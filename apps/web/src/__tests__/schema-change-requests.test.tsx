@@ -14,6 +14,7 @@ import {
   stubFetchRoutes,
   type RouteEntry,
 } from '../test/apiFixtures';
+import { chooseIn, chooseOption, chooseSegment, getSelect, selectGroups, selectValue } from '../test/controls';
 import {
   SCHEMA_PROPOSALS_COPY as COPY,
   canProposeTerm,
@@ -277,20 +278,18 @@ describe('a new field (schema change request)', () => {
     expect(COPY.kindFieldHint).not.toContain('portal');
     // One choice: no separate Section for a field, and every block grouped by its section.
     expect(panel.queryByLabelText('Section')).toBeNull();
-    const where = panel.getByLabelText('Where in the schema');
-    expect(within(where).getAllByRole('option')[0]).toHaveTextContent('Choose a block…');
-    const groups = Array.from(where.querySelectorAll('optgroup'));
-    expect(groups.map((g) => g.label)).toEqual(['Context', 'System']);
-    expect(groups.map((g) => Array.from(g.querySelectorAll('option')).map((o) => o.textContent))).toEqual([
-      ['context', 'context.electrochemistry'],
-      ['system'],
+    const where = getSelect('Where in the schema', proposePanel());
+    expect(where).toHaveTextContent('Choose a block…');
+    expect(selectGroups(where)).toEqual([
+      { group: 'Context', options: ['context', 'context.electrochemistry'] },
+      { group: 'System', options: ['system'] },
     ]);
-    fireEvent.change(where, { target: { value: '@context.electrochemistry' } });
+    chooseIn(where, 'context.electrochemistry');
     expect(panel.getByText(/refuses any key the schema does not declare/)).toBeInTheDocument();
     fireEvent.change(panel.getByLabelText('New field name'), { target: { value: 'c_rate' } });
-    fireEvent.change(panel.getByLabelText('Kind of value'), { target: { value: 'number' } });
+    chooseOption('Kind of value', 'Number', proposePanel());
     fireEvent.change(panel.getByLabelText('Unit (optional)'), { target: { value: '1/h' } });
-    fireEvent.click(panel.getByRole('radio', { name: 'No, optional' }));
+    chooseSegment('Must every record in this block carry it?', 'Optional', proposePanel());
     fireEvent.change(panel.getByLabelText('Definition (required)'), {
       target: { value: 'The C-rate of a battery cycling test.' },
     });
@@ -344,7 +343,10 @@ describe('a new field (schema change request)', () => {
     renderAt(`${ROUTE}?tab=propose`);
     fireEvent.click(await screen.findByRole('radio', { name: COPY.kindField }));
     const panel = within(proposePanel());
-    fireEvent.change(panel.getByLabelText('Where in the schema'), { target: { value: '@context' } });
+    // "Required?" starts with nothing chosen, and stays so: the body below carries no `required`.
+    const required = screen.getByRole('radiogroup', { name: 'Must every record in this block carry it?' });
+    expect(within(required).getAllByRole('radio').map((r) => r.getAttribute('aria-checked'))).toEqual(['false', 'false']);
+    chooseOption('Where in the schema', 'context', proposePanel());
     fireEvent.change(panel.getByLabelText('New field name'), { target: { value: 'buffer_name' } });
     fireEvent.click(panel.getByRole('button', { name: 'Save Proposal' }));
     await screen.findByText('SERVER-SAID: say whether it is required.');
@@ -393,26 +395,55 @@ describe('a new field (schema change request)', () => {
   });
 });
 
-// --- propose from where the gap is found -------------------------------------------
-
-describe('opening the form from a link', () => {
-  it('fills the list, the term and the source surface, and looks the section up itself', async () => {
+describe('a new field from the vocabulary', () => {
+  it('"New Field in <section>" opens the form on a new field there, cursor in "Where in the schema"', async () => {
     stubFetchRoutes({
       'GET /api/schema-proposals/vocabulary': { body: baseVocabulary },
       'GET /api/schema-proposals': list([]),
     });
+    renderAt(`${ROUTE}?tab=browse`);
+    await screen.findByRole('radiogroup', { name: 'Source' });
+    const browse = screen.getByText(COPY.browseTitle).closest('details') as HTMLElement;
+    fireEvent.click(within(browse).getByRole('button', { name: 'New Field in Context' }));
+    expect(screen.getByRole('radio', { name: COPY.kindField })).toBeChecked();
+    await waitFor(() => expect(getSelect('Where in the schema')).toHaveFocus());
+    // Its choices are every block, grouped; the section is set by the block chosen.
+    chooseOption('Where in the schema', 'context.electrochemistry');
+    expect(selectValue(getSelect('Where in the schema'))).toBe('@context.electrochemistry');
+  });
+});
+
+// --- propose from where the gap is found -------------------------------------------
+
+describe('opening the form from a link', () => {
+  it('fills the list, the term and the source surface, and looks the section up itself', async () => {
+    let sent: Record<string, unknown> | null = null;
+    stubFetchRoutes({
+      'GET /api/schema-proposals/vocabulary': { body: baseVocabulary },
+      'GET /api/schema-proposals': list([]),
+      'POST /api/schema-proposals': (init) => {
+        sent = JSON.parse(String(init?.body));
+        return { status: 422, body: { error: 'x', message: 'SERVER: stop here.' } };
+      },
+    });
     renderAt(proposeTermHref(ROUTE, { category: 'system.technique', term: 'XMCD', from: 'validator' }));
     const panel = within(await screen.findByRole('region', { name: 'Propose a Change' }));
-    const listSelect = (await panel.findByLabelText('List')) as HTMLSelectElement;
-    await waitFor(() => expect(listSelect).toHaveValue('system.technique'));
-    // The section is the server's own for that list: the chosen option carries the section id the body sends.
-    expect(listSelect.selectedOptions[0].dataset.section).toBe(portalSectionFor(baseVocabulary, 'system.technique'));
-    expect(listSelect.selectedOptions[0].closest('optgroup')?.label).toBe('System');
+    const listSelect = await panel.findByLabelText('List');
+    await waitFor(() => expect(selectValue(listSelect)).toBe('system.technique'));
+    // Shown under its section's group.
+    expect(selectGroups(listSelect).find((g) => g.options.includes('system.technique'))?.group).toBe('System');
     expect(panel.getByLabelText('New term')).toHaveValue('XMCD');
     expect(panel.getByText(/Opened from the Validator/)).toBeInTheDocument();
     expect(panel.getByLabelText('Examples')).toHaveValue(
       'Found in the Validator on the ISAAC Metadata Assistant, as "XMCD".',
     );
+    // The section id the body carries is the server's own for that list.
+    fireEvent.change(panel.getByLabelText('Description (required)'), {
+      target: { value: 'X-ray magnetic circular dichroism, as the validator read it.' },
+    });
+    fireEvent.click(panel.getByRole('button', { name: 'Save Proposal' }));
+    await screen.findByText('SERVER: stop here.');
+    expect((sent as unknown as { section: string }).section).toBe(portalSectionFor(baseVocabulary, 'system.technique'));
   });
 
   it('fills in nothing for a list the portal does not have, and says so', async () => {
@@ -430,7 +461,7 @@ describe('opening the form from a link', () => {
     const panel = within(await screen.findByRole('region', { name: 'Propose a Change' }));
     await panel.findByText(/is not a term list in the portal vocabulary snapshot, so nothing was filled in/);
     expect(panel.getByLabelText('New term')).toHaveValue('');
-    expect(panel.getByLabelText('List')).toHaveValue('');
+    expect(selectValue(panel.getByLabelText('List'))).toBe('');
     expect(panel.queryByText(/Opened from/)).toBeNull();
   });
 

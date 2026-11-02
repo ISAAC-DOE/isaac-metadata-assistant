@@ -725,10 +725,10 @@ const STATES: readonly VisualState[] = [
    */
   {
     id: 'schema-proposals-browse',
-    what: 'Schema Proposals → Browse the Whole Vocabulary (opened by ?tab=browse) — the portal and schema term lists',
+    what: 'Schema Proposals → Look Up an Existing List (opened by ?tab=browse) — section, lists and terms',
     async reach({ page, app }) {
       await app.open(surface('schema-proposals'));
-      const which = page.getByRole('group', { name: 'Which list?' });
+      const which = page.getByRole('radiogroup', { name: 'Source' });
       await expect(which).toBeVisible({ timeout: 20_000 });
       return which;
     },

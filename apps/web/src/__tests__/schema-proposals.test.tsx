@@ -9,6 +9,7 @@ import { LABELS, formatWhen } from '../lib/labels';
 import { ROUTES } from '../lib/routes';
 import { composeDocumentTitle } from '../lib/documentTitle';
 import { stubFetchRoutes, type RouteEntry } from '../test/apiFixtures';
+import { chooseIn, chooseOption, chooseSegment, getSelect, selectGroups, selectOptions, selectValue } from '../test/controls';
 import {
   SCHEMA_PROPOSALS_COPY as COPY,
   portalSectionFor,
@@ -203,7 +204,12 @@ function proposeRegion(): HTMLElement {
 
 /** The Section select INSIDE the form (offered for a new list only); Browse has one of the same name. */
 function sectionSelect(): HTMLElement {
-  return within(proposeRegion()).getByLabelText('Section');
+  return getSelect('Section', proposeRegion());
+}
+
+/** Browse's own Section picker (the form has one of the same name for a new list). */
+function browseSection(): HTMLElement {
+  return getSelect('Section', browseDetails());
 }
 
 /** The folded vocabulary, by its summary. */
@@ -221,7 +227,7 @@ function readBlob(blob: Blob): Promise<string> {
 }
 
 function fillPropose() {
-  fireEvent.change(screen.getByLabelText('List'), { target: { value: 'system.technique' } });
+  chooseOption('List', 'system.technique');
   fireEvent.change(screen.getByLabelText('New term'), { target: { value: 'xmcd_scan' } });
   fireEvent.change(screen.getByLabelText('Description (required)'), {
     target: { value: 'Magnetic dichroism measured with circular polarisation.' },
@@ -285,7 +291,7 @@ describe('the destination', () => {
       'GET /api/schema-proposals': list([]),
     });
     const first = renderAt(`${ROUTE}?tab=browse`);
-    await screen.findByRole('group', { name: 'Which list?' });
+    await screen.findByRole('radiogroup', { name: 'Source' });
     await waitFor(() => expect(browseDetails()).toHaveAttribute('open'));
     first.unmount();
     for (const path of [`${ROUTE}?tab=propose`, `${ROUTE}?tab=proposals`, ROUTE]) {
@@ -298,58 +304,79 @@ describe('the destination', () => {
 });
 
 describe('Browse', () => {
-  it('renders the sections, the categories of a section and the allowed terms of a category', async () => {
-    stubFetchRoutes({
-      'GET /api/schema-proposals/vocabulary': { body: vocabulary },
-      'GET /api/schema-proposals': list([]),
-    });
-    renderAt(ROUTE);
-    const select = await screen.findByRole('combobox', { name: 'Section' });
-    const options = within(select).getAllByRole('option').map((o) => o.textContent);
-    expect(options).toHaveLength(vocabulary.sources.portal.sections.length);
-
-    fireEvent.change(select, { target: { value: 'System' } });
-    const categories = screen.getByRole('list', { name: 'Categories' });
-    expect(within(categories).getAllByRole('button').map((b) => b.textContent)).toEqual([
-      'system.technique3',
-      'system.domain1',
-    ]);
-
-    const table = screen.getByRole('table', { name: 'Allowed terms for system.technique' });
-    expect(within(table).getAllByRole('row').slice(1).map((r) => r.textContent)).toEqual(['XAS', 'XPS', 'SAXS']);
-
-    fireEvent.click(within(categories).getByRole('button', { name: /system\.domain/ }));
-    const second = screen.getByRole('table', { name: 'Allowed terms for system.domain' });
-    expect(within(second).getAllByRole('row').slice(1).map((r) => r.textContent)).toEqual(['experimental']);
-  });
-
-  it('says so when a section has no fixed lists, and offers no "new list" button of its own (the kind chooser does)', async () => {
-    stubFetchRoutes({
-      'GET /api/schema-proposals/vocabulary': { body: vocabulary },
-      'GET /api/schema-proposals': list([]),
-    });
-    renderAt(ROUTE);
-    const select = await screen.findByRole('combobox', { name: 'Section' });
-    fireEvent.change(select, { target: { value: 'Sample' } });
-    expect(screen.getByText(/no fixed lists of allowed terms/)).toBeInTheDocument();
-    expect(screen.queryByRole('button', { name: /Propose a New List in/ })).toBeNull();
-    expect(screen.queryByRole('button', { name: /Propose a New Field in/ })).toBeNull();
-  });
-
-  it('"Propose a New Term for This List" fills the form on that list and puts the cursor in "New term"', async () => {
+  it('goes section -> list -> terms: lists by their human name with key and count, terms as a named set', async () => {
     stubFetchRoutes({
       'GET /api/schema-proposals/vocabulary': { body: vocabulary },
       'GET /api/schema-proposals': list([]),
     });
     renderAt(`${ROUTE}?tab=browse`);
-    const select = await screen.findByRole('combobox', { name: 'Section' });
-    fireEvent.change(select, { target: { value: 'System' } });
+    await screen.findByRole('radiogroup', { name: 'Source' });
+    expect(browseDetails().querySelector('summary')).toHaveTextContent(COPY.browseTitle);
+    expect(selectOptions(browseSection())).toHaveLength(vocabulary.sources.portal.sections.length);
+
+    chooseIn(browseSection(), 'System');
+    const lists = within(browseDetails()).getByRole('list', { name: 'Lists in System' });
+    const rows = within(lists).getAllByRole('button');
+    expect(rows.map((b) => b.querySelector('.sp-cat-name')?.textContent)).toEqual(['Technique', 'Domain']);
+    expect(rows.map((b) => b.querySelector('.sp-cat-key')?.textContent)).toEqual(['system.technique', 'system.domain']);
+    expect(rows.map((b) => b.querySelector('.sp-cat-count')?.textContent)).toEqual(['3 terms', '1 term']);
+    expect(rows[0]).toHaveAttribute('aria-pressed', 'true');
+
+    const terms = within(browseDetails()).getByRole('list', { name: 'Allowed terms for system.technique' });
+    expect(within(terms).getAllByRole('listitem').map((li) => li.textContent)).toEqual(['XAS', 'XPS', 'SAXS']);
+    expect(within(browseDetails()).getByRole('heading', { level: 3, name: 'Technique' })).toBeInTheDocument();
+
+    fireEvent.click(rows[1]);
+    const second = within(browseDetails()).getByRole('list', { name: 'Allowed terms for system.domain' });
+    expect(within(second).getAllByRole('listitem').map((li) => li.textContent)).toEqual(['experimental']);
+    expect(rows[1]).toHaveAttribute('aria-pressed', 'true');
+  });
+
+  it('says so in one line when a section has no fixed lists, and offers a new list in it there', async () => {
+    stubFetchRoutes({
+      'GET /api/schema-proposals/vocabulary': { body: vocabulary },
+      'GET /api/schema-proposals': list([]),
+    });
+    renderAt(`${ROUTE}?tab=browse`);
+    await screen.findByRole('radiogroup', { name: 'Source' });
+    chooseIn(browseSection(), 'Sample');
+    expect(screen.getByText('This section has no fixed lists of allowed terms in this source.')).toBeInTheDocument();
+    expect(within(browseDetails()).getByRole('button', { name: 'New List in Sample' })).toBeInTheDocument();
+    // This server describes no new-field kind, so none is offered here either.
+    expect(within(browseDetails()).queryByRole('button', { name: /New Field in/ })).toBeNull();
+  });
+
+  it('"Propose a Term for This List" fills the form on that list and puts the cursor in "New term"', async () => {
+    stubFetchRoutes({
+      'GET /api/schema-proposals/vocabulary': { body: vocabulary },
+      'GET /api/schema-proposals': list([]),
+    });
+    renderAt(`${ROUTE}?tab=browse`);
+    await screen.findByRole('radiogroup', { name: 'Source' });
+    chooseIn(browseSection(), 'System');
     // The kind is switched back to a term even if another kind was chosen.
     fireEvent.click(screen.getByRole('radio', { name: COPY.kindList }));
-    fireEvent.click(screen.getByRole('button', { name: 'Propose a New Term for This List' }));
-    await waitFor(() => expect(screen.getByLabelText('List')).toHaveValue('system.technique'));
+    const propose = screen.getByRole('button', { name: 'Propose a Term for This List' });
+    expect(propose).toHaveClass('btn-primary');
+    fireEvent.click(propose);
+    await waitFor(() => expect(selectValue(getSelect('List'))).toBe('system.technique'));
     expect(screen.getByRole('radio', { name: COPY.kindTerm })).toBeChecked();
     await waitFor(() => expect(screen.getByLabelText('New term')).toHaveFocus());
+  });
+
+  it('"New List in <section>" opens the form on a new list in that section, cursor in "New list key"', async () => {
+    stubFetchRoutes({
+      'GET /api/schema-proposals/vocabulary': { body: vocabulary },
+      'GET /api/schema-proposals': list([]),
+    });
+    renderAt(`${ROUTE}?tab=browse`);
+    await screen.findByRole('radiogroup', { name: 'Source' });
+    chooseIn(browseSection(), 'Record Info (root fields)');
+    // The section's human name, without its parenthetical, in the action's words.
+    fireEvent.click(within(browseDetails()).getByRole('button', { name: 'New List in Record Info' }));
+    expect(screen.getByRole('radio', { name: COPY.kindList })).toBeChecked();
+    expect(selectValue(sectionSelect())).toBe('Record Info');
+    await waitFor(() => expect(screen.getByLabelText('New list key')).toHaveFocus());
   });
 });
 
@@ -404,7 +431,7 @@ describe('Propose a Change', () => {
     renderAt(`${ROUTE}?tab=propose`);
     await screen.findByLabelText('List');
     fireEvent.click(screen.getByRole('radio', { name: COPY.kindList }));
-    fireEvent.change(sectionSelect(), { target: { value: 'System' } });
+    chooseIn(sectionSelect(), 'System');
     fireEvent.change(screen.getByLabelText('New list key'), { target: { value: 'system.viscosity' } });
     fireEvent.change(screen.getByLabelText('Description (required)'), {
       target: { value: 'Dynamic viscosity of the medium, needed for flow cells.' },
@@ -439,7 +466,7 @@ describe('Propose a Change', () => {
     });
     renderAt(`${ROUTE}?tab=propose`);
     await screen.findByLabelText('List');
-    fireEvent.change(screen.getByLabelText('List'), { target: { value: 'system.technique' } });
+    chooseOption('List', 'system.technique');
     fireEvent.change(screen.getByLabelText('New term'), { target: { value: 'bad term' } });
     fireEvent.change(screen.getByLabelText('Description (required)'), { target: { value: 'short' } });
     fireEvent.click(screen.getByRole('button', { name: 'Save Proposal' }));
@@ -503,7 +530,7 @@ describe('Propose a Change', () => {
     fireEvent.change(screen.getByLabelText('Examples'), { target: { value: 'run 4' } });
     // Looking around Browse does not touch the form.
     fireEvent.click(screen.getByText(COPY.browseTitle));
-    fireEvent.change(screen.getByRole('combobox', { name: 'Section' }), { target: { value: 'System' } });
+    chooseIn(browseSection(), 'System');
     expect(screen.getByLabelText('New term')).toHaveValue('half_written');
     // The shared boxes survive a change of kind and back.
     fireEvent.click(screen.getByRole('radio', { name: COPY.kindList }));
@@ -544,14 +571,15 @@ describe('Propose a Change', () => {
     const select = await screen.findByRole('combobox', { name: 'List' });
     // No separate Section choice for a term: the List carries it.
     expect(within(proposeRegion()).queryByLabelText('Section')).toBeNull();
-    const groups = Array.from(select.querySelectorAll('optgroup'));
-    expect(groups.map((g) => g.label)).toEqual(['Record Info (root fields)', 'System']);
-    expect(groups.map((g) => Array.from(g.querySelectorAll('option')).map((o) => o.textContent))).toEqual([
-      ['record_type'],
-      ['system.technique', 'system.domain'],
+    expect(selectGroups(select)).toEqual([
+      { group: 'Record Info (root fields)', options: ['record_type'] },
+      { group: 'System', options: ['system.technique', 'system.domain'] },
     ]);
-    expect(within(select).getAllByRole('option')[0]).toHaveTextContent('Choose a list…');
-    fireEvent.change(select, { target: { value: 'record_type' } });
+    // A themed picker, not the browser's: nothing chosen yet shows the placeholder.
+    expect(select.tagName).toBe('BUTTON');
+    expect(select).toHaveTextContent('Choose a list…');
+    chooseIn(select, 'record_type');
+    expect(select).toHaveTextContent('record_type');
     fireEvent.change(screen.getByLabelText('New term'), { target: { value: 'simulation' } });
     fireEvent.change(screen.getByLabelText('Description (required)'), {
       target: { value: 'A record that describes a simulation, not a measurement.' },
@@ -573,15 +601,15 @@ describe('Propose a Change', () => {
     renderAt(ROUTE);
     const select = await screen.findByRole('combobox', { name: 'List' });
     expect(screen.queryByText(/Already on the list/)).toBeNull();
-    // The hint is what the select is described by (read from the ids: jsdom's description of a <select> is empty).
+    // The hint the picker is described by, as written (the description algorithm adds a space at the mono span).
     const describedBy = () =>
       (select.getAttribute('aria-describedby') ?? '')
         .split(' ')
         .map((id) => document.getElementById(id)?.textContent ?? '')
         .join(' ');
-    fireEvent.change(select, { target: { value: 'system.domain' } });
+    chooseIn(select, 'system.domain');
     expect(describedBy()).toBe('Already on the list (1): experimental.');
-    fireEvent.change(select, { target: { value: 'system.technique' } });
+    chooseIn(select, 'system.technique');
     expect(describedBy()).toBe(`Already on the list (15): ${many.slice(0, 12).join(', ')} and 3 more.`);
   });
 });
@@ -781,38 +809,61 @@ describe('Copy and download the portal payload', () => {
 });
 
 describe('review fixes', () => {
-  it('Browse shows both vocabulary sources, labelled, and never calls either "the official vocabulary"', async () => {
+  it('Browse shows both vocabulary sources by short names, one quiet fact each, never "the official vocabulary"', async () => {
     stubFetchRoutes({
       'GET /api/schema-proposals/vocabulary': { body: vocabulary },
       'GET /api/schema-proposals': list([]),
     });
-    renderAt(ROUTE);
-    const portalRadio = await screen.findByRole('radio', { name: 'Portal vocabulary (snapshot a1cb1c8)' });
-    const schemaRadio = screen.getByRole('radio', { name: 'Schema enums (vendored v1.05)' });
-    expect(portalRadio).toBeChecked();
-    expect(screen.getByText(/DETAIL-PORTAL/)).toBeInTheDocument();
+    renderAt(`${ROUTE}?tab=browse`);
+    const source = await screen.findByRole('radiogroup', { name: 'Source' });
+    const portal = within(source).getByRole('radio', { name: 'Portal Vocabulary' });
+    expect(portal).toHaveAttribute('aria-checked', 'true');
+    expect(
+      within(browseDetails()).getByText(/The ISAAC portal's terms, snapshot a1cb1c8: 3 sections, 3 term lists, 6 terms\./),
+    ).toBeInTheDocument();
+    // The server's long source prose is not repeated on the page.
+    expect(screen.queryByText(/DETAIL-PORTAL/)).toBeNull();
 
-    fireEvent.click(schemaRadio);
-    expect(screen.getByText(/DETAIL-SCHEMA/)).toBeInTheDocument();
-    fireEvent.change(screen.getByRole('combobox', { name: 'Section' }), { target: { value: 'Context' } });
-    const table = screen.getByRole('table', { name: 'Allowed terms for context.environment' });
-    expect(within(table).getAllByRole('row').slice(1).map((r) => r.textContent)).toEqual(['ambient', 'vacuum']);
+    chooseSegment('Source', 'Schema Lists');
+    expect(within(source).getByRole('radio', { name: 'Schema Lists' })).toHaveAttribute('aria-checked', 'true');
+    expect(within(browseDetails()).getByText(/The record schema's fixed lists, version 1\.05/)).toBeInTheDocument();
+    chooseIn(browseSection(), 'Context');
+    const terms = within(browseDetails()).getByRole('list', { name: 'Allowed terms for context.environment' });
+    expect(within(terms).getAllByRole('listitem').map((li) => li.textContent)).toEqual(['ambient', 'vacuum']);
     expect(document.body.textContent ?? '').not.toMatch(/official vocabulary/i);
   });
 
-  it('offers a new term only for a list the portal has, and says why for one it does not', async () => {
+  it('offers a new term only for a list the portal has, and says why in one line for one it does not', async () => {
     stubFetchRoutes({
       'GET /api/schema-proposals/vocabulary': { body: vocabulary },
       'GET /api/schema-proposals': list([]),
     });
-    renderAt(ROUTE);
-    fireEvent.click(await screen.findByRole('radio', { name: 'Schema enums (vendored v1.05)' }));
-    fireEvent.change(screen.getByRole('combobox', { name: 'Section' }), { target: { value: 'Context' } });
-    expect(screen.queryByRole('button', { name: 'Propose a New Term for This List' })).toBeNull();
-    expect(screen.getByText(/portal would\s+refuse a new term/)).toBeInTheDocument();
-    fireEvent.click(screen.getByRole('radio', { name: 'Portal vocabulary (snapshot a1cb1c8)' }));
-    fireEvent.change(screen.getByRole('combobox', { name: 'Section' }), { target: { value: 'System' } });
-    expect(screen.getByRole('button', { name: 'Propose a New Term for This List' })).toBeInTheDocument();
+    renderAt(`${ROUTE}?tab=browse`);
+    await screen.findByRole('radiogroup', { name: 'Source' });
+    chooseSegment('Source', 'Schema Lists');
+    chooseIn(browseSection(), 'Context');
+    expect(screen.queryByRole('button', { name: 'Propose a Term for This List' })).toBeNull();
+    expect(screen.getByText(/it would refuse a new term for it/)).toBeInTheDocument();
+    chooseSegment('Source', 'Portal Vocabulary');
+    chooseIn(browseSection(), 'System');
+    expect(screen.getByRole('button', { name: 'Propose a Term for This List' })).toBeInTheDocument();
+  });
+
+  it('every action on the page is themed blue: one primary, tinted actions, quiet text for the rest; none is white', async () => {
+    stubFetchRoutes({
+      'GET /api/schema-proposals/vocabulary': { body: vocabulary },
+      'GET /api/schema-proposals': list([proposal()]),
+    });
+    renderAt(`${ROUTE}?tab=browse`);
+    await screen.findAllByRole('button', { name: 'Copy Portal Payload' });
+    await screen.findByRole('radiogroup', { name: 'Source' });
+    expect(document.querySelectorAll('.sp-screen .btn-secondary')).toHaveLength(0);
+    expect(screen.getByRole('button', { name: 'Save Proposal' })).toHaveClass('btn-primary');
+    expect(screen.getByRole('button', { name: 'Copy Portal Payload' })).toHaveClass('btn-action');
+    expect(screen.getByRole('button', { name: 'Download JSON' })).toHaveClass('btn-action');
+    expect(screen.getByRole('button', { name: 'Withdraw' })).toHaveClass('btn-danger-quiet');
+    // No browser-default <select> is left on the screen.
+    expect(document.querySelectorAll('.sp-screen select')).toHaveLength(0);
   });
 
   it('the new-term form offers only the portal term lists, and says so when there are none', async () => {
@@ -821,9 +872,9 @@ describe('review fixes', () => {
       'GET /api/schema-proposals': list([]),
     });
     const first = renderAt(`${ROUTE}?tab=propose`);
-    const options = within(await screen.findByLabelText('List')).getAllByRole('option').map((o) => o.textContent);
+    const options = selectOptions(await screen.findByLabelText('List'));
     // Only the portal's term lists: the schema-only `context.environment` is not one.
-    expect(options).toEqual(['Choose a list…', 'record_type', 'system.technique', 'system.domain']);
+    expect(options).toEqual(['record_type', 'system.technique', 'system.domain']);
     first.unmount();
     const bare: ApiSchemaVocabulary = {
       ...vocabulary,
@@ -834,7 +885,7 @@ describe('review fixes', () => {
       'GET /api/schema-proposals': list([]),
     });
     renderAt(`${ROUTE}?tab=propose`);
-    expect(within(await screen.findByLabelText('List')).getAllByRole('option').map((o) => o.textContent)).toEqual(['Choose a list…']);
+    expect(selectOptions(await screen.findByLabelText('List'))).toEqual([]);
     expect(screen.getByText(/portal vocabulary snapshot has no term lists/)).toBeInTheDocument();
   });
 

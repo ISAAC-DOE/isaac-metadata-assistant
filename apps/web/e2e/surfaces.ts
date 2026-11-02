@@ -583,7 +583,7 @@ export const SURFACES: readonly Surface[] = [
    * proposals beside it, and the whole vocabulary folded below the form. The three ids
    * are kept so every sweep keyed on them still runs, each now a different way in:
    * `?tab=browse` (an old link, still honoured) opens the folded vocabulary, so its gate
-   * is the vocabulary's "Which list?" group; the plain page's gate is the form's one
+   * is the vocabulary's "Source" segmented control; the plain page's gate is the form's one
    * "List" choice; `?tab=proposals` scrolls to the Proposals column, whose named region
    * is its gate. The first two render only once the vocabulary has arrived; the region
    * is there from the start, so `app.open`'s loading-panel wait is what keeps the scan
@@ -591,10 +591,10 @@ export const SURFACES: readonly Surface[] = [
    */
   {
     id: 'schema-proposals',
-    name: 'Schema Proposals — Browse the Whole Vocabulary (opened)',
+    name: 'Schema Proposals — Look Up an Existing List (opened)',
     path: '/schema-proposals?tab=browse',
     scope: 'ordinary',
-    ready: { role: 'group', name: 'Which list?' },
+    ready: { role: 'radiogroup', name: 'Source' },
   },
   {
     id: 'schema-proposals-propose',

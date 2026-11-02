@@ -18,7 +18,9 @@ import { AppShell } from '../components/AppShell';
 import { TopBar } from '../components/TopBar';
 import { LeftNav } from '../components/LeftNav';
 import { BackendDown, LoadingPanel } from '../components/FetchStates';
-import { ChevronRight, Copy, Download } from '../components/icons';
+import { ChevronRight, Copy, Download, Plus } from '../components/icons';
+import { Select } from '../components/Select';
+import { SegmentedControl } from '../components/SegmentedControl';
 import { InlineCode } from '../components/InlineCode';
 import { LABELS, formatWhen } from '../lib/labels';
 import { api } from '../lib/api';
@@ -106,8 +108,8 @@ interface Prefill {
   term?: string;
   /** Which screen that was (`?from=`); only the names in `PROPOSE_SOURCES` are shown. */
   from?: ProposeSource;
-  /** Move focus to the "New term" box once the form is filled (Browse's contextual button). */
-  focusTerm?: boolean;
+  /** Where focus goes once the form is filled (Browse's contextual actions): the one box left to fill. */
+  focus?: 'term' | 'listKey' | 'where';
   nonce: number;
 }
 
@@ -132,13 +134,16 @@ export function SchemaProposals() {
   const proposalsRef = useRef<HTMLElement>(null);
   const ids = { propose: useId(), proposals: useId() };
 
-  /** Browse's "Propose a New Term for This List": fill the form on that list and put the cursor in "New term". */
-  const proposeTermIn = useCallback((section: string, category: string) => {
+  /**
+   * Browse's contextual actions: open the form on that kind, in that section (and on that list, for a term),
+   * and put the cursor in the one box left to fill.
+   */
+  const proposeFromBrowse = useCallback((type: SchemaProposalType, section: string, category: string) => {
     setPrefill((previous) => ({
-      type: 'add_term',
+      type,
       section,
       category,
-      focusTerm: true,
+      focus: type === 'add_term' ? 'term' : type === 'add_category' ? 'listKey' : 'where',
       nonce: (previous?.nonce ?? 0) + 1,
     }));
   }, []);
@@ -209,7 +214,7 @@ export function SchemaProposals() {
       topBar={<TopBar variant="home" />}
       sidebar={<LeftNav active="schemaProposals" />}
       mainPad="pad"
-      width="wide"
+      width="full"
     >
       <div className="sp-screen">
         <header className="sp-head">
@@ -235,23 +240,23 @@ export function SchemaProposals() {
                 />
               )}
             </section>
-
-            {vocabulary.status === 'data' && (
-              <details
-                className="sp-browse sp-fold"
-                ref={browseRef}
-                open={browseOpen}
-                onToggle={(e) => setBrowseOpen(e.currentTarget.open)}
-              >
-                <summary>
-                  <ChevronRight className="sp-chevron" size={16} strokeWidth={2} aria-hidden="true" />
-                  {COPY.browseTitle}
-                </summary>
-                <BrowsePanel vocabulary={vocabulary.data} onProposeTerm={proposeTermIn} />
-              </details>
-            )}
           </div>
 
+          {/* The vocabulary spans the page under both columns, so section, lists and terms can sit side by side. */}
+          {vocabulary.status === 'data' && (
+            <details
+              className="sp-browse sp-fold"
+              ref={browseRef}
+              open={browseOpen}
+              onToggle={(e) => setBrowseOpen(e.currentTarget.open)}
+            >
+              <summary>
+                <ChevronRight className="sp-chevron" size={16} strokeWidth={2} aria-hidden="true" />
+                {COPY.browseTitle}
+              </summary>
+              <BrowsePanel vocabulary={vocabulary.data} onPropose={proposeFromBrowse} />
+            </details>
+          )}
           <ProposalsPanel
             version={listVersion}
             headingId={ids.proposals}
@@ -266,16 +271,26 @@ export function SchemaProposals() {
 
 // --- Browse ---------------------------------------------------------------------
 
+/** A list's own name, said the way a person would: "record_type" -> "Record type". The key stays beside it. */
+function humanLabel(label: string): string {
+  const words = label.replace(/[_.]+/g, ' ').trim();
+  return words ? words[0].toUpperCase() + words.slice(1) : label;
+}
+
+/** A section's name without its parenthetical ("Record Info (root fields)" -> "Record Info"), for action text. */
+function sectionName(label: string): string {
+  return label.replace(/\s*\([^)]*\)\s*$/, '');
+}
+
 function BrowsePanel({
   vocabulary,
-  onProposeTerm,
+  onPropose,
 }: {
   vocabulary: ApiSchemaVocabulary;
-  /** Open the form on this portal list, with the cursor in "New term". */
-  onProposeTerm: (section: string, category: string) => void;
+  /** Open the form on this kind and section (and list, for a term), with the cursor in the box left to fill. */
+  onPropose: (type: SchemaProposalType, section: string, category: string) => void;
 }) {
-  const sectionSelectId = useId();
-  const sourceName = useId();
+  const ids = { section: useId(), lists: useId(), pane: useId() };
   const [sourceId, setSourceId] = useState<SchemaSourceId>(vocabulary.default_source);
   const source = vocabulary.sources[sourceId];
   const sections = source.sections;
@@ -285,71 +300,92 @@ function BrowsePanel({
   const category: ApiSchemaCategory | undefined =
     section?.categories.find((c) => c.key === categoryKey) ?? section?.categories[0];
   // A new term can join only a list the PORTAL has, because the portal is what checks it.
-  const termListsHere = new Set(
-    vocabulary.proposal_sections.find((s) => s.id === section?.id)?.term_lists ?? [],
+  const proposalSection = vocabulary.proposal_sections.find((s) => s.id === section?.id);
+  const canAddTerm = category !== undefined && (proposalSection?.term_lists ?? []).includes(category.key);
+  const canAddList = proposalSection !== undefined;
+  const canAddField =
+    vocabulary.schema_change !== undefined &&
+    vocabulary.schema_change !== null &&
+    vocabulary.schema_change.object_paths.some((o) => o.section === section?.id);
+  const shortSection = section ? sectionName(section.label) : '';
+
+  /** The one quiet fact about the chosen source a person needs: what it is, which copy, and how big. */
+  const sourceLine =
+    sourceId === 'portal'
+      ? `The ISAAC portal's terms${source.snapshot_commit ? `, snapshot ${source.snapshot_commit}` : ''}`
+      : `The record schema's fixed lists, version ${vocabulary.schema_version}`;
+
+  const sectionActions = section && (canAddList || canAddField) && (
+    <div className="sp-browse-actions">
+      {canAddList && (
+        <button type="button" className="btn btn-quiet sp-text-btn" onClick={() => onPropose('add_category', section.id, '')}>
+          <Plus size={14} strokeWidth={2.25} aria-hidden="true" /> New List in {shortSection}
+        </button>
+      )}
+      {canAddField && (
+        <button type="button" className="btn btn-quiet sp-text-btn" onClick={() => onPropose('schema_change', section.id, '')}>
+          <Plus size={14} strokeWidth={2.25} aria-hidden="true" /> New Field in {shortSection}
+        </button>
+      )}
+    </div>
   );
-  const canAddTerm = category !== undefined && termListsHere.has(category.key);
 
   return (
     <div className="sp-browse-body">
       <p className="sp-note">{COPY.browseLead}</p>
 
-      <fieldset className="sp-fieldset">
-        <legend>Which list?</legend>
-        {(['portal', 'schema'] as const).map((id) => (
-          <label className="sp-radio" key={id}>
-            <input
-              type="radio"
-              name={sourceName}
-              checked={sourceId === id}
-              onChange={() => {
-                setSourceId(id);
-                setSectionId(vocabulary.sources[id].sections[0]?.id ?? '');
-                setCategoryKey(null);
-              }}
-            />
-            <span>{vocabulary.sources[id].label}</span>
-          </label>
-        ))}
-      </fieldset>
-      <p className="sp-note">{source.detail}</p>
-      <p className="sp-meta">
-        {source.section_count} sections, {source.term_list_count} term lists, {source.term_count} terms.
-      </p>
-
-      <div className="sp-field">
-        <label htmlFor={sectionSelectId}>Section</label>
-        <select
-          id={sectionSelectId}
-          className="input sp-select"
-          value={section?.id ?? ''}
-          onChange={(e) => {
-            setSectionId(e.target.value);
+      <div className="sp-browse-controls">
+        <SegmentedControl
+          label="Source"
+          options={[
+            { value: 'portal', label: LABELS.actionSpSourcePortal },
+            { value: 'schema', label: LABELS.actionSpSourceSchema },
+          ]}
+          value={sourceId}
+          onChange={(v) => {
+            const id = v as SchemaSourceId;
+            setSourceId(id);
+            setSectionId(vocabulary.sources[id].sections[0]?.id ?? '');
             setCategoryKey(null);
           }}
-        >
-          {sections.map((s) => (
-            <option key={s.id} value={s.id}>
-              {s.label} ({s.categories.length} {s.categories.length === 1 ? 'entry' : 'entries'})
-            </option>
-          ))}
-        </select>
+        />
+        <div className="sp-field sp-browse-section">
+          <label htmlFor={ids.section}>Section</label>
+          <Select
+            id={ids.section}
+            value={section?.id ?? ''}
+            options={sections.map((s) => ({
+              value: s.id,
+              label: s.label,
+              detail: s.categories.length === 1 ? '1 list' : `${s.categories.length} lists`,
+            }))}
+            onChange={(v) => {
+              setSectionId(v);
+              setCategoryKey(null);
+            }}
+          />
+        </div>
       </div>
+      <p className="sp-meta">
+        {sourceLine}: {source.section_count} sections, {source.term_list_count} term lists, {source.term_count} terms.
+      </p>
 
       {section && section.categories.length === 0 && (
-        <p className="sp-note" role="status">
-          This section has no fixed lists of allowed terms in this source. You can still propose a new list for it in
-          the form above.
-        </p>
+        <>
+          <p className="sp-note" role="status">
+            This section has no fixed lists of allowed terms in this source.
+          </p>
+          {sectionActions}
+        </>
       )}
 
       {section && section.categories.length > 0 && (
         <div className="sp-browse-grid">
-          <div>
-            <h3 className="sp-h3" id="sp-categories-heading">
-              Categories
+          <div className="sp-browse-lists">
+            <h3 className="sp-h3" id={ids.lists}>
+              Lists in {shortSection}
             </h3>
-            <ul className="sp-cat-list" aria-labelledby="sp-categories-heading">
+            <ul className="sp-cat-list" aria-labelledby={ids.lists}>
               {section.categories.map((c) => {
                 const current = c.key === category?.key;
                 return (
@@ -360,63 +396,59 @@ function BrowsePanel({
                       aria-pressed={current}
                       onClick={() => setCategoryKey(c.key)}
                     >
-                      <span className="sp-cat-key">{c.key}</span>
-                      <span className="sp-cat-count">{c.kind === 'other' ? 'no list' : c.terms.length}</span>
+                      <span className="sp-cat-text">
+                        <span className="sp-cat-name">{humanLabel(c.label)}</span>
+                        <span className="sp-cat-key">{c.key}</span>
+                      </span>
+                      <span className="sp-cat-count">
+                        {c.kind === 'other' ? 'Mapping, no fixed terms' : c.terms.length === 1 ? '1 term' : `${c.terms.length} terms`}
+                      </span>
                     </button>
                   </li>
                 );
               })}
             </ul>
+            {sectionActions}
           </div>
 
           {category && (
-            <div>
-              <h3 className="sp-h3 sp-term">{category.key}</h3>
-              {category.description && <p className="sp-note">{category.description}</p>}
-              {category.kind === 'other' ? (
-                <p className="sp-note">
-                  This entry is a mapping or a unit grammar, not a list of allowed terms, so it has no terms to show.
-                </p>
-              ) : (
-                <table className="sp-table">
-                  <caption className="sr-only">Allowed terms for {category.key}</caption>
-                  <thead>
-                    <tr>
-                      <th scope="col">Allowed term</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {category.terms.map((term) => (
-                      <tr key={term}>
-                        <td className="sp-term">{term}</td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              )}
-              {canAddTerm ? (
-                <div className="sp-actions">
+            <section className="sp-browse-pane" aria-labelledby={ids.pane}>
+              <div className="sp-browse-pane-head">
+                <div className="sp-browse-pane-title">
+                  <h3 className="sp-h3" id={ids.pane}>
+                    {humanLabel(category.label)}
+                  </h3>
+                  <span className="sp-cat-key">{category.key}</span>
+                </div>
+                {canAddTerm && (
                   <button
                     type="button"
-                    className="btn btn-secondary"
-                    onClick={() => onProposeTerm(section.id, category.key)}
+                    className="btn btn-primary"
+                    onClick={() => onPropose('add_term', section.id, category.key)}
                   >
-                    Propose a New Term for This List
+                    Propose a Term for This List
                   </button>
-                </div>
+                )}
+              </div>
+              {category.description && <p className="sp-note">{category.description}</p>}
+              {category.kind === 'other' ? (
+                <p className="sp-note">A mapping or a unit grammar, not a list of allowed terms.</p>
               ) : (
-                category.kind !== 'other' && (
-                  <p className="sp-hint">
-                    The portal vocabulary snapshot has no list for this entry in this section, so the portal would
-                    refuse a new term for it. Switch to the portal list to propose a term.
-                  </p>
-                )
+                <ul className="sp-term-chips" aria-label={`Allowed terms for ${category.key}`}>
+                  {category.terms.map((term) => (
+                    <li key={term} className="sp-term-chip">
+                      {term}
+                    </li>
+                  ))}
+                </ul>
               )}
-            </div>
+              {!canAddTerm && category.kind !== 'other' && (
+                <p className="sp-hint">The portal has no list for this entry here, so it would refuse a new term for it.</p>
+              )}
+            </section>
           )}
         </div>
       )}
-
     </div>
   );
 }
@@ -503,6 +535,8 @@ function ProposePanel({
   } | null>(null);
   const descriptionRef = useRef<HTMLTextAreaElement>(null);
   const termRef = useRef<HTMLInputElement>(null);
+  const listKeyRef = useRef<HTMLInputElement>(null);
+  const whereRef = useRef<HTMLButtonElement>(null);
   const filingRef = useRef<HTMLDivElement>(null);
   /**
    * The drafts of the loaded file a proposal has been saved from (by `key`), so their rows say so and
@@ -539,6 +573,18 @@ function ProposePanel({
     return new Set([...seen].filter(([, n]) => n > 1).map(([key]) => key));
   }, [sections]);
   const listValue = (sid: string, key: string) => (sharedListKeys.has(key) ? `${sid}\u001f${key}` : key);
+  /** The List picker's options, grouped by section, and what each one means (its section and its key). */
+  const listOptions = useMemo(
+    () => listGroups.flatMap((s) => s.term_lists.map((key) => ({ value: listValue(s.id, key), label: key, group: s.label }))),
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- listValue depends only on sharedListKeys
+    [listGroups, sharedListKeys],
+  );
+  const listByValue = useMemo(() => {
+    const m = new Map<string, { section: string; key: string }>();
+    for (const s of listGroups) for (const key of s.term_lists) m.set(listValue(s.id, key), { section: s.id, key });
+    return m;
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- listValue depends only on sharedListKeys
+  }, [listGroups, sharedListKeys]);
   /** Every block of the schema a new field could go in, as the server derived them. */
   const objectPaths = useMemo(() => schemaChange?.object_paths ?? [], [schemaChange]);
   /** The same blocks, grouped by section for the "Where in the schema" choice. */
@@ -581,11 +627,13 @@ function ProposePanel({
     setErrors([]);
     setTopMessage(null);
     setSaved(null);
-    if (prefill.focusTerm) {
-      // After the form has re-rendered on that list: the box left to fill is brought into view and focused.
+    if (prefill.focus) {
+      // After the form has re-rendered on that kind: the box left to fill is brought into view and focused.
+      const target = prefill.focus;
       window.setTimeout(() => {
-        termRef.current?.scrollIntoView?.({ block: 'center' });
-        termRef.current?.focus({ preventScroll: true });
+        const el = target === 'term' ? termRef.current : target === 'listKey' ? listKeyRef.current : whereRef.current;
+        el?.scrollIntoView?.({ block: 'center' });
+        el?.focus({ preventScroll: true });
       }, 0);
     }
   }, [prefill, schemaChange]);
@@ -853,7 +901,7 @@ function ProposePanel({
             </p>
           )}
           <div className="sp-actions">
-            <button type="button" className="btn btn-secondary" onClick={stopUsingDraft}>
+            <button type="button" className="btn btn-quiet sp-text-btn" onClick={stopUsingDraft}>
               Stop Using This Draft
             </button>
           </div>
@@ -900,36 +948,25 @@ function ProposePanel({
             {/* One choice, not two: the list, grouped by the section it is in. The section sent is the group's. */}
             <div className="sp-field">
               <label htmlFor={ids.category}>List</label>
-              <select
+              <Select
                 id={ids.category}
-                className="input sp-select"
                 value={category === '' ? '' : listValue(sectionId, category)}
-                onChange={(e) => {
-                  const option = e.target.selectedOptions[0];
-                  const sid = option?.dataset.section;
-                  if (!option || option.value === '' || !sid) {
+                placeholder="Choose a list…"
+                options={listOptions}
+                onChange={(v) => {
+                  const chosen = listByValue.get(v);
+                  if (!chosen) {
                     setCategory('');
                     return;
                   }
-                  setSectionId(sid);
-                  setCategory(option.dataset.list ?? '');
+                  setSectionId(chosen.section);
+                  setCategory(chosen.key);
                 }}
                 aria-invalid={errorFor('category') || sectionError ? true : undefined}
                 aria-describedby={`${ids.category}-hint${errorFor('category') ? ` ${ids.category}-err` : ''}${
                   sectionError ? ` ${ids.section}-err` : ''
                 }`}
-              >
-                <option value="">Choose a list…</option>
-                {listGroups.map((s) => (
-                  <optgroup key={s.id} label={s.label}>
-                    {s.term_lists.map((key) => (
-                      <option key={key} value={listValue(s.id, key)} data-section={s.id} data-list={key}>
-                        {key}
-                      </option>
-                    ))}
-                  </optgroup>
-                ))}
-              </select>
+              />
               {listGroups.length === 0 ? (
                 <p className="sp-hint" id={`${ids.category}-hint`}>
                   The portal vocabulary snapshot has no term lists, so there is no list to add a term to. Propose a
@@ -983,20 +1020,14 @@ function ProposePanel({
           <>
             <div className="sp-field">
               <label htmlFor={ids.section}>Section</label>
-              <select
+              <Select
                 id={ids.section}
-                className="input sp-select"
                 value={sectionId}
-                onChange={(e) => setSectionId(e.target.value)}
+                options={sections.map((s) => ({ value: s.id, label: s.label }))}
+                onChange={setSectionId}
                 aria-invalid={sectionError ? true : undefined}
                 aria-describedby={sectionError ? `${ids.section}-err` : undefined}
-              >
-                {sections.map((s) => (
-                  <option key={s.id} value={s.id}>
-                    {s.label}
-                  </option>
-                ))}
-              </select>
+              />
               <FieldError id={`${ids.section}-err`} message={sectionError} />
             </div>
 
@@ -1004,6 +1035,7 @@ function ProposePanel({
               <label htmlFor={ids.category}>New list key</label>
               <input
                 id={ids.category}
+                ref={listKeyRef}
                 className="input input-mono"
                 value={category}
                 maxLength={limits.category_max}
@@ -1028,17 +1060,17 @@ function ProposePanel({
             {/* One choice, not two: the block, grouped by section. The section sent is the block's own. */}
             <div className="sp-field">
               <label htmlFor={ids.parent}>Where in the schema</label>
-              <select
+              <Select
+                ref={whereRef}
                 id={ids.parent}
-                className="input sp-select"
                 /* `@` + the path, so the record root (path '') is a choice distinct from "none chosen". */
                 value={parent === null ? '' : `@${parent.path}`}
-                onChange={(e) => {
-                  if (e.target.value === '') {
-                    setParentPath(null);
-                    return;
-                  }
-                  const path = e.target.value.slice(1);
+                placeholder="Choose a block…"
+                options={pathGroups.flatMap((g) =>
+                  g.paths.map((o) => ({ value: `@${o.path}`, label: o.path === '' ? 'The record root' : o.path, group: g.label })),
+                )}
+                onChange={(v) => {
+                  const path = v.slice(1);
                   const chosen = objectPaths.find((o) => o.path === path);
                   if (chosen) setSectionId(chosen.section);
                   setParentPath(path);
@@ -1048,18 +1080,7 @@ function ProposePanel({
                 aria-describedby={`${ids.parent}-hint${errorFor('change.parent_path') ? ` ${ids.parent}-err` : ''}${
                   sectionError ? ` ${ids.section}-err` : ''
                 }`}
-              >
-                <option value="">Choose a block…</option>
-                {pathGroups.map((g) => (
-                  <optgroup key={g.id} label={g.label}>
-                    {g.paths.map((o) => (
-                      <option key={o.path} value={`@${o.path}`}>
-                        {o.path === '' ? 'The record root' : o.path}
-                      </option>
-                    ))}
-                  </optgroup>
-                ))}
-              </select>
+              />
               <p className="sp-hint" id={`${ids.parent}-hint`}>
                 {objectPaths.length === 0
                   ? 'The ISAAC schema declares no block a new field could go in.'
@@ -1103,22 +1124,16 @@ function ProposePanel({
 
             <div className="sp-field">
               <label htmlFor={ids.valueType}>Kind of value</label>
-              <select
+              <Select
                 id={ids.valueType}
-                className="input sp-select"
                 value={valueType}
-                onChange={(e) => setValueType(e.target.value as SchemaChangeValueType | '')}
+                placeholder="Choose…"
+                options={schemaChange.value_types.map((t) => ({ value: t, label: VALUE_TYPE_LABEL[t] ?? t }))}
+                onChange={(v) => setValueType(v as SchemaChangeValueType | '')}
                 aria-required="true"
                 aria-invalid={errorFor('change.value_type') ? true : undefined}
                 aria-describedby={errorFor('change.value_type') ? `${ids.valueType}-err` : undefined}
-              >
-                <option value="">Choose…</option>
-                {schemaChange.value_types.map((t) => (
-                  <option key={t} value={t}>
-                    {VALUE_TYPE_LABEL[t] ?? t}
-                  </option>
-                ))}
-              </select>
+              />
               <FieldError id={`${ids.valueType}-err`} message={errorFor('change.value_type')} />
             </div>
 
@@ -1141,24 +1156,20 @@ function ProposePanel({
               </div>
             )}
 
-            {/* A real radio group, so `aria-required` / `aria-invalid` are valid on it (they are not on a fieldset). */}
-            <div
-              className="sp-fieldset"
-              role="radiogroup"
-              aria-labelledby={ids.required}
-              aria-required="true"
-              aria-invalid={errorFor('change.required') ? true : undefined}
-              aria-describedby={errorFor('change.required') ? `${ids.required}-err` : undefined}
-            >
-              <p className="sp-legend" id={ids.required}>Must every record in this block carry it?</p>
-              <label className="sp-radio">
-                <input type="radio" name="schema-change-required" checked={required === 'yes'} onChange={() => setRequired('yes')} />
-                <span>Yes, required</span>
-              </label>
-              <label className="sp-radio">
-                <input type="radio" name="schema-change-required" checked={required === 'no'} onChange={() => setRequired('no')} />
-                <span>No, optional</span>
-              </label>
+            {/* Nothing is chosen until the person chooses: an unchosen answer is sent as missing, never defaulted. */}
+            <div className="sp-field">
+              <SegmentedControl
+                label="Must every record in this block carry it?"
+                options={[
+                  { value: 'yes', label: LABELS.actionSpRequired },
+                  { value: 'no', label: LABELS.actionSpOptional },
+                ]}
+                value={required === '' ? null : required}
+                onChange={(v) => setRequired(v as 'yes' | 'no')}
+                aria-required
+                aria-invalid={errorFor('change.required') ? true : undefined}
+                aria-describedby={errorFor('change.required') ? `${ids.required}-err` : undefined}
+              />
               <FieldError id={`${ids.required}-err`} message={errorFor('change.required')} />
             </div>
 
@@ -1180,21 +1191,20 @@ function ProposePanel({
 
             <div className="sp-field">
               <label htmlFor={ids.scope}>Who needs it (optional)</label>
-              <select
+              <Select
                 id={ids.scope}
-                className="input sp-select"
                 value={scope}
-                onChange={(e) => setScope(e.target.value as SchemaChangeScope | '')}
+                options={[
+                  { value: '', label: 'Not stated' },
+                  ...schemaChange.scopes.map((sc) => ({
+                    value: sc,
+                    label: sc === 'core' ? 'Every science (the core)' : 'One science (a domain profile)',
+                  })),
+                ]}
+                onChange={(v) => setScope(v as SchemaChangeScope | '')}
                 aria-invalid={errorFor('change.scope') ? true : undefined}
                 aria-describedby={`${ids.scope}-hint${errorFor('change.scope') ? ` ${ids.scope}-err` : ''}`}
-              >
-                <option value="">Not stated</option>
-                {schemaChange.scopes.map((sc) => (
-                  <option key={sc} value={sc}>
-                    {sc === 'core' ? 'Every science (the core)' : 'One science (a domain profile)'}
-                  </option>
-                ))}
-              </select>
+              />
               <p className="sp-hint" id={`${ids.scope}-hint`}>
                 The standard&apos;s process puts a field only one science needs in that science&apos;s profile.
               </p>
@@ -1673,7 +1683,7 @@ function ReadyDraftItem({
         {isCurrent ? (
           <span className="chip sp-chip-current">{LABELS.chipDraftBeingProposed}</span>
         ) : (
-          <button type="button" className="btn btn-secondary" onClick={onUse} ref={buttonRef}>
+          <button type="button" className="btn btn-action" onClick={onUse} ref={buttonRef}>
             Propose This Term
           </button>
         )}
@@ -1853,7 +1863,7 @@ function ProposalsPanel({
               )}
               {nextOffset !== null && (
                 <div className="sp-actions">
-                  <button type="button" className="btn btn-secondary" onClick={showMore} disabled={loadingMore}>
+                  <button type="button" className="btn btn-action" onClick={showMore} disabled={loadingMore}>
                     {loadingMore ? 'Loading…' : 'Show More'}
                   </button>
                 </div>
@@ -2000,7 +2010,7 @@ function ProposalRow({
             {proposal.status === 'pending' && !confirming && (
               <button
                 type="button"
-                className="btn btn-secondary"
+                className="btn btn-danger-quiet"
                 ref={withdrawRef}
                 onClick={() => setConfirming(true)}
               >
@@ -2013,7 +2023,7 @@ function ProposalRow({
                 <button type="button" className="btn btn-danger" ref={confirmRef} onClick={withdraw} disabled={busy}>
                   {busy ? 'Withdrawing…' : 'Confirm Withdraw'}
                 </button>
-                <button type="button" className="btn btn-secondary" onClick={keep} disabled={busy}>
+                <button type="button" className="btn btn-quiet sp-text-btn" onClick={keep} disabled={busy}>
                   Keep It
                 </button>
               </span>
@@ -2124,13 +2134,13 @@ function ChangeRequestActions({ proposalId }: { proposalId: string }) {
   const notes = state.kind === 'copied' || state.kind === 'downloaded' || state.kind === 'manual' ? state.notes : [];
   return (
     <span className="sp-portal">
-      <button type="button" className="btn btn-secondary" onClick={copy} disabled={busy}>
+      <button type="button" className="btn btn-action" onClick={copy} disabled={busy}>
         <Copy size={14} strokeWidth={2} aria-hidden="true" /> Copy Change Request
       </button>
-      <button type="button" className="btn btn-secondary" onClick={() => download('md')} disabled={busy}>
+      <button type="button" className="btn btn-action" onClick={() => download('md')} disabled={busy}>
         <Download size={14} strokeWidth={2} aria-hidden="true" /> Download Markdown
       </button>
-      <button type="button" className="btn btn-secondary" onClick={() => download('json')} disabled={busy}>
+      <button type="button" className="btn btn-action" onClick={() => download('json')} disabled={busy}>
         <Download size={14} strokeWidth={2} aria-hidden="true" /> Download JSON
       </button>
       <span className="sp-portal-status" role="status">
@@ -2237,10 +2247,10 @@ function PortalActions({ proposalId }: { proposalId: string }) {
     : null;
   return (
     <span className="sp-portal">
-      <button type="button" className="btn btn-secondary" onClick={copy} disabled={busy}>
+      <button type="button" className="btn btn-action" onClick={copy} disabled={busy}>
         <Copy size={14} strokeWidth={2} aria-hidden="true" /> Copy Portal Payload
       </button>
-      <button type="button" className="btn btn-secondary" onClick={download} disabled={busy}>
+      <button type="button" className="btn btn-action" onClick={download} disabled={busy}>
         <Download size={14} strokeWidth={2} aria-hidden="true" /> Download JSON
       </button>
       <span className="sp-portal-status" role="status">

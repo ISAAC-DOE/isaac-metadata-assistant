@@ -6,6 +6,7 @@ import { AppRoutes } from '../App';
 import { ROUTES } from '../lib/routes';
 import { LABELS } from '../lib/labels';
 import { stubFetchRoutes } from '../test/apiFixtures';
+import { selectGroups, selectValue } from '../test/controls';
 import type { ApiSchemaProposal, ApiSchemaVocabulary } from '../lib/schemaProposals';
 import { countsSentence, gate0FromDraft, parseTermDraftsFile } from '../lib/termDrafts';
 
@@ -363,10 +364,9 @@ describe('Load drafts from a local import', () => {
     fireEvent.click(within(draftItem('XMCD')).getByRole('button', { name: 'Propose This Term' }));
 
     const panel = screen.getByRole('region', { name: 'Propose a Change' });
-    const listSelect = within(panel).getByLabelText('List') as HTMLSelectElement;
-    await waitFor(() => expect(listSelect).toHaveValue('system.technique'));
-    expect(listSelect.selectedOptions[0].dataset.section).toBe('System');
-    expect(listSelect.selectedOptions[0].closest('optgroup')?.label).toBe('System');
+    const listSelect = within(panel).getByLabelText('List');
+    await waitFor(() => expect(selectValue(listSelect)).toBe('system.technique'));
+    expect(selectGroups(listSelect).find((g) => g.options.includes('system.technique'))?.group).toBe('System');
     expect(within(panel).getByLabelText('New term')).toHaveValue('XMCD');
     const description = within(panel).getByLabelText('Description (required)');
     expect(description).toHaveValue('');
@@ -453,7 +453,7 @@ describe('Load drafts from a local import', () => {
     await chooseFile(JSON.stringify(DRAFTS_FILE));
     await drafts();
     fireEvent.click(within(draftItem('simulated')).getByRole('button', { name: 'Propose This Term' }));
-    await waitFor(() => expect(screen.getByLabelText('List')).toHaveValue('system.domain'));
+    await waitFor(() => expect(selectValue(screen.getByLabelText('List'))).toBe('system.domain'));
     const examples = screen.getByLabelText('Examples (required)');
     expect(examples).toHaveValue('');
     expect(examples).toHaveAttribute('aria-required', 'true');

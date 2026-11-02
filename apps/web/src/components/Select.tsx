@@ -377,8 +377,9 @@ export const Select = forwardRef<HTMLButtonElement, SelectProps>(function Select
         ref={listRef}
         id={listboxId}
         role="listbox"
-        aria-label={listName}
-        aria-labelledby={listName === undefined ? (labelledBy ?? id) : undefined}
+        // Named only while open: closed, it is hidden, and a name on it would make the label find it as well.
+        aria-label={open ? listName : undefined}
+        aria-labelledby={open && listName === undefined ? (labelledBy ?? id) : undefined}
         className={`select-popup${above ? ' is-above' : ''}`}
         hidden={!open}
         tabIndex={-1}

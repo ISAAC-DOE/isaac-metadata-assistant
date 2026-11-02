@@ -40,8 +40,14 @@
   gap: var(--space-xl);
   align-items: start;
 }
-@media (min-width: 1180px) {
-  .sp-layout { grid-template-columns: minmax(0, 44rem) minmax(17rem, 22rem); }
+/* The screen uses the whole content area: the form takes what is left beside the proposals column. */
+@media (min-width: 1100px) {
+  .sp-layout { grid-template-columns: minmax(0, 1fr) minmax(18rem, 24rem); }
+  /* Form beside the proposals; the vocabulary under both, across the page. Stacked, the source order holds:
+     form, vocabulary, proposals. */
+  .sp-main { grid-column: 1; grid-row: 1; }
+  .sp-proposals { grid-column: 2; grid-row: 1; }
+  .sp-browse { grid-column: 1 / -1; grid-row: 2; }
 }
 .sp-main { display: flex; flex-direction: column; gap: var(--space-xl); min-width: 0; }
 
@@ -168,14 +174,15 @@ details[open] > summary > .sp-chevron { transform: rotate(90deg); }
 .sp-form { display: flex; flex-direction: column; gap: var(--space-lg); }
 .sp-field { display: flex; flex-direction: column; gap: var(--space-xs); min-width: 0; }
 .sp-field > label,
-.sp-fieldset > legend,
-.sp-fieldset > .sp-legend {
+.sp-fieldset > legend {
   font-size: var(--font-size-body);
   font-weight: var(--font-weight-semibold);
   color: var(--text-strong);
 }
 .sp-fieldset > legend { margin-bottom: var(--space-xs); padding: 0; }
-.sp-select { max-width: 40ch; }
+/* Single-line boxes and pickers keep a sensible width in a wide column; textareas and the kind rows take it all. */
+.sp-field > .input:not(textarea),
+.sp-field > .select { max-width: 40rem; }
 .sp-textarea {
   height: auto;
   min-height: 0;
@@ -212,13 +219,6 @@ details[open] > summary > .sp-chevron { transform: rotate(90deg); }
   border: 0;
   min-width: 0;
 }
-.sp-radio {
-  display: flex;
-  align-items: center;
-  gap: var(--space-sm);
-  color: var(--text-primary);
-}
-.sp-radio input,
 .sp-kind input {
   /* Left at the OS default a native radio paints in the viewer's own accent. */
   accent-color: var(--action);
@@ -324,16 +324,50 @@ details[open] > summary > .sp-chevron { transform: rotate(90deg); }
 /* --- browse ----------------------------------------------------------------------------- */
 
 .sp-browse { scroll-margin-top: var(--space-md); }
+/* Source and section side by side, then the section's lists beside the chosen list. */
+.sp-browse-controls {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  gap: var(--space-md) var(--space-xl);
+}
+.sp-browse-section { flex: 1 1 16rem; max-width: 24rem; }
 .sp-browse-grid {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) minmax(0, 2fr);
-  gap: var(--space-xl);
-  align-items: start;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-start;
+  gap: var(--space-lg) var(--space-xl);
+  margin-top: var(--space-xs);
 }
+.sp-browse-lists {
+  flex: 1 1 15rem;
+  max-width: 24rem;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-xs);
+  min-width: 0;
+}
+.sp-browse-pane {
+  flex: 2 1 18rem;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-sm);
+  min-width: 0;
+  padding-left: var(--space-lg);
+  border-left: 1px solid var(--border);
+}
+/* Stacked, the rule moves above the pane. */
 @media (max-width: 760px) {
-  .sp-browse-grid { grid-template-columns: minmax(0, 1fr); }
+  .sp-browse-pane { padding: var(--space-md) 0 0; border-left: 0; border-top: 1px solid var(--border); }
 }
-.sp-browse-grid > div { display: flex; flex-direction: column; gap: var(--space-sm); min-width: 0; }
+.sp-browse-pane-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: var(--space-sm) var(--space-md);
+}
+.sp-browse-pane-title { display: flex; flex-direction: column; gap: var(--space-2xs); min-width: 0; }
 .sp-cat-list {
   display: flex;
   flex-direction: column;
@@ -355,42 +389,56 @@ details[open] > summary > .sp-chevron { transform: rotate(90deg); }
   color: var(--text-primary);
   text-align: left;
   cursor: pointer;
+  transition: border-color 120ms ease-out, background-color 120ms ease-out;
 }
-.sp-cat:hover { border-color: var(--border-strong); }
+.sp-cat:hover { border-color: var(--action-selected-border); }
 .sp-cat.is-current {
   background: var(--action-tint);
   border-color: var(--action-selected-border);
-  font-weight: var(--font-weight-semibold);
 }
 .sp-cat:focus-visible {
   outline: 2px solid var(--action);
   outline-offset: 2px;
 }
+.sp-cat-text { display: flex; flex-direction: column; min-width: 0; }
+.sp-cat-name { font-weight: var(--font-weight-semibold); color: var(--text-strong); }
+.sp-cat.is-current .sp-cat-name { color: var(--action-hover); }
 .sp-cat-key {
   font-family: var(--font-mono);
   font-size: var(--font-size-meta);
+  color: var(--text-secondary);
   overflow-wrap: anywhere;
 }
 .sp-cat-count {
   flex: none;
   font-size: var(--font-size-meta);
   font-variant-numeric: tabular-nums;
-  color: var(--text-muted);
+  color: var(--text-secondary);
+  text-align: right;
 }
-.sp-table {
-  width: 100%;
-  border-collapse: collapse;
+/* The allowed terms: a wrapped set of neutral identifier chips, not a one-column table. */
+.sp-term-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2xs) var(--space-xs);
+  margin: 0;
+  padding: 0;
+  list-style: none;
 }
-.sp-table th,
-.sp-table td {
-  padding: var(--space-xs) var(--space-md);
-  border-bottom: 1px solid var(--border-faint);
-  text-align: left;
-}
-.sp-table th {
+.sp-term-chip {
+  padding: 2px var(--space-xs);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-token);
+  background: var(--surface-subtle);
+  font-family: var(--font-mono);
   font-size: var(--font-size-meta);
-  font-weight: var(--font-weight-semibold);
-  color: var(--text-muted);
+  color: var(--text-primary);
+  overflow-wrap: anywhere;
+}
+/* Section-level actions, beside what they act on: quiet blue text actions. */
+.sp-browse-actions { display: flex; flex-wrap: wrap; gap: var(--space-2xs) var(--space-sm); margin-top: var(--space-xs); }
+@media (prefers-reduced-motion: reduce) {
+  .sp-cat { transition: none; }
 }
 .sp-term {
   font-family: var(--font-mono);
@@ -492,7 +540,7 @@ details[open] > summary > .sp-chevron { transform: rotate(90deg); }
   border-top: 1px solid var(--border);
   scroll-margin-top: var(--space-md);
 }
-@media (min-width: 1180px) {
+@media (min-width: 1100px) {
   .sp-proposals { padding: 0 0 0 var(--space-xl); border-top: 0; border-left: 1px solid var(--border); }
 }
 .sp-proposals-head { display: flex; align-items: baseline; gap: var(--space-sm); }
@@ -602,3 +650,32 @@ details[open] > summary > .sp-chevron { transform: rotate(90deg); }
   color: var(--text-primary);
 }
 .sp-file:focus-visible { outline: 2px solid var(--action); outline-offset: 2px; }
+
+/* A tertiary action on this screen: blue text, no box until hovered (Stop Using This Draft, Keep It, the
+   section actions in the vocabulary). Scoped here until a shared `.btn-quiet` lands in base.css. */
+.sp-text-btn {
+  padding: 5px var(--space-xs);
+  border-color: transparent;
+  background: transparent;
+  color: var(--action-hover);
+  font-weight: var(--font-weight-semibold);
+}
+.sp-text-btn:hover:not(:disabled) { background: var(--action-tint); color: var(--action-pressed); }
+.sp-text-btn:disabled { color: var(--text-tertiary); cursor: not-allowed; }
+
+/* The browser's own "Choose File" button, in the screen's tinted action look. */
+.sp-file::file-selector-button {
+  margin-right: var(--space-sm);
+  padding: 7px 13px;
+  border: 1px solid var(--action-selected-border);
+  border-radius: var(--radius-control);
+  background: var(--action-tint);
+  color: var(--action-hover);
+  font: inherit;
+  font-weight: var(--font-weight-semibold);
+  cursor: pointer;
+}
+.sp-file::file-selector-button:hover { border-color: var(--action); color: var(--action-pressed); }
+
+/* The chosen list's name heads its pane one step above the list rows beside it. */
+.sp-browse-pane-title > .sp-h3 { font-size: var(--font-size-heading-sm); }

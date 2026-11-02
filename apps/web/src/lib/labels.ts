@@ -1903,6 +1903,11 @@ export const LABELS = {
   headingSpWhereRead: 'Where It Was Read',
   headingSpReviewerNotes: 'Notes for Reviewers',
   chipDraftBeingProposed: 'Being Proposed Below',
+  /* Schema Proposals' segmented choices (Register 1, `action*` keys, so §1 checks their casing). */
+  actionSpSourcePortal: 'Portal Vocabulary',
+  actionSpSourceSchema: 'Schema Lists',
+  actionSpRequired: 'Required',
+  actionSpOptional: 'Optional',
   draftFactSinceAsked: 'Since it was asked for',
   draftFilingLead: 'Proposing:',
 

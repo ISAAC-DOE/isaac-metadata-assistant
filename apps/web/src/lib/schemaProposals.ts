@@ -488,10 +488,9 @@ export const SCHEMA_PROPOSALS_COPY = {
   /** The page's three parts: the form's heading, the list's heading, and the folded vocabulary's summary. */
   proposeTitle: 'Propose a Change',
   proposalsTitle: 'Proposals',
-  browseTitle: 'Browse the Whole Vocabulary',
-  browseLead:
-    'The portal\'s vocabulary is a copy taken at one point in time, the record schema\'s fixed lists are ' +
-    'what records are validated against, and the two overlap only in part.',
+  browseTitle: 'Look Up an Existing List',
+  /* Browse, in one line: the path a person takes through it (section, then list, then its terms). */
+  browseLead: 'Choose a section, then one of its lists, to see the terms it allows.',
   /*
    * THE KIND CHOOSER. Each option's title is its accessible name and its hint is its description, so the
    * hint says what the kind is for in one line and the title stays short. The third is offered only when
