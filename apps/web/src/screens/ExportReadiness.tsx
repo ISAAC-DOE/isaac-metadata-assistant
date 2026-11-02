@@ -177,8 +177,14 @@ export function ExportReadiness() {
   // the pattern.
   const [refreshFailed, setRefreshFailed] = useState(false);
 
+  // Reads overlap (the post-export refresh, the change poller, the feed, Re-Validate, a new
+  // record id): only the LATEST one may land, as in `useFetch`. Without this an older read that
+  // arrived last swapped in an older detail, and the held If-Match token followed it (a 412 on
+  // the next export), or an older failure raised "refresh failed" over a newer success.
+  const fetchSeq = useRef(0);
   const runFetch = useCallback(
     (showLoading: boolean) => {
+      const mine = ++fetchSeq.current;
       if (showLoading) {
         setLoad({ name: 'loading' });
         setRefreshFailed(false);
@@ -186,10 +192,12 @@ export function ExportReadiness() {
       api
         .getExportReadiness(id)
         .then((data) => {
+          if (mine !== fetchSeq.current) return;
           setLoad({ name: 'data', data });
           setRefreshFailed(false);
         })
         .catch((e: unknown) => {
+          if (mine !== fetchSeq.current) return;
           const error =
             e instanceof ApiError ? e : new ApiError(e instanceof Error ? e.message : String(e));
           // A blanking fetch owns the whole screen and shows BackendDown. A

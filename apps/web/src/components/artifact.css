@@ -54,6 +54,7 @@
   overflow-x: auto;
   white-space: nowrap;
 }
+.artifact-path:focus-visible { outline: 2px solid var(--action); outline-offset: 2px; }
 .artifact-actions {
   display: flex;
   gap: 10px;

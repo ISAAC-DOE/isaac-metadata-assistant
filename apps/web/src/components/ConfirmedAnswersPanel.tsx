@@ -459,7 +459,8 @@ function AnswerRow({
             </p>
           )}
           <Disclosure
-            summary={`Show the stored ${blocker.label.toLowerCase()}`}
+            // only a leading capital is lowered, so an acronym ("QC verdict") keeps its case
+            summary={`Show the stored ${blocker.label.replace(/^[A-Z](?=[a-z])/, (c) => c.toLowerCase())}`}
             className="confirmed-stored"
           >
             <pre className="mono confirmed-json">{JSON.stringify(answer.value, null, 2)}</pre>

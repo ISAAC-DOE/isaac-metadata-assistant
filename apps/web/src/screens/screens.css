@@ -329,7 +329,7 @@
   font-weight: var(--font-weight-semibold);
   color: var(--text-heading);
 }
-.completion-counter { font-family: var(--font-mono); font-size: 13px; color: var(--text-tertiary); }
+.completion-counter { font-family: var(--font-mono); font-size: 13px; color: var(--text-tertiary); white-space: nowrap; }
 /* Prose (e.g. "No open questions.") isn't a numeric ratio — render it in the
    UI font, not the mono font meant for digit/slash counters. */
 .completion-counter.completion-counter-prose { font-family: var(--font-ui); }
@@ -344,8 +344,11 @@
   border-radius: 3px;
   background: var(--border-input);
 }
-.progress-seg.answered { background: var(--pass-solid); }
-.progress-seg.current { background: var(--action); }
+/* Answered is a filled segment in the action blue, never the PASS green, which is reserved for the
+   validation verdict (design-system.md). The question being asked now is OUTLINED on the empty track:
+   filled, "0 / 2" drew as half done. */
+.progress-seg.answered { background: var(--action); }
+.progress-seg.current { box-shadow: inset 0 0 0 1px var(--action); }
 
 /* ---- S6 signal row ------------------------------------------------- */
 .signal-row {
@@ -2965,12 +2968,14 @@ a.settings-jump-btn {
     margin-top: 4px;
   }
 
-  /* Two-up grids collapse to a single column so nothing is squeezed. */
+  /* Two-up grids collapse to a single column so nothing is squeezed. `minmax(0, 1fr)`, not `1fr`:
+     a `1fr` track's minimum is its content, so the record card's one-line mono file name widened the
+     column ~25px past the screen and clipped the cards; at 0 the name scrolls inside its own box. */
   .signal-row,
   .artifact-row,
   .memory-figures,
   .settings-figures {
-    grid-template-columns: 1fr;
+    grid-template-columns: minmax(0, 1fr);
   }
 
   /*

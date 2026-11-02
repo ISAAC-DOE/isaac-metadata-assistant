@@ -35,6 +35,7 @@ import {
 } from 'react';
 
 import { ChevronRight, Info, Search } from '../../components/icons';
+import { InlineCode } from '../../components/InlineCode';
 import {
   codeSamples,
   collectExamples,
@@ -766,34 +767,6 @@ export function splitPurpose(description?: string): {
   const collapse =
     rest.join('').length > PURPOSE_DISCLOSURE_MIN_CHARS && !rest.some(isBoundaryCaveat);
   return { lead, inline: collapse ? [] : rest, collapsed: collapse ? rest : [] };
-}
-
-/**
- * THE CONTRACT'S OWN MARKUP, RENDERED RATHER THAN PRINTED (2026-10-12).
- *
- * The descriptions are route docstrings, and they mark identifiers the way a
- * docstring does — `persistence`, `GET /api/health`. Rendered as plain text the
- * reader saw the backticks themselves, a dozen pairs on some operations. A pair
- * of backticks now becomes an inline `<code>`, and NOTHING ELSE CHANGES: no
- * word is added or dropped, the span's text is exactly what sat between the
- * backticks, and an unpaired backtick is left as it is rather than guessed at.
- */
-export function InlineCode({ text }: { text: string }) {
-  const parts = text.split(/`([^`\n]+)`/);
-  if (parts.length === 1) return <>{text}</>;
-  return (
-    <>
-      {parts.map((part, i) =>
-        i % 2 === 1 ? (
-          <code className="mono api-inline-code" key={i}>
-            {part}
-          </code>
-        ) : (
-          part
-        ),
-      )}
-    </>
-  );
 }
 
 function ApiEndpointDetail({

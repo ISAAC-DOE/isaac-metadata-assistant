@@ -17,6 +17,7 @@ import { TopBar } from '../components/TopBar';
 import { LeftNav } from '../components/LeftNav';
 import { BackendDown, LoadingPanel } from '../components/FetchStates';
 import { Copy, Download } from '../components/icons';
+import { InlineCode } from '../components/InlineCode';
 import { LABELS, formatWhen } from '../lib/labels';
 import { api, isHostedBuild } from '../lib/api';
 import { useFetch } from '../lib/useFetch';
@@ -1151,7 +1152,9 @@ function ProposePanel({
                 <textarea
                   id={fieldId}
                   className="input sp-textarea"
-                  rows={g.rows}
+                  // tall enough for what a draft filled in (one citation a line, and a line's room for one that
+                  // wraps), up to 8 lines; then it scrolls
+                  rows={Math.min(8, Math.max(g.rows, (gate0[g.key] ?? '').split('\n').length + 1))}
                   value={gate0[g.key] ?? ''}
                   onChange={(e) => setGate0((prev) => ({ ...prev, [g.key]: e.target.value }))}
                   aria-required={requiredHere ? true : undefined}
@@ -1339,14 +1342,15 @@ function LocalDraftItem({ draft, whyNot, onUse }: { draft: LocalTermDraft; whyNo
       <h3 className="sp-item-title">
         <code className="sp-term">{draft.term}</code>
       </h3>
-      <dl className="sp-why-list">
+      <dl className="sp-why-list sp-draft-facts">
         <dt>Field</dt>
         <dd>
           <code className="sp-term">{draft.fieldPath}</code>
         </dd>
         <dt>How often</dt>
         <dd>
-          {counts ?? 'The file gives no count.'}
+          {/* the counts sentence has no full stop of its own; one is added before the runs sentence follows it */}
+          {counts ? (draft.runs === null ? `${counts}.` : counts) : 'The file gives no count.'}
           {draft.runs === null ? ' Runs: not stated in the file.' : ''}
         </dd>
         {lists.length > 0 && (
@@ -1379,7 +1383,9 @@ function LocalDraftItem({ draft, whyNot, onUse }: { draft: LocalTermDraft; whyNo
         {draft.answerNotes.length > 0 && (
           <>
             <dt>Since it was asked for</dt>
-            <dd>{draft.answerNotes.join(' ')}</dd>
+            <dd>
+              <InlineCode text={draft.answerNotes.join(' ')} />
+            </dd>
           </>
         )}
         <dt>Where it was read</dt>
@@ -1394,7 +1400,9 @@ function LocalDraftItem({ draft, whyNot, onUse }: { draft: LocalTermDraft; whyNo
         {draft.problems.length > 0 && (draft.drafted || !draft.reason) && (
           <>
             <dt>Problems the file reports</dt>
-            <dd>{draft.problems.map((p) => p.message).join(' ')}</dd>
+            <dd>
+              <InlineCode text={draft.problems.map((p) => p.message).join(' ')} />
+            </dd>
           </>
         )}
       </dl>
@@ -1407,7 +1415,7 @@ function LocalDraftItem({ draft, whyNot, onUse }: { draft: LocalTermDraft; whyNo
         </div>
       ) : (
         <p className="sp-item-text">
-          <strong>Cannot be proposed from here.</strong> {whyNot}
+          <strong>Cannot be proposed from here.</strong> <InlineCode text={whyNot} />
         </p>
       )}
     </li>
@@ -1437,6 +1445,8 @@ function ProposalsPanel({ version }: { version: number }) {
   const [changed, setChanged] = useState<Record<string, ApiSchemaProposal>>({});
 
   const firstData = first.status === 'data' ? first.data : null;
+  const firstRef = useRef(firstData);
+  firstRef.current = firstData;
   useEffect(() => {
     // A fresh first page replaces everything that was appended after the previous one.
     setMore([]);
@@ -1449,9 +1459,16 @@ function ProposalsPanel({ version }: { version: number }) {
     if (nextOffset === null || loadingMore) return;
     setLoadingMore(true);
     setMoreFailed(false);
+    const startedOn = firstRef.current;
     try {
       const page = await api.listSchemaProposals({ limit: PAGE_SIZE, offset: nextOffset });
-      setMore((prev) => [...prev, ...page.proposals]);
+      // A first page read again meanwhile (a save here) already replaced the list: this page belongs to the old one.
+      if (firstRef.current !== startedOn) return;
+      // Newest first by offset: a proposal saved elsewhere since shifts a row onto the next page; it is listed once.
+      setMore((prev) => {
+        const listed = new Set([...(startedOn?.proposals ?? []), ...prev].map((x) => x.id));
+        return [...prev, ...page.proposals.filter((x) => !listed.has(x.id))];
+      });
       setNextOffset(page.next_offset);
     } catch {
       setMoreFailed(true);

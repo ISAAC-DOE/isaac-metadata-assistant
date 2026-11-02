@@ -39,7 +39,8 @@
   overflow-wrap: anywhere;
 }
 .li-h2 { font-size: var(--font-size-heading-sm); }
-.li-h2:focus-visible { outline: 2px solid var(--action); outline-offset: 2px; }
+.li-h2:focus-visible,
+.li-h3:focus-visible { outline: 2px solid var(--action); outline-offset: 2px; }
 .li-h3 { font-size: var(--font-size-body); }
 .li-h4,
 .li-h5 { font-size: var(--font-size-body); color: var(--text-strong); }
@@ -79,7 +80,9 @@
 
 .li-dl {
   display: grid;
-  grid-template-columns: minmax(8rem, max-content) minmax(0, 1fr);
+  /* One label track for every list on the page, so two lists one above the other (a bundle's facts
+     and its progress) line their values up instead of each sizing to its own longest label. */
+  grid-template-columns: minmax(8rem, 12rem) minmax(0, 1fr);
   gap: var(--space-2xs) var(--space-md);
   margin: 0;
 }
@@ -126,11 +129,15 @@
 .li-row { display: flex; flex-wrap: wrap; gap: var(--space-md); }
 .li-fieldset { display: flex; flex-direction: column; gap: var(--space-xs); margin: 0; padding: 0; border: 0; min-width: 0; }
 .li-radio,
-.li-check,
-.li-inline { display: flex; align-items: center; gap: var(--space-sm); color: var(--text-primary); }
+.li-check { display: flex; align-items: center; gap: var(--space-sm); color: var(--text-primary); }
 .li-radio input,
 .li-check input { accent-color: var(--action); }
-.li-filters { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-lg); }
+.li-filters { display: flex; flex-wrap: wrap; align-items: flex-end; gap: var(--space-sm) var(--space-lg); }
+/* The type filter's label sits above its select, as "Your name" does above its box: beside it, the
+   label wrapped to two lines at a phone width. */
+.li-filter-field { display: flex; flex-direction: column; gap: var(--space-xs); min-width: 0; flex: 0 1 48ch; }
+.li-filter-field > label { font-weight: var(--font-weight-semibold); color: var(--text-strong); }
+.li-filters .li-check { min-height: 42px; }
 .li-actions { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-sm); margin: 0; min-width: 0; }
 /* A button's label may be a long value or sentence: it wraps (and breaks a long unspaced value)
    rather than pushing the page sideways at a narrow width or at 200% zoom. */
@@ -150,6 +157,24 @@
 .li-ids { overflow-wrap: anywhere; font-family: var(--font-mono); }
 .li-bullets { margin: 0; padding-left: var(--space-lg); display: flex; flex-direction: column; gap: var(--space-xs); }
 .li-bullets .btn { white-space: normal; overflow-wrap: anywhere; text-align: left; }
+/* A recommendation's warning, after its field name: a box of its own on its own line. As an inline
+   span its border and padding were drawn once per wrapped line, across the words. */
+.li-bullets .li-warning {
+  display: block;
+  margin-top: var(--space-2xs);
+  padding: var(--space-xs) var(--space-md);
+  border-width: 1px;
+  font-weight: var(--font-weight-regular);
+}
+
+/* A link inside a sentence is told from the words around it by an underline, not by colour alone
+   (WCAG 1.4.1; the same remedy as the Governance page's links). Buttons styled as links are not prose. */
+.li-screen a:not(.btn) {
+  text-decoration: underline;
+  text-decoration-color: var(--action-selected-border);
+  text-underline-offset: 3px;
+}
+.li-screen a:not(.btn):hover { text-decoration-color: currentColor; }
 
 .li-notice,
 .li-preview {
@@ -185,7 +210,9 @@
   overflow-wrap: anywhere;
 }
 .li-details > summary { cursor: pointer; font-weight: var(--font-weight-semibold); color: var(--text-strong); }
-.li-details[open] { display: flex; flex-direction: column; gap: var(--space-sm); }
+/* A <details> lays its content out in an internal slot, so `display: flex` + `gap` on the element
+   never reaches the children (measured: 0px between them in Chromium). The rhythm is margins. */
+.li-details[open] > * + * { margin-top: var(--space-sm); }
 .li-details > summary:focus-visible { outline: 2px solid var(--action); outline-offset: 2px; }
 .li-progress { display: flex; flex-direction: column; gap: var(--space-sm); }
 
@@ -242,3 +269,7 @@
 .li-change { display: contents; }
 .li-change[hidden] { display: none; }
 .li-current { display: flex; flex-direction: column; gap: var(--space-xs); }
+
+/* The section jump list above the questions: one wrapped line of links with their counts. */
+.li-jumps { display: flex; flex-wrap: wrap; align-items: baseline; gap: var(--space-2xs) var(--space-sm); }
+.li-jumps ul { display: flex; flex-wrap: wrap; gap: var(--space-2xs) var(--space-md); margin: 0; padding: 0; list-style: none; }

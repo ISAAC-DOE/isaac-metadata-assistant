@@ -474,8 +474,11 @@ describe('Load drafts from a local import', () => {
     await within(loader()).findByRole('list', { name: 'Drafts in the file' });
     const item = draftItem('XMCD');
     expect(item).toHaveTextContent('Since it was asked for');
-    expect(item).toHaveTextContent(partly);
-    expect(item).toHaveTextContent(early);
+    // the file's own sentences, word for word; a backticked value is shown as code, not as backticks
+    expect(item).toHaveTextContent(partly.replace(/`/g, ''));
+    expect(item).toHaveTextContent(early.replace(/`/g, ''));
+    expect(within(item).getAllByText('XAS', { selector: 'code' })).toHaveLength(2);
+    expect(item.textContent).not.toContain('`');
     const answered = draftItem('ZZANSWERED');
     expect(answered).toHaveTextContent('Cannot be proposed from here.');
     expect(answered).toHaveTextContent('so the term is not drafted');

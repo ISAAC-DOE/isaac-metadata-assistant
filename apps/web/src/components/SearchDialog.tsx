@@ -148,9 +148,16 @@ export function SearchDialog() {
   const memHeadId = useId();
   const triageHeadId = useId();
 
-  const closeDialog = useCallback(() => setOpen(false), []);
+  // Only the LATEST triage request may land: a second chip clicked before the first answered, or a
+  // close and reopen, bumps it, so a late answer never replaces a newer one or refills a fresh dialog.
+  const triageSeq = useRef(0);
+  const closeDialog = useCallback(() => {
+    triageSeq.current += 1;
+    setOpen(false);
+  }, []);
 
   const openDialog = useCallback(() => {
+    triageSeq.current += 1;
     setQuery('');
     setDebounced('');
     setResults({ status: 'idle' });
@@ -166,13 +173,16 @@ export function SearchDialog() {
   // never blocks the query search below. Never mutates and never rules a verdict.
   const runTriage = useCallback(
     (intent: TriageIntent, filter: Parameters<typeof api.getRuntimeRecords>[0]) => {
+      const mine = ++triageSeq.current;
       setTriage({ status: 'loading', intent });
       api
         .getRuntimeRecords(filter)
         .then(({ records }) => {
+          if (mine !== triageSeq.current) return;
           setTriage({ status: 'data', intent, result: crossRecordTriage(records, intent) });
         })
         .catch(() => {
+          if (mine !== triageSeq.current) return;
           setTriage({ status: 'error', intent });
         });
     },

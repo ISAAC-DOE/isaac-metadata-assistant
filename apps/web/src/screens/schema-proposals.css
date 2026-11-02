@@ -126,8 +126,13 @@
   font-weight: var(--font-weight-semibold);
   color: var(--text-strong);
 }
-.sp-why[open] > summary { margin-bottom: var(--space-sm); }
-.sp-why[open] { display: flex; flex-direction: column; gap: var(--space-md); }
+/* A <details> lays its content out in an internal slot, so `display: flex` + `gap` on the element never
+   reaches the children (measured: 0px between the reviewer-note fields in Chromium). The rhythm is margins:
+   the lead hint sits close under the summary, each field a full step below the one before. */
+.sp-why[open] > summary { margin-bottom: var(--space-xs); }
+.sp-why[open] > .sp-field + .sp-field,
+.sp-why[open] > .sp-hint + .sp-field { margin-top: var(--space-md); }
+.sp-why[open] { padding-bottom: var(--space-md); }
 .sp-why > summary:focus-visible {
   outline: 2px solid var(--action);
   outline-offset: 2px;
@@ -336,8 +341,24 @@
 
 .sp-drafts { display: flex; flex-direction: column; gap: var(--space-sm); }
 .sp-drafts > .sp-h2 { margin: 0; }
-.sp-drafts .sp-list { margin-top: var(--space-xs); }
-.sp-drafts .sp-item { padding: var(--space-md); }
+.sp-drafts .sp-list { margin-top: var(--space-xs); gap: 0; }
+/* The drafts sit inside the loader's own panel, so each is a row ruled off from the next rather than a
+   card inside a card. */
+.sp-drafts .sp-item {
+  padding: var(--space-md) 0;
+  border: 0;
+  border-top: 1px solid var(--border);
+  border-radius: 0;
+  background: none;
+}
+/* One label track for every draft, so the values line up from one draft to the next. */
+.sp-draft-facts { grid-template-columns: minmax(7rem, 11rem) minmax(0, 1fr); }
+/* At a phone width a label column squeezed the values to a few words a line (and broke a field path in
+   two): every such list stacks there, label above value, as Local Imports' lists do. */
+@media (max-width: 560px) {
+  .sp-why-list { grid-template-columns: minmax(0, 1fr); row-gap: 0; }
+  .sp-why-list dd { margin-bottom: var(--space-xs); }
+}
 .sp-file {
   max-width: 100%;
   min-height: 24px;

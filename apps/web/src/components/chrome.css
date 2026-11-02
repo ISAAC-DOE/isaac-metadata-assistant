@@ -503,6 +503,8 @@
   display: inline-flex;
   align-items: center;
   gap: 8px;
+  /* the phase sentence touched the separator after it ("…to confirm|") */
+  padding-right: 16px;
   color: var(--text-secondary);
   font-weight: 500;
 }

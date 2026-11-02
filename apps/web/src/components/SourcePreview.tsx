@@ -217,7 +217,8 @@ function EvidenceObject({ ev }: { ev: FieldEvidence }) {
       <SourceTypeToken sourceType={ev.source_type} />
       {ev.source_file && <KV k="source_file" v={ev.source_file} />}
       {ev.locator && <KV k="locator" v={ev.locator} />}
-      {ev.quote && <KV k="quote" v={`"${ev.quote}"`} />}
+      {/* `KV` quotes its value as JSON does; quoting it here too showed ""SSRL"" */}
+      {ev.quote && <KV k="quote" v={ev.quote} />}
       {ev.question && <KV k="question" v={ev.question} wrap />}
       {ev.answer &&
         (isHash(ev.answer) ? (
@@ -242,10 +243,17 @@ function KV({ k, v, wrap }: { k: string; v: string; wrap?: boolean }) {
 /** A copyable full hash — mono, horizontally scrollable, never truncated. */
 function HashField({ k, value }: { k: string; value: string }) {
   const [copied, setCopied] = useState(false);
+  // "Copied" only once the browser says it copied: a refused clipboard (no permission, an insecure
+  // origin) said "copied" anyway and left the rejection unhandled.
   const copy = () => {
-    void navigator.clipboard?.writeText(value);
-    setCopied(true);
-    window.setTimeout(() => setCopied(false), 1500);
+    const done = navigator.clipboard?.writeText(value);
+    if (!done) return;
+    done
+      .then(() => {
+        setCopied(true);
+        window.setTimeout(() => setCopied(false), 1500);
+      })
+      .catch(() => undefined);
   };
   return (
     <div className="sidecar-kv">

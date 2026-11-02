@@ -119,7 +119,7 @@ export function VerdictCard({ result, onRevalidate, onBackToComplete }: VerdictC
               </button>
             )}
           </div>
-          {pass && <p className="verdict-hint">this is the same gate that backs export.</p>}
+          {pass && <p className="verdict-hint">This is the same gate that backs export.</p>}
         </div>
       </section>
 

@@ -7,6 +7,7 @@ import { TopBar } from '../components/TopBar';
 import { LeftNav } from '../components/LeftNav';
 import { BackendDown, LoadingPanel } from '../components/FetchStates';
 import { Copy } from '../components/icons';
+import { InlineCode } from '../components/InlineCode';
 import { LABELS } from '../lib/labels';
 import { api, type ApiError } from '../lib/api';
 import { useFetch } from '../lib/useFetch';
@@ -92,8 +93,8 @@ export function LocalImports() {
       <div className="li-screen">
         <header className="li-head">
           <h1 className="page-title">{LABELS.navLocalImports}</h1>
-          <p className="li-lead">{COPY.lead}</p>
-          <p className="li-boundary">{COPY.boundary}</p>
+          <p className="li-lead"><InlineCode text={COPY.lead} /></p>
+          <p className="li-boundary"><InlineCode text={COPY.boundary} /></p>
         </header>
         {!enabled ? (
           <div className="li-notice" role="note">
@@ -217,7 +218,7 @@ function Overview() {
         {list.data.statement}
       </p>
       {bundles.length === 0 ? (
-        <p className="li-note">{COPY.noBundles}</p>
+        <p className="li-note"><InlineCode text={COPY.noBundles} /></p>
       ) : (
         <ul className="li-list">
           {bundles.map((b) => (
@@ -314,7 +315,9 @@ function ProgressBlock({ name }: { name: string }) {
           <h4 className="li-h4">{COPY.blocksExport}</h4>
           <ul className="li-bullets">
             {p.blocks_export.map((s) => (
-              <li key={s}>{s}</li>
+              <li key={s}>
+                <InlineCode text={s} />
+              </li>
             ))}
           </ul>
         </>
@@ -324,7 +327,7 @@ function ProgressBlock({ name }: { name: string }) {
           <summary>
             {COPY.lastValidation} ({p.last_validation.reports.length} group(s))
           </summary>
-          <p className="li-meta">{p.last_validation.statement}</p>
+          <p className="li-meta"><InlineCode text={p.last_validation.statement} /></p>
           <ul className="li-bullets">
             {p.last_validation.reports.map((r) => (
               <li key={r.group_id}>
@@ -354,8 +357,11 @@ interface WriteHandlers {
   name: string;
   by: string;
   version: string;
-  /** No name typed: the name field is focused and its error said (again, on every attempt). */
-  needName: () => void;
+  /**
+   * No name typed: the name field is focused and its error said (again, on every attempt). `from` is the control
+   * that was used, which the error offers to return to — the name field can be far above the question.
+   */
+  needName: (from?: HTMLElement | null) => void;
   /** A write the server recorded: say it, adopt the version it returned, read the questions again. */
   onWritten: (id: string, message: string, versions: { sentWith: string; now?: string }) => void;
   /** Read the questions again after a refusal (412, or a question answered elsewhere). */
@@ -385,10 +391,19 @@ function BundleQuestions({ name }: { name: string }) {
     rememberName(v);
     if (v.trim()) setNameError(0);
   };
-  const needName = useCallback(() => {
+  const [returnTo, setReturnTo] = useState<HTMLElement | null>(null);
+  const needName = useCallback((from?: HTMLElement | null) => {
+    setReturnTo(from ?? null);
     setNameError((n) => n + 1);
     nameRef.current?.focus();
   }, []);
+  const backToQuestion = () => {
+    const back = returnTo;
+    setReturnTo(null);
+    if (!back || !back.isConnected) return;
+    back.scrollIntoView?.({ block: 'center' });
+    back.focus();
+  };
 
   /*
    * THE VERSION A WRITE RETURNED IS USED AT ONCE. Every write answers with the bundle's new
@@ -514,6 +529,13 @@ function BundleQuestions({ name }: { name: string }) {
     pageFocus.current = true;
     setOffset(next);
   }, []);
+  // Answering the last questions on the last page leaves that page empty (the server does not clamp the offset):
+  // go to the last page there still is, rather than show "Questions 51–50 of 50." and no cards.
+  useEffect(() => {
+    if (shownData && shownData.returned === 0 && shownData.offset > 0 && shownData.total > 0) {
+      onPage(lastPageOffset(shownData.total, shownData.limit));
+    }
+  }, [shownData, onPage]);
   useEffect(() => {
     if (pageFocus.current && shownData !== null) {
       pageFocus.current = false;
@@ -554,12 +576,20 @@ function BundleQuestions({ name }: { name: string }) {
           aria-describedby={`${byId}-hint${nameError ? ` ${byId}-err` : ''}`}
         />
         <p id={`${byId}-hint`} className="li-hint">
-          {COPY.yourNameHint}
+          <InlineCode text={COPY.yourNameHint} />
         </p>
         {nameError > 0 && (
           // keyed by the attempt, so a repeat click is announced again
           <p key={nameError} id={`${byId}-err`} className="li-error" role="alert" data-testid="li-name-error">
             {COPY.nameNeeded}
+          </p>
+        )}
+        {/* stays once the name is typed (which clears the error): that is when it is needed */}
+        {returnTo?.isConnected && (
+          <p className="li-actions">
+            <button type="button" className="btn btn-secondary" onClick={backToQuestion}>
+              {COPY.backToQuestion}
+            </button>
           </p>
         )}
       </div>
@@ -575,9 +605,10 @@ function BundleQuestions({ name }: { name: string }) {
           />
           Only questions that block export
         </label>
-        <label className="li-inline">
-          Question type{' '}
+        <div className="li-filter-field">
+          <label htmlFor={`${byId}-kind`}>Question type</label>
           <select
+            id={`${byId}-kind`}
             className="input li-select"
             value={kind}
             onChange={(e) => {
@@ -592,7 +623,7 @@ function BundleQuestions({ name }: { name: string }) {
               </option>
             ))}
           </select>
-        </label>
+        </div>
       </div>
       {questions.status === 'loading' && <LoadingPanel label="Reading the questions…" />}
       {questions.status === 'error' &&
@@ -650,7 +681,7 @@ function QuestionsBody({
           <dt>Export rules used</dt>
           <dd title={data.blocking_basis.source}>ISAAC record schema ({data.blocking_basis.schema})</dd>
         </dl>
-        <p className="li-meta">{data.statement}</p>
+        <p className="li-meta"><InlineCode text={data.statement} /></p>
         {data.exposures_recorded > 0 && (
           <p className="li-meta">
             This page noted in the bundle that these suggestions were shown to you ({data.exposures_recorded}), as the
@@ -669,11 +700,12 @@ function QuestionsBody({
           {notCountedText(data.counts)}
         </p>
       )}
+      {sections.length > 1 && <SectionJumps sections={sections} />}
       {data.minimum_for_one_group && <NearestRecord m={data.minimum_for_one_group} />}
       {data.total === 0 && <p className="li-note">No open questions match.</p>}
       {sections.map((s) => (
         <section key={s.id} className="li-section" aria-labelledby={`li-sec-${s.id}`}>
-          <h3 id={`li-sec-${s.id}`} className="li-h3">
+          <h3 id={`li-sec-${s.id}`} className="li-h3" tabIndex={-1}>
             {s.title} <span className="li-count">({s.questions.length})</span>
           </h3>
           {s.id === 'settles-many' && <p className="li-note">{COPY.settlesManyLead}</p>}
@@ -708,6 +740,39 @@ function QuestionsBody({
 }
 
 /**
+ * A list of this page's question sections, each a link to its heading. A bundle's questions can run to a hundred
+ * cards on one page; this names the sections and their counts up front and moves focus to the one chosen.
+ */
+function SectionJumps({ sections }: { sections: ReturnType<typeof sectionQuestions> }) {
+  const go = (e: React.MouseEvent, id: string) => {
+    const heading = document.getElementById(id);
+    if (!heading) return;
+    e.preventDefault();
+    heading.scrollIntoView?.({ block: 'start' });
+    heading.focus();
+  };
+  return (
+    <nav className="li-jumps" aria-label={COPY.jumpLabel}>
+      <span className="li-meta">{COPY.jumpLabel}:</span>
+      <ul>
+        {sections.map((s) => (
+          <li key={s.id}>
+            <a href={`#li-sec-${s.id}`} onClick={(e) => go(e, `li-sec-${s.id}`)}>
+              {s.title} ({s.questions.length})
+            </a>
+          </li>
+        ))}
+        <li>
+          <a href="#li-answered-title" onClick={(e) => go(e, 'li-answered-title')}>
+            {COPY.answeredTitle}
+          </a>
+        </li>
+      </ul>
+    </nav>
+  );
+}
+
+/**
  * THE ANSWERED QUESTIONS — what `isaac bundle show question` shows as `status: answered` — read only when the person
  * asks for them (reading them records that command's exposures), each with its current answers and a "Change answer"
  * that goes through the same preview and write as every answer: the server answers it again with `decide --question`.
@@ -717,7 +782,7 @@ function AnsweredSection({ kind, writes, handlers }: { kind: string; writes: num
   const regionId = useId();
   return (
     <section className="li-section" aria-labelledby="li-answered-title">
-      <h3 id="li-answered-title" className="li-h3">
+      <h3 id="li-answered-title" className="li-h3" tabIndex={-1}>
         {COPY.answeredTitle}
       </h3>
       <p className="li-actions">
@@ -768,17 +833,24 @@ function AnsweredList({ kind, writes, handlers }: { kind: string; writes: number
     pageFocus.current = true;
     setOffset(next);
   };
+  // a "Change answer" that defers can empty the last answered page: go to the last page there still is
+  useEffect(() => {
+    if (data && data.returned === 0 && data.offset > 0 && data.total > 0) {
+      pageFocus.current = true;
+      setOffset(lastPageOffset(data.total, data.limit));
+    }
+  }, [data]);
 
   if (answered.status === 'loading') return <LoadingPanel label={COPY.readingAnswered} />;
   if (answered.status === 'error') return <LocalFailure error={answered.error} onRetry={answered.reload} />;
   const d = answered.data;
   return (
     <>
-      <p className="li-note">{COPY.answeredLead}</p>
+      <p className="li-note"><InlineCode text={COPY.answeredLead} /></p>
       {d.exposures_recorded > 0 && (
         <p className="li-meta">
           This page noted in the bundle that these questions’ suggestions were shown to you ({d.exposures_recorded}), as
-          the command line’s `isaac bundle show question` does.
+          the command line’s <code className="mono inline-code">isaac bundle show question</code> does.
         </p>
       )}
       <p className="li-meta" tabIndex={-1} ref={rangeRef} data-testid="li-answered-range">
@@ -809,6 +881,19 @@ function AnsweredList({ kind, writes, handlers }: { kind: string; writes: number
       )}
     </>
   );
+}
+
+/** The offset of the last page of `total` items, `limit` to a page. */
+function lastPageOffset(total: number, limit: number): number {
+  return limit > 0 ? Math.floor((total - 1) / limit) * limit : 0;
+}
+
+/** `text` whole when it fits in `max` characters; else cut at the last word that fits, with an ellipsis. */
+function clipAtWord(text: string, max: number): string {
+  if (text.length <= max) return text;
+  const cut = text.slice(0, max);
+  const space = cut.lastIndexOf(' ');
+  return `${(space > max / 2 ? cut.slice(0, space) : cut).replace(/[\s,;:—–-]+$/, '')}…`;
 }
 
 /** The questions on this page by id, so a link can reach a card; null outside the questions page. */
@@ -860,7 +945,7 @@ function NearestRecord({ m }: { m: NonNullable<LocalProgress['minimum_for_one_gr
   return (
     <div className="li-progress" data-testid="li-nearest">
       <p className="li-note">
-        {COPY.nearestRecord}: {nearestRecordText(m)}
+        {COPY.nearestRecord}: <InlineCode text={nearestRecordText(m)} />
       </p>
       {m.processing_qc && <p className="li-warning">Processing QC: {m.processing_qc}.</p>}
       {qs.length > 0 && (
@@ -889,7 +974,7 @@ function NearestRecord({ m }: { m: NonNullable<LocalProgress['minimum_for_one_gr
                 ) : (
                   r.fields.map(fieldWords).join(', ')
                 )}
-                {onlyWords(r.only) ? ` — for ${onlyWords(r.only)}` : ''}: <span className="li-warning">{r.why}</span>
+                {onlyWords(r.only) ? ` — for ${onlyWords(r.only)}` : ''}: <span className="li-warning"><InlineCode text={r.why} /></span>
               </li>
             ))}
           </ul>
@@ -904,7 +989,7 @@ function NearestRecord({ m }: { m: NonNullable<LocalProgress['minimum_for_one_gr
           <ul className="li-bullets" data-testid="li-nearest-warnings">
             {warnings.map((w) => (
               <li key={w} className="li-warning">
-                {w}
+                <InlineCode text={w} />
               </li>
             ))}
           </ul>
@@ -926,12 +1011,12 @@ function NearestRecord({ m }: { m: NonNullable<LocalProgress['minimum_for_one_gr
 function WhyText({ q }: { q: LocalQuestion }) {
   const cover = q.display.covered_by;
   const parts = splitAtId(q.why, cover?.question_id);
-  if (!cover || !cover.question_id || !parts) return <>{q.why}</>;
+  if (!cover || !cover.question_id || !parts) return <InlineCode text={q.why} />;
   return (
     <>
-      {parts[0]}
+      <InlineCode text={parts[0]} />
       <CardLink id={cover.question_id}>“{cover.text}”</CardLink>
-      {parts[1]}
+      <InlineCode text={parts[1]} />
     </>
   );
 }
@@ -1497,15 +1582,17 @@ function QuestionCard({
     say(localReasonOf(err) ?? 'The answer could not be recorded. Nothing was written.');
   }
 
+  // a long question is shortened at a word with an ellipsis, so the message never ends mid-word
+  const shortText = clipAtWord(q.text, 80);
   function recordedMessage(n: number) {
-    return `Recorded ${n} answer(s) to “${q.text.slice(0, 80)}”.`;
+    return `Recorded ${n} answer(s) to “${shortText}”.`;
   }
 
   function written(result: ApiLocalAnswerRecorded, sentWith: string) {
     // decide's own plain statement ("Fe K recorded for 9 groups.", "Nothing new recorded: …"), as the command line
     // prints it; the server's count only when it says none. What a counter answer would do on the regroup follows.
     const said = result.result.statement?.trim();
-    const base = said ? `“${q.text.slice(0, 80)}”: ${said}` : recordedMessage(result.result.recorded.length);
+    const base = said ? `“${shortText}”: ${said}` : recordedMessage(result.result.recorded.length);
     const regroup = result.result.regroup_preview?.statement;
     const message = regroup ? `${base} ${regroup}` : base;
     setRecorded(message);
@@ -1520,7 +1607,7 @@ function QuestionCard({
     setStatus('');
     opener.current = document.activeElement instanceof HTMLElement ? document.activeElement : null;
     if (!handlers.by.trim()) {
-      handlers.needName();
+      handlers.needName(opener.current);
       return;
     }
     if (how.scope === undefined && how.scopes === undefined && multi && scopeMode === null) {
@@ -1642,7 +1729,7 @@ function QuestionCard({
             )}
             <AnswerForm onAnswer={() => submit('correct', { value })}>
               <ValueInput id={valueId} rule={rule} value={value} onChange={setValue} label={d.distinct_extracted_values.length > 0 ? 'Or correct it' : 'Your answer'} />
-              {answerButton(false)}
+              {answerButton(d.distinct_extracted_values.length === 0)}
             </AnswerForm>
           </>
         );
@@ -1676,7 +1763,13 @@ function QuestionCard({
           <AnswerForm onAnswer={() => submit('correct', { value })}>
             <div className="li-field">
               <label htmlFor={`${uid}-f`}>Field</label>
-              <select id={`${uid}-f`} className="input li-select" value={field} onChange={(e) => setField(e.target.value)}>
+              <select id={`${uid}-f`} className="input li-select" value={field}
+                onChange={(e) => {
+                  // a value typed for one field is never sent for another (a list's box would show "Choose one…")
+                  setField(e.target.value);
+                  setValue('');
+                }}
+              >
                 {optionalFields.map((f) => (
                   <option key={f} value={f}>
                     {f}
@@ -1832,7 +1925,7 @@ function QuestionCard({
         <span className="li-meta">{KIND_LABEL[q.kind] ?? q.kind}</span>
       </div>
       <h4 id={`${uid}-t`} className="li-h4 li-question-text" tabIndex={-1} ref={titleRef} data-li-title>
-        {q.text}
+        <InlineCode text={q.text} />
       </h4>
       {q.deferred && (
         <p className="li-meta" data-testid="li-deferred" title={q.deferred.decided_utc ?? undefined}>
@@ -1902,7 +1995,7 @@ function QuestionCard({
             Showing {d.suggestions.length} of {d.suggestions_total} suggestions and hints.
           </p>
         )}
-        <p className="li-hint">{d.suggestion_statement}</p>
+        <p className="li-hint"><InlineCode text={d.suggestion_statement} /></p>
         {others.length > 0 && (
           <details className="li-details">
             <summary>
@@ -2132,7 +2225,7 @@ function useDecision(id: string, handlers: WriteHandlers) {
   async function record(input: Omit<Parameters<typeof api.recordLocalDecision>[1], 'by' | 'expected_version'>, done: string) {
     setError(null);
     if (!handlers.by.trim()) {
-      handlers.needName();
+      handlers.needName(document.activeElement instanceof HTMLElement ? document.activeElement : null);
       return;
     }
     setBusy(true);

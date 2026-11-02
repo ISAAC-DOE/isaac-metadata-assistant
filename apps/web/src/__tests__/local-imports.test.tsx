@@ -503,6 +503,67 @@ describe('the questions screen', () => {
     expect(calls.filter((k) => k.startsWith('POST'))).toEqual([]);
   });
 
+  it('after the name error, "Back to the question" returns to the control that was used, and stays once the name is typed', async () => {
+    stubQuestions();
+    renderAt(ROUTES.localImportBundle('synthetic-beamtime'));
+    const card = (await screen.findByRole('heading', { name: envQ.text })).closest('li') as HTMLElement;
+    const accept = within(card).getByRole('button', { name: `${COPY.acceptSuggestion}: ex_situ` });
+    accept.focus();
+    fireEvent.click(accept);
+    await screen.findByTestId('li-name-error');
+    // typing the name clears the error; the way back is still offered, because that is when it is needed
+    fireEvent.change(screen.getByLabelText(COPY.yourName), { target: { value: 'Synthetic Scientist' } });
+    expect(screen.queryByTestId('li-name-error')).toBeNull();
+    fireEvent.click(screen.getByRole('button', { name: COPY.backToQuestion }));
+    expect(accept).toHaveFocus();
+    expect(screen.queryByRole('button', { name: COPY.backToQuestion })).toBeNull();
+  });
+
+  it('lists the question sections with their counts, each a link that moves focus to its heading', async () => {
+    stubQuestions();
+    renderAt(ROUTES.localImportBundle('synthetic-beamtime'));
+    const nav = await screen.findByRole('navigation', { name: COPY.jumpLabel });
+    const sections = sectionQuestions([envQ, tempQ, zoneQ, absorberQ, counterQ]);
+    const links = within(nav).getAllByRole('link');
+    expect(links.map((l) => l.textContent)).toEqual([
+      ...sections.map((x) => `${x.title} (${x.questions.length})`),
+      COPY.answeredTitle,
+    ]);
+    fireEvent.click(links[1]);
+    expect(screen.getByRole('heading', { name: new RegExp(`^${sections[1].title}`) })).toHaveFocus();
+  });
+
+  it('a page emptied by answering its last questions moves to the last page there still is', async () => {
+    vi.stubEnv('VITE_ISAAC_LOCAL_IMPORTS', '1');
+    const page = (offset: number, qs: LocalQuestion[], total: number) => ({
+      ...questionsBody(qs),
+      total,
+      offset,
+      limit: 2,
+      returned: qs.length,
+      omitted_before: offset,
+      omitted_after: Math.max(0, total - offset - qs.length),
+    });
+    let firstPage = true;
+    const calls = stubFetchRoutes({
+      'GET /api/local-bundles': { body: listBody },
+      [`GET ${QPATH}`]: () => {
+        const body = firstPage ? page(0, [envQ, tempQ], 3) : page(0, [envQ, tempQ], 2);
+        return { body };
+      },
+      // the second page was answered elsewhere in the meantime: the server returns it empty, offset unclamped
+      [`GET ${QPATH}?offset=2`]: () => ({ body: page(2, [], 2) }),
+    });
+    renderAt(ROUTES.localImportBundle('synthetic-beamtime'));
+    await screen.findByRole('heading', { name: envQ.text });
+    firstPage = false;
+    fireEvent.click(screen.getByRole('button', { name: 'Next questions' }));
+    // the empty page is replaced by the last real one; "Questions 3–2 of 2." is never left on screen
+    await waitFor(() => expect(calls.filter((k) => k.startsWith(`GET ${QPATH}`)).length).toBe(3));
+    expect(await screen.findByRole('heading', { name: envQ.text })).toBeInTheDocument();
+    expect(screen.queryByText(/Questions 3–2 of 2/)).toBeNull();
+  });
+
   it('where the groups’ suggestions differ, no scope is chosen for you and nothing is sent until one is', async () => {
     const calls = stubQuestions({}, [envQ]);
     renderAt(ROUTES.localImportBundle('synthetic-beamtime'));
@@ -1395,7 +1456,11 @@ describe('polish c8-web: an answered question can be seen and changed, as `decid
     expect(answers).toHaveTextContent('2 different answers');
     expect(answers).toHaveTextContent('Element Zz, edge K — by Synthetic Scientist, 2099-01-01 00:00 UTC, for 1 group');
     expect(answers).toHaveTextContent('Element Yy, edge L3');
-    expect(screen.getByText(/as the command line’s `isaac bundle show question` does/)).toHaveTextContent('(3)');
+    // the command is shown as code, not between backticks
+    const exposures = screen.getByText(/questions’ suggestions were shown to you/);
+    expect(exposures).toHaveTextContent('(3)');
+    expect(exposures).toHaveTextContent('as the command line’s isaac bundle show question does');
+    expect(within(exposures).getByText('isaac bundle show question', { selector: 'code' })).toBeInTheDocument();
     // the controls are there only once "Change answer" is chosen
     expect(within(env).queryByRole('button', { name: COPY.answer })).toBeNull();
     const change = within(env).getByRole('button', { name: COPY.changeAnswer });

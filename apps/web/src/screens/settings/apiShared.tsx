@@ -53,7 +53,8 @@ export function CopyButton({
     [],
   );
   const copy = () => {
-    void navigator.clipboard?.writeText(value);
+    // a refused clipboard (no permission, an insecure origin) must not escape as an unhandled rejection
+    navigator.clipboard?.writeText(value)?.catch(() => undefined);
     setCopied(true);
     onCopied(what);
     if (resetTimer.current !== null) window.clearTimeout(resetTimer.current);

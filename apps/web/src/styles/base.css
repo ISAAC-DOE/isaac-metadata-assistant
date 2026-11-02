@@ -65,6 +65,17 @@ a:hover {
   font-variant-numeric: tabular-nums lining-nums;
 }
 
+/* Backtick markup rendered as code (`components/InlineCode.tsx`): the API reference's
+   docstrings, Local Imports' bundle sentences, Schema Proposals' drafts-file reasons. */
+.inline-code {
+  font-size: inherit;
+  padding: 0 var(--space-2xs);
+  border-radius: var(--radius-token);
+  background: var(--border-faint);
+  color: var(--text-strong);
+  overflow-wrap: anywhere;
+}
+
 /* Section eyebrow — mono, uppercase, tracked. */
 .eyebrow {
   font-family: var(--font-mono);
