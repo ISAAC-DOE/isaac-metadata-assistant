@@ -2899,7 +2899,7 @@ function ProposalCard({
         </button>
         <button
           type="button"
-          className="btn btn-secondary agent-proposal-cancel"
+          className="btn btn-quiet agent-proposal-cancel"
           onClick={onCancel}
           disabled={confirming}
         >

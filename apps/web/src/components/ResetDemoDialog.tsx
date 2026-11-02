@@ -518,7 +518,7 @@ export function ResetDemoDialog() {
             </div>
 
             <div className="reset-dialog-actions">
-              <button type="button" className="btn btn-secondary" onClick={closeDialog}>
+              <button type="button" className="btn btn-quiet" onClick={closeDialog}>
                 {LABELS.actionCancel}
               </button>
               <button

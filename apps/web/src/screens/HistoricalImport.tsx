@@ -817,7 +817,7 @@ function DiscardDialog({
           {error !== null && <Refusal error={error} />}
         </div>
         <div className="reset-dialog-actions">
-          <button ref={keepRef} type="button" className="btn btn-secondary" onClick={onKeep} disabled={busy}>
+          <button ref={keepRef} type="button" className="btn btn-quiet" onClick={onKeep} disabled={busy}>
             {IMPORT_COPY.discardKeep}
           </button>
           <button type="button" className="btn btn-danger" onClick={onConfirm} disabled={busy}>

@@ -1310,7 +1310,7 @@ function CreateExperimentControl({
         <button type="submit" className="btn btn-primary" disabled={busy} aria-busy={busy || undefined}>
           {LABELS.createExperimentSubmit}
         </button>
-        <button type="button" className="btn btn-secondary" onClick={close} disabled={busy}>
+        <button type="button" className="btn btn-quiet" onClick={close} disabled={busy}>
           {LABELS.createExperimentCancel}
         </button>
       </div>
