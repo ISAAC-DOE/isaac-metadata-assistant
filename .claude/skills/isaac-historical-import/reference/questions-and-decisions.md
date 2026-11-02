@@ -121,12 +121,13 @@ group is confirmed the minimum names it in `answer_first` (not counted; never af
   Show the sentence and ask whether it applies to these runs; a sentence that only mentions the thing in
   passing is usually a `reject` or a `correct`. Answer all groups at once only when they say it applies to all.
 - **A cell named only in passing** ("What is the cell type? … The notes name a cell only in passing, in a
-  sentence about something else: '…'"): a notes line that names a cell but is about something else (where
-  the grids are kept) gives no cell type. The question quotes the line and asks; it offers no `confirm` and no
+  sentence about something else: '…'"): a notes line that names a cell but is about something else gives no
+  cell type. That is a to-do or reminder ("TODO: flow cell needs a gasket"), handling or storing it ("kept with
+  the flow cell", "rinse the flow cell"), or any line not shaped like a statement of the cell. The question quotes the line and asks; it offers no `confirm` and no
   `--same-reading` batch. Ask "What cell was used for these runs?" per group (or in the template's Cell Type
   column) and record `correct --value <their answer>`. A record cites such a line as `context`, never as
-  support. A line about the cell ("Flow cell = 5 ml/min", "Cell: H-cell", "measured in a flow cell") is
-  read as before.
+  support. A line about the cell is read as before: a short header ("PEEK flow cell", "In situ flow cell,
+  5 ml/min"), a label ("Cell: H-cell"), "is a flow cell", or "measured in a flow cell".
 - **Sample questions asked once for several groups** name the shared sample reading as the files write it
   ("with the same sample reading (sample name 'ZZ1', sample or electrode number '01', as the files write
   it)"). Say that reading when you ask.

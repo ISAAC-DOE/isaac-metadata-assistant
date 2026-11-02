@@ -2557,34 +2557,71 @@ def _cell_type_rule_id() -> str | None:
     return next((rule for path, rule, _name in cond.FIELDS.values() if path == "context.electrochemistry.cell_type"), None)
 
 
-#: The line opens with the cell itself (after a bullet, a "Note:"-style label and an article): "Flow cell = 5 ml/min".
-_CELL_LEADS = re.compile(r"^[\W_]*(?:[A-Za-z][\w ]{0,24}:\s*)?(?:(?:a|an|the|our|one|this|same)\s+)?$", re.IGNORECASE)
+# THE RULE (r5 review M1/M2): a line names the cell IN PASSING when a POSITIVE marker says it is about something else;
+# a line shaped like a statement of the cell is read; anything else is asked (no value), never guessed.
+
+#: A to-do or reminder line: "TODO: flow cell needs a gasket", "Note: flow cell leaked", "Remember to fill the flow cell".
+_PASSING_LEAD = re.compile(r"^[\W_]*(?:to\s?-?do|note|n\.?b\.?|remember|reminder|ask|check|fixme|tbd)\b", re.IGNORECASE)
+#: A verb of handling the apparatus, not of measuring in it: kept, stored, rinsed, cleaned, replaced, leaked, needs ...
+_PASSING_VERB = re.compile(r"\b(?:kept|keep|keeps|keeping|stored|store|stores|storing|rinse\w*|clean\w*|replac\w*|broke|"
+                           r"broken|leak\w*|bring|brought|fill|fills|filling|filled(?!\s+with)|needs?|repair\w*|borrow\w*|"
+                           r"return\w*|order\w*|lost|ship\w*|pack\w*|wash\w*|dismantl\w*|disassembl\w*|clog\w*|crack\w*)\b",
+                           re.IGNORECASE)
+#: The cell is the object of a place word: "... kept with the flow cell", "beside the H-cell", "old data from the flow cell".
+_PLACE_BEFORE = re.compile(r"\b(?:with|beside|next\s+to|near|by|behind|beneath|under|from)\s+"
+                           r"(?:(?:the|a|an|our|this|that)\s+)?(?:[\w'’-]+\s+){0,2}$", re.IGNORECASE)
+#: ...or of a storage place anywhere in the line: "in the drawer", "on the shelf", "on the USB stick".
+_STORAGE = re.compile(r"\b(?:drawer|box|cabinet|cupboard|shelf|fridge|freezer|bag|usb|stick|hard\s+drive|folder)\b",
+                      re.IGNORECASE)
 #: The line is a label for the cell: "Cell: H-cell", "Cell type = flow cell", "Setup - beaker cell".
 _CELL_LABEL = re.compile(r"^[\W_]*(?:electrochemical\s+|echem\s+)?(?:cell(?:\s+type)?|set-?up|configuration|apparatus|reactor)"
                          r"\s*[:=–—-]", re.IGNORECASE)
 _MEASURE_WORDS = (r"measur\w*|collect\w*|record\w*|acquir\w*|perform\w*|conduct\w*|carried\s+out|done|run|ran|runs|"
-                  r"operat\w*|experiment\w*|spectr\w*|scans?|scanned|data|xas|xanes|exafs|herfd|electrochem\w*|in[\s-]situ|"
+                  r"operat\w*|experiment\w*|spectr\w*|scans?|scanned|xas|xanes|exafs|herfd|electrochem\w*|in[\s-]situ|"
                   r"operando|samples?|electrodes?|cycl\w*|polari[sz]\w*|held|tested")
 #: "... measured in a flow cell", "spectra collected with the H-cell", "samples were run in a beaker cell".
-_MEASURED_IN = re.compile(rf"\b(?:{_MEASURE_WORDS})\b(?:\s+[\w'’-]+){{0,3}}?\s+(?:in|into|inside|with|using|via|on|"
-                          rf"from)\s+(?:(?:a|an|the|our|same|this|that)\s+)?(?:[\w-]+\s+)?$", re.IGNORECASE)
+_MEASURED_IN = re.compile(rf"\b(?:{_MEASURE_WORDS})\b(?:\s+[\w'’-]+){{0,3}}?\s+(?:in|into|inside|with|using|via|on)\s+"
+                          rf"(?:(?:a|an|the|our|same|this|that)\s+)?(?:[\w-]+\s+)?$", re.IGNORECASE)
 #: "we used a flow cell", "using an H-cell", "assembled the beaker cell".
-_USED = re.compile(r"\b(?:use[ds]?|using|assembl\w*|mount\w*|load\w*|fill\w*|built|installed|switched\s+to|chang\w*\s+to)"
+_USED = re.compile(r"\b(?:use[ds]?|using|assembl\w*|mount\w*|load\w*|built|installed|switched\s+to|chang\w*\s+to)"
                    r"\s+(?:(?:a|an|the|our|same|this|that|new)\s+)?(?:[\w-]+\s+)?$", re.IGNORECASE)
+#: "The cell is a flow cell", "Cell was a flow cell".
+_COPULA = re.compile(r"\b(?:is|was|were|are)\s+(?:(?:a|an|the)\s+)?(?:[\w-]+\s+){0,2}$", re.IGNORECASE)
+#: a leading label ("Electrolyte:", "SYNTHETIC:") before a short header
+_LEAD_LABEL = re.compile(r"^[\W_]*(?:[A-Za-z][\w ]{0,24}:\s*)?")
+#: words that do not count toward a short header's modifiers
+_FREE_WORDS = frozenset({"a", "an", "the", "our", "one", "this", "same", "in", "at", "inside", "into", "of", "for"})
+#: how many modifier words a one-line header may put before the cell ("Custom PEEK flow cell", "0.1 M KOH in flow cell")
+HEADER_MODIFIERS = 3
+
+
+def _states_the_cell(sentence: str, before: str) -> bool:
+    """The line is shaped like a statement of the cell: a label for it, a measurement made in or with it, "used a
+    ...", "is a ...", or a short header that opens with at most :data:`HEADER_MODIFIERS` modifier words before it."""
+    if _CELL_LABEL.match(sentence) or _MEASURED_IN.search(before) or _USED.search(before) or _COPULA.search(before):
+        return True
+    words = [w for w in re.findall(r"[\w.'’+/-]+", before[_LEAD_LABEL.match(before).end():])
+             if w.casefold() not in _FREE_WORDS]
+    return len(words) <= HEADER_MODIFIERS
 
 
 def cell_named_in_passing(sentence: Any, term: Any) -> bool:
-    """True when ``sentence`` (a logbook line the cell-type rule read) names the cell ``term`` only IN PASSING:
-    the line neither opens with it, nor labels it, nor says a measurement was made in or with it. A plain
-    reading of word order, deliberately narrow: when the term is not found in the line, nothing is judged."""
+    """True when ``sentence`` (a logbook line the cell-type rule read) names the cell ``term`` only IN PASSING. Decided
+    from POSITIVE markers first: a to-do or reminder lead, a verb of handling (kept, stored, rinsed, leaked, needs ...),
+    or the cell as the object of a place word ("kept with the flow cell", "in the drawer"); then a line shaped like a
+    statement of the cell (:func:`_states_the_cell`) is read; anything else is asked (``True``: no value, never a guess).
+    When the term is not found in the line, nothing is judged (``False``)."""
     if not isinstance(sentence, str) or not isinstance(term, str) or not term.strip():
         return False
     at = sentence.casefold().find(term.casefold())
     if at < 0:
         return False
     before = sentence[:at]
-    return not (_CELL_LEADS.match(before) or _CELL_LABEL.match(sentence) or _MEASURED_IN.search(before)
-                or _USED.search(before))
+    if _PASSING_LEAD.match(sentence) or _PASSING_VERB.search(sentence) or _STORAGE.search(sentence):
+        return True
+    if _PLACE_BEFORE.search(before) and not _MEASURED_IN.search(before):
+        return True
+    return not _states_the_cell(sentence, before)
 
 
 def _passing_readings(candidate: Mapping) -> list[tuple[str, str]]:
@@ -2636,8 +2673,8 @@ def passing_reading_value(candidate: Mapping) -> Any:
 _PASSING_CLEARABLE = (STATE_CANDIDATE_EXTRACTED, STATE_NEEDS_REVIEW)
 
 PASSING_MENTION_REASON = (
-    "The notes name this cell only in passing, in a sentence about something else (it neither opens with the cell, "
-    "nor labels it, nor says a measurement was made in it). A sentence like that is not a statement of the cell type: "
+    "The notes name this cell only in passing, in a sentence about something else (a to-do or a reminder, handling or "
+    "storing the apparatus, or a line not shaped like a statement of the cell). It is not read as the cell type: "
     "it is kept as evidence and quoted, and no value is read from it (the engine proposed one; this local build does not)."
 )
 
@@ -2656,7 +2693,7 @@ def clear_passing_cell_mentions(bundle: dict) -> list[str]:
     ``value`` becomes ``None``, held for review with :data:`PASSING_MENTION_REASON`. A candidate a scientist decided
     (confirmed, corrected, rejected) is never touched. Idempotent. Counts do not move (it was already held for
     review, or moves exactly as :func:`hold_beamtime_wide_statements` counts it)."""
-    decision_of = None
+    decision_of = conflict_ids_of = None
     cleared = []
     for c in bundle.get("candidates") or ():
         if (c.get("value") is None or c.get("target_field_path") != "context.electrochemistry.cell_type"
@@ -2665,9 +2702,10 @@ def clear_passing_cell_mentions(bundle: dict) -> list[str]:
         readings = _passing_readings(c)
         if not readings:
             continue
-        if decision_of is None:
+        if decision_of is None:  # built once, and only when a candidate needs them
             decision_of = _decisions_by_target(bundle.get("scientist_decisions") or ())
-        d = candidate_decision(bundle, c, decision_of)
+            conflict_ids_of = conflict_ids_by_candidate(bundle)
+        d = candidate_decision(bundle, c, decision_of, conflict_ids_of)
         if d is not None and d.get("decision") not in NEUTRAL_DECISIONS:
             continue
         _clear_passing_mention(c, readings)

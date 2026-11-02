@@ -379,3 +379,130 @@ def test_the_template_marks_a_context_row_and_records_nothing_from_it(plain, tmp
     marked = [ws.cell(row=i, column=1) for i in range(2, ws.max_row + 1) if ws.cell(row=i, column=1).comment]
     assert len(marked) == 1 and marked[0].comment.text.startswith("Kept by its record group as context")
     assert marked[0].value == next(r["file_name"] for r in rows if r.get("context"))
+
+
+# --- review of r5b: H1, M1/M2, M3 and the LOW items ------------------------------------------------------------------
+
+
+def test_an_answer_for_a_group_with_a_context_run_fills_its_record(plain):
+    """H1: `--only group:<id>` records every MEASUREMENT run of the group; the composer covers a field when every
+    measurement run is answered (a context run is asked nothing, so counting it left the field unfillable)."""
+    b, gid, ctx_id, _donor = _with_context_run(M.load(plain))
+    M.save_bundle(plain, b)
+    b = M.load(plain)
+    q = next(q for q in Q.consolidate(b)["questions"]
+             if q["kind"] == "missing_value" and q["scope"] == "experiment" and f"group:{gid}" not in q["per_scope_targets"])
+    path = q["target_field_path"]
+    M.decide_question(plain, question_id=q["question_id"], decision="correct", value="SYN-value", only=f"group:{gid}", **BY)
+    b = M.load(plain)
+    g = next(g for g in b["record_groups"] if g["group_id"] == gid)
+    _draft, rep = R.compose_group(b, g, Path(plain), R.composition_index(b))
+    assert path in [f["path"] for f in rep["filled"]]
+    assert not [n for n in rep["not_composed"] if n.get("path") == path]
+
+
+def test_a_context_runs_own_old_answer_never_blocks_its_group(plain):
+    """H1: a value an older build let a scientist confirm on the context run's own target is not composed: the group's
+    answer fills the field, with no disagreement no question could settle."""
+    b, gid, ctx_id, _donor = _with_context_run(M.load(plain))
+    M.save_bundle(plain, b)
+    b = M.load(plain)
+    ctx_paths = {c["target_field_path"]: c for c in b["candidates"] if c["run_id"] == ctx_id and c["value"] is not None}
+    q = next((q for q in Q.consolidate(b)["questions"] if q["scope"] == f"group:{gid}" and q["kind"] == "confirm_value"
+              and q["target_field_path"] in ctx_paths and not q.get("informational")), None)
+    if q is None:
+        pytest.skip("no field both the group and its context run hold")
+    path = q["target_field_path"]
+    M.decide(plain, target_ids=[ctx_paths[path]["candidate_id"]], decision="confirm", value=None, **BY)
+    M.decide_question(plain, question_id=q["question_id"], decision="correct", value=-0.9, **BY)
+    b = M.load(plain)
+    g = next(g for g in b["record_groups"] if g["group_id"] == gid)
+    _draft, rep = R.compose_group(b, g, Path(plain), R.composition_index(b))
+    assert not [d for d in rep["disagreements"] if d["path"] == path]
+
+
+#: one-line headers and statements that state the cell (M1), and lines that only mention it (M2)
+STATED = ["in situ flow cell", "In situ flow cell, 5 ml/min", "Operando flow cell used for all scans", "PEEK flow cell",
+          "Custom PEEK flow cell with Kapton window", "Electrochemical flow cell", "Echem in a 3-electrode flow cell",
+          "Electrolyte: 0.1 M KOH in flow cell", "Fluorescence mode, flow cell", "The cell is a flow cell",
+          "Cell was a flow cell", "Flow cell filled with 0.1 M KOH", "SYNTHETIC: measured with a flow cell"]
+IN_PASSING = ["Spare electrodes are kept with the flow cell", "TEM samples are kept with the flow cell",
+              "Old data from the flow cell is on the USB stick", "Note: flow cell leaked overnight",
+              "TODO: flow cell needs new gasket", "Remember to fill the flow cell reservoir",
+              "SYNTHETIC: the operator said something about the flow cell yesterday"]  # unsure: asked, never guessed
+
+
+@pytest.mark.parametrize("line", STATED)
+def test_a_line_that_states_the_cell_keeps_its_value(line):
+    assert B.cell_named_in_passing(line, "flow cell") is False
+
+
+@pytest.mark.parametrize("line", IN_PASSING)
+def test_a_line_that_only_mentions_the_cell_gives_no_value(line):
+    assert B.cell_named_in_passing(line, "flow cell") is True
+
+
+def test_reference_groups_are_found_in_linear_time(plain):
+    """M3: half of ~4,000 runs marked references; measured before the fix 454 s (a scan of every target per group and
+    field), after ~5 s on a loaded machine. The bound is generous."""
+    import time
+
+    from test_local_import_questions_audit import _scaled
+
+    b = M.load(plain)
+    big = _scaled(b, 4000 // len(b["runs"]))
+    live = Q.live_groups(big)
+    keys = {k for g in live[: len(live) // 2] for k in g["member_run_keys"]}
+    rids = {r["run_id"] for r in big["runs"] if r["run_key"] in keys}
+    for r in big["runs"]:
+        if r["run_key"] in keys:
+            r["run_candidate"] = False
+    big["missing_values"] = [m for m in big["missing_values"] if m["run_id"] not in rids]
+    start = time.perf_counter()
+    got = Q.not_a_measurement_groups(big)
+    elapsed = time.perf_counter() - start
+    assert len(got) == len(live) // 2
+    assert elapsed < 40, f"not_a_measurement_groups took {elapsed:.1f}s"
+
+
+def test_a_regroup_preview_does_not_look_for_reference_groups(plain, monkeypatch):
+    """M3: the counter answer's preview throws its groups away, so it never composes them."""
+    def boom(*_a, **_k):
+        raise AssertionError("not_a_measurement_groups was called in a preview")
+
+    b = M.load(plain)
+    monkeypatch.setattr(Q, "not_a_measurement_groups", boom)
+    M._regroup(copy.deepcopy(b), regroup=True, preview=True)
+    with pytest.raises(AssertionError):
+        M._regroup(copy.deepcopy(b), regroup=True)
+
+
+def test_the_template_says_why_a_context_run_gets_no_campaign_answer_and_a_reordered_row_is_reordered(plain, tmp_path):
+    import openpyxl
+
+    b, gid, ctx_id, _donor = _with_context_run(M.load(plain))
+    M.save_bundle(plain, b)
+    out = tmp_path / "t.xlsx"
+    T.export_template(plain, out)
+    wb = openpyxl.load_workbook(out)
+    ci = wb["Campaign Info"]
+    row = next(r for r in range(1, ci.max_row + 1) if ci.cell(row=r, column=1).value == "Facility Name")
+    ci.cell(row=row, column=2, value="SYN Facility")
+    fl = wb[T.SHEET_FILES]
+    ctx_row = next(r for r in range(2, fl.max_row + 1) if fl.cell(row=r, column=1).comment)
+    other = 2 if ctx_row != 2 else 3
+    # the context row typed into: recorded nowhere, said so
+    fl.cell(row=ctx_row, column=3, value="SYN typed")
+    filled = tmp_path / "filled.xlsx"
+    wb.save(filled)
+    got = T.import_template(plain, filled, by=BY["by"])
+    assert any(x["reason"] == T.CONTEXT_ROW_REASON for x in got["rows_refused"])
+    assert any(x["reason"] == T.CAMPAIGN_CONTEXT_REASON and x["run_ids"] == [ctx_id] for x in got["campaign_not_filled"])
+    # the context row and another swapped: the rows are said to be reordered
+    a, c = fl.cell(row=ctx_row, column=1).value, fl.cell(row=other, column=1).value
+    fl.cell(row=ctx_row, column=1, value=c)
+    fl.cell(row=other, column=1, value=a)
+    fl.cell(row=other, column=3, value="SYN typed")
+    wb.save(filled)
+    got = T.import_template(plain, filled, by=BY["by"])
+    assert any("rows were reordered" in x["reason"] for x in got["rows_refused"] if x["row"] == ctx_row)

@@ -3527,7 +3527,7 @@ def group(bundle_dir: Path, *, regroup: bool = False) -> dict:
     return result
 
 
-def _regroup(bundle: dict, *, regroup: bool = True) -> dict:
+def _regroup(bundle: dict, *, regroup: bool = True, preview: bool = False) -> dict:
     """:func:`group` applied to an ALREADY-LOADED bundle (the caller's lock, or a copy: the counter answer's
     preview runs it on one). Saves nothing and writes no mirror."""
     try:
@@ -3834,7 +3834,8 @@ def _regroup(bundle: dict, *, regroup: bool = True) -> dict:
     }
     from . import questions as Q
 
-    not_records = Q.not_a_measurement_groups(bundle)
+    # a preview (counter_answer_preview) throws the groups away: it is not told this (r5 review M3)
+    not_records = {} if preview else Q.not_a_measurement_groups(bundle)
     if not_records:
         # r5 B4: said when the groups are made, not only after the curve of one is approved
         shown = ", ".join(sorted(not_records)[:5]) + ("…" if len(not_records) > 5 else "")
@@ -4193,7 +4194,7 @@ def _merges_combined(bundle: Mapping) -> dict[str, dict]:
     if not bundle.get("record_groups"):
         return {}
     try:
-        out = _regroup(copy.deepcopy(dict(bundle)), regroup=True)
+        out = _regroup(copy.deepcopy(dict(bundle)), regroup=True, preview=True)
     except MutationRefused:
         return {}
     return {x["decision_id"]: x for x in out["combined_by_merge_decision"]}

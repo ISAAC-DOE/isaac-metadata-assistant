@@ -2796,13 +2796,22 @@ def not_a_measurement_groups(bundle: Mapping, groups: Sequence[Mapping] | None =
     if not picked:
         return {}
     reports = compositions({**bundle, "record_groups": picked})
-    objs = [*(bundle.get("candidates") or ()), *(bundle.get("missing_values") or ())]
+    # ONE index, built once (r5 review M3: a scan of every target per group and field was quadratic): each field path
+    # to the runs holding a target for it (``None`` for a beamtime-wide one)
+    holders: dict[str, set] = {}
+    for o in [*(bundle.get("candidates") or ()), *(bundle.get("missing_values") or ())]:
+        if o.get("target_field_path"):
+            holders.setdefault(o["target_field_path"], set()).add(o.get("run_id"))
+    filling: dict[str, set] = {}  # composer path -> the runs (or None) some target filling it is held by
     out: dict[str, list[str]] = {}
     for g in picked:
         rids = {runs[k]["run_id"] for k in g.get("member_run_keys") or () if k in runs}
-        missing = _answer_missing(reports.get(g["group_id"]) or {})
-        unfillable = [p for p in missing if not any(_fills(o.get("target_field_path"), p)
-                                                    and (o.get("run_id") in rids or o.get("run_id") is None) for o in objs)]
+        unfillable = []
+        for p in _answer_missing(reports.get(g["group_id"]) or {}):
+            if p not in filling:
+                filling[p] = set().union(*(held for q, held in holders.items() if _fills(q, p)))
+            if None not in filling[p] and not (filling[p] & rids):
+                unfillable.append(p)
         if unfillable:
             out[g["group_id"]] = unfillable
     return out

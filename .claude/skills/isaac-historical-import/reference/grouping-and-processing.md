@@ -363,8 +363,9 @@ an element/edge already named for the group: approved, proposed, or the group's 
   `cannot_export` counts them over the whole list. Such a group
   can never become an exportable record as it stands: present it as such, leave it out of a bulk confirm,
   and offer `reject` (it is kept as decision history) or leaving it unconfirmed.
-- **A run kept as context** (`exported_file`): it is not a measurement run. No question asks about it, and no
-  count, `applies_to` or reach includes it. The template's File List shows its row in grey with a note;
+- **A run kept as context** (`exported_file`): it is not a measurement run. No question asks about it, no
+  count, `applies_to` or reach includes it, and its values fill nothing in the record. `--only group:<id>`
+  answers the group's measurement runs, which is enough to fill the field. The template's File List shows its row in grey with a note;
   anything typed on that row is recorded nowhere (`rows_refused`).
 - `naming_counter_positions` (an experiment-scope question): which positions of the file name are running
   counters, not sample identity. Ask once, before any group is confirmed. Answer with

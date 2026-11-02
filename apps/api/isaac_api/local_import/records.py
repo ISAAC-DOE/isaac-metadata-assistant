@@ -612,6 +612,11 @@ def compose_group(bundle: Mapping, group: Mapping, bundle_dir: Path, index: dict
     runs_by_key = index["runs_by_key"]
     member_runs = [runs_by_key[k] for k in group["member_run_keys"] if k in runs_by_key]
     member_ids = {r["run_id"] for r in member_runs}
+    # r5 B5 (review H1): a run the group keeps as CONTEXT (an exported file of a run, its data not merged) is no
+    # measurement run: its values fill nothing, and a field is covered when every MEASUREMENT run is (no question asks
+    # about a context run, so counting it would leave a field unfillable)
+    context_keys = set(group.get("context_run_keys") or ())
+    measured_ids = {r["run_id"] for r in member_runs if r["run_key"] not in context_keys}
     report: dict[str, Any] = {
         "group_id": group["group_id"],
         "member_run_ids": sorted(member_ids),
@@ -626,7 +631,7 @@ def compose_group(bundle: Mapping, group: Mapping, bundle_dir: Path, index: dict
     def _confirmed_but_unfit(obj: Mapping, id_key: str) -> None:
         # A scientist's answer the official field cannot hold (e.g. "-0.8 V" for a number) is
         # never composed; it is SAID, so it cannot vanish from the record unseen.
-        if obj["value_state"] == B.STATE_SCIENTIST_CONFIRMED and (obj["run_id"] in member_ids or obj["run_id"] is None):
+        if obj["value_state"] == B.STATE_SCIENTIST_CONFIRMED and (obj["run_id"] in measured_ids or obj["run_id"] is None):
             report["not_composed"].append({id_key: obj[id_key], "path": obj["target_field_path"],
                                            "reason": obj["eligibility_for_official_record"]["reason"]})
 
@@ -634,7 +639,7 @@ def compose_group(bundle: Mapping, group: Mapping, bundle_dir: Path, index: dict
         if not c["eligibility_for_official_record"]["eligible"]:
             _confirmed_but_unfit(c, "candidate_id")
             continue
-        in_group = c["run_id"] in member_ids
+        in_group = c["run_id"] in measured_ids
         beamtime = c["run_id"] is None
         if not (in_group or beamtime):
             continue
@@ -673,7 +678,7 @@ def compose_group(bundle: Mapping, group: Mapping, bundle_dir: Path, index: dict
         if not m["eligibility_for_official_record"]["eligible"]:
             _confirmed_but_unfit(m, "value_id")
             continue
-        if not (m["run_id"] in member_ids or m["run_id"] is None):
+        if not (m["run_id"] in measured_ids or m["run_id"] is None):
             continue
         d = decisions[("missing_value", m["value_id"])]
         value = B.final_value(None, d)
@@ -706,16 +711,16 @@ def compose_group(bundle: Mapping, group: Mapping, bundle_dir: Path, index: dict
         slots = [i for i in f["from"] if obj_of_any.get(i, (None, None))[0] == "missing_value"
                  and B.is_answer_slot(obj_of_any[i][1])]
         covered = {run_of.get(i) for i in f["from"]}
-        if not slots or None in covered or not (member_ids - covered):
+        if not slots or None in covered or not (measured_ids - covered):
             continue
         path = f["path"]
-        lacking = sorted(member_ids - covered)
+        lacking = sorted(measured_ids - covered)
         qid = next((q for i in slots if (q := B.answer_slot_question(obj_of_any[i][1]))), None)
         how = (f"`isaac bundle decide <bundle_dir> --question {qid} --only group:{group['group_id']} --decision correct "
                '--value <value> --by "<your name>"` (it records every run of this group), or answer that question for '
                "the whole beamtime" if qid else
                f"answer it for this group (`isaac bundle questions <bundle_dir> --scope group:{group['group_id']}`)")
-        reason = SLOT_NOT_EVERY_RUN.format(answered=len(member_ids & covered), total=len(member_ids),
+        reason = SLOT_NOT_EVERY_RUN.format(answered=len(measured_ids & covered), total=len(measured_ids),
                                            lacking=", ".join(lacking[:5]) + ("…" if len(lacking) > 5 else ""),
                                            have="has" if len(lacking) == 1 else "have", path=path, how=how)
         del fields[path]
@@ -1042,7 +1047,7 @@ def compose_group(bundle: Mapping, group: Mapping, bundle_dir: Path, index: dict
         # DEC-76: an unknown temperature is written the way the portal's schema says —
         # temperature_K null with temperature_basis not_reported. Never a default value.
         nobody = [m["value_id"] for m in bundle["missing_values"]
-                  if m["target_field_path"] == "context.temperature_K" and m["run_id"] in member_ids]
+                  if m["target_field_path"] == "context.temperature_K" and m["run_id"] in measured_ids]
         fields["context.temperature_basis"] = {
             "value": "not_reported",
             "status": "inferred",
@@ -1105,11 +1110,12 @@ def compose_group(bundle: Mapping, group: Mapping, bundle_dir: Path, index: dict
     # (questions._companions_missing, the same entry and why). Appended last, so the questions read the same list.
     report["missing_required"] += Q._companions_missing(report)
 
-    report["warnings"] = (_stated_potential_warnings(bundle, group, member_ids, fields, proposals,
+    # the conditions a run's names or headers state, of the MEASUREMENT runs only (a context run is asked nothing)
+    report["warnings"] = (_stated_potential_warnings(bundle, group, measured_ids, fields, proposals,
                                                      held_by_scale=held_by_companion.get(SETPOINT_PATH, (None,))[0] == SCALE_PATH)
-                          + _potential_sources_warnings(bundle, group, member_ids, fields)
-                          + Q.open_circuit_warnings(bundle, group, member_ids, fields)
-                          + _start_time_warnings(bundle, group, member_ids, fields, index["memo"]))
+                          + _potential_sources_warnings(bundle, group, measured_ids, fields)
+                          + Q.open_circuit_warnings(bundle, group, measured_ids, fields)
+                          + _start_time_warnings(bundle, group, measured_ids, fields, index["memo"]))
     if chose_other is not None:
         # r5c C1: the record carries an approved result that is not the version the scientist chose last: said at
         # build-records, validate and export (on the record's row), never silent

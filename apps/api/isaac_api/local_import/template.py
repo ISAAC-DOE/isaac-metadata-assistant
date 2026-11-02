@@ -763,6 +763,9 @@ def live_run_ids(bundle: Mapping) -> set[str]:
 #: r5 B5: the note on a File List row of a run kept as context, and why its cells are recorded nowhere
 CONTEXT_ROW_NOTE = ("Kept by its record group as context: the scientist's exported or processed file of a run, its data "
                     "not merged. It is not a measurement run and goes into no record; leave this row blank.")
+CAMPAIGN_CONTEXT_REASON = ("these runs are kept by their record group as context (an exported or processed file of a "
+                           "run, its data not merged): they are not measurement runs and go into no record, so a "
+                           "Campaign Info answer does not reach them; nothing was recorded for them")
 CONTEXT_ROW_REASON = ("this row is a run its record group keeps as context (an exported or processed file of a run, its "
                       "data not merged): it is not a measurement run and goes into no record, so its cells are recorded nowhere")
 
@@ -1605,11 +1608,6 @@ def read_cells(wb, marker: Mapping, bundle: Mapping, file_label: str) -> dict:
                                             "cells": [_cell_ref(SHEET_FILES, ref) for _, ref, _, _ in answered]})
             continue
         run = runs.get(str(entry.get("run_id")))
-        if run is not None and run["run_id"] in context:
-            if answered:
-                out["rows_refused"].append({"row": r, "reason": CONTEXT_ROW_REASON,
-                                            "cells": [_cell_ref(SHEET_FILES, ref) for _, ref, _, _ in answered]})
-            continue
         name_cell = wfl.cell(row=r, column=1).value
         # EXACT match, not trimmed or case-folded: the name is the row's identity.
         if run is None or not isinstance(name_cell, str) or name_cell != str(entry.get("file_name")):
@@ -1624,6 +1622,12 @@ def read_cells(wb, marker: Mapping, bundle: Mapping, file_label: str) -> dict:
                     if run is not None else f"the run {entry.get('run_id')!r} is not in this bundle",
                     "cells": [_cell_ref(SHEET_FILES, ref) for _, ref, _, _ in answered],
                 })
+            continue
+        if run["run_id"] in context:
+            # r5 B5: after the row's identity is checked, so a reordered row is said to be reordered
+            if answered:
+                out["rows_refused"].append({"row": r, "reason": CONTEXT_ROW_REASON,
+                                            "cells": [_cell_ref(SHEET_FILES, ref) for _, ref, _, _ in answered]})
             continue
         for col, ref, raw, why in values[1:]:
             if why:
@@ -2718,6 +2722,7 @@ def plan_and_record(bundle: dict, cells: Mapping, *, by: str, orcid: str | None,
         return found
 
     file_list_runs = cells.get("file_list_run_ids") or set()  # c14p LOW-5: the runs the File List names
+    context_runs = B.context_run_ids(bundle)  # r5 B5: on the File List, but no measurement run
     planned: list[tuple[dict, str, str, Mapping, str]] = []  # (cell, decision, kind, obj, target_id)
     # H1: a Campaign Info beamline (or facility acronym) naming another one than a facility hint — named once per
     # cell (never once per run it fills); held back when adopt copied it, recorded when the scientist typed it
@@ -2736,13 +2741,18 @@ def plan_and_record(bundle: dict, cells: Mapping, *, by: str, orcid: str | None,
                     targets.append(("correct", "missing_value", m, m["value_id"]))
                 else:
                     outside.append(m)
-            if outside:
-                report["campaign_not_filled"].append({
-                    "cell": cell["cell"], "target_field_path": path, "targets": len(outside),
-                    "run_ids": sorted({m["run_id"] for m in outside})[:20], "runs": len({m["run_id"] for m in outside}),
-                    "reason": "these runs are not in the template's File List or no longer in a live record group, so a "
-                              "Campaign Info answer does not reach them; nothing was recorded for them",
-                })
+            # r5 review LOW: a run kept as context is said apart (it IS on the File List, and in a live group)
+            kept = [m for m in outside if m["run_id"] in context_runs]
+            for part, reason in (([m for m in outside if m["run_id"] not in context_runs],
+                                  "these runs are not in the template's File List or no longer in a live record group, so "
+                                  "a Campaign Info answer does not reach them; nothing was recorded for them"),
+                                 (kept, CAMPAIGN_CONTEXT_REASON)):
+                if part:
+                    report["campaign_not_filled"].append({
+                        "cell": cell["cell"], "target_field_path": path, "targets": len(part),
+                        "run_ids": sorted({m["run_id"] for m in part})[:20], "runs": len({m["run_id"] for m in part}),
+                        "reason": reason,
+                    })
             extracted = [c for c in index.cands_by_path.get(path, [])]
             if extracted:
                 report["left_alone"].append({
