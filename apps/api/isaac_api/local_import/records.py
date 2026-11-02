@@ -257,6 +257,11 @@ def _vouches_for(candidate: Mapping, e: Mapping, path: str | None, value: Any) -
     return False
 
 
+#: r5 B1: what a record says of a notes sentence that names the cell only in passing (``bundle.passing_witness_term``)
+PASSING_WITNESS_NOTE = ("the notes name the cell here only in passing, in a sentence about something else: it does not "
+                        "state the value of record")
+
+
 def _witnesses(candidate: Mapping, value: Any = None, decision: Mapping | None = None) -> list[dict]:
     """The file's own statements for a composed candidate value, each with its ``relation``.
 
@@ -283,7 +288,12 @@ def _witnesses(candidate: Mapping, value: Any = None, decision: Mapping | None =
             "method_id": e["method_id"],
             "relation": e.get("relation"),
         }
-        if replaced:
+        if B.passing_witness_term(candidate, e) is not None:
+            # r5 B1: the notes name the cell only in passing here: never cited as support for any value of record
+            entry["relation_to_parser_value"] = e.get("relation")
+            entry["relation"] = "context"
+            entry["note"] = PASSING_WITNESS_NOTE
+        elif replaced:
             entry["relation_to_parser_value"] = e.get("relation")
             entry["relation"] = "supports" if _vouches_for(candidate, e, path, value) else "contradicts"
             if entry["relation"] == "contradicts":

@@ -218,6 +218,11 @@ def _reading(candidate: Mapping, run: Mapping) -> dict | None:
         return {"kind": "literal", "value": toks} if toks else None
     if candidate.get("value") is not None:
         return {"kind": "value", "value": candidate["value"]}
+    from .bundle import passing_reading_value
+
+    if (passing := passing_reading_value(candidate)) is not None:
+        # r5 B1: a cell named only in passing gives no value locally; the runs are partitioned as the import read them
+        return {"kind": "value", "value": passing}
     lits = _literals(candidate)
     if not lits:
         return None

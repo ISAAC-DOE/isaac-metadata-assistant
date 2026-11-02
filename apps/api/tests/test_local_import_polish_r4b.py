@@ -135,7 +135,9 @@ def test_a_counter_example_differs_only_at_the_asked_position():
 
 def test_no_example_is_shown_where_no_two_names_differ_only_there():
     got = Q._counter_examples(_hand_bundle([["01_13_SYNa_cell", "03_12_SYNa_cell"]]), [1, 2])
-    assert got == {}
+    # no PAIR is shown (r4b M2); r5 B2: one real name with the asked token marked is, never the XX_02 pattern
+    assert all(not ex["differ"] for ex in got.values())
+    assert got[1]["one"].startswith("[0") and got[2]["one"].split("_")[1].startswith("[1")
 
 
 STEMS = ["01_13_SYNcat_pH2_400mV", "03_12_SYNcat_pH2_400mV", "02_13_SYNcat_pH2_400mV", "01_12_SYNcat_pH2_400mV"]

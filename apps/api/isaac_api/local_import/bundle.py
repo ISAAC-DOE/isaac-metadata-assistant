@@ -2436,12 +2436,166 @@ def _hold_for_review(candidate: dict) -> None:
             writable_paths=frozenset())
 
 
+# --- a cell named only in passing is not the cell type (r5 B1) ------------------------------------------------
+#
+# The logbook rule (`bl15.notes`, the truth plane, untouched) reads ANY prose line that names a cell option as a
+# cell-type statement. Measured on a real beamtime: a line saying where some unrelated items were kept "with the flow
+# cell" became the cell type of every run, offered as one bulk confirm and cited as the record's evidence, while the
+# line that states the cell ("Flow cell = <rate>") sat in a section with no file numbers. Locally a sentence that names the
+# cell only IN PASSING (it is about something else) gives no value: the candidate keeps the sentence and its reading
+# (the evidence is unchanged) and carries `value: null`, so the question quotes the sentence and asks (no confirm),
+# and a scientist's answer is cited as theirs, never as the sentence's. A sentence ABOUT the cell or the measurement
+# ("Flow cell = 5 ml/min", "Cell: H-cell", "measured in a flow cell", "we used a beaker cell") is read as before.
+# Only an undecided value is cleared (a confirm already recorded keeps the value it confirmed). Applied where the
+# beamtime-wide hold is: at import (`_candidate_record`) and in memory on every read (`hold_beamtime_wide_statements`).
+
+@lru_cache(maxsize=1)
+def _cell_type_rule_id() -> str | None:
+    """The logbook cell-type rule's id (``bl15.notes.cell_type_statement.v1``), read from the conditions table."""
+    from ..bl15 import conditions as cond  # local: bl15 imports historical_import
+
+    return next((rule for path, rule, _name in cond.FIELDS.values() if path == "context.electrochemistry.cell_type"), None)
+
+
+#: The line opens with the cell itself (after a bullet, a "Note:"-style label and an article): "Flow cell = 5 ml/min".
+_CELL_LEADS = re.compile(r"^[\W_]*(?:[A-Za-z][\w ]{0,24}:\s*)?(?:(?:a|an|the|our|one|this|same)\s+)?$", re.IGNORECASE)
+#: The line is a label for the cell: "Cell: H-cell", "Cell type = flow cell", "Setup - beaker cell".
+_CELL_LABEL = re.compile(r"^[\W_]*(?:electrochemical\s+|echem\s+)?(?:cell(?:\s+type)?|set-?up|configuration|apparatus|reactor)"
+                         r"\s*[:=–—-]", re.IGNORECASE)
+_MEASURE_WORDS = (r"measur\w*|collect\w*|record\w*|acquir\w*|perform\w*|conduct\w*|carried\s+out|done|run|ran|runs|"
+                  r"operat\w*|experiment\w*|spectr\w*|scans?|scanned|data|xas|xanes|exafs|herfd|electrochem\w*|in[\s-]situ|"
+                  r"operando|samples?|electrodes?|cycl\w*|polari[sz]\w*|held|tested")
+#: "... measured in a flow cell", "spectra collected with the H-cell", "samples were run in a beaker cell".
+_MEASURED_IN = re.compile(rf"\b(?:{_MEASURE_WORDS})\b(?:\s+[\w'’-]+){{0,3}}?\s+(?:in|into|inside|with|using|via|on|"
+                          rf"from)\s+(?:(?:a|an|the|our|same|this|that)\s+)?(?:[\w-]+\s+)?$", re.IGNORECASE)
+#: "we used a flow cell", "using an H-cell", "assembled the beaker cell".
+_USED = re.compile(r"\b(?:use[ds]?|using|assembl\w*|mount\w*|load\w*|fill\w*|built|installed|switched\s+to|chang\w*\s+to)"
+                   r"\s+(?:(?:a|an|the|our|same|this|that|new)\s+)?(?:[\w-]+\s+)?$", re.IGNORECASE)
+
+
+def cell_named_in_passing(sentence: Any, term: Any) -> bool:
+    """True when ``sentence`` (a logbook line the cell-type rule read) names the cell ``term`` only IN PASSING:
+    the line neither opens with it, nor labels it, nor says a measurement was made in or with it. A plain
+    reading of word order, deliberately narrow: when the term is not found in the line, nothing is judged."""
+    if not isinstance(sentence, str) or not isinstance(term, str) or not term.strip():
+        return False
+    at = sentence.casefold().find(term.casefold())
+    if at < 0:
+        return False
+    before = sentence[:at]
+    return not (_CELL_LEADS.match(before) or _CELL_LABEL.match(sentence) or _MEASURED_IN.search(before)
+                or _USED.search(before))
+
+
+def _passing_readings(candidate: Mapping) -> list[tuple[str, str]]:
+    """``[(sentence, term)]`` of every file witness of ``candidate`` when EACH is a logbook cell-type reading that
+    names the cell only in passing (:func:`cell_named_in_passing`); ``[]`` otherwise (one witness that states the
+    cell is enough to keep the value). An AI interpretation is not file evidence and is not counted either way."""
+    if candidate.get("target_field_path") != "context.electrochemistry.cell_type" or candidate.get("kind") != "field":
+        return []
+    witnesses = [e for e in candidate.get("evidence") or () if e.get("method") != "ai_interpretation"]
+    out = []
+    for e in witnesses:
+        term = passing_witness_term(candidate, e)
+        if term is None:
+            return []
+        out.append((str(e.get("literal_value")), term))
+    return out
+
+
+def passing_witness_term(candidate: Mapping, e: Mapping) -> str | None:
+    """The cell term ONE witness of a cell-type candidate names only in passing (:func:`cell_named_in_passing`),
+    or ``None`` when it is not a logbook cell-type reading or the sentence is about the cell. ``records`` cites such a
+    witness as context, never as support for the value of record."""
+    if candidate.get("target_field_path") != "context.electrochemistry.cell_type" or e.get("method") == "ai_interpretation":
+        return None
+    rule = _cell_type_rule_id()
+    reading = next((n.get("to") for n in e.get("normalization") or ()
+                    if n.get("rule_id") == rule and n.get("step") == "normalize" and isinstance(n.get("to"), Mapping)), None)
+    if reading is None or not cell_named_in_passing(e.get("literal_value"), reading.get("term")):
+        return None
+    return str(reading.get("term"))
+
+
+def passing_reading_value(candidate: Mapping) -> Any:
+    """The value the logbook rule read from a sentence that names the cell only in passing (its ``derive`` step),
+    for a candidate :func:`clear_passing_cell_mentions` cleared — what the IMPORT recorded, so a question's scope
+    (DEC-91: read only from what the import recorded) and a regroup's partition do not move with this local hold.
+    ``None`` for any other candidate."""
+    if (candidate.get("state_basis") or {}).get("not_proposable_reason") != PASSING_MENTION_REASON:
+        return None
+    rule = _cell_type_rule_id()
+    for e in candidate.get("evidence") or ():
+        for n in e.get("normalization") or ():
+            if n.get("rule_id") == rule and n.get("step") == "derive" and isinstance(n.get("to"), str):
+                return n["to"]
+    return None
+
+
+#: the parser states a passing mention's value may be cleared from (never a conflict: that is the scientist's to settle)
+_PASSING_CLEARABLE = (STATE_CANDIDATE_EXTRACTED, STATE_NEEDS_REVIEW)
+
+PASSING_MENTION_REASON = (
+    "The notes name this cell only in passing, in a sentence about something else (it neither opens with the cell, "
+    "nor labels it, nor says a measurement was made in it). A sentence like that is not a statement of the cell type: "
+    "it is kept as evidence and quoted, and no value is read from it (the engine proposed one; this local build does not)."
+)
+
+
+def passing_mention_summary(readings: Sequence[tuple[str, str]]) -> str:
+    """The one-line ``not_proposable_summary`` of a cleared cell-type candidate: the sentence, quoted."""
+    sentence, term = readings[0]
+    shown = sentence if len(sentence) <= 160 else sentence[:159] + "…"
+    return (f"the notes name a {term.strip().lower()} only in passing, in a sentence about something else ('{shown}'): "
+            "no value is read from it.")
+
+
+def clear_passing_cell_mentions(bundle: dict) -> list[str]:
+    """Clear the value of every UNDECIDED cell-type candidate whose every file witness names the cell only in
+    passing (:func:`_passing_readings`), in place; the ids cleared. The candidate keeps its evidence and literal;
+    ``value`` becomes ``None``, held for review with :data:`PASSING_MENTION_REASON`. A candidate a scientist decided
+    (confirmed, corrected, rejected) is never touched. Idempotent. Counts do not move (it was already held for
+    review, or moves exactly as :func:`hold_beamtime_wide_statements` counts it)."""
+    decision_of = None
+    cleared = []
+    for c in bundle.get("candidates") or ():
+        if (c.get("value") is None or c.get("target_field_path") != "context.electrochemistry.cell_type"
+                or c.get("extracted_state") not in _PASSING_CLEARABLE):
+            continue
+        readings = _passing_readings(c)
+        if not readings:
+            continue
+        if decision_of is None:
+            decision_of = _decisions_by_target(bundle.get("scientist_decisions") or ())
+        d = candidate_decision(bundle, c, decision_of)
+        if d is not None and d.get("decision") not in NEUTRAL_DECISIONS:
+            continue
+        _clear_passing_mention(c, readings)
+        cleared.append(c["candidate_id"])
+    return cleared
+
+
+def _clear_passing_mention(candidate: dict, readings: Sequence[tuple[str, str]]) -> None:
+    sb = candidate["state_basis"]
+    sb.update(review_status="needs_review", proposable=False, not_proposable_reason=PASSING_MENTION_REASON,
+              not_proposable_summary=passing_mention_summary(readings))
+    candidate["value"] = None
+    candidate["extracted_state"] = STATE_NEEDS_REVIEW
+    if candidate.get("value_state") == STATE_CANDIDATE_EXTRACTED:
+        candidate["value_state"] = STATE_NEEDS_REVIEW
+    candidate["eligibility_for_official_record"] = eligibility_for_official_record(
+        candidate.get("value_state") or STATE_NEEDS_REVIEW, target_field_path=candidate.get("target_field_path"),
+        value=None, writable_paths=frozenset())
+
+
 def hold_beamtime_wide_statements(bundle: dict) -> list[str]:
     """Hold every extracted candidate :func:`beamtime_wide_statement` finds for review, in place; the ids
     held. Idempotent (a held candidate is no longer proposable). The counts a held value moves
     (``counts.candidate_extracted`` / ``needs_review``, ``readiness.blocking.needs_review``) move with it, so a
     READ-ONLY command that holds in memory (``cli``'s list/show/check, ``local_bundles.read_bundle``) shows
-    what :func:`apply_derivations` would store, and the held bundle validates as the stored one does."""
+    what :func:`apply_derivations` would store, and the held bundle validates as the stored one does.
+    r5 B1: then clears the value a sentence that names the cell only in passing gave
+    (:func:`clear_passing_cell_mentions`), counted the same way."""
     held, moved = [], 0
     for c in bundle.get("candidates") or ():
         if c.get("extracted_state") == STATE_CANDIDATE_EXTRACTED and beamtime_wide_statement(c):
@@ -2449,6 +2603,10 @@ def hold_beamtime_wide_statements(bundle: dict) -> list[str]:
             _hold_for_review(c)
             moved += was == STATE_CANDIDATE_EXTRACTED and c.get("value_state") == STATE_NEEDS_REVIEW
             held.append(c["candidate_id"])
+    was_extracted = {c["candidate_id"] for c in bundle.get("candidates") or ()
+                     if c.get("value_state") == STATE_CANDIDATE_EXTRACTED}
+    for cid in clear_passing_cell_mentions(bundle):
+        moved += cid in was_extracted  # the ids returned stay the beamtime-wide holds (`held_statement` counts those)
     counts = bundle.get("counts")
     if moved and isinstance(counts, dict) and isinstance(counts.get("candidate_extracted"), int):
         counts["candidate_extracted"] -= moved
@@ -2459,8 +2617,14 @@ def hold_beamtime_wide_statements(bundle: dict) -> list[str]:
     return held
 
 
+#: the reasons a value is held for review by this local build, not by the engine (c6-a, r5 B1)
+HELD_REASONS = frozenset({BEAMTIME_WIDE_REASON, PASSING_MENTION_REASON})
+
 #: ``eligibility_rederived[].reason`` for a value a save HOLDS that the stored file gave as extracted (M2, c6-r).
 BEAMTIME_WIDE_REDERIVED_REASON = "Held for review by this build; an older build stored it as an extracted value. " + BEAMTIME_WIDE_REASON
+#: ...and for a cell-type value read from a sentence that names the cell only in passing (r5 B1)
+PASSING_MENTION_REDERIVED_REASON = ("No value is read by this build; an older build stored it as an extracted value. "
+                                    + PASSING_MENTION_REASON)
 
 
 def held_statement(n: int) -> str:
@@ -2478,7 +2642,7 @@ def log_beamtime_wide_holds(bundle: dict, stored: Mapping | None, *, to_version:
     if not stored:
         return []
     was = {c.get("candidate_id"): c for c in stored.get("candidates") or () if isinstance(c, Mapping)
-           and c.get("extracted_state") == STATE_CANDIDATE_EXTRACTED and beamtime_wide_statement(c)}
+           and c.get("extracted_state") == STATE_CANDIDATE_EXTRACTED and (beamtime_wide_statement(c) or _passing_readings(c))}
     if not was:
         return []
     from datetime import datetime, timezone
@@ -2489,7 +2653,7 @@ def log_beamtime_wide_holds(bundle: dict, stored: Mapping | None, *, to_version:
     logged = []
     for c in bundle.get("candidates") or ():
         before = was.get(c["candidate_id"])
-        if before is None or (c.get("state_basis") or {}).get("not_proposable_reason") != BEAMTIME_WIDE_REASON:
+        if before is None or (c.get("state_basis") or {}).get("not_proposable_reason") not in HELD_REASONS:
             continue
         d = candidate_decision(bundle, c, decision_of)
         log.append({"kind": "candidate", "id": c["candidate_id"], "target_field_path": c.get("target_field_path") or "",
@@ -2497,7 +2661,9 @@ def log_beamtime_wide_holds(bundle: dict, stored: Mapping | None, *, to_version:
                     "rederived_utc": at, "value_state": c["value_state"],
                     "eligible_before": bool((before.get("eligibility_for_official_record") or {}).get("eligible")),
                     "eligible_now": bool(c["eligibility_for_official_record"]["eligible"]),
-                    "decision_id": (d or {}).get("decision_id"), "reason": BEAMTIME_WIDE_REDERIVED_REASON})
+                    "decision_id": (d or {}).get("decision_id"),
+                    "reason": (PASSING_MENTION_REDERIVED_REASON if c["state_basis"]["not_proposable_reason"] == PASSING_MENTION_REASON
+                               else BEAMTIME_WIDE_REDERIVED_REASON)})
         logged.append(c["candidate_id"])
     return logged
 
@@ -2832,6 +2998,8 @@ def _candidate_record(c, *, bundle_cid: str, run_id: str | None, key: str, evide
     }
     if extracted == STATE_CANDIDATE_EXTRACTED and beamtime_wide_statement(record):
         _hold_for_review(record)  # a beamtime-wide notes statement is context, not this run's value
+    if record["value"] is not None and record["extracted_state"] in _PASSING_CLEARABLE and (readings := _passing_readings(record)):
+        _clear_passing_mention(record, readings)  # r5 B1: a cell named only in passing gives no value
     return record
 
 

@@ -813,7 +813,10 @@ GROUP_ROW_FILES = 3
 #: ``cannot_export_reason`` codes on a ``bundle list <dir> groups`` row, said once on the page.
 CANNOT_EXPORT_NOTE = ("Such a group can never become an exportable record as it stands; leave it out of a bulk confirm. "
                       "no_scans: none of its runs lists a scan. processing_not_applicable:<code>: no ISAAC processing "
-                      "protocol covers this data yet.")
+                      "protocol covers this data yet. not_a_measurement_run: every run is a reference standard, an "
+                      "alignment or a calibration scan, so the import asks nothing about its sample or conditions and "
+                      "the required fields in cannot_export_fields have nowhere to hold an answer; its curve can be "
+                      "approved, but it does not become a record.")
 
 
 def group_list_extras(bundle: Mapping) -> dict[str, dict]:
@@ -821,9 +824,11 @@ def group_list_extras(bundle: Mapping) -> dict[str, dict]:
     the name a scientist recognises), the scan count, the reader (the runs' source type) and, when known,
     ``cannot_export_reason``. File names and counts only — no parser value, so no exposure."""
     from . import bundle as B
+    from . import questions as Q
 
     runs = {r["run_key"]: r for r in bundle.get("runs") or ()}
     blocked = B.processing_blocked_groups(bundle)
+    not_measured = Q.not_a_measurement_groups(bundle)  # r5 B4: said up front, not only once its curve is approved
     out: dict[str, dict] = {}
     for g in bundle.get("record_groups") or ():
         members = [runs[k] for k in g.get("member_run_keys") or () if k in runs]
@@ -845,6 +850,9 @@ def group_list_extras(bundle: Mapping) -> dict[str, dict]:
             row["cannot_export_reason"] = f"processing_not_applicable:{(na.get('applicability') or {}).get('reason_code')}"
         elif members and scans == 0:
             row["cannot_export_reason"] = "no_scans"
+        elif g["group_id"] in not_measured:
+            row["cannot_export_reason"] = "not_a_measurement_run"
+            row["cannot_export_fields"] = not_measured[g["group_id"]]
         out[g["group_id"]] = row
     return out
 

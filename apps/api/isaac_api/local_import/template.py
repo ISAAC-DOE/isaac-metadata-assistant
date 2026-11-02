@@ -713,6 +713,13 @@ def live_run_ids(bundle: Mapping) -> set[str]:
     return {r["run_id"] for r in bundle["runs"] if r["run_key"] in group_of}
 
 
+#: r5 B5: the note on a File List row of a run kept as context, and why its cells are recorded nowhere
+CONTEXT_ROW_NOTE = ("Kept by its record group as context: the scientist's exported or processed file of a run, its data "
+                    "not merged. It is not a measurement run and goes into no record; leave this row blank.")
+CONTEXT_ROW_REASON = ("this row is a run its record group keeps as context (an exported or processed file of a run, its "
+                      "data not merged): it is not a measurement run and goes into no record, so its cells are recorded nowhere")
+
+
 def live_rows(bundle: Mapping) -> list[dict]:
     """One row per run that belongs to a live record group (proposed or confirmed), in run order.
 
@@ -721,6 +728,7 @@ def live_rows(bundle: Mapping) -> list[dict]:
     still share that path (one file holding two acquisitions), the run's label is added. If the
     names still repeat, the export is refused: a scientist could not tell the rows apart."""
     group_of = _live_group_of(bundle)
+    context = B.context_run_ids(bundle)
     sources = {s["source_id"]: s for s in bundle["sources"]}
     rows = []
     for run in bundle["runs"]:
@@ -735,6 +743,8 @@ def live_rows(bundle: Mapping) -> list[dict]:
             "file_name": rel or str(run.get("stem") or run["run_id"]),
             "label": run.get("label"),
             "relative_path": rel,
+            # r5 B5: kept by its group as CONTEXT (an exported file of a run): marked on its row, never answered
+            **({"context": True} if run["run_id"] in context else {}),
         })
     counts: dict[str, int] = {}
     for r in rows:
@@ -1030,7 +1040,10 @@ def export_template(bundle_dir: Path, out: Path, *, suggestions: bool = True, fo
         wf.column_dimensions[_letter(j)].width = 18
     wf.column_dimensions["A"].width = 48
     for i, row in enumerate(rows, start=2):
-        wf.cell(row=i, column=1, value=row["file_name"])
+        name = wf.cell(row=i, column=1, value=row["file_name"])
+        if row.get("context"):
+            name.font = Font(italic=True, color="808080")
+            name.comment = Comment(CONTEXT_ROW_NOTE, "ISAAC")
         for j, col in enumerate(FILE_COLUMNS[1:], start=2):
             rule = rules.get(col.path or "")
             if not (rule and rule["numeric"]):
@@ -1228,6 +1241,8 @@ def export_template(bundle_dir: Path, out: Path, *, suggestions: bool = True, fo
         "bundle_id": bundle["bundle_id"],
         "exported_utc": exported,
         "file_list_rows": len(rows),
+        # r5 B5: rows of runs a group keeps as context (grey, with a note): not measurement runs, never answered
+        **({"file_list_context_rows": n_context} if (n_context := sum(1 for r in rows if r.get("context"))) else {}),
         "sheets": list(wb.sheetnames),
         "hidden_sheets": [n for n in wb.sheetnames if wb[n].sheet_state == "hidden"],
         "bundle_dir": str(bundle_dir),
@@ -1516,7 +1531,8 @@ def read_cells(wb, marker: Mapping, bundle: Mapping, file_label: str) -> dict:
             seen[v] = rnum
     row_of_name = {str(e.get("file_name")): rnum for rnum, e in rows.items()}
     # the runs a Campaign Info answer reaches: the File List's runs that are still in a live group
-    out["file_list_run_ids"] = {str(e.get("run_id")) for e in rows.values()} & live_run_ids(bundle)
+    context = B.context_run_ids(bundle)  # r5 B5: a run kept as context is reached by no answer
+    out["file_list_run_ids"] = ({str(e.get("run_id")) for e in rows.values()} & live_run_ids(bundle)) - context
     max_row = max([wfl.max_row, *rows]) if rows else wfl.max_row
     for r in range(2, max_row + 1):
         entry = rows.get(r)
@@ -1542,6 +1558,11 @@ def read_cells(wb, marker: Mapping, bundle: Mapping, file_label: str) -> dict:
                                             "cells": [_cell_ref(SHEET_FILES, ref) for _, ref, _, _ in answered]})
             continue
         run = runs.get(str(entry.get("run_id")))
+        if run is not None and run["run_id"] in context:
+            if answered:
+                out["rows_refused"].append({"row": r, "reason": CONTEXT_ROW_REASON,
+                                            "cells": [_cell_ref(SHEET_FILES, ref) for _, ref, _, _ in answered]})
+            continue
         name_cell = wfl.cell(row=r, column=1).value
         # EXACT match, not trimmed or case-folded: the name is the row's identity.
         if run is None or not isinstance(name_cell, str) or name_cell != str(entry.get("file_name")):

@@ -426,6 +426,24 @@ HEADER_CHECK = {
 }
 
 
+def _passing_sentences(ids: Sequence[str], cand_by_id: Mapping[str, Mapping], source_path_of: Mapping[str, Any]) -> str:
+    """r5 B1: the sentence(s) behind value-less cell-type targets that name the cell only in passing
+    (:data:`bundle.PASSING_MENTION_REASON`), quoted with where they are: ``'…' (notes.txt @ line 12)``. Empty unless
+    EVERY target is such a candidate."""
+    said: list[str] = []
+    for i in ids:
+        c = cand_by_id.get(i) or {}
+        if (c.get("state_basis") or {}).get("not_proposable_reason") != B.PASSING_MENTION_REASON:
+            return ""
+        ev = next((e for e in c.get("evidence") or () if e.get("method") != "ai_interpretation"), None) or {}
+        where = source_path_of.get(ev.get("source_id")) or ev.get("relative_path")
+        line = str(ev.get("locator") or "").split(" cell type statement")[0]
+        one = _quoted(ev.get("literal_value")) + (f" ({where} @ {line})" if where and line else "")
+        if one not in said:
+            said.append(one)
+    return "; ".join(said[:3]) + (f" (and {len(said) - 3} more)" if len(said) > 3 else "")
+
+
 def _confirmable_candidates(targets: Sequence[Mapping], cand_by_id: Mapping[str, Mapping],
                             writable: frozenset[str]) -> list[Mapping]:
     """The candidate targets ``confirm`` can record: each carries a value its field takes (not value-less, not
@@ -532,6 +550,10 @@ def consolidate(bundle: Mapping, *, compositions_out: dict | None = None, includ
                 group_of[rid] = g["group_id"]
     # GROUPED: the record composer decides what blocks (a run no live group holds becomes no record)
     has_groups = bool(bundle.get("record_groups"))
+    # r5 B5: A RUN KEPT AS CONTEXT (`context_run_keys`: the scientist's exported file of a run, its data not merged) is
+    # no measurement run and goes into no record: nothing is asked about it, and it is in no count or reach. Its group
+    # stays its scope holder (`group_of`), so no surviving question's scope, and so its id, moves (DEC-91).
+    context = B.context_run_ids(bundle)
 
     def outside(runs) -> int:
         return sum(1 for r in runs if r not in group_of) if has_groups else 0
@@ -571,8 +593,10 @@ def consolidate(bundle: Mapping, *, compositions_out: dict | None = None, includ
     # the rest under the SAME id; answers that already differ are stated in its text instead.
     recorded: dict[str, set[str]] = {}
     for c in bundle["candidates"]:
-        if c["target_field_path"] and c["value"] is not None:
-            recorded.setdefault(c["target_field_path"], set()).add(json.dumps(c["value"], sort_keys=True))
+        # r5 B1: a cell named only in passing gives no value locally, but the IMPORT recorded one: counted as it was
+        value = c["value"] if c["value"] is not None else B.passing_reading_value(c)
+        if c["target_field_path"] and value is not None:
+            recorded.setdefault(c["target_field_path"], set()).add(json.dumps(value, sort_keys=True))
     answered: dict[str, set[str]] = {}
     decisions = B._decisions_by_target(bundle.get("scientist_decisions") or ())
     # ASKED AGAIN: a scientist's answer the record cannot take (bundle.eligibility_for_official_record,
@@ -683,6 +707,8 @@ def consolidate(bundle: Mapping, *, compositions_out: dict | None = None, includ
                 continue
             back = back or again is None
         path, rid = m["target_field_path"], m["run_id"]
+        if rid in context:
+            continue
         if rid is not None and group_of and rid not in group_of:
             run = run_by_id.get(rid)
             if run is not None and not run["run_candidate"]:
@@ -720,7 +746,7 @@ def consolidate(bundle: Mapping, *, compositions_out: dict | None = None, includ
     zone_decided = B.clock_zone_decision(bundle) is not None
     for c in bundle["candidates"]:
         path = c["target_field_path"]
-        if not path:
+        if not path or c["run_id"] in context:
             continue
         again = None
         state = c["value_state"]
@@ -797,11 +823,14 @@ def consolidate(bundle: Mapping, *, compositions_out: dict | None = None, includ
         if (cf["value_state"] not in (B.STATE_CONFLICTING, B.STATE_NEEDS_REVIEW) and cf["conflict_id"] not in conflict_again
                 and not (include_answered and ("conflict", cf["conflict_id"]) in decisions)):
             continue
+        rids = cf["run_ids"]
+        if rids and all(r in context for r in rids):
+            continue  # r5 B5: only about runs kept as context, which no record holds
         if (answered_out is not None and cf["value_state"] not in (B.STATE_CONFLICTING, B.STATE_NEEDS_REVIEW)
                 and cf["conflict_id"] not in conflict_again):
             answered_out.add(cf["conflict_id"])
-        rids = cf["run_ids"]
-        scope = scope_of_run(rids[0]) if rids else "experiment"
+        scope = scope_of_run(rids[0]) if rids else "experiment"  # the stored first run: the id never moves
+        rids = [r for r in rids if r not in context]
         cand = cand_by_id.get(cf.get("candidate_id") or "")
         path = cand["target_field_path"] if cand else None
         # D6: a disagreement about a field the record REQUIRES blocks the record exactly as
@@ -943,6 +972,13 @@ def consolidate(bundle: Mapping, *, compositions_out: dict | None = None, includ
                         "it if no value is stated for this scan, or defer it.")
                 decision = "correct"
                 decisions_offered = list(VALUELESS_DECISIONS)
+            elif len(valueless) == len(q["targets"]) and (passing := _passing_sentences(valueless, cand_by_id, source_path_of)):
+                # r5 B1: the notes name the cell only in passing: the sentence is quoted and the value asked, never offered
+                text = (f"What is the {_label(path)} ({path})? No parser read a statement of it for these runs. The notes "
+                        f"name a cell only in passing, in a sentence about something else: {passing}. No value is read from that sentence: "
+                        "give the value yourself (correct) if you know it, or reject or defer it.")
+                decision = "correct"
+                decisions_offered = list(VALUELESS_DECISIONS)
             elif len(valueless) == len(q["targets"]):
                 text = (f"What is the {_label(path)} ({path})? The files hold text for it (see the hints) but no value this "
                         "build can carry" + (f": {summary.rstrip('.')}" if summary else "")
@@ -1055,6 +1091,7 @@ def consolidate(bundle: Mapping, *, compositions_out: dict | None = None, includ
             entry["no_value"] = True
         questions.append(entry)
     for scope, cf, affects, path, required in conflicts_out:
+        cf_runs = [r for r in cf["run_ids"] if r not in context]
         enum = _eligible_values(path) if path else None
         again = [conflict_again[cf["conflict_id"]]] if cf["conflict_id"] in conflict_again else []
         # A DISAGREEMENT NO RECORD FIELD HOLDS (a comment line, a unit spelling, a file-name declaration) cannot
@@ -1064,12 +1101,13 @@ def consolidate(bundle: Mapping, *, compositions_out: dict | None = None, includ
         reaches = bool(required) or (bool(affects) and no_field is None)
         qid = _qid(scope, "resolve_conflict", cf["conflict_id"])
         answer = _conflict_answer(qid, cf, path, enum, writable, related, source_path_of, _is_numeric(_node(schema, path)) if path else False)
-        n_groups = len({group_of[r] for r in cf["run_ids"] if r in group_of})
-        applies = {"groups": n_groups, "runs": len(cf["run_ids"]), "targets": 1}
+        n_groups = len({group_of[r] for r in cf_runs if r in group_of})
+        applies = {"groups": n_groups, "runs": len(cf_runs), "targets": 1}
         if not cf["run_ids"] and reaches and has_groups:
             # A BEAMTIME-WIDE disagreement (no run named) fills every record built: it reaches every live group, as
             # the composer counts it (blocks_groups), never "0 groups"
-            applies = {"groups": len(groups), "runs": len(group_of), "targets": 1, "beamtime_wide": True}
+            applies = {"groups": len(groups), "runs": sum(1 for r in group_of if r not in context), "targets": 1,
+                       "beamtime_wide": True}
         questions.append(
             {
                 **({"asked_again": again, "reason": "answer_not_eligible_for_official_record"} if again else {}),
@@ -1149,12 +1187,16 @@ def consolidate(bundle: Mapping, *, compositions_out: dict | None = None, includ
         text = str(gq.get("text") or "Which filename token positions are run or acquisition counters?")
         # REAL NAMES, NOT A PATTERN: the file names this bundle holds, the asked token marked
         examples = _counter_examples(bundle, open_positions or asked_positions, ruled=ruled_at)
-        if examples and _COUNTER_PLACEHOLDER in text:
+        if _COUNTER_PLACEHOLDER in text:
+            # r5 B2: real names only; with none to show, the pattern goes (it marks the 2nd token, whatever is asked)
             text = text.replace(_COUNTER_PLACEHOLDER, "(e.g. " + "; ".join(
-                f"the {_ordinal(p)} token: " + " vs ".join(ex["differ"])
+                f"the {_ordinal(p)} token: " + (" vs ".join(ex["differ"]) if ex["differ"] else
+                                               f"{ex['one']} (no two names here differ only there)")
                 + (f", while it is not a number in {ex['elsewhere']}" if ex["elsewhere"] else "")
-                for p, ex in examples.items()) + ")")
-        example_names = {str(p): ex["differ"] + ([ex["elsewhere"]] if ex["elsewhere"] else []) for p, ex in examples.items()}
+                for p, ex in examples.items()) + ")" if examples else
+                "(" + ", ".join(f"the {_ordinal(p)} token" for p in (open_positions or asked_positions)) + ")")
+        example_names = {str(p): ex["differ"] + ([ex["one"]] if ex.get("one") else []) + ([ex["elsewhere"]] if ex["elsewhere"] else [])
+                         for p, ex in examples.items()}
         if asked_positions and not open_positions:
             text += " Already answered: every position it asks about (" + ", ".join(map(_position_shown, asked_positions)) + ")."
         elif len(open_positions) < len(asked_positions):
@@ -1222,8 +1264,8 @@ def consolidate(bundle: Mapping, *, compositions_out: dict | None = None, includ
                 "scope": "experiment",
                 "target_field_path": B.XDC_START_PATH,
                 "text": zq["text"],
-                "applies_to": {"groups": len({group_of[r] for r in zq["run_ids"] if r in group_of}), "runs": len(zq["run_ids"]),
-                               "targets": 1},
+                "applies_to": {"groups": len({group_of[r] for r in zq["run_ids"] if r in group_of and r not in context}),
+                               "runs": sum(1 for r in zq["run_ids"] if r not in context), "targets": 1},
                 "targets": [{"kind": "experiment", "id": "experiment"}],
                 "per_scope_targets": {"experiment": ["experiment"]},
                 "hints": [{"kind": "local_clock_literal", **zq["example"],
@@ -1600,6 +1642,7 @@ def _counter_examples(bundle: Mapping, positions: Sequence[int], ruled: Containe
 
     runs_by_key = {r["run_key"]: r for r in bundle.get("runs") or ()}
     groups = {g["group_id"]: g for g in bundle.get("record_groups") or ()}
+    groups_of_run = {k: g for g in live_groups(bundle) for k in g.get("member_run_keys") or ()}
     candidates = sorted(bundle.get("merge_candidates") or (), key=lambda mc: not all(
         (groups.get(gid) or {}).get("role") == ROLE_SAMPLE for gid in mc.get("group_ids") or ()))
     out: dict[int, dict] = {}
@@ -1648,6 +1691,22 @@ def _counter_examples(bundle: Mapping, positions: Sequence[int], ruled: Containe
     for p in positions:
         if p not in out and p != LAST_POSITION and (pair := only_there(every, p)):
             out[p] = {"differ": [_marked_token(s, p) for s in pair], "elsewhere": None}
+    # r5 B2: still no pair: ONE real name with a number there, the token marked (never the `XX_02_…` pattern, which
+    # marks the 2nd token whatever position is asked). A sample group's name first, as above.
+    sample_first = [str(runs_by_key[k]["stem"]) for mc in candidates for gid in mc.get("group_ids") or ()
+                    for k in ((groups.get(gid) or {}).get("member_run_keys") or ())[:1]
+                    if k in runs_by_key and runs_by_key[k].get("stem")]
+    sample_first += [str(r["stem"]) for r in bundle.get("runs") or ()
+                     if r.get("stem") and (groups_of_run.get(r["run_key"]) or {}).get("role") == ROLE_SAMPLE]
+    for p in positions:
+        if p in out:
+            continue
+        for stem in dict.fromkeys([*sample_first, *every]):
+            t = _stem_tokens(stem)
+            at = len(t) if p == LAST_POSITION else p
+            if 1 <= at <= len(t) and t[at - 1].isdigit() and not (p == LAST_POSITION and at in ruled):
+                out[p] = {"differ": [], "one": _marked_token(stem, at), "elsewhere": None}
+                break
     for p, ex in out.items():
         if p == LAST_POSITION:
             continue  # every name has a last token: there is no "elsewhere" to show
@@ -2122,15 +2181,43 @@ def _note_shared_reading_groups(questions: list[dict], cand_by_id: Mapping[str, 
         return tuple(sorted({repr(r["value"]) for rid in rids if rid in runs
                              for r in file_name_readings(bundle, runs[rid], q["target_field_path"])}))
 
+    def passing(q: Mapping) -> bool:
+        # r5 B1: a sentence that names the cell only in passing says nothing of any group's cell: never one answer for all
+        return all(((cand_by_id.get(t["id"]) or {}).get("state_basis") or {}).get("not_proposable_reason")
+                   == B.PASSING_MENTION_REASON for t in q["targets"])
+
+    def values_of(q: Mapping) -> frozenset | None:
+        # r5 B3: a per-group confirm whose every target carries ONE value read from ONE literal is keyed by that VALUE
+        # (`0p8V` and `800mV` are both 0.8 V, and `confirm` records exactly the value), never by the token as written
+        if (q.get("kind") != "confirm_value" or not str(q.get("scope") or "").startswith("group:") or q.get("informational")
+                or q.get("no_value")
+                or q.get("targets_with_an_unfit_value") or q.get("targets_without_a_value")
+                or "confirm" not in (q.get("allowed_decisions") or ALLOWED_DECISIONS["confirm_value"])):
+            return None
+        out = set()
+        for t in q["targets"]:
+            c = cand_by_id.get(t["id"]) if t["kind"] == "candidate" else None
+            if c is None or c.get("value") is None or len(c.get("observed_literals") or ()) != 1 \
+                    or int(c.get("observed_literals_total") or 1) != 1:
+                return None
+            out.add(json.dumps(c["value"], sort_keys=True, default=str))
+        return frozenset(out) or None
+
     shared: dict[tuple, list[dict]] = {}
     for q in questions:
-        if q.get("same_reading_group") or not (q.get("same_reading_as") or q.get("same_statement_as")):
+        if q.get("same_reading_group") or passing(q):
             continue
-        if (lits := lits_of(q)) is not None:
-            shared.setdefault((q["target_field_path"], lits, name_key(q), bool(q.get("outside_live_groups"))), []).append(q)
-    for (path, lits, readings, _), members in shared.items():
+        values = values_of(q)
+        if values is None and not (q.get("same_reading_as") or q.get("same_statement_as")):
+            continue
+        if values is not None:
+            shared.setdefault((q["target_field_path"], ("value", values), name_key(q), bool(q.get("outside_live_groups"))), []).append(q)
+        elif (lits := lits_of(q)) is not None:
+            shared.setdefault((q["target_field_path"], ("literal", lits), name_key(q), bool(q.get("outside_live_groups"))), []).append(q)
+    for (path, (by, key_of), readings, _), members in shared.items():
         if len(members) < 2:
             continue
+        lits = frozenset(t for q in members for t in (lits_of(q) or ()))
         ids = sorted(q["question_id"] for q in members)
         key = "SR-" + hashlib.sha256("\n".join(ids).encode()).hexdigest()[:10]
         named = [m for q in sorted(members, key=lambda q: q["question_id"])
@@ -2144,9 +2231,17 @@ def _note_shared_reading_groups(questions: list[dict], cand_by_id: Mapping[str, 
                                                   f"--question {q['question_id']} {SAME_READING_FLAG} ", 1)
             q["same_reading_group"], q["same_reading_count"] = key, len(members)
             q["same_reading_members"], q["same_reading_command"] = named, command
-            said = (f" {len(members)} questions share this reading ({', '.join(sorted({repr(x) for t in lits for x in t}))}, as the files write "
-                    f"it) for this field, one per group (same_reading_group {key}; the files: {shown}{alike}); answer them "
-                    f"together with {command} if it is the same thing for all of them, or each on its own if not.")
+            written = ', '.join(sorted({repr(x) for t in lits for x in t}))
+            if by == "value":
+                value_shown = ", ".join(_shown_value(json.loads(v), _unit_of(path, cand_by_id.get(q["targets"][0]["id"]) or {}))
+                                        for v in sorted(key_of))
+                said = (f" {len(members)} questions share this value ({value_shown}; the files write it {written}) for this "
+                        f"field, one per group (same_reading_group {key}; the files: {shown}{alike}); answer them together "
+                        f"with {command} if it is the same thing for all of them, or each on its own if not.")
+            else:
+                said = (f" {len(members)} questions share this reading ({written}, as the files write "
+                        f"it) for this field, one per group (same_reading_group {key}; the files: {shown}{alike}); answer them "
+                        f"together with {command} if it is the same thing for all of them, or each on its own if not.")
             before = reading_said.get(q["question_id"])
             q["text"] = q["text"].replace(before, said, 1) if before and before in q["text"] else q["text"] + said
 
@@ -2388,6 +2483,12 @@ def _before_split_text(hints: Sequence[Mapping]) -> str:
         "otherwise." for h in hints[:_HINTS_PER_QUESTION])
 
 
+def _measured_runs(group: Mapping) -> int:
+    """r5 B5: how many runs of ``group`` are measurement runs (its members, less those kept as context)."""
+    context = set(group.get("context_run_keys") or ())
+    return sum(1 for k in group.get("member_run_keys") or () if k not in context)
+
+
 def _absorber_questions(bundle: Mapping, groups: Sequence[Mapping], *, include_answered: bool = False) -> list[dict]:
     """The absorbing element and edge, asked ONCE per distinct suggestion over the groups
     the files agree on (or, where no file states it, the AI readings agree on), and per group
@@ -2451,7 +2552,7 @@ def _absorber_questions(bundle: Mapping, groups: Sequence[Mapping], *, include_a
             "scope": "experiment",
             "target_field_path": None,
             "text": text,
-            "applies_to": {"groups": len(items), "runs": sum(len(g.get("member_run_keys") or ()) for g, _ in items), "targets": len(items)},
+            "applies_to": {"groups": len(items), "runs": sum(_measured_runs(g) for g, _ in items), "targets": len(items)},
             "targets": [{"kind": "record_group", "id": g["group_id"]} for g, _ in items],
             "per_scope_targets": {f"group:{g['group_id']}": [g["group_id"]] for g, _ in items},
             # the file (or AI) evidence first, then the pair it adds up to — both hints, neither an answer
@@ -2489,7 +2590,7 @@ def _absorber_questions(bundle: Mapping, groups: Sequence[Mapping], *, include_a
             "scope": f"group:{g['group_id']}",
             "target_field_path": None,
             "text": text,
-            "applies_to": {"groups": 1, "runs": len(g.get("member_run_keys") or ()), "targets": 1},
+            "applies_to": {"groups": 1, "runs": _measured_runs(g), "targets": 1},
             "targets": [{"kind": "record_group", "id": g["group_id"]}],
             "per_scope_targets": {f"group:{g['group_id']}": [g["group_id"]]},
             "hints": _absorber_hints([(g, sug)]) + before,
@@ -2671,6 +2772,34 @@ def scanless_groups(bundle: Mapping, groups: Sequence[Mapping]) -> set[str]:
         members = [runs[k] for k in g.get("member_run_keys") or () if k in runs]
         if members and not any(int(r.get("scan_count") or 0) for r in members):
             out.add(g["group_id"])
+    return out
+
+
+def not_a_measurement_groups(bundle: Mapping, groups: Sequence[Mapping] | None = None) -> dict[str, list[str]]:
+    """r5 B4: ``{group_id: [field path]}`` for each live group whose every run is marked NOT a measurement run
+    (``run_candidate`` false: a reference standard, an alignment or a calibration scan) and whose record lacks a
+    required field nothing in the import can hold an answer for (no candidate or missing value of that field in its
+    runs, nor one for the whole beamtime; :func:`_unasked`'s ``answerable: false``). Such a group can be confirmed and
+    its curve approved, yet it never exports as it stands: ``bundle list <dir> groups`` says so up front
+    (``cannot_export_reason: not_a_measurement_run``). Only those groups are composed (usually none or a few)."""
+    runs = {r["run_key"]: r for r in bundle.get("runs") or ()}
+    picked = []
+    for g in live_groups(bundle) if groups is None else groups:
+        members = [runs[k] for k in g.get("member_run_keys") or () if k in runs]
+        if members and all(r.get("run_candidate") is False for r in members):
+            picked.append(g)
+    if not picked:
+        return {}
+    reports = compositions({**bundle, "record_groups": picked})
+    objs = [*(bundle.get("candidates") or ()), *(bundle.get("missing_values") or ())]
+    out: dict[str, list[str]] = {}
+    for g in picked:
+        rids = {runs[k]["run_id"] for k in g.get("member_run_keys") or () if k in runs}
+        missing = _answer_missing(reports.get(g["group_id"]) or {})
+        unfillable = [p for p in missing if not any(_fills(o.get("target_field_path"), p)
+                                                    and (o.get("run_id") in rids or o.get("run_id") is None) for o in objs)]
+        if unfillable:
+            out[g["group_id"]] = unfillable
     return out
 
 

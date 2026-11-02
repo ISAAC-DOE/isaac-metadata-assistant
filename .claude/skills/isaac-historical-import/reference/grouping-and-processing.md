@@ -346,10 +346,17 @@ an element/edge already named for the group: approved, proposed, or the group's 
 - **A groups row** (`bundle list <bundle> groups`) has `files` (the first 3 member stems; `files_more`
   counts the rest), `scans`, `reader` (the runs' source type), `exported_file` when a member is the
   scientist's exported/processed file of a run (kept as context, its data not merged: say so), and, when known, `cannot_export_reason`:
-  `no_scans` (no run lists a scan) or `processing_not_applicable:<code>` (e.g. an `.mca` or `xes` file:
-  no ISAAC protocol covers it). The page's `cannot_export` counts them over the whole list. Such a group
+  `no_scans` (no run lists a scan), `processing_not_applicable:<code>` (e.g. an `.mca` or `xes` file:
+  no ISAAC protocol covers it), or `not_a_measurement_run` (every run is a reference standard, an alignment
+  or a calibration scan: the import asks nothing about its sample or conditions, so the fields in
+  `cannot_export_fields`, e.g. sample form and environment, have nowhere to hold an answer; its curve can be
+  approved, but it is not a record). `bundle group` says the last one when it makes the groups. The page's
+  `cannot_export` counts them over the whole list. Such a group
   can never become an exportable record as it stands: present it as such, leave it out of a bulk confirm,
   and offer `reject` (it is kept as decision history) or leaving it unconfirmed.
+- **A run kept as context** (`exported_file`): it is not a measurement run. No question asks about it, and no
+  count, `applies_to` or reach includes it. The template's File List shows its row in grey with a note;
+  anything typed on that row is recorded nowhere (`rows_refused`).
 - `naming_counter_positions` (an experiment-scope question): which positions of the file name are running
   counters, not sample identity. Ask once, before any group is confirmed. Answer with
   `<isaac> bundle decide <bundle> --target experiment --decision set_counter_positions --positions 2,3 --by "<name>"` (`--positions last` when the counter is

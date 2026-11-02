@@ -263,7 +263,7 @@ def save_bundle(bundle_dir: Path, bundle: dict) -> None:
     # once the write succeeds. Read only when this bundle holds such a value (a fresh import's are held already:
     # the stored file then gives them held, and nothing is logged).
     held_now: list = []
-    if any((c.get("state_basis") or {}).get("not_proposable_reason") == B.BEAMTIME_WIDE_REASON for c in bundle["candidates"]):
+    if any((c.get("state_basis") or {}).get("not_proposable_reason") in B.HELD_REASONS for c in bundle["candidates"]):
         stored_h = None
         if B.bundle_path(Path(bundle_dir)).is_file():
             try:
@@ -1669,7 +1669,9 @@ def _live_reach(bundle: Mapping) -> tuple[int, int]:
     from . import questions as Q
 
     groups = Q.live_groups(bundle)
-    return len(groups), len({k for g in groups for k in g.get("member_run_keys") or ()})
+    # r5 B5: a run kept as context (an exported file of a run) is no measurement run: never counted as reached
+    context = {k for g in groups for k in g.get("context_run_keys") or ()}
+    return len(groups), len({k for g in groups for k in g.get("member_run_keys") or () if k not in context})
 
 
 def _count(n: int, noun: str) -> str:
@@ -1689,7 +1691,9 @@ def reach_index(bundle: Mapping) -> dict:
     from . import questions as Q
 
     run_of_key = {r["run_key"]: r["run_id"] for r in bundle.get("runs") or ()}
-    live = [(g["group_id"], [run_of_key[k] for k in g.get("member_run_keys") or () if k in run_of_key])
+    # r5 B5: a group's runs kept as context are no measurement runs: an answer never reaches them, and they are not counted
+    live = [(g["group_id"], [run_of_key[k] for k in g.get("member_run_keys") or ()
+                             if k in run_of_key and k not in set(g.get("context_run_keys") or ())])
             for g in Q.live_groups(bundle)]
     groups_of_run: dict[str, list[int]] = {}
     for i, (_gid, members) in enumerate(live):
@@ -1831,9 +1835,10 @@ def group_answer_targets(bundle: dict, asked: Mapping, only: str, field: str | N
         group = next((g for g in Q.live_groups(bundle) if g["group_id"] == gid), None)
         if group is None:
             raise MutationRefused(f"No live record group {gid!r} in this bundle; nothing was recorded.", code=6)
-        runs = [run_of_key[k] for k in group.get("member_run_keys") or () if k in run_of_key]
+        context = set(group.get("context_run_keys") or ())  # r5 B5: never answered for a run kept as context
+        runs = [run_of_key[k] for k in group.get("member_run_keys") or () if k in run_of_key and k not in context]
         if not runs:
-            raise MutationRefused(f"Record group {gid} holds no run; nothing was recorded.", code=6)
+            raise MutationRefused(f"Record group {gid} holds no measurement run; nothing was recorded.", code=6)
     ids, added = run_answer_targets(bundle, path, runs, question_id=asked["question_id"],
                                     how=f"decide --question {asked['question_id']} --only {only}")
     groups, _runs = _live_reach(bundle)
@@ -3727,6 +3732,17 @@ def _regroup(bundle: dict, *, regroup: bool = True) -> dict:
             "isaac bundle list <bundle_dir> merge-candidates",
         ],
     }
+    from . import questions as Q
+
+    not_records = Q.not_a_measurement_groups(bundle)
+    if not_records:
+        # r5 B4: said when the groups are made, not only after the curve of one is approved
+        shown = ", ".join(sorted(not_records)[:5]) + ("…" if len(not_records) > 5 else "")
+        out["not_a_measurement_groups"] = sorted(not_records)
+        out["statement"] += (f" {len(not_records)} group(s) hold only runs that are not measurement runs (a reference "
+                             f"standard, an alignment or a calibration scan: {shown}). The import asks nothing about "
+                             "their sample or conditions, so they never become records as they stand "
+                             "(cannot_export_reason: not_a_measurement_run in `bundle list <bundle_dir> groups`).")
     if split_decision:
         # each split in force: the groups it holds (kept as named), and, said plainly, one applied only now (an older
         # build recorded the split without making them) or one whose lists cannot make groups
