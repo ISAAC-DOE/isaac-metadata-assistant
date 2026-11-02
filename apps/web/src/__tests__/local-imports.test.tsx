@@ -12,6 +12,7 @@ import {
   CHECK_STATUS_LABEL,
   LOCAL_IMPORTS_COPY as COPY,
   __resetLocalImportsAvailability,
+  pageSections,
   sectionQuestions,
   type ApiLocalBundleList,
   type ApiLocalBundleProgress,
@@ -382,7 +383,7 @@ describe('the destination is absent unless this is a local build on a server tha
     const chip = screen.getByText(CHECK_STATUS_LABEL.STALE).closest('.li-chip') as HTMLElement;
     expect(chip).toHaveAttribute('title', expect.stringMatching(/^STALE: /));
     expect(screen.queryByText('STALE')).toBeNull();
-    expect(screen.getByText('SYN_2099_beamtime')).toBeInTheDocument();
+    expect(screen.getByText(/^SYN_2099_beamtime · /)).toBeInTheDocument();
     // the "missing-value share" row said only that it is not available: it is gone
     expect(screen.queryByText('SERVER-SAID: no missing share is computed.')).toBeNull();
     expect(screen.queryByText(/Missing-value share/)).toBeNull();
@@ -411,8 +412,7 @@ describe('the questions screen', () => {
     const card = (await screen.findByRole('heading', { name: envQ.text })).closest('li') as HTMLElement;
     const c = within(card);
     // beamline, beamtime and folder are said ONCE, in the bundle header, not on every card
-    expect(screen.getByText('SYN-1 (candidate_extracted)', { selector: 'dd' })).toBeInTheDocument();
-    expect(screen.getByText('SYN_2099_beamtime', { selector: 'dd' })).toBeInTheDocument();
+    expect(screen.getByText(/^SYN_2099_beamtime · beamline SYN-1 \(candidate_extracted\) · /)).toBeInTheDocument();
     expect(c.queryByText('Beamline')).toBeNull();
     expect(c.queryByText('Folder')).toBeNull();
     expect(c.queryByText('Beamtime')).toBeNull();
@@ -561,14 +561,23 @@ describe('the questions screen', () => {
     stubQuestions();
     renderAt(ROUTES.localImportBundle('synthetic-beamtime'));
     const nav = await screen.findByRole('navigation', { name: COPY.jumpLabel });
-    const sections = sectionQuestions([envQ, tempQ, zoneQ, absorberQ, counterQ]);
+    // the sections that block export or change a record are listed; the rest are one folded group, said once
+    const { main: sections, optional } = pageSections([envQ, tempQ, zoneQ, absorberQ, counterQ]);
+    const folded = optional.reduce((n, x) => n + x.questions.length, 0);
     const links = within(nav).getAllByRole('link');
     expect(links.map((l) => l.textContent)).toEqual([
       ...sections.map((x) => `${x.title} (${x.questions.length})`),
+      ...(folded > 0 ? [`${COPY.optionalTitle} (${folded})`] : []),
       COPY.answeredTitle,
     ]);
-    fireEvent.click(links[1]);
-    expect(screen.getByRole('heading', { name: new RegExp(`^${sections[1].title}`) })).toHaveFocus();
+    fireEvent.click(links[0]);
+    expect(screen.getByRole('heading', { level: 3, name: new RegExp(`^${sections[0].title}`) })).toHaveFocus();
+    // the folded group opens when its link is followed, and its summary takes the focus
+    expect(folded).toBeGreaterThan(0);
+    fireEvent.click(links[sections.length]);
+    const group = document.getElementById('li-optional') as HTMLDetailsElement;
+    expect(group.open).toBe(true);
+    expect(group.querySelector('summary')).toHaveFocus();
   });
 
   it('a page emptied by answering its last questions moves to the last page there still is', async () => {
@@ -1388,9 +1397,9 @@ describe('polish c7-w: the page says what the command line says', () => {
     const card = await cardOf(coveredQ);
     const link = within(card).getByRole('link', { name: `“${envQ.text}”` });
     expect(link).toHaveAttribute('href', `#li-q-${envQ.question_id}`);
-    expect(link.closest('dd')).toHaveTextContent('Not blocking: answer the experiment-wide question');
-    expect(link.closest('dd')).toHaveTextContent('SERVER-SAID rest.');
-    expect(link.closest('dd')).not.toHaveTextContent(envQ.question_id);
+    expect(link.closest('.li-why')).toHaveTextContent('Not blocking: answer the experiment-wide question');
+    expect(link.closest('.li-why')).toHaveTextContent('SERVER-SAID rest.');
+    expect(link.closest('.li-why')).not.toHaveTextContent(envQ.question_id);
   });
 
   it('the overview’s counts add up, informational and deferred named, and bundle check’s held line is said', async () => {
@@ -1646,5 +1655,153 @@ describe('polish c8-web: an answered question can be seen and changed, as `decid
       /^context\.temperature_K: 295 — .*for 3 values$/,
     );
     expect(currentAnswerText({ ...base, decision: 'reject' }, 'confirm_value')).toMatch(/^Rejected: no value goes into the record/);
+  });
+});
+
+describe('skill rounds 5–7 on the page', () => {
+  const startQ = question({
+    question_id: 'Q-e54ec10987',
+    kind: 'stated_utc_start_times',
+    tier: 2,
+    blocking: false,
+    scope: 'experiment',
+    target_field_path: 'timestamps.acquired_start_utc',
+    text: 'One answer for the start time of 2 groups. SYNTHETIC full wording, or add --only group:<id> here for one group.',
+    applies_to: { groups: 2, runs: 2, targets: 2 },
+    targets: [{ kind: 'conflict', id: 'conf-1' }, { kind: 'conflict', id: 'conf-2' }],
+    per_scope_targets: { 'group:g1': ['conf-1'], 'group:g2': ['conf-2'] },
+    allowed_decisions: ['confirm'],
+    largest_file_to_first_scan_s: 42,
+    max_file_to_first_scan_s: 600,
+    not_reached: [{ group_id: 'g3', question_id: 'Q-g3start0001', reason: 'its files state no UTC instant (no #E line)' }],
+    display: display({
+      answer_kind: 'start_times',
+      settles_many: true,
+      text: 'One answer for the start time of 2 groups. SYNTHETIC full wording.',
+      scopes: [
+        { scope: 'group:g1', kind: 'group', label: 'Record group g1', target_count: 1, run_names: ['SYN_run_A'], group_id: 'g1' },
+        { scope: 'group:g2', kind: 'group', label: 'Record group g2', target_count: 1, run_names: ['SYN_run_B'], group_id: 'g2' },
+      ],
+      suggestions: [
+        { who: 'hint', who_label: 'A hint', hint_kind: 'utc_reading', value: '2099-01-01T00:20:00+00:00', relative_path: 'SYN_run_A',
+          locator: 'line 2 header #E', quote: '4070908800', model_id: null, field: null, note: null, acceptable: false, confirmed: false },
+      ],
+      suggestions_total: 1,
+    }),
+  });
+  const groupStartQ = question({
+    question_id: 'Q-g1start0001',
+    kind: 'resolve_conflict',
+    tier: 2,
+    blocking: false,
+    scope: 'group:g1',
+    target_field_path: 'timestamps.acquired_start_utc',
+    text: 'SYNTHETIC: the sources disagree about the start of group g1.',
+    answered_at_once_by: 'Q-e54ec10987',
+    applies_to: { groups: 1, runs: 1, targets: 1 },
+    per_scope_targets: { 'group:g1': ['conf-1'] },
+    display: display({ answer_kind: 'conflict' }),
+  });
+
+  function stubStart(routes: Record<string, RouteEntry> = {}) {
+    vi.stubEnv('VITE_ISAAC_LOCAL_IMPORTS', '1');
+    return stubFetchRoutes({
+      'GET /api/local-bundles': { body: listBody },
+      [`GET ${QPATH}`]: { body: questionsBody([startQ, groupStartQ, envQ]) },
+      ...routes,
+    });
+  }
+
+  it('the beamtime start-time question is one card with one action, and each group is answerable under it', async () => {
+    stubStart();
+    renderAt(ROUTES.localImportBundle('synthetic-beamtime'));
+    const title = await screen.findByRole('heading', { name: /^Use the time each file was created as the start time of 2 groups\?$/ });
+    const card = title.closest('li') as HTMLElement;
+    const c = within(card);
+    expect(c.getByText(/first scan began at most 42 s later; a run whose first scan began more than 10 min later is left out/)).toBeInTheDocument();
+    expect(within(c.getByTestId('li-start-examples')).getByText('2099-01-01T00:20:00+00:00')).toBeInTheDocument();
+    // one primary action, and no scope radio (the per-group questions are the one-group path)
+    expect([...card.querySelectorAll('.btn-primary')].filter((b) => !b.closest('.li-nested'))).toHaveLength(1);
+    expect(c.getByRole('button', { name: COPY.startTimesUse })).toBeInTheDocument();
+    expect(c.queryByRole('radio')).toBeNull();
+    // what it does not reach is named, the full wording is kept one click away, without the command-line instruction
+    expect(within(c.getByTestId('li-start-not-reached')).getByText(/no #E line/)).toBeInTheDocument();
+    expect(c.getByText('One answer for the start time of 2 groups. SYNTHETIC full wording.')).toBeInTheDocument();
+    expect(card).not.toHaveTextContent('--only');
+    // the per-group question is listed under it (once), and still answers on its own
+    const nested = c.getByText(new RegExp(`^${COPY.startTimesEachGroup}`)).closest('details') as HTMLElement;
+    const inner = within(nested).getByRole('heading', { name: groupStartQ.text }).closest('li') as HTMLElement;
+    expect(within(inner).getByRole('button', { name: COPY.answer })).toBeInTheDocument();
+    expect(screen.getAllByRole('heading', { name: groupStartQ.text })).toHaveLength(1);
+  });
+
+  it('the start-time answer is previewed group by group, never said to have "no reading", and written on request', async () => {
+    const posts: Record<string, unknown>[] = [];
+    stubStart({
+      [APATH(startQ.question_id)]: (init) => {
+        const body = bodyOf(init);
+        posts.push(body);
+        if (body.dry_run) {
+          return { body: {
+            dry_run: true, question_id: startQ.question_id, would_record: ['conf-1', 'conf-2'], unchanged: [],
+            target_ids: ['conf-1', 'conf-2'], value: null, bundle_version: VERSION, statement: 'SERVER-SAID: nothing was written.',
+            scopes_total: 2, scopes_whose_files_suggest_otherwise: 0, would_say: 'SERVER-SAID: Would record the start time of 2 group(s).',
+            by_scope: startQ.display.scopes.map((sc) => ({ scope: sc.scope, label: sc.label, run_names: sc.run_names, run_count: 1,
+              target_ids: startQ.per_scope_targets[sc.scope], own_suggestions: [], compared: false, differs: false, differing_targets: [] })),
+          } };
+        }
+        return { body: { ...recordedBody(startQ.question_id, []), result: { statement: 'SERVER-SAID: Recorded the start time of 2 group(s).' } } };
+      },
+    });
+    renderAt(ROUTES.localImportBundle('synthetic-beamtime'));
+    fireEvent.change(await screen.findByLabelText(COPY.yourName), { target: { value: 'Synthetic Scientist' } });
+    fireEvent.click(await screen.findByRole('button', { name: COPY.startTimesUse }));
+    const write = await screen.findByRole('button', { name: COPY.previewWrite });
+    const box = write.closest('.li-preview, [tabindex]') as HTMLElement;
+    expect(posts[0]).toMatchObject({ decision: 'confirm', dry_run: true, expected_version: VERSION });
+    expect(posts[0]).not.toHaveProperty('only');
+    expect(box).toHaveTextContent('Record group g1');
+    expect(box).toHaveTextContent('Record group g2');
+    expect(box).not.toHaveTextContent(COPY.previewNoReading);
+    expect(box).not.toHaveTextContent('Value:');
+    fireEvent.click(write);
+    await waitFor(() => expect(posts).toHaveLength(2));
+    expect(posts[1]).toMatchObject({ decision: 'confirm', expected_version: VERSION });
+    expect(posts[1]).not.toHaveProperty('dry_run', true);
+  });
+
+  it('progress says the groups that cannot export once, lists unmatched Athena merges, and states validation compactly', async () => {
+    vi.stubEnv('VITE_ISAAC_LOCAL_IMPORTS', '1');
+    stubFetchRoutes({
+      'GET /api/local-bundles': { body: listBody },
+      'GET /api/local-bundles/synthetic-beamtime/progress': {
+        body: { ...progressBody, progress: { ...progressBody.progress,
+          cannot_export: { total: 1, live_groups: 2, by_reason: { no_scans: 1 },
+            statement: 'SERVER-SAID: 1 of the 2 live group(s) cannot become a record as they stand (no_scans for 1).' },
+          athena_merges: { total: 3, statement: 'SERVER-SAID: merges that match no group.', items: [
+            { athena_label: 'SYN merge 200mV', projects: ['SYN.prj'], near_groups: [{ group_id: 'g1', group_name: 'SYN_group_g1' }], groups_in_project: ['g1'] },
+          ] },
+          last_validation: { statement: 'SERVER-SAID: last validate.', reports: [
+            { group_id: 'g1', verdict: 'incomplete', missing_required: ['sample.sample_form'], written_utc: '2099-01-01T00:00:00Z', older_than_bundle: true },
+            { group_id: 'g2', verdict: 'incomplete', missing_required: ['sample.sample_form'], written_utc: '2099-01-01T00:00:00Z', older_than_bundle: false },
+            { group_id: 'g3', verdict: 'exportable', missing_required: [], written_utc: '2099-01-01T00:00:00Z', older_than_bundle: false },
+          ] },
+        } },
+      },
+    });
+    renderAt(ROUTES.localImports);
+    expect(await screen.findByTestId('li-cannot-export')).toHaveTextContent(/1 of the 2 live group\(s\) cannot become a record/);
+    const merges = screen.getByTestId('li-athena-merges');
+    expect(merges).toHaveTextContent(`${COPY.athenaMergesTitle} (3)`);
+    expect(merges).toHaveTextContent('SYN merge 200mV');
+    expect(merges).toHaveTextContent('near: SYN_group_g1 (a hint, not a match)');
+    expect(merges).toHaveTextContent('Showing 1 of 3.');
+    expect(within(merges).queryByRole('button')).toBeNull(); // read-only
+    // the counts once; the two groups that share a verdict and a missing set are one row
+    const validation = screen.getByTestId('li-last-validation');
+    expect(within(validation).getByText(`${COPY.lastValidation}: 2 incomplete, 1 exportable`)).toBeInTheDocument();
+    expect(within(validation).getAllByRole('listitem')).toHaveLength(2);
+    expect(validation).toHaveTextContent('2 groups: g1, g2');
+    expect(validation).toHaveTextContent('1 of 3 reports are older than the bundle');
   });
 });

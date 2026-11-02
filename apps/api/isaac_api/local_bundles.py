@@ -801,6 +801,37 @@ def per_target_agreement(idx: BundleIndex, target_ids: Sequence[str], kind_of: M
     }
 
 
+#: A flag, an `isaac` command or the CLI's `<bundle_dir>` placeholder: words that only say how to do something on the
+#: command line.
+_CLI_WORDS = re.compile(r"(?:^|[\s(`])--[a-z][a-z_-]*|\bisaac (?:bundle|process|import|template)\b|<bundle_dir>")
+_SENTENCE_END = re.compile(r"(?<=[.!?])\s+(?=[A-Z0-9\"'(])")
+#: a trailing `: isaac bundle decide …` (the command after a colon, to the end of its sentence)
+_CLI_TAIL = re.compile(r"\s*[:;—–]\s*`?isaac (?:bundle|process|import|template)\b.*$", re.S)
+#: a parenthesis naming a command or a flag
+_CLI_PAREN = re.compile(r"\s*\([^()]*?(?:--[a-z]|isaac (?:bundle|process|import|template)\b)[^()]*\)")
+#: an appended ", and …" / ", or …" / "; or …" clause naming a command or a flag
+_CLI_CLAUSE = re.compile(r"[,;]\s+(?:and|or)\s+[^,;]*?(?:--[a-z]|isaac (?:bundle|process|import|template)\b)[^,;]*?(?=[,;]|[.!?]?$)")
+
+
+def page_words(text: str | None) -> str | None:
+    """``text`` as this page says it: the command line's sentences, in order and word for word, less the parts that
+    only say how to do it on the command line — a trailing ``: isaac bundle decide …``, a parenthesis or an appended
+    "and/or" clause naming a command or a flag is cut, and a sentence that still names one is left out (the page has
+    its own control for each). Nothing is reworded or added, so the page never says more than the command line.
+    ``None`` stays ``None``."""
+    if not text:
+        return text
+    out = []
+    for sentence in _SENTENCE_END.split(str(text).strip()):
+        cut = _CLI_CLAUSE.sub("", _CLI_PAREN.sub("", _CLI_TAIL.sub("", sentence))).strip()
+        if not cut or _CLI_WORDS.search(cut):
+            continue
+        if not cut.endswith((".", "!", "?")):
+            cut = cut.rstrip(":;,") + "."
+        out.append(cut)
+    return " ".join(out) or None
+
+
 def describe_question(bundle: Mapping, q: Mapping, *, folder: str,
                       idx: BundleIndex | None = None, answered: bool = False) -> tuple[dict, list[tuple[str, str]]]:
     """``(display, shown)`` — what the screen shows beside one consolidated question, and the
@@ -957,7 +988,7 @@ def describe_question(bundle: Mapping, q: Mapping, *, folder: str,
     answer_kind = {
         "missing_value": "field_value", "optional_values": "optional_values", "confirm_value": "confirm_value",
         "resolve_conflict": "conflict", "naming_counter_positions": "counter_positions",
-        "clock_time_zone": "clock_zone", "confirm_absorber": "absorber",
+        "clock_time_zone": "clock_zone", "confirm_absorber": "absorber", "stated_utc_start_times": "start_times",
     }.get(kind, "other")
     if q.get("informational"):
         # no answer can reach the record from this path yet: shown, never answered
@@ -984,6 +1015,10 @@ def describe_question(bundle: Mapping, q: Mapping, *, folder: str,
         "fields": fields,
         "suggested_absorber": absorber,
         "suggestion_statement": "A suggestion is NOT confirmed: nothing is recorded until you answer.",
+        # the question and its reason in the page's words: the same sentences, less the ones that only say how to
+        # do it on the command line (the page has its own controls for each)
+        "text": page_words(q.get("text")),
+        "why": page_words(q.get("why")),
     }, shown
 
 
@@ -1056,59 +1091,50 @@ def progress(bundle_dir: Path, bundle: Mapping, check: Mapping) -> dict:
     }
     questions_counts = None
     minimum = None
+    reports: dict = {}  # composed once: consolidate's reports are reused by the minimum and the cannot-export reasons
     if check.get("status") != "INVALID":
         try:
-            reports: dict = {}  # composed once: consolidate's reports are reused by the minimum
             payload = Q.consolidate(bundle, compositions_out=reports)
             questions_counts = payload["counts"]
             minimum = Q.minimum_answers_for_one_group(payload, bundle, bundle_dir=bundle_dir, reports=reports)
         except Exception as exc:  # a bundle this build cannot consolidate: said, never hidden
             questions_counts = {"unavailable": f"{type(exc).__name__}"}
     out["questions"] = questions_counts
-    out["minimum_for_one_group"] = minimum
+    out["minimum_for_one_group"] = with_page_words(minimum)
 
     blocks: list[str] = []
     if check.get("status") == "INVALID":
         blocks.append("The bundle does not pass `isaac bundle check`; nothing can be composed from it.")
     if isinstance(questions_counts, Mapping) and questions_counts.get("blocking"):
         blocks.append(f"{questions_counts['blocking']} blocking question(s) are open.")
-    unconfirmed = group_status.get("proposed", 0)
+    live_groups = Q.live_groups(bundle)
+    # r6 I2 / r7 J2: A GROUP THAT CAN NEVER EXPORT AS IT STANDS (its one cannot_export_reason, as `bundle list <dir>
+    # groups` gives it: processing_not_applicable:<code>, no_scans, not_a_measurement_run) is said ONCE, counted by
+    # reason, and counts toward nothing else here — as no question counts as blocking for it
+    cannot: dict[str, str] = {}
+    if bundle.get("record_groups"):
+        live_ids = {g["group_id"] for g in live_groups}
+        not_measured = Q.not_a_measurement_groups(bundle, reports=reports or None)
+        cannot = {gid: why for gid, why in Q.cannot_export_reasons(bundle, not_measured).items() if gid in live_ids}
+    unconfirmed = [g for g in bundle.get("record_groups") or ()
+                   if (g.get("status") or "?") == "proposed" and g["group_id"] not in cannot]
     if unconfirmed:
-        blocks.append(f"{unconfirmed} record group(s) are proposed, not confirmed (a group is confirmed with "
+        blocks.append(f"{len(unconfirmed)} record group(s) are proposed, not confirmed (a group is confirmed with "
                       "`isaac bundle decide --target <group> --decision confirm`).")
     if not bundle.get("record_groups"):
         blocks.append("No record groups yet: `isaac bundle group` proposes them.")
     # COUNTED BY GROUP, by the minimum's own curve state (questions._curve): a live group with an undecided result
     # and NO approved curve. A group whose ISAAC curve or Athena curve is approved needs nothing more here, however
-    # many other curves it has; a rejected result, a not-applicable one (its group is counted below) and any result
-    # of a rejected, split or merged group are not blockers
-    live_groups = Q.live_groups(bundle)
-    blocked = Q.processing_blocked_groups(bundle) if bundle.get("record_groups") else {}
-    scanless = Q.scanless_groups(bundle, live_groups)
-    curves = {g["group_id"]: Q._curve(bundle, g["group_id"])["state"] for g in live_groups}
-    pending = [gid for gid, state in curves.items() if state in ("curve", "no_curve") and gid not in blocked]
+    # many other curves it has; a rejected result and any result of a rejected, split or merged group are not
+    # blockers, nor is any group that cannot export (said once, below)
+    curves = {g["group_id"]: Q._curve(bundle, g["group_id"])["state"] for g in live_groups if g["group_id"] not in cannot}
+    pending = [gid for gid, state in curves.items() if state in ("curve", "no_curve")]
     if pending:
         blocks.append(f"{len(pending)} record group(s) have a processing result awaiting a decision and no approved curve.")
-    # NO PROTOCOL vs NO SCAN, split as `bundle list <dir> groups` states them (cannot_export_reason): a group the
-    # protocol could not be applied to (e.g. no_xas_channel), and one whose runs list no scan at all (recorded
-    # by `isaac process` as not applicable, no_scans, or not processed yet)
-    no_protocol: dict[str, int] = {}
-    for gid, code in blocked.items():
-        if code != B.NA_NO_SCANS:
-            no_protocol[code or "?"] = no_protocol.get(code or "?", 0) + 1
-    no_scans = {gid for gid, code in blocked.items() if code == B.NA_NO_SCANS} | {
-        gid for gid in scanless if curves.get(gid) == "none" and gid not in blocked}
-    if no_protocol:
-        blocks.append(f"{sum(no_protocol.values())} group(s) have no applicable processing protocol "
-                      f"({', '.join(f'{code}: {n}' for code, n in sorted(no_protocol.items()))}), so they cannot become "
-                      "complete records yet.")
-    if no_scans:
-        blocks.append(f"{len(no_scans)} group(s) list no scan (no_scans), so there is nothing to process and they cannot "
-                      "become complete records as they stand.")
     # NOTHING TO APPROVE YET (the minimum's own wording, questions.NOT_PROCESSED_YET): a group with scans and no
     # processing result, and one whose every result is rejected
     processed = {r.get("group_id") for r in bundle.get("processing_results") or () if not B.processing_not_applicable(r)}
-    idle = [gid for gid, state in curves.items() if state == "none" and gid not in blocked and gid not in scanless]
+    idle = [gid for gid, state in curves.items() if state == "none"]
     unprocessed = [gid for gid in idle if gid not in processed]
     if unprocessed:
         blocks.append(f"{len(unprocessed)} record group(s) have no processing result to approve: run `isaac process` first.")
@@ -1116,6 +1142,16 @@ def progress(bundle_dir: Path, bundle: Mapping, check: Mapping) -> dict:
         blocks.append(f"{len(idle) - len(unprocessed)} record group(s) have only rejected processing results: re-process "
                       "them with other parameters (`isaac process <bundle_dir> --source <the beamtime folder> --group <id> "
                       "--params-file <params.json>`).")
+    by_reason: dict[str, int] = {}
+    for why in cannot.values():
+        by_reason[why] = by_reason.get(why, 0) + 1
+    out["cannot_export"] = {
+        "total": len(cannot),
+        "live_groups": len(live_groups),
+        "by_reason": dict(sorted(by_reason.items(), key=lambda x: (-x[1], x[0]))),
+        "statement": (f"{len(cannot)} of the {len(live_groups)} live group(s) cannot become a record as they stand "
+                      f"({Q._reasons_said(cannot, cannot)}). They count toward nothing above." if cannot else None),
+    }
     out["blocks_export"] = blocks
 
     reports = []
@@ -1142,12 +1178,55 @@ def progress(bundle_dir: Path, bundle: Mapping, check: Mapping) -> dict:
             "written_utc": datetime.fromtimestamp(mtime, timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
             "older_than_bundle": bundle_mtime is not None and mtime < bundle_mtime,
         })
+    out["athena_merges"] = athena_merges(bundle_dir)
     out["last_validation"] = {
         "reports": reports,
         "statement": ("What the last `isaac bundle validate` wrote, per group. It is not re-run here; a report older "
                       "than the bundle does not reflect the answers given since."),
     }
     return out
+
+
+#: How many of the scientist's unmatched Athena merges the progress block lists (the rest are counted).
+ATHENA_MERGES_SHOWN = 20
+
+
+def with_page_words(minimum: Mapping | None) -> Mapping | None:
+    """``minimum_for_one_group`` with each recommendation's ``why`` also as the page says it (``why_page``,
+    :func:`page_words`); the command line's own words are kept unchanged beside it."""
+    if not isinstance(minimum, Mapping) or not minimum.get("recommended"):
+        return minimum
+    return {**minimum, "recommended": [{**r, "why_page": page_words(r.get("why"))} if isinstance(r, Mapping) else r
+                                       for r in minimum["recommended"]]}
+
+
+def athena_merges(bundle_dir: Path) -> dict | None:
+    """r7 K1: the scientist's own Athena merges that match no group, as ``isaac bundle list <dir> athena-merges`` reads
+    them from the last ``isaac process`` (one compact row each, :func:`mutations.unmatched_merge_row`), read-only.
+    ``None`` when no project was processed or none is unmatched. Their labels are the scientist's own Athena labels,
+    not parser values, so showing them records no exposure."""
+    from .local_import import mutations as M
+    from .local_import import records as R
+
+    f = R.contained_file(bundle_dir, "processing/processing_results.json")
+    if f is None:
+        return None
+    try:
+        athena = json.loads(f.read_text(encoding="utf-8")).get("athena")
+    except (OSError, ValueError, AttributeError):
+        return None
+    if not isinstance(athena, Mapping):
+        return None
+    rows = [i for i in athena.get("unmatched_merges") or () if isinstance(i, Mapping)]
+    if not rows:
+        return None
+    total = int(athena.get("unmatched_merges_total") or len(rows))
+    return {
+        "total": total,
+        "items": [M.unmatched_merge_row(i) for i in rows[:ATHENA_MERGES_SHOWN]],
+        "statement": ("Athena merges whose name matches no record group. ISAAC used none of them; a near group is a "
+                      "hint, never a match."),
+    }
 
 
 # --- the request bodies -------------------------------------------------------------------------
@@ -1435,9 +1514,11 @@ def get_local_bundle_questions(
         rows = Q.filter_questions(payload, scope=scope, blocking_only=blocking_only, reports=reports)
         if kind:
             rows = [q for q in rows if q["kind"] == kind]
-        # r6 I1: the beamtime-wide start-time question is answered with `isaac bundle decide`; this screen has no card for
-        # it yet and answers each group's start-time question as before
-        rows = [Q.without_answered_at_once(q) for q in rows if q["kind"] != Q.STATED_UTC_START_KIND]
+        # r6 I1: the beamtime-wide start-time question has its own card here; each per-group start-time question it
+        # answers at once stays listed and answerable, and keeps `answered_at_once_by` (the card it is shown under) —
+        # its sentence naming that question by id is the command line's, so it is left off
+        rows = [{**Q.without_answered_at_once(q), **({"answered_at_once_by": q["answered_at_once_by"]}
+                                                     if q.get("answered_at_once_by") else {})} for q in rows]
         # r3c LOW-3: hidden by default, counted, as `isaac bundle questions` hides them
         rows, outside = Q.hide_outside_live_groups(rows, scope=scope, include=include_outside_live_groups)
         page = rows[offset: offset + limit]
@@ -1496,7 +1577,7 @@ def get_local_bundle_questions(
         "omitted_before": min(offset, len(rows)),
         "omitted_after": max(0, len(rows) - offset - len(page)),
         **Q.hidden_outside_live_groups(outside, "include_outside_live_groups=true"),
-        "minimum_for_one_group": minimum,
+        "minimum_for_one_group": with_page_words(minimum),
         "questions": out_questions,
         "capture": capture,
         "exposures_recorded": added,
@@ -1565,6 +1646,26 @@ def preview_group_answer(bundle: Mapping, q: Mapping, reach: Mapping, target_ids
     rows[0]["target_ids"] = list(target_ids)
     rows[0]["answer_slots"] = len([t for t in target_ids if t not in existing])
     return rows
+
+
+def stated_utc_would_record(bundle: Mapping, q: Mapping, target_ids: Sequence[str]) -> list[str]:
+    """The start-time disagreements a ``confirm`` of the beamtime start-time question would record, as
+    ``mutations._decide_stated_utc_starts`` decides them: every target whose run's file states a UTC instant and that
+    holds no answer of its own (a deferred one is answered; any other answer is kept)."""
+    from .local_import import bundle as B
+
+    values = {c["candidate_id"]: c.get("value") for c in bundle.get("candidates") or ()}
+    latest = B._decisions_by_target(bundle.get("scientist_decisions") or ())
+    stated = q.get("stated_utc_candidates") or {}
+    out = []
+    for cid in target_ids:
+        if values.get(stated.get(cid) or "") is None:
+            continue
+        prior = latest.get(("conflict", cid))
+        if prior is not None and prior.get("decision") not in B.NEUTRAL_DECISIONS:
+            continue
+        out.append(cid)
+    return out
 
 
 def _typed_value(q: Mapping, body: LocalAnswerRequest) -> tuple[Any, str | None]:
@@ -1751,15 +1852,20 @@ def post_local_bundle_answer(
             # an answered target of an open question (`only` a group already answered): its scope is listed in the
             # question as asked with its answered targets back in
             asked = _answered_question_to_resolve(data, question_id) or asked
+        would = result.get("recorded", [])
+        if asked.get("kind") == Q.STATED_UTC_START_KIND and "recorded" not in result:
+            # r6 I1: decide says this question's reach in its own words (`recorded_starts`, bounded): the conflicts it
+            # would record are its targets less those that already hold an answer of their own (each keeps it)
+            would = stated_utc_would_record(data, asked, result.get("target_ids") or [])
         groups = (preview_group_answer(data, asked, reach, result.get("target_ids") or [], value) if reach.get("scope")
-                  else preview_by_scope(data, asked, result.get("recorded", []), value))
+                  else preview_by_scope(data, asked, would, value))
         return {
             "by_scope": groups,
             "scopes_total": len(groups),
             "scopes_whose_files_suggest_otherwise": sum(1 for g in groups if g["differs"]),
             "dry_run": True,
             "question_id": question_id,
-            "would_record": result.get("recorded", []),
+            "would_record": would,
             "unchanged": result.get("unchanged", []),
             "target_ids": result.get("target_ids", []),
             "value": value,

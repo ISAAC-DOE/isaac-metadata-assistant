@@ -38,7 +38,7 @@ import {
   regroupCommand,
   rememberName,
   rememberedName,
-  sectionQuestions,
+  pageSections,
   shownValue,
   splitAtId,
   type ApiLocalAnsweredQuestions,
@@ -58,6 +58,7 @@ import {
   type LocalQuestion,
   type LocalSuggestion,
   type LocalValueRule,
+  type QuestionSection,
 } from '../lib/localImports';
 
 /**
@@ -94,7 +95,6 @@ export function LocalImports() {
         <header className="li-head">
           <h1 className="page-title">{LABELS.navLocalImports}</h1>
           <p className="li-lead"><InlineCode text={COPY.lead} /></p>
-          <p className="li-boundary"><InlineCode text={COPY.boundary} /></p>
         </header>
         {!enabled ? (
           <div className="li-notice" role="note">
@@ -134,6 +134,12 @@ function CheckChip({ check }: { check: LocalBundleCheck }) {
 function beamlineText(readings: LocalBeamlineReading[] | undefined): string {
   if (!readings || readings.length === 0) return 'Not recorded in this bundle';
   return readings.map((r) => `${shownValue(r.value)} (${r.basis ?? 'unknown basis'})`).join('; ');
+}
+
+/** The beamtime and beamline in one line: "BL15-2 2099 · beamline 15-2 (stated)". */
+function bundleFacts(source: string | null | undefined, readings: LocalBeamlineReading[] | undefined): string {
+  const beamline = readings && readings.length > 0 ? `beamline ${beamlineText(readings)}` : 'beamline not recorded';
+  return `${source ?? 'Beamtime not named'} · ${beamline}`;
 }
 
 function namesText(names: string[], total?: number, limit = 6): string {
@@ -213,9 +219,8 @@ function Overview() {
         {COPY.overviewTitle}
       </h2>
       <p className="li-meta">
-        {bundles.length} bundle(s) in the folder {dir}
-        {notBundles ? `; ${notBundles} other entr${notBundles === 1 ? 'y is' : 'ies are'} not a bundle` : ''}.{' '}
-        {list.data.statement}
+        {bundles.length} {bundles.length === 1 ? 'bundle' : 'bundles'} in {dir}
+        {notBundles ? ` (${notBundles} other entr${notBundles === 1 ? 'y is' : 'ies are'} not a bundle)` : ''}.
       </p>
       {bundles.length === 0 ? (
         <p className="li-note"><InlineCode text={COPY.noBundles} /></p>
@@ -239,21 +244,15 @@ function BundleCard({ bundle }: { bundle: LocalBundleSummary }) {
           {bundle.name}
         </h3>
         <CheckChip check={bundle.check} />
+        <Link className="btn btn-primary li-card-action" to={ROUTES.localImportBundle(bundle.name)}>
+          {COPY.openQuestions}
+          <span className="sr-only"> for {bundle.name}</span>
+        </Link>
       </div>
-      <dl className="li-dl">
-        <dt>Beamtime (imported folder)</dt>
-        <dd>{bundle.source_label ?? '—'}</dd>
-        <dt>Beamline</dt>
-        <dd>{beamlineText(bundle.beamline)}</dd>
-        <dt>Bundle format</dt>
-        <dd>{bundle.format_version ?? '—'}</dd>
-        <dt>Runs</dt>
-        <dd>{bundle.counts?.runs ?? '—'}</dd>
-        <dt>Record groups proposed</dt>
-        <dd>{bundle.record_groups ?? 0}</dd>
-        <dt>Answers recorded</dt>
-        <dd>{bundle.scientist_decisions ?? 0}</dd>
-      </dl>
+      <p className="li-meta" title={bundle.format_version ? `Bundle format ${bundle.format_version}` : undefined}>
+        {bundleFacts(bundle.source_label, bundle.beamline)} · {bundle.counts?.runs ?? '—'} runs ·{' '}
+        {bundle.scientist_decisions ?? 0} answers recorded
+      </p>
       {bundle.check.status !== 'VALID' && <p className="li-note">{bundle.check.statement}</p>}
       {bundle.check.held_statement && (
         <p className="li-note" data-testid="li-held">
@@ -261,12 +260,6 @@ function BundleCard({ bundle }: { bundle: LocalBundleSummary }) {
         </p>
       )}
       <ProgressBlock name={bundle.name} />
-      <p className="li-actions">
-        <Link className="btn btn-primary" to={ROUTES.localImportBundle(bundle.name)}>
-          {COPY.openQuestions}
-          <span className="sr-only"> for {bundle.name}</span>
-        </Link>
-      </p>
     </li>
   );
 }
@@ -278,6 +271,8 @@ function ProgressBlock({ name }: { name: string }) {
     return <p className="li-note">Progress could not be read: {localReasonOf(progress.error) ?? progress.error.message}</p>;
   }
   const p = progress.data.progress;
+  const notCounted = notCountedText(p.questions);
+  const cannot = p.cannot_export;
   return (
     <div className="li-progress">
       <dl className="li-dl">
@@ -286,9 +281,9 @@ function ProgressBlock({ name }: { name: string }) {
           {p.questions && typeof p.questions.total === 'number'
             ? `${p.questions.total} (${countsText(p.questions)})`
             : 'Not available for this bundle'}
-          {notCountedText(p.questions) && (
+          {notCounted && (
             <div className="li-meta" data-testid="li-not-counted">
-              {notCountedText(p.questions)}
+              {notCounted}
             </div>
           )}
         </dd>
@@ -299,6 +294,11 @@ function ProgressBlock({ name }: { name: string }) {
                 .map(([s, n]) => `${n} ${s.replace(/_/g, ' ')}`)
                 .join(', ')
             : 'None proposed yet'}
+          {cannot && cannot.total > 0 && cannot.statement && (
+            <div className="li-meta" data-testid="li-cannot-export">
+              {COPY.cannotExport}: <InlineCode text={cannot.statement} />
+            </div>
+          )}
         </dd>
         <dt>Processing results</dt>
         <dd>
@@ -309,7 +309,15 @@ function ProgressBlock({ name }: { name: string }) {
             : 'None yet'}
         </dd>
       </dl>
-      {p.minimum_for_one_group && <NearestRecord m={p.minimum_for_one_group} />}
+      {p.minimum_for_one_group && (
+        // the questions page shows it in full; here it is one line, opened on request
+        <details className="li-details" data-testid="li-nearest-folded">
+          <summary>
+            {COPY.nearestRecord}: {p.minimum_for_one_group.group_id ?? 'none'}
+          </summary>
+          <NearestRecord m={p.minimum_for_one_group} />
+        </details>
+      )}
       {p.blocks_export.length > 0 && (
         <>
           <h4 className="li-h4">{COPY.blocksExport}</h4>
@@ -322,24 +330,85 @@ function ProgressBlock({ name }: { name: string }) {
           </ul>
         </>
       )}
-      {p.last_validation.reports.length > 0 && (
-        <details className="li-details">
-          <summary>
-            {COPY.lastValidation} ({p.last_validation.reports.length} group(s))
-          </summary>
-          <p className="li-meta"><InlineCode text={p.last_validation.statement} /></p>
-          <ul className="li-bullets">
-            {p.last_validation.reports.map((r) => (
-              <li key={r.group_id}>
-                {r.group_id}: {r.verdict ?? 'no verdict'} (written {r.written_utc}
-                {r.older_than_bundle ? '; older than the bundle, so answers given since are not reflected' : ''})
-                {r.missing_required.length ? ` — missing: ${r.missing_required.join(', ')}` : ''}
-              </li>
-            ))}
-          </ul>
-        </details>
-      )}
+      {p.athena_merges && p.athena_merges.total > 0 && <AthenaMerges merges={p.athena_merges} />}
+      {p.last_validation.reports.length > 0 && <LastValidation reports={p.last_validation.reports} />}
     </div>
+  );
+}
+
+/** The scientist's Athena merges that match no record group (`bundle list <dir> athena-merges`): read-only. */
+function AthenaMerges({ merges }: { merges: NonNullable<LocalProgress['athena_merges']> }) {
+  return (
+    <details className="li-details" data-testid="li-athena-merges">
+      <summary>
+        {COPY.athenaMergesTitle} ({merges.total})
+      </summary>
+      <p className="li-meta">{merges.statement}</p>
+      <ul className="li-bullets">
+        {merges.items.map((m, i) => (
+          <li key={`${m.athena_label}-${i}`}>
+            <strong>{m.athena_label || 'Unnamed merge'}</strong>
+            {m.projects.length > 0 && <span className="li-meta"> — {m.projects.join(', ')}</span>}
+            {m.near_groups.length > 0 && (
+              <span className="li-meta">
+                {' '}
+                · near: {m.near_groups.map((g) => g.group_name ?? g.group_id).join(', ')} (a hint, not a match)
+              </span>
+            )}
+          </li>
+        ))}
+      </ul>
+      {merges.total > merges.items.length && (
+        <p className="li-meta">
+          Showing {merges.items.length} of {merges.total}.
+        </p>
+      )}
+    </details>
+  );
+}
+
+/**
+ * What the last `isaac bundle validate` wrote, said compactly: the counts once, then one row per distinct verdict and
+ * missing set (the groups that share it are counted on that row, never repeated), and how many reports are older
+ * than the bundle.
+ */
+function LastValidation({ reports }: { reports: LocalProgress['last_validation']['reports'] }) {
+  const rows = new Map<string, { verdict: string; missing: string[]; groups: string[] }>();
+  for (const r of reports) {
+    const verdict = r.verdict ?? 'no verdict';
+    const key = JSON.stringify([verdict, r.missing_required]);
+    const row = rows.get(key) ?? { verdict, missing: r.missing_required, groups: [] };
+    row.groups.push(r.group_id);
+    rows.set(key, row);
+  }
+  const counts = new Map<string, number>();
+  for (const r of reports) counts.set(r.verdict ?? 'no verdict', (counts.get(r.verdict ?? 'no verdict') ?? 0) + 1);
+  const older = reports.filter((r) => r.older_than_bundle).length;
+  const said = [...counts.entries()].map(([v, n]) => `${n} ${v.replace(/_/g, ' ')}`).join(', ');
+  return (
+    <details className="li-details" data-testid="li-last-validation">
+      <summary>
+        {COPY.lastValidation}: {said}
+      </summary>
+      {older > 0 && (
+        <p className="li-meta">
+          {older} of {reports.length} {reports.length === 1 ? 'report is' : 'reports are'} older than the bundle, so
+          answers given since are not reflected.
+        </p>
+      )}
+      <ul className="li-bullets">
+        {[...rows.values()].map((row) => (
+          <li key={`${row.verdict}-${row.groups[0]}`}>
+            {row.verdict.replace(/_/g, ' ')}
+            {row.missing.length ? ` — missing: ${row.missing.map(fieldWords).join(', ')}` : ''}
+            <span className="li-meta">
+              {' '}
+              · {row.groups.length === 1 ? `group ${row.groups[0]}` : `${row.groups.length} groups: ${namesText(row.groups, undefined, 3)}`}
+            </span>
+          </li>
+        ))}
+      </ul>
+    </details>
   );
 }
 
@@ -435,7 +504,7 @@ function BundleQuestions({ name }: { name: string }) {
     if (shownData === null) return [];
     const d = shownData;
     return [
-      ...sectionQuestions(d.questions).flatMap((sec) => sec.questions.map((q) => q.question_id)),
+      ...pageSections(d.questions).order,
       ...d.capture.merge_candidates.map((m) => m.merge_candidate_id),
       ...d.capture.athena_selections.map((a) => a.processing_id),
     ];
@@ -510,17 +579,21 @@ function BundleQuestions({ name }: { name: string }) {
     );
     const own = cards.get(focusPlan.id);
     if (own) {
+      reveal(own);
       (own.querySelector<HTMLElement>('[data-li-recorded]') ?? own.querySelector<HTMLElement>('[data-li-title]'))?.focus();
       return;
     }
     const at = focusPlan.order.indexOf(focusPlan.id);
     const candidates = at < 0 ? [] : [...focusPlan.order.slice(at + 1), ...focusPlan.order.slice(0, at).reverse()];
-    for (const id of candidates) {
-      const el = cards.get(id)?.querySelector<HTMLElement>('[data-li-title]');
-      if (el) {
-        el.focus();
-        return;
-      }
+    // the next question in view first; else the next one in a folded group, which is opened for it
+    const titles = candidates.map((id) => cards.get(id)?.querySelector<HTMLElement>('[data-li-title]')).filter(
+      (el): el is HTMLElement => el != null,
+    );
+    const next = titles.find((el) => !el.closest('details:not([open])')) ?? titles[0];
+    if (next) {
+      reveal(next);
+      next.focus();
+      return;
     }
     questionsHeading.current?.focus();
   }, [focusPlan, shownData]);
@@ -559,6 +632,7 @@ function BundleQuestions({ name }: { name: string }) {
       <p className="li-meta">
         <Link to={ROUTES.localImports}>{COPY.backToAll}</Link>
       </p>
+      {shownData && <BundleHead data={shownData} />}
       <p className="sr-only" role="status" aria-live="polite">
         {announcement}
       </p>
@@ -567,6 +641,7 @@ function BundleQuestions({ name }: { name: string }) {
           <p>{announcement}</p>
         </div>
       )}
+      <div className="li-controls">
       <div className="li-field li-name">
         <label htmlFor={byId}>{COPY.yourName}</label>
         <input
@@ -632,6 +707,7 @@ function BundleQuestions({ name }: { name: string }) {
           </select>
         </div>
       </div>
+      </div>
       {questions.status === 'loading' && <LoadingPanel label="Reading the questions…" />}
       {questions.status === 'error' &&
         (questions.error.status === 404 && localReasonCodeOf(questions.error) !== 'bundle_not_found' ? (
@@ -672,30 +748,28 @@ function QuestionsBody({
   kind: string;
   writes: number;
 }) {
-  const sections = useMemo(() => sectionQuestions(data.questions), [data.questions]);
+  const { main: sections, optional, nested } = useMemo(() => pageSections(data.questions), [data.questions]);
+  const optionalCount = optional.reduce((n, sec) => n + sec.questions.length, 0);
+  // a section inside the folded group is a level below it
+  const sectionView = (s: QuestionSection, folded = false) => {
+    const Heading = folded ? 'h4' : 'h3';
+    return (
+      <section key={s.id} className="li-section" aria-labelledby={`li-sec-${s.id}`}>
+        <Heading id={`li-sec-${s.id}`} className="li-h3" tabIndex={-1}>
+          {s.title} <span className="li-count">({s.questions.length})</span>
+        </Heading>
+        {s.id === 'settles-many' && <p className="li-note">{COPY.settlesManyLead}</p>}
+        <ol className="li-list">
+          {s.questions.map((q) => (
+            <QuestionCard key={q.question_id} q={q} handlers={handlers} nested={nested.get(q.question_id)} />
+          ))}
+        </ol>
+      </section>
+    );
+  };
   const pageQuestions = useMemo(() => new Map(data.questions.map((q) => [q.question_id, q])), [data.questions]);
-  const b = data.bundle;
   return (
     <PageQuestions.Provider value={pageQuestions}>
-      <div className="li-card li-bundle-head">
-        <dl className="li-dl">
-          <dt>Folder</dt>
-          <dd>{b.name}</dd>
-          <dt>Beamtime (imported folder)</dt>
-          <dd>{b.source_label ?? '—'}</dd>
-          <dt>Beamline</dt>
-          <dd>{beamlineText(b.beamline)}</dd>
-          <dt>Export rules used</dt>
-          <dd title={data.blocking_basis.source}>ISAAC record schema ({data.blocking_basis.schema})</dd>
-        </dl>
-        <p className="li-meta"><InlineCode text={data.statement} /></p>
-        {data.exposures_recorded > 0 && (
-          <p className="li-meta">
-            This page noted in the bundle that these suggestions were shown to you ({data.exposures_recorded}), as the
-            command line does, so that a later independent check knows you had seen them.
-          </p>
-        )}
-      </div>
       <h2 id="li-questions-title" className="li-h2" tabIndex={-1} ref={headingRef}>
         {COPY.questionsTitle}{' '}
         <span className="li-count">
@@ -707,22 +781,19 @@ function QuestionsBody({
           {notCountedText(data.counts)}
         </p>
       )}
-      {sections.length > 1 && <SectionJumps sections={sections} />}
+      {sections.length + (optionalCount > 0 ? 1 : 0) > 1 && <SectionJumps sections={sections} optional={optionalCount} />}
       {data.minimum_for_one_group && <NearestRecord m={data.minimum_for_one_group} />}
       {data.total === 0 && <p className="li-note">No open questions match.</p>}
-      {sections.map((s) => (
-        <section key={s.id} className="li-section" aria-labelledby={`li-sec-${s.id}`}>
-          <h3 id={`li-sec-${s.id}`} className="li-h3" tabIndex={-1}>
-            {s.title} <span className="li-count">({s.questions.length})</span>
-          </h3>
-          {s.id === 'settles-many' && <p className="li-note">{COPY.settlesManyLead}</p>}
-          <ol className="li-list">
-            {s.questions.map((q) => (
-              <QuestionCard key={q.question_id} q={q} handlers={handlers} />
-            ))}
-          </ol>
-        </section>
-      ))}
+      {sections.map((sec) => sectionView(sec))}
+      {optionalCount > 0 && (
+        <details className="li-details li-optional" id="li-optional">
+          <summary>
+            {COPY.optionalTitle} <span className="li-count">({optionalCount})</span>
+          </summary>
+          <p className="li-meta">{COPY.optionalLead}</p>
+          {optional.map((sec) => sectionView(sec, true))}
+        </details>
+      )}
       {(data.omitted_before > 0 || data.omitted_after > 0) && (
         <p className="li-actions">
           <span className="li-meta">
@@ -746,19 +817,40 @@ function QuestionsBody({
   );
 }
 
+/** The bundle the questions are for, in one line. */
+function BundleHead({ data }: { data: ApiLocalQuestions }) {
+  const b = data.bundle;
+  return (
+    <div className="li-bundle-head">
+      <h2 className="li-h2">{b.name}</h2>
+      <p className="li-meta" title={data.blocking_basis.source}>
+        {bundleFacts(b.source_label, b.beamline)} · checked against the ISAAC record schema ({data.blocking_basis.schema})
+      </p>
+      {data.exposures_recorded > 0 && (
+        <p className="li-meta">
+          Noted in the bundle that {data.exposures_recorded} suggestion(s) were shown to you, so a later check knows you
+          saw them.
+        </p>
+      )}
+    </div>
+  );
+}
+
 /**
  * A list of this page's question sections, each a link to its heading. A bundle's questions can run to a hundred
  * cards on one page; this names the sections and their counts up front and moves focus to the one chosen.
  */
-function SectionJumps({ sections }: { sections: ReturnType<typeof sectionQuestions> }) {
+function SectionJumps({ sections, optional }: { sections: QuestionSection[]; optional: number }) {
   const go = (e: React.MouseEvent, id: string) => {
     // a modified click (new tab, window) is the browser's own
     if (e.metaKey || e.ctrlKey || e.shiftKey || e.altKey || e.button !== 0) return;
     const heading = document.getElementById(id);
     if (!heading) return;
     e.preventDefault();
-    heading.scrollIntoView?.({ block: 'start' });
-    heading.focus();
+    const target = heading instanceof HTMLDetailsElement ? (heading.querySelector('summary') ?? heading) : heading;
+    reveal(target);
+    target.scrollIntoView?.({ block: 'start' });
+    target.focus();
   };
   return (
     <nav className="li-jumps" aria-label={COPY.jumpLabel}>
@@ -771,6 +863,13 @@ function SectionJumps({ sections }: { sections: ReturnType<typeof sectionQuestio
             </a>
           </li>
         ))}
+        {optional > 0 && (
+          <li>
+            <a href="#li-optional" onClick={(e) => go(e, 'li-optional')}>
+              {COPY.optionalTitle} ({optional})
+            </a>
+          </li>
+        )}
         <li>
           <a href="#li-answered-title" onClick={(e) => go(e, 'li-answered-title')}>
             {COPY.answeredTitle}
@@ -907,6 +1006,11 @@ function clipAtWord(text: string, max: number): string {
   return `${(space > max / 2 ? cut.slice(0, space) : cut).replace(/[\s,;:—–-]+$/, '')}…`;
 }
 
+/** Opens every folded section (`<details>`) around `el`, so it can be seen and focused. */
+function reveal(el: Element | null | undefined) {
+  for (let d = el?.closest('details'); d; d = d.parentElement?.closest('details') ?? null) d.open = true;
+}
+
 /** The questions on this page by id, so a link can reach a card; null outside the questions page. */
 const PageQuestions = createContext<ReadonlyMap<string, LocalQuestion> | null>(null);
 
@@ -931,6 +1035,7 @@ function CardLink({ id, children }: { id: string; children: ReactNode }) {
         const card = document.getElementById(questionCardId(id));
         if (!card) return;
         e.preventDefault();
+        reveal(card);
         card.scrollIntoView?.({ block: 'start' });
         card.querySelector<HTMLElement>('[data-li-title]')?.focus();
       }}
@@ -946,13 +1051,11 @@ function CardLink({ id, children }: { id: string; children: ReactNode }) {
  * verdict when it failed, and every field its record is missing now.
  */
 function NearestRecord({ m }: { m: NonNullable<LocalProgress['minimum_for_one_group']> }) {
-  const page = useContext(PageQuestions);
   const qs = m.questions ?? [];
   const recommended = m.recommended ?? [];
   // the warnings are the recommendations' own words; said alone only when no recommendation carries them
   const warnings = recommended.length === 0 ? (m.warnings ?? []) : [];
   const missing = m.missing_required_now ?? [];
-  const textOf = (id: string) => page?.get(id)?.text;
   return (
     <div className="li-progress" data-testid="li-nearest">
       <p className="li-note">
@@ -968,7 +1071,6 @@ function NearestRecord({ m }: { m: NonNullable<LocalProgress['minimum_for_one_gr
                 <CardLink id={x.question_id}>{x.fields.map(fieldWords).join(', ') || x.question_id}</CardLink>
                 {onlyWords(x.only) ? ` — for ${onlyWords(x.only)}` : ''}
                 {x.deferred ? ` (${COPY.deferredChip.toLowerCase()})` : ''}
-                {textOf(x.question_id) ? <span className="li-meta"> — {textOf(x.question_id)}</span> : null}
               </li>
             ))}
           </ul>
@@ -985,7 +1087,7 @@ function NearestRecord({ m }: { m: NonNullable<LocalProgress['minimum_for_one_gr
                 ) : (
                   r.fields.map(fieldWords).join(', ')
                 )}
-                {onlyWords(r.only) ? ` — for ${onlyWords(r.only)}` : ''}: <span className="li-warning"><InlineCode text={r.why} /></span>
+                {onlyWords(r.only) ? ` — for ${onlyWords(r.only)}` : ''}: <span className="li-warning"><InlineCode text={r.why_page ?? r.why} /></span>
               </li>
             ))}
           </ul>
@@ -1021,8 +1123,9 @@ function NearestRecord({ m }: { m: NonNullable<LocalProgress['minimum_for_one_gr
 /** `why`, with the beamtime question it names (`covered_by`) as a link to that card, in that question's words. */
 function WhyText({ q }: { q: LocalQuestion }) {
   const cover = q.display.covered_by;
-  const parts = splitAtId(q.why, cover?.question_id);
-  if (!cover || !cover.question_id || !parts) return <InlineCode text={q.why} />;
+  const why = q.display.why ?? q.why;
+  const parts = splitAtId(why, cover?.question_id);
+  if (!cover || !cover.question_id || !parts) return <InlineCode text={why} />;
   return (
     <>
       <InlineCode text={parts[0]} />
@@ -1035,36 +1138,39 @@ function WhyText({ q }: { q: LocalQuestion }) {
 // --- one question -----------------------------------------------------------------------------
 
 function SuggestionItem({ s }: { s: LocalSuggestion }) {
+  const value = shownValue(s.value);
+  // the quote is shown only when it says more than the value it was read as
+  const quote = s.quote && s.quote.trim() !== value ? s.quote : null;
   return (
     <div className="li-suggestion">
       <p className="li-suggestion-head">
         {s.acceptable && <span className="li-chip">{COPY.suggestedNotConfirmed}</span>}
-        <span>
+        <span className="li-value">
+          <span className="sr-only">Value: </span>
+          <code>{value}</code>
+        </span>
+        <span className="li-meta">
           {s.who_label}
           {s.model_id ? ` (${s.model_id})` : ''}
         </span>
+        {s.targets && s.targets > 1 ? <span className="li-meta">for {s.targets} of the values asked about</span> : null}
       </p>
-      <p className="li-value">
-        <span className="sr-only">Value: </span>
-        <code>{shownValue(s.value)}</code>
-        {s.targets && s.targets > 1 ? <span className="li-meta"> — for {s.targets} of the values asked about</span> : null}
-      </p>
-      <dl className="li-dl li-dl-tight">
-        <dt>File</dt>
-        <dd>{s.relative_path ?? 'not recorded'}</dd>
-        <dt>Where in the file</dt>
-        <dd>{s.locator ?? 'not recorded'}</dd>
-        {s.run_names && s.run_names.length > 0 && (
+      <p className="li-meta li-source">
+        <span className="sr-only">File: </span>
+        <span>{s.relative_path ?? 'file not recorded'}</span>
+        {s.locator ? (
           <>
-            <dt>Run</dt>
-            <dd>{namesText(s.run_names)}</dd>
+            {' · '}
+            <span className="sr-only">Where in the file: </span>
+            <span>{s.locator}</span>
           </>
-        )}
-      </dl>
-      {s.quote && (
+        ) : null}
+        {s.run_names && s.run_names.length > 0 ? ` · run ${namesText(s.run_names)}` : ''}
+      </p>
+      {quote && (
         <blockquote className="li-quote">
           <span className="sr-only">Quoted from the file: </span>
-          {s.quote}
+          {quote}
         </blockquote>
       )}
       {s.note && <p className="li-hint">{s.note}</p>}
@@ -1209,6 +1315,7 @@ function PreviewBox({
   onCancel,
   boxRef,
   titleId,
+  readings = true,
 }: {
   preview: ApiLocalAnswerPreview;
   scopes: LocalScope[];
@@ -1217,6 +1324,8 @@ function PreviewBox({
   onCancel: () => void;
   boxRef: React.RefObject<HTMLDivElement>;
   titleId: string;
+  /** The question compares each run's own reading with the answer (a field value): only then is a run said to have none. */
+  readings?: boolean;
 }) {
   const differing = preview.by_scope.filter((g) => g.differs);
   const otherValues = [
@@ -1268,7 +1377,7 @@ function PreviewBox({
               </>
             )}
             {!g.compared && g.own_suggestions.length > 0 && <OwnSuggestions own={g.own_suggestions} />}
-            {inline ? (
+            {!readings ? null : inline ? (
               <RunReadings scope={byKey.get(g.scope)} />
             ) : (
               byKey.get(g.scope) && (
@@ -1307,7 +1416,12 @@ function PreviewBox({
         </>
       )}
       <p className="li-meta">
-        Value: <code>{shownValue(preview.value)}</code>. {preview.statement}
+        {preview.value !== null && preview.value !== undefined && (
+          <>
+            Value: <code>{shownValue(preview.value)}</code>.{' '}
+          </>
+        )}
+        {preview.statement}
       </p>
       <details className="li-details">
         <summary>{COPY.previewIds}</summary>
@@ -1507,13 +1621,17 @@ function QuestionCard({
   q,
   handlers,
   answered,
+  nested,
 }: {
   q: LocalQuestion;
   handlers: WriteHandlers;
   /** An ANSWERED question: its current answers are shown, and its controls only once "Change answer" is chosen. */
   answered?: LocalAnsweredQuestion;
+  /** The per-group questions this beamtime question answers at once: listed under it, each answerable on its own. */
+  nested?: LocalQuestion[];
 }) {
   const d = q.display;
+  const startTimes = d.answer_kind === 'start_times';
   const uid = useId();
   // an answered card is its own card (the same question may come back as an open one, e.g. after a defer)
   const cardKey = answered ? `answered:${q.question_id}` : q.question_id;
@@ -1594,7 +1712,7 @@ function QuestionCard({
   }
 
   // a long question is shortened at a word with an ellipsis, so the message never ends mid-word
-  const shortText = clipAtWord(q.text, 80);
+  const shortText = clipAtWord(startTimes ? startTitle(q) : (d.text ?? q.text), 80);
   function recordedMessage(n: number) {
     return `Recorded ${n} answer(s) to “${shortText}”.`;
   }
@@ -1724,6 +1842,14 @@ function QuestionCard({
         return (
           <p className="li-hint" data-testid="li-informational">
             {COPY.informational}
+          </p>
+        );
+      case 'start_times':
+        return (
+          <p className="li-actions">
+            <button type="button" className="btn btn-primary" disabled={busy} onClick={() => submit('confirm')}>
+              {COPY.startTimesUse}
+            </button>
           </p>
         );
       case 'confirm_value':
@@ -1933,12 +2059,21 @@ function QuestionCard({
       data-card-id={cardKey}
     >
       <div className="li-card-head">
-        <span className="li-chip">{answered ? COPY.answeredChip : q.blocking ? COPY.chipBlocks : COPY.chipOptional}</span>
+        <span className="li-chip">
+          {answered ? COPY.answeredChip : q.blocking ? COPY.chipBlocks : q.tier === 2 ? COPY.chipAffectsRecord : COPY.chipOptional}
+        </span>
         {q.deferred && <span className="li-chip">{COPY.deferredChip}</span>}
-        <span className="li-meta">{KIND_LABEL[q.kind] ?? q.kind}</span>
+        {/* the section heading names the kind; an answered card and a nested one are not under it */}
+        {(answered !== undefined || q.answered_at_once_by !== undefined) && (
+          <span className="li-meta">{KIND_LABEL[q.kind] ?? q.kind}</span>
+        )}
       </div>
       <h4 id={`${uid}-t`} className="li-h4 li-question-text" tabIndex={-1} ref={titleRef} data-li-title>
-        <InlineCode text={q.text} />
+        {startTimes ? (
+          startTitle(q)
+        ) : (
+          <InlineCode text={d.text ?? q.text} />
+        )}
       </h4>
       {q.deferred && (
         <p className="li-meta" data-testid="li-deferred" title={q.deferred.decided_utc ?? undefined}>
@@ -1975,56 +2110,55 @@ function QuestionCard({
           </ul>
         </div>
       )}
-      <dl className="li-dl">
-        <dt>Record (runs)</dt>
-        <dd>{d.record_run_names.length ? namesText(d.record_run_names) : 'The whole beamtime'}</dd>
-        {q.target_field_path && (
-          <>
-            <dt>Field</dt>
-            <dd>
-              <code>{q.target_field_path}</code>
-            </dd>
-          </>
-        )}
-        <dt>Applies to</dt>
-        <dd>
-          {q.applies_to.groups} group(s), {q.applies_to.runs} run(s); answering records {q.applies_to.targets} value(s)
-        </dd>
-        <dt>Why</dt>
-        <dd>
-          <WhyText q={q} />
-        </dd>
-      </dl>
-
-      <div className="li-suggestions">
-        <h5 className="li-h5">{COPY.suggestedNotConfirmed}</h5>
-        {acceptable.length === 0 && d.answer_kind !== 'absorber' ? (
-          <p className="li-meta">{COPY.noSuggestion}</p>
-        ) : (
-          acceptable.map((s, i) => <SuggestionItem key={i} s={s} />)
-        )}
-        {d.suggestions_total > d.suggestions.length && (
-          <p className="li-meta">
-            Showing {d.suggestions.length} of {d.suggestions_total} suggestions and hints.
+      {startTimes ? (
+        <StartTimesFacts q={q} />
+      ) : (
+        <>
+          <p className="li-meta li-facts">
+            {/* the field is named once: here only when the question's own words do not name it */}
+            {q.target_field_path && !(d.text ?? q.text).includes(q.target_field_path) && (
+              <>
+                <code>{q.target_field_path}</code>
+                {' · '}
+              </>
+            )}
+            {reachText(q)}
           </p>
-        )}
-        <p className="li-hint"><InlineCode text={d.suggestion_statement} /></p>
-        {others.length > 0 && (
-          <details className="li-details">
-            <summary>
-              {COPY.otherReadings} ({others.length})
-            </summary>
-            {others.map((s, i) => (
-              <SuggestionItem key={i} s={s} />
-            ))}
-          </details>
-        )}
-      </div>
+          <p className="li-why">
+            <WhyText q={q} />
+          </p>
+        </>
+      )}
+      {!startTimes && d.record_run_names.length > 0 && (
+        <details className="li-details li-runs">
+          <summary>
+            {COPY.runsListed} ({d.record_run_names.length === d.targets_total || d.targets_described === d.targets_total ? d.record_run_names.length : `${d.record_run_names.length}+`})
+          </summary>
+          <p className="li-meta">{d.record_run_names.join(', ')}</p>
+        </details>
+      )}
 
-      {rule?.allowed && (
-        <p className="li-meta">
-          {COPY.allowedAnswers}: {rule.allowed.map(shownValue).join(', ')}
-        </p>
+      {!startTimes && (acceptable.length > 0 || others.length > 0) && (
+        <div className="li-suggestions">
+          {acceptable.map((s, i) => (
+            <SuggestionItem key={i} s={s} />
+          ))}
+          {d.suggestions_total > d.suggestions.length && (
+            <p className="li-meta">
+              Showing {d.suggestions.length} of {d.suggestions_total} suggestions and hints.
+            </p>
+          )}
+          {others.length > 0 && (
+            <details className="li-details">
+              <summary>
+                {COPY.otherReadings} ({others.length})
+              </summary>
+              {others.map((s, i) => (
+                <SuggestionItem key={i} s={s} />
+              ))}
+            </details>
+          )}
+        </div>
       )}
 
       {answered && d.answer_kind !== 'informational' && (
@@ -2077,7 +2211,7 @@ function QuestionCard({
         />
       )}
 
-      {multi && d.answer_kind !== 'informational' && (
+      {multi && d.answer_kind !== 'informational' && !startTimes && (
         <fieldset className="li-fieldset">
           <legend>Answer for</legend>
           <label className="li-radio">
@@ -2129,9 +2263,10 @@ function QuestionCard({
             {otherDecisions.includes('defer') && (
               <button
                 type="button"
-                className="btn btn-secondary"
+                className="btn btn-secondary li-quiet"
                 disabled={busy}
                 aria-describedby={`${uid}-dh`}
+                title={COPY.deferHint}
                 onClick={() => submit('defer')}
               >
                 {COPY.defer}
@@ -2140,9 +2275,10 @@ function QuestionCard({
             {otherDecisions.includes('reject') && (
               <button
                 type="button"
-                className="btn btn-secondary"
+                className="btn btn-secondary li-quiet"
                 disabled={busy}
                 aria-describedby={`${uid}-rh`}
+                title={COPY.rejectHint}
                 onClick={() => submit('reject')}
               >
                 {COPY.reject}
@@ -2150,14 +2286,14 @@ function QuestionCard({
             )}
           </p>
           {otherDecisions.includes('defer') && (
-            <p id={`${uid}-dh`} className="li-hint">
+            <span id={`${uid}-dh`} className="sr-only">
               {COPY.deferHint}
-            </p>
+            </span>
           )}
           {otherDecisions.includes('reject') && (
-            <p id={`${uid}-rh`} className="li-hint">
+            <span id={`${uid}-rh`} className="sr-only">
               {COPY.rejectHint}
-            </p>
+            </span>
           )}
         </div>
       )}
@@ -2181,16 +2317,117 @@ function QuestionCard({
           onCancel={cancelPreview}
           boxRef={previewRef}
           titleId={`${uid}-pv`}
+          readings={d.answer_kind === 'field_value' || d.answer_kind === 'confirm_value' || d.answer_kind === 'optional_values'}
         />
       )}
 
-      {d.answer_kind !== 'informational' && (
-        <details className="li-details">
-          <summary>Command-line equivalent</summary>
-          <pre className="li-command">{q.answer_command}</pre>
+      {startTimes && <StartTimesMore q={q} />}
+      {nested && nested.length > 0 && (
+        <details className="li-details li-nested">
+          <summary>
+            {COPY.startTimesEachGroup} ({nested.length})
+          </summary>
+          <ol className="li-list">
+            {nested.map((n) => (
+              <QuestionCard key={n.question_id} q={n} handlers={handlers} />
+            ))}
+          </ol>
         </details>
       )}
     </li>
+  );
+}
+
+/** Who a question reaches, in a few words: "9 group(s), 9 run(s)", with the values only where they differ. */
+function reachText(q: LocalQuestion): string {
+  const { groups, runs, targets } = q.applies_to;
+  if (runs === 0) return groups > 0 ? `${groups} group(s) · the whole beamtime` : 'the whole beamtime';
+  return `${groups} group(s), ${runs} run(s)${targets !== runs ? `, ${targets} value(s)` : ''}`;
+}
+
+/** The beamtime start-time question, asked as the choice it is. */
+function startTitle(q: LocalQuestion): string {
+  return `Use the time each file was created as the start time of ${q.applies_to.groups} groups?`;
+}
+
+/**
+ * The beamtime-wide start-time question (`stated_utc_start_times`) in a few lines, from its own fields: what it
+ * records, its reach, and the groups it does not reach with why. Its full wording is one click away.
+ */
+function StartTimesFacts({ q }: { q: LocalQuestion }) {
+  const d = q.display;
+  const gap = q.largest_file_to_first_scan_s;
+  const max = q.max_file_to_first_scan_s;
+  const canExport = (q.applies_to as { groups_that_can_export?: number }).groups_that_can_export;
+  return (
+    <>
+      <p className="li-why">
+        Each SPEC file states when it was created (#E, in UTC). This records that instant, from each group’s own file,
+        as its start time.
+        {gap !== undefined ? ` The first scan began at most ${Math.round(gap)} s later` : ''}
+        {gap !== undefined && max !== undefined
+          ? `; a run whose first scan began more than ${Math.round(max / 60)} min later is left out.`
+          : gap !== undefined
+            ? '.'
+            : ''}
+      </p>
+      <p className="li-meta li-facts">
+        <code>{q.target_field_path}</code> · {q.applies_to.groups} group(s), {q.applies_to.runs} run(s)
+        {canExport !== undefined ? ` · ${canExport} of them can become records` : ''}
+      </p>
+      {d.suggestions.length > 0 && (
+        <div className="li-examples">
+          <p className="li-meta">{COPY.startTimesExamples}:</p>
+          <ul className="li-bullets" data-testid="li-start-examples">
+            {d.suggestions.map((x, i) => (
+              <li key={i}>
+                <code>{shownValue(x.value)}</code>
+                <span className="li-meta">
+                  {' '}
+                  · {x.relative_path ?? 'file not recorded'}
+                  {x.locator ? `, ${x.locator}` : ''}
+                </span>
+              </li>
+            ))}
+          </ul>
+          {q.applies_to.groups > d.suggestions.length && (
+            <p className="li-meta">and {q.applies_to.groups - d.suggestions.length} more, each from its own file.</p>
+          )}
+        </div>
+      )}
+    </>
+  );
+}
+
+/** What the start-time card keeps one click away: the groups it does not reach, and its full wording. */
+function StartTimesMore({ q }: { q: LocalQuestion }) {
+  const notReached = q.not_reached ?? [];
+  const text = q.display.text ?? q.text;
+  return (
+    <>
+      {notReached.length > 0 && (
+        <details className="li-details" data-testid="li-start-not-reached">
+          <summary>
+            {COPY.startTimesNotReached} ({notReached.length})
+          </summary>
+          <ul className="li-bullets">
+            {notReached.map((x) => (
+              <li key={x.question_id}>
+                <CardLink id={x.question_id}>Group {x.group_id}</CardLink>: <InlineCode text={x.reason} />
+              </li>
+            ))}
+          </ul>
+        </details>
+      )}
+      {text && (
+        <details className="li-details">
+          <summary>{COPY.questionDetails}</summary>
+          <p className="li-meta">
+            <InlineCode text={text} />
+          </p>
+        </details>
+      )}
+    </>
   );
 }
 
