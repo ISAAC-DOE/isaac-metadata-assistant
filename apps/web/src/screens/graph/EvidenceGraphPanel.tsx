@@ -1,3 +1,4 @@
+import { Maximize2, RotateCcw, ZoomIn, ZoomOut } from '../../components/icons';
 import './evidence-graph.css';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { KeyboardEvent as ReactKeyboardEvent, PointerEvent as ReactPointerEvent } from 'react';
@@ -844,16 +845,9 @@ function LoadedEvidenceGraph({
         <h2 id="evgraph-heading" className="evgraph-title">
           Evidence Graph
         </h2>
-        <p className="evgraph-intro">
-          This experiment and its runs, with the sample, context, measurement, assets and
-          descriptors each run actually carries — and the evidence and validation findings
-          recorded under them.
-        </p>
-        {/* The disclosure. Rendered from the exported constant so a paraphrase
-            cannot satisfy the test that asserts it is on screen. */}
-        <p className="evgraph-disclosure" role="note" data-testid="evgraph-disclosure">
-          {EVIDENCE_GRAPH_DISCLOSURE}
-        </p>
+        {/* ONE COUNT LINE STAYS IN VIEW; the intro, the disclosure and the notes
+            are one "About This Graph" disclosure below, still in the DOM with their
+            testids (declutter, 2026-11-02). */}
         <p className="evgraph-counts" data-testid="evgraph-counts">
           {drawnLabel}
         </p>
@@ -875,6 +869,7 @@ function LoadedEvidenceGraph({
             When the two agree — every mount that does not track the runs'
             version, and every successful refresh — the sentence is byte-identical
             to what it always was. */}
+        {staleRunsVersion !== null && (
         <p className="evgraph-freshness" data-testid="evgraph-freshness">
           Built from this record at version <code>{graph.freshnessKey.split('|').pop()}</code>.
           {staleRunsVersion === null ? (
@@ -889,8 +884,29 @@ function LoadedEvidenceGraph({
             </>
           )}
         </p>
+        )}
       </header>
 
+      <details className="evgraph-about">
+        <summary>About This Graph</summary>
+        <p className="evgraph-intro">
+          This experiment and its runs, with the sample, context, measurement, assets and
+          descriptors each run actually carries — and the evidence and validation findings
+          recorded under them.
+        </p>
+        {/* The disclosure. Rendered from the exported constant so a paraphrase
+            cannot satisfy the test that asserts it is on screen. */}
+        <p className="evgraph-disclosure" role="note" data-testid="evgraph-disclosure">
+          {EVIDENCE_GRAPH_DISCLOSURE}
+        </p>
+        {/* THE VERSION LINE, in its plain form, here; the qualified form above
+            stays in view because it corrects a claim a reader would otherwise act on. */}
+        {staleRunsVersion === null && (
+          <p className="evgraph-freshness" data-testid="evgraph-freshness">
+            Built from this record at version <code>{graph.freshnessKey.split('|').pop()}</code>.
+            {' Nothing here is cached across a version change.'}
+          </p>
+        )}
       {graph.notes.length > 0 && (
         /*
          * `role="note"` used to sit on each `<li>`, and axe was right to refuse
@@ -915,6 +931,10 @@ function LoadedEvidenceGraph({
           ))}
         </ul>
       )}
+        <p className="evgraph-legend-kinds">
+          {EVIDENCE_NODE_KINDS.map((k) => NODE_KIND_LABELS[k]).join(' · ')}
+        </p>
+      </details>
       {truncated && (
         <p className="evgraph-note" role="note" data-note="visible_cap">
           More than {MAX_VISIBLE_EVIDENCE_NODES} nodes would be drawn at once, so the view is
@@ -983,29 +1003,42 @@ function LoadedEvidenceGraph({
         </div>
 
         <div className="evgraph-buttons" role="group" aria-label="Graph view controls">
+          {/* Compact icon buttons with the same accessible names (declutter). */}
           <button
             type="button"
-            className="evgraph-btn"
+            className="evgraph-btn evgraph-icon-btn"
+            aria-label="Zoom In"
+            title="Zoom In"
             onClick={() => dispatch({ kind: 'zoom', factor: 1.25 })}
           >
-            Zoom In
+            <ZoomIn size={16} strokeWidth={2} aria-hidden="true" />
           </button>
           <button
             type="button"
-            className="evgraph-btn"
+            className="evgraph-btn evgraph-icon-btn"
+            aria-label="Zoom Out"
+            title="Zoom Out"
             onClick={() => dispatch({ kind: 'zoom', factor: 1 / 1.25 })}
           >
-            Zoom Out
-          </button>
-          <button type="button" className="evgraph-btn" onClick={() => dispatch({ kind: 'fit', box })}>
-            Fit to View
+            <ZoomOut size={16} strokeWidth={2} aria-hidden="true" />
           </button>
           <button
             type="button"
-            className="evgraph-btn"
+            className="evgraph-btn evgraph-icon-btn"
+            aria-label="Fit to View"
+            title="Fit to View"
+            onClick={() => dispatch({ kind: 'fit', box })}
+          >
+            <Maximize2 size={16} strokeWidth={2} aria-hidden="true" />
+          </button>
+          <button
+            type="button"
+            className="evgraph-btn evgraph-icon-btn"
+            aria-label="Reset"
+            title="Reset"
             onClick={() => dispatch({ kind: 'reset', box })}
           >
-            Reset
+            <RotateCcw size={16} strokeWidth={2} aria-hidden="true" />
           </button>
         </div>
 
@@ -1390,10 +1423,10 @@ function NodeDetail({
         </p>
       )}
 
-      <p className="evgraph-detail-producer">
-        <span className="evgraph-detail-producer-term">Where this came from</span>
+      <details className="evgraph-detail-producer">
+        <summary className="evgraph-detail-producer-term">Where this came from</summary>
         <span className="evgraph-detail-producer-value">{node.producer}</span>
-      </p>
+      </details>
 
       {node.detail.length > 0 && (
         <dl className="evgraph-detail-list">
@@ -1409,14 +1442,11 @@ function NodeDetail({
       <div className="evgraph-detail-actions">
         {children.length > 0 &&
           (expanded ? (
-            <button
-              type="button"
-              className="evgraph-btn"
-              disabled={isAnchor}
-              onClick={() => onCollapse(node.id)}
-            >
-              {isAnchor ? 'Anchor — always open' : 'Collapse'}
-            </button>
+            isAnchor ? null : (
+              <button type="button" className="evgraph-btn" onClick={() => onCollapse(node.id)}>
+                Collapse
+              </button>
+            )
           ) : (
             <button type="button" className="evgraph-btn" onClick={() => onExpand(node.id)}>
               Expand
@@ -1492,16 +1522,16 @@ function NodeDetail({
                   {other.label}
                   <span className="evgraph-conn-kind">{NODE_KIND_LABELS[other.kind]}</span>
                 </button>
-                <p className="evgraph-conn-why">{adj.edge.why}</p>
+                <details className="evgraph-conn-more">
+                  <summary>Why</summary>
+                  <p className="evgraph-conn-why">{adj.edge.why}</p>
+                </details>
               </li>
             );
           })}
         </ul>
       )}
 
-      <p className="evgraph-legend-kinds">
-        {EVIDENCE_NODE_KINDS.map((k) => NODE_KIND_LABELS[k]).join(' · ')}
-      </p>
     </div>
   );
 }

@@ -975,11 +975,8 @@
 
 .evgraph-legend-kinds {
   margin: 0;
-  padding-top: 8px;
-  border-top: 1px solid var(--border-hair);
-  font-family: var(--font-mono);
-  font-size: 11px;
-  color: var(--text-quaternary);
+  font-size: 11.5px;
+  color: var(--text-tertiary);
 }
 
 /* --- responsive ---------------------------------------------------------- */
@@ -1088,4 +1085,42 @@
   .evgraph-row {
     transition: none;
   }
+}
+
+/* ── Declutter (2026-11-02) ──────────────────────────────────────────────────
+   "About This Graph" holds what used to sit above the canvas; the four view
+   controls are compact icon buttons; each connection's "why" is folded; the
+   technical source of a node is behind its own summary. */
+.evgraph-about {
+  font-size: 12.5px;
+  color: var(--text-secondary);
+}
+.evgraph-about > summary {
+  cursor: pointer;
+  min-height: 28px;
+  font-weight: 550;
+  color: var(--text-strong);
+}
+.evgraph-about[open] {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.evgraph-icon-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 34px;
+  padding: 0;
+}
+.evgraph-conn-more > summary,
+summary.evgraph-detail-producer-term {
+  cursor: pointer;
+  font-size: 11.5px;
+  color: var(--text-secondary);
+  text-transform: none;
+  letter-spacing: 0;
+}
+.evgraph-conn-more[open] > summary {
+  margin-bottom: 4px;
 }

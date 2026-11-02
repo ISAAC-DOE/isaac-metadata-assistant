@@ -1490,9 +1490,8 @@ describe('evidence graph · the rendered panel', () => {
         fireEvent.keyDown(r, { key: 'Enter' });
       }
     }
-    const fit = [...container.querySelectorAll('button')].find((b) =>
-      (b.textContent ?? '').includes('Fit to View'),
-    )!;
+    // An icon button since the declutter: found by its accessible name.
+    const fit = container.querySelector('button[aria-label="Fit to View"]') as HTMLElement;
     fireEvent.click(fit);
     await waitFor(() => {
       if (container.querySelectorAll('text.evgraph-node-label').length < 12) {
@@ -1578,7 +1577,10 @@ describe('evidence graph · the rendered panel', () => {
 
   it('offers Fit to View, Reset, Search, Focus on Run and the kind filters', () => {
     const { container, getByLabelText } = renderPanel();
-    const buttons = [...container.querySelectorAll('button')].map((b) => b.textContent ?? '');
+    // Icon buttons since the declutter: the accessible names are unchanged.
+    const buttons = [...container.querySelectorAll('button')].map(
+      (b) => b.getAttribute('aria-label') ?? b.textContent ?? '',
+    );
     expect(buttons.some((t) => t.includes('Fit to View'))).toBe(true);
     expect(buttons.some((t) => t.includes('Reset'))).toBe(true);
     expect(getByLabelText('Search this experiment')).toBeTruthy();
