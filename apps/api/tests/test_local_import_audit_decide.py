@@ -73,8 +73,9 @@ def test_decide_question_refuses_an_off_list_value_and_writes_nothing(b, capsys)
     before = _bytes(b)
     code = cli.main(["bundle", "decide", str(b), "--question", q["question_id"], "--decision", "correct",
                      "--value", "ex situ", "--by", "X", "--as-said"])
-    err = capsys.readouterr().err
-    assert code == 2
+    out, err = capsys.readouterr()
+    err += out  # r5f L6: a word kept as a vocabulary request exits 0 and says so on stdout
+    assert code == 0
     assert "'ex situ' is not one of the schema's allowed values for context.environment" in err
     allowed = (B._schema_node(ENV) or {})["enum"]
     assert f"Allowed values for {ENV}: {', '.join(allowed)}" in err and "Nothing was recorded" in err

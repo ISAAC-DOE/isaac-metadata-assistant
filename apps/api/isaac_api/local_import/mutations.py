@@ -85,11 +85,22 @@ class OffListRefused(MutationRefused):
     vocabulary request (:func:`keep_vocabulary_request`) and say so; otherwise NOTHING is kept and the refusal says
     how to keep it (:data:`AS_SAID_HINT`). ``problem``: the refusal's own sentence, without what was or was not kept."""
 
-    def __init__(self, message: str, *, field_path: str, term: str, code: int = 2, problem: str | None = None):
+    def __init__(self, message: str, *, field_path: str, term: str, code: int = 2, problem: str | None = None,
+                 kept: Mapping | None = None):
         super().__init__(message, code=code)
         self.field_path = field_path
         self.term = term
         self.problem = problem if problem is not None else message
+        #: r5f L6: ``{"request_id", "sentence", "new"}`` when ``--as-said`` KEPT the word as a vocabulary request: the
+        #: command did what it was asked (it exits 0 and says the request was kept first); ``None`` when nothing was kept
+        self.kept = dict(kept) if kept else None
+
+    def kept_statement(self, extra: str = "") -> str:
+        """The sentence the CLI leads with when the word was kept: the kept request first, then that the answer itself
+        was not recorded as a decision or a value (and why), then ``extra`` (who the request is for)."""
+        sentence = (self.kept or {}).get("sentence", "")
+        return (f"{sentence} No decision and no value was recorded for it: {self.problem.strip()}"
+                + (f" {extra}" if extra else ""))
 
 
 #: c10-d H1: an off-list answer is kept as a vocabulary request ONLY when the scientist says it is their own word
@@ -286,7 +297,8 @@ def save_bundle(bundle_dir: Path, bundle: dict) -> None:
             raise MutationRefused(
                 "The change would add a non-finite number (NaN or infinity), which is not standard JSON and no field "
                 f"takes, so nothing was written: {', '.join(added[:10])}", code=5)
-    errors = B.validate_bundle(bundle)
+    encoded = B.encode(bundle)  # r5f: once: the size check and the write share it (it is the slow part on a big bundle)
+    errors = B.validate_bundle(bundle, encoded=encoded)
     if errors:
         raise MutationRefused(
             "The change would leave the bundle invalid, so nothing was written:\n  - "
@@ -294,7 +306,7 @@ def save_bundle(bundle_dir: Path, bundle: dict) -> None:
             code=5,
         )
     bundle_dir = Path(bundle_dir)
-    cli._atomic_write(bundle_dir / B.BUNDLE_FILE, B.encode(bundle))
+    cli._atomic_write(bundle_dir / B.BUNDLE_FILE, encoded)
     for name, data in cli.section_payloads(bundle).items():
         cli._atomic_write(bundle_dir / name, data)
     if held_now:
@@ -749,6 +761,18 @@ def no_curve_cause(result: Mapping) -> str:
     return f"{code}: {detail}" if detail else str(code)
 
 
+#: r5f L1: failure codes where processing the group again cannot help: its scans share too few points, and a
+#: params file cannot add points the scans do not have. A remedy for such a result never offers re-processing.
+NO_REPROCESS_FAILURES = ("too_few_common_points",)
+
+
+def reprocess_cannot_help(causes: Any) -> bool:
+    """``True`` when every cause (a failure ``code`` or ``code: detail``, or a list of them) is one that re-processing
+    cannot change (:data:`NO_REPROCESS_FAILURES`)."""
+    items = [causes] if isinstance(causes, str) else list(causes or ())
+    return bool(items) and all(str(c).split(":")[0].strip() in NO_REPROCESS_FAILURES for c in items)
+
+
 def reprocess_command(group_id: str) -> str:
     """Re-processing ONE group with other parameters: the only way to a different result."""
     return (f"`isaac process <bundle_dir> --source <the beamtime folder you imported> --group {group_id} "
@@ -765,9 +789,11 @@ def no_curve_refusal(result: Mapping) -> str:
         f"{no_curve_cause(result)}), so an approval would state a QC status for a spectrum that does not exist. "
         "Re-running `isaac process` with the same parameters gives the same result. The options: "
         f'reject it (`isaac bundle decide <bundle_dir> --target {pid} --decision reject --by "<your name>"`); '
-        f"or mark it needs_changes (`--target {pid} --decision needs_changes`) and re-process the group with "
-        f"other parameters ({reprocess_command(gid)}), which adds a new result to review; "
-        "or leave the group out of the records "
+        + ("(re-processing with other parameters cannot add points the scans do not have) "
+           if reprocess_cannot_help(no_curve_cause(result)) else
+           f"or mark it needs_changes (`--target {pid} --decision needs_changes`) and re-process the group with "
+           f"other parameters ({reprocess_command(gid)}), which adds a new result to review; ")
+        + "or leave the group out of the records "
         f'(`isaac bundle decide <bundle_dir> --target {gid} --decision reject --by "<your name>"`). Nothing was recorded.'
     )
 
@@ -1554,8 +1580,10 @@ def _keep_refused_answer(bundle_dir: Path, bundle: dict, exc: "OffListRefused", 
     reaffirmed = not new and request["source"].get("as_said") is True  # keep_vocabulary_request stamped reaffirmed_utc
     if new or reaffirmed:
         save_bundle(bundle_dir, bundle)
-    return OffListRefused(f"{exc} {vocabulary_kept_sentence(request, new, reaffirmed, bundle)}", field_path=exc.field_path, term=exc.term,
-                          code=exc.code, problem=exc.problem)
+    sentence = vocabulary_kept_sentence(request, new, reaffirmed, bundle)
+    return OffListRefused(f"{exc} {sentence}", field_path=exc.field_path, term=exc.term,
+                          code=exc.code, problem=exc.problem,
+                          kept={"request_id": request["request_id"], "sentence": sentence, "new": new, "reaffirmed": reaffirmed})
 
 
 #: c8-a: the ``value`` a ``defer`` on the experiment carries when it answers the CLOCK question ("I don't know the
@@ -2192,7 +2220,8 @@ def decide_question(
                                                     "question_id": question_id, "as_said": True})
             if where:
                 kept_exc = OffListRefused(f"{kept_exc} {where}",
-                                          field_path=exc.field_path, term=exc.term, code=exc.code, problem=exc.problem)
+                                          field_path=exc.field_path, term=exc.term, code=exc.code, problem=exc.problem,
+                                          kept={**(kept_exc.kept or {}), "reach": where})
             raise kept_exc from None
         result = _said_on_list(_with_answered(_with_kept(kept_overrides, reached(bundle, recorded)), bundle, before), as_said)
         if same_members:

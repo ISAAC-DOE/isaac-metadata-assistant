@@ -1556,6 +1556,15 @@ def _mutation(fn) -> int:
 
     try:
         result = fn()
+    except M.OffListRefused as exc:
+        if exc.kept is None:
+            _err(str(exc))
+            return exc.code
+        # r5f L6: `--as-said` KEPT the scientist's word as a vocabulary request: that is what was asked, so it exits 0
+        # and says so FIRST. No decision and no value was recorded, and the statement says that too.
+        _print({"vocabulary_request_kept": exc.kept["request_id"], "decision_recorded": False,
+                "statement": exc.kept_statement(exc.kept.get("reach") or "")})
+        return EXIT_OK
     except (M.MutationRefused, R.RecordsRefused) as exc:
         _err(str(exc))
         return exc.code
@@ -1981,12 +1990,11 @@ def cmd_bundle_upload(args) -> int:
         _err(f"No records directory at {args.records_dir}.")
         return EXIT_NOT_FOUND
     plan = R.upload_plan(Path(args.records_dir), args.portal_url)
-    noted = [line for p in plan for line in p.get("notes") or ()]
-    _print({"dry_run": True, "network_calls": 0, "records": plan,
-            "statement": "Nothing was sent. The token is never read or printed."
-            # c16d: what a record would go out without (its evidence file's notes), said once more before an upload
-            + "".join(f" {line} ({n} record(s); records[].notes)." for line, n in
-                      {x: noted.count(x) for x in dict.fromkeys(noted)}.items())})
+    # r5f L3: the statement leads ("N records, 2 requests each, to <portal>") and says each distinct note and each
+    # portal warning once (a note differing only in its question id is one note); a record's own notes stay in `records`
+    summary = R.upload_summary(plan, Path(args.records_dir), args.portal_url)
+    _print({"dry_run": True, "network_calls": 0, "statement": summary["statement"],
+            **{k: v for k, v in summary.items() if k != "statement"}, "records": plan})
     return EXIT_OK
 
 

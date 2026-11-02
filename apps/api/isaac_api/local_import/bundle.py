@@ -4136,6 +4136,9 @@ def build_bundle(
                 "value_state": STATE_CONFLICTING,
             }
         )
+    # r5f M7: a macro's declared name that states another set-point than the file acquired in its place
+    for extra in _macro_setpoint_conflicts(runs, conflicts, out_candidates, sources):
+        conflicts.append({**extra, "conflict_id": f"conf-{len(conflicts) + 1:03d}"})
     for conflict in conflicts:
         for rid in conflict["run_ids"]:
             if rid in runs_by_id:
@@ -4523,8 +4526,12 @@ def refresh_questions(bundle: dict) -> dict:
     }
     order = _run_order(bundle)
     missing_qs = []
+    required_by_mode: dict[str | None, tuple[str, ...]] = {}  # r5f: the schema is read once per control mode, not per value
     for m in bundle["missing_values"]:
-        required = required_record_paths(control_mode=control_mode.get(m["run_id"])) + PORTAL_REQUIRED_PATHS
+        mode = control_mode.get(m["run_id"])
+        if mode not in required_by_mode:
+            required_by_mode[mode] = required_record_paths(control_mode=mode) + PORTAL_REQUIRED_PATHS
+        required = required_by_mode[mode]
         if m["run_id"] in reaction_runs:
             required = required + REACTION_REQUIRED_PATHS
         req = _required_for(m["target_field_path"], required)
@@ -4837,6 +4844,119 @@ def witnessed_values(candidate: Mapping) -> set[str]:
     return out
 
 
+#: A file-name token that states a potential: ``800mV``, ``m800mV`` (minus), ``1p2V``, ``0.5V``. Read only for the
+#: macro-versus-file-name comparison below, and only when the whole token reads cleanly.
+_POTENTIAL_NAME_TOKEN = re.compile(r"^(?P<neg>m|n|neg|minus|-)?(?P<int>\d+)(?:[p.](?P<frac>\d+))?(?P<milli>m?)V$", re.IGNORECASE)
+MACRO_SETPOINT_CONFLICT_KIND = "macro_setpoint_disagrees"
+_MACRO_RUN_NUMBER = re.compile(r"^run0*(\d+)\.mac$", re.IGNORECASE)
+SETPOINT_FIELD = "context.electrochemistry.potential_setpoint_V"
+START_FIELD = "timestamps.acquired_start_utc"
+
+
+def _potential_token_volts(token: str) -> float | None:
+    """The volts a file-name potential token states (``m800mV`` -> -0.8), or ``None`` when it is not one."""
+    m = _POTENTIAL_NAME_TOKEN.match(token)
+    if not m:
+        return None
+    value = float(f"{m['int']}.{m['frac'] or '0'}")
+    value = value / 1000 if m["milli"] else value
+    return round(-value if m["neg"] else value, 6)
+
+
+def _start_epoch(run_id: str, by_run: Mapping[str, Sequence[Mapping]]) -> float | None:
+    """The one UTC start the run's candidates give (a ``#E`` epoch), or ``None`` (none, a local clock time, or two
+    that differ): the timing the macro link needs."""
+    from datetime import datetime
+
+    found = set()
+    for c in by_run.get(run_id, ()):
+        v = c.get("value")
+        if c.get("target_field_path") == START_FIELD and isinstance(v, str):
+            try:
+                t = datetime.fromisoformat(v.replace("Z", "+00:00"))
+            except ValueError:
+                continue
+            if t.tzinfo is not None:
+                found.add(t.timestamp())
+    return found.pop() if len(found) == 1 else None
+
+
+def _macro_setpoint_conflicts(runs: Sequence[Mapping], conflicts: Sequence[Mapping], candidates: Sequence[Mapping],
+                              sources: Sequence[Mapping]) -> list[dict]:
+    """r5f M7: ``macro_setpoint_disagrees`` conflicts (without ``conflict_id``), one per macro whose declared name was
+    never acquired (``macro_declared_never_acquired``) but whose ACQUIRED counterpart states another set-point.
+
+    The link is made only when all of these hold, else nothing is raised (the macro's own conflict stays as it was):
+    the macro is ``run<N>.mac``; the macros ``run<N-1>`` and ``run<N+1>`` each declared exactly one acquired file with a
+    UTC start (a ``#E`` epoch); exactly ONE acquired run no macro declared started between those two times; and its file
+    name equals the declared name except for ONE token, which on both sides is a potential that reads cleanly in volts
+    and differs. A run number alone, or a time alone, links nothing. The new conflict hangs on the counterpart's
+    set-point candidate, so the question reaches the record (its answer is the scientist's: ``--decision confirm
+    --value <one reading>`` or ``correct``); the macro's own conflict and every id stay unchanged."""
+    by_run: dict[str, list[Mapping]] = {}
+    for c in candidates:
+        if c.get("run_id"):
+            by_run.setdefault(c["run_id"], []).append(c)
+    path_of = {s["source_id"]: s["relative_path"] for s in sources}
+    declared_at: dict[int, tuple[Mapping, float]] = {}
+    for r in runs:
+        ds = [d for d in r.get("declared_by") or () if d.get("acquired")]
+        if len(r.get("declared_by") or ()) != 1 or len(ds) != 1:
+            continue
+        m = _MACRO_RUN_NUMBER.match(PurePosixPath(ds[0].get("macro_path") or "").name)
+        t = _start_epoch(r["run_id"], by_run) if m else None
+        if m and t is not None:
+            declared_at[int(m[1])] = (r, t)
+    undeclared = [r for r in runs if r.get("run_candidate") and not r.get("declared_by")]
+    out: list[dict] = []
+    taken: set[str] = set()
+    for cf in conflicts:
+        if cf.get("kind") != "macro_declared_never_acquired" or not cf.get("subject"):
+            continue
+        w = (cf["readings"][0]["witnesses"] or [{}])[0]
+        m = _MACRO_RUN_NUMBER.match(PurePosixPath(w.get("relative_path") or "").name)
+        if not m or int(m[1]) - 1 not in declared_at or int(m[1]) + 1 not in declared_at:
+            continue
+        lo, hi = declared_at[int(m[1]) - 1][1], declared_at[int(m[1]) + 1][1]
+        inside = [r for r in undeclared if (t := _start_epoch(r["run_id"], by_run)) is not None and lo < t < hi]
+        if len(inside) != 1 or inside[0]["run_id"] in taken:
+            continue
+        run = inside[0]
+        mine, theirs = str(cf["subject"]).split("_"), str(run["stem"]).split("_")
+        differ = [i for i in range(len(mine)) if len(mine) == len(theirs) and mine[i] != theirs[i]]
+        if len(differ) != 1:
+            continue
+        said, found = _potential_token_volts(mine[differ[0]]), _potential_token_volts(theirs[differ[0]])
+        cand = next((c for c in by_run.get(run["run_id"], ()) if c.get("target_field_path") == SETPOINT_FIELD), None)
+        if said is None or found is None or said == found or cand is None:
+            continue
+        taken.add(run["run_id"])
+        out.append({
+            "engine_conflict_id": None,
+            "kind": MACRO_SETPOINT_CONFLICT_KIND,
+            "subject": SETPOINT_FIELD,
+            "candidate_id": cand["candidate_id"],
+            "run_ids": [run["run_id"]],
+            "readings": [
+                {"reading_index": 0, "value": found,
+                 "witnesses": [{"source_id": run["acquisition_source_id"], "relative_path": path_of.get(run["acquisition_source_id"]),
+                                "locator": "filename", "source_role": "human_label"}]},
+                {"reading_index": 1, "value": said,
+                 "witnesses": [{"source_id": w.get("source_id"), "relative_path": w.get("relative_path"),
+                                "locator": w.get("locator") or "newfile", "source_role": "planned_acquisition"}]},
+            ],
+            "explanation": (f"The macro {w.get('relative_path')} started a file named {cf['subject']!r} (set-point {said} V); the file "
+                            f"acquired in its place, between run{int(m[1]) - 1} and run{int(m[1]) + 1} in time, is named "
+                            f"{run['stem']!r} (set-point {found} V). Same run number, same time slot, same name but for the "
+                            "potential: the two statements about one measurement disagree. Which one is right is the scientist's call."),
+            "recommendation": None,
+            "resolution": None,
+            "value_state": STATE_CONFLICTING,
+        })
+    return out
+
+
+
 def _conflict_from_candidate(conflict_id, c, bundle_cid, run_id, engine_conflict, archive_paths, sid_of) -> dict:
     roles: dict[tuple[str, str], str] = {}
     if isinstance(engine_conflict, Mapping):
@@ -5130,8 +5250,9 @@ def record_rederivation(bundle: dict, stale: Sequence[Mapping], *, to_version: s
                     "eligible_now": s["eligible_now"], "decision_id": s.get("decision_id"), "reason": s["reason"]})
 
 
-def validate_bundle(bundle: Any, *, max_errors: int = 50) -> list[str]:
-    """Every way ``bundle`` breaks the v1 contract. Empty means valid."""
+def validate_bundle(bundle: Any, *, max_errors: int = 50, encoded: bytes | None = None) -> list[str]:
+    """Every way ``bundle`` breaks the v1 contract. Empty means valid. ``encoded``: :func:`encode` of this same
+    ``bundle``, when the caller already has it (the size bound is read from it, so a save encodes once)."""
     from jsonschema import Draft202012Validator
 
     errors: list[str] = []
@@ -5148,7 +5269,7 @@ def validate_bundle(bundle: Any, *, max_errors: int = 50) -> list[str]:
     # the bundle unwritable for good. It is never eligible (value_problem), `bundle check` NAMES each one
     # (non_finite_findings), and no write may ADD one (new_non_finite_paths, mutations.save_bundle).
 
-    size = len(encode(bundle))
+    size = len(encoded if encoded is not None else encode(bundle))
     if size > MAX_BUNDLE_BYTES:
         errors.append(f"bounds: bundle is {size} bytes, over {MAX_BUNDLE_BYTES}")
     for s in _iter_strings(bundle):
@@ -5511,7 +5632,9 @@ def _provenance_errors(bundle: Mapping) -> list[str]:
     decision_of = _decisions_by_target(bundle.get("scientist_decisions") or ())
     conflict_for: dict[str, list[str]] = {}
     for conflict in bundle["conflicts"]:
-        if conflict.get("candidate_id"):
+        # r5f M7: a macro-versus-file-name set-point conflict hangs on a candidate whose own sources agree: the
+        # disagreement is between the file name and a macro, which the candidate's evidence does not hold
+        if conflict.get("candidate_id") and conflict.get("kind") != MACRO_SETPOINT_CONFLICT_KIND:
             conflict_for.setdefault(conflict["candidate_id"], []).append(conflict["conflict_id"])
     by_id = {c["candidate_id"]: c for c in bundle["candidates"]}
     for cid in conflict_for:

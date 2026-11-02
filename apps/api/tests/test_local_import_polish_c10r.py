@@ -295,9 +295,11 @@ def test_as_said_on_a_value_the_field_accepts_is_recorded_and_says_nothing_was_k
 
 
 def test_a_request_kept_with_as_said_records_it(vb, capsys):
-    code, _, err = _cli_decide(vb, capsys, "--target", _vr_miss(vb, REACTION)["value_id"], "--decision", "correct",
-                               "--value", "cathodic corrosion", "--as-said")
-    assert code == 2 and "kept as a vocabulary request" in err
+    code, out, err = _cli_decide(vb, capsys, "--target", _vr_miss(vb, REACTION)["value_id"], "--decision", "correct",
+                                 "--value", "cathodic corrosion", "--as-said")
+    # r5f L6: kept, so it exits 0 and the statement (the kept request first) is on stdout
+    assert code == 0 and json.loads(out)["statement"].startswith("'cathodic corrosion' is kept as a vocabulary request")
+    assert json.loads(out)["decision_recorded"] is False and not err
     [req] = M.load(vb)["vocabulary_requests"]
     assert req["source"]["as_said"] is True
     assert B.check_bundle(vb) == []

@@ -202,7 +202,7 @@ is in the reference; in short:
 - **Asked again** or **no reading fits**: give the reason, show the allowed values or `utc_readings`, ask.
 - **An answer not on the list**: if no allowed value fits and they keep their own word, run
   `decide … --value "<their exact word>" --as-said` once: it records no decision but keeps their word as a
-  vocabulary request (`--note`: their own words, or nothing). Never pass a word they did not say.
+  vocabulary request (`--note`: their own words, or nothing). It exits 0 and says the request was kept, first. Never pass a word they did not say.
   Offer `<isaac> bundle propose-terms <bundle> --out <bundle>-notes/terms.json`. They write each
   description themselves on the Schema Proposals page, never in the file and never by you. Saving a proposal
   sends the term, counts and file-name citations to the ISAAC server the page uses; say so before they save.
@@ -229,7 +229,7 @@ Read `reference/records-and-validation.md`; explain the verdicts from validate's
 `missing_required_by_field` and `not_exportable_first` in plain words with the exact fix (open
 `validation/<group_id>.json` only for a group those leave unexplained), then go back to the step that fixes it (a
 `processing_fix` means its curve needs approval in Step 6). Say each `warnings` item in words
-(only 5 warnings show by default; `validate --full` lists all), and ask the scale question it names (and the set-point
+(only 5 warnings show by default; `validate --full` lists all; the most serious come first: a stated value left out of a record, then a portal warning, then the routine start-time note), and ask the scale question it names (and the set-point
 if `also_needs`, with `also_command`; a missing set-point lists its scale as missing too). `athena_version_no_longer_chosen`: the
 approved curve is not the version they chose last; say its steps. Run a command only with their answer. Never edit a draft or relax a check.
 
@@ -240,7 +240,7 @@ approved curve is not the version they chose last; say its steps. Run a command 
 then its refusal counts (`records_ready` = N; `records_written` = W, new or replacing records only).
 **If nothing is exportable**, export writes nothing: skip the dry run, say "no record is ready yet", name what
 blocks the nearest group (from Step 8), and go to Step 10. `<isaac> bundle upload <records> --dry-run` shows what
-*would* be sent: summarise it (how many records, where to) and say **nothing was sent and this build cannot send**. The scientist uploads through the ISAAC portal themselves.
+*would* be sent: summarise it (its `statement` leads with "N records, 2 requests each, to <portal>", and says each note and each portal warning once, with a count) and say **nothing was sent and this build cannot send**. The scientist uploads through the ISAAC portal themselves.
 
 ## Step 10 · Final summary
 

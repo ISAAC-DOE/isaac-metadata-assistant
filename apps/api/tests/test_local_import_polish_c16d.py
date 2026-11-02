@@ -96,7 +96,7 @@ def test_export_the_sidecar_and_the_dry_run_say_it(bdir, tmp_path, monkeypatch, 
     assert cli.main(["bundle", "upload", str(out), "--dry-run"]) == 0
     plan = json.loads(capsys.readouterr().out)
     [rec] = plan["records"]
-    assert rec["notes"] == [LINE] and f"{LINE} (1 record(s); records[].notes)." in plan["statement"]
+    assert rec["notes"] == [LINE] and LINE.replace(Q.CLOCK_QUESTION_ID, "<question id>") in plan["statement"] and f"(1 record(s), e.g. question {Q.CLOCK_QUESTION_ID})" in plan["statement"]
 
 
 def test_without_a_defer_the_sidecar_has_no_notes(bdir, tmp_path):

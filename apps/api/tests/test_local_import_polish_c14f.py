@@ -53,7 +53,7 @@ def test_a_word_asked_again_is_a_draft_for_the_new_request_only(grouped, capsys,
     _env_sheet(grouped, tmp_path)  # vr-00001: the sheet's word on run-001 and run-002
     for rid in ("run-001", "run-002"):
         _out(grouped, capsys, "--target", _vid(grouped, rid), "--decision", "correct", "--value", "in_situ")
-    assert _said(grouped, capsys, "--target", _vid(grouped, "run-001"), "--decision", "correct", "--value", WORD)[0] == 2
+    assert _said(grouped, capsys, "--target", _vid(grouped, "run-001"), "--decision", "correct", "--value", WORD)[0] == 0
     report = _report(grouped, capsys)
     t = _term(report, ENV, WORD)
     d = t["draft"]
@@ -103,11 +103,11 @@ def test_a_term_answered_throughout_keeps_its_counts(grouped, capsys, tmp_path, 
 def test_the_as_said_reply_names_the_value_the_record_keeps(grouped, capsys, ticking):
     _out(grouped, capsys, "--target", _vid(grouped, "run-001"), "--decision", "correct", "--value", "in_situ")
     code, err = _said(grouped, capsys, "--target", _vid(grouped, "run-001"), "--decision", "correct", "--value", WORD)
-    assert code == 2 and KEPT in err
+    assert code == 0 and KEPT in err
     assert "the record keeps `in_situ` meanwhile; ask whether that is acceptable until the term exists" in err
     assert "stays missing" not in err and "keeps what it has" not in err
     code, err = _said(grouped, capsys, "--target", _vid(grouped, "run-002"), "--decision", "correct", "--value", WORD)
-    assert code == 2 and ("the field stays missing until the vocabulary has the term or you answer with an allowed value"
+    assert code == 0 and ("the field stays missing until the vocabulary has the term or you answer with an allowed value"
                           in err) and "meanwhile" not in err
 
 
@@ -126,7 +126,7 @@ def test_a_request_over_runs_holding_and_lacking_a_value_says_both(grouped, tick
 
 
 def test_decide_says_when_its_value_answers_an_open_request(grouped, capsys, ticking):
-    assert _said(grouped, capsys, "--target", _vid(grouped, "run-001"), "--decision", "correct", "--value", WORD)[0] == 2
+    assert _said(grouped, capsys, "--target", _vid(grouped, "run-001"), "--decision", "correct", "--value", WORD)[0] == 0
     reply = _out(grouped, capsys, "--target", _vid(grouped, "run-001"), "--decision", "correct", "--value", "in_situ")
     assert f"This answers your request for '{WORD}' (vr-00001); it is no longer drafted." in reply["statement"]
     assert reply["answers_requests"] == ["vr-00001"]
@@ -139,14 +139,14 @@ def test_decide_says_when_its_value_answers_an_open_request(grouped, capsys, tic
 def test_a_value_restated_after_the_word_says_it_answers_it(grouped, capsys, ticking):
     """in_situ, their word --as-said, in_situ again: the re-recorded value answers the request, and says so."""
     _out(grouped, capsys, "--target", _vid(grouped, "run-001"), "--decision", "correct", "--value", "in_situ")
-    assert _said(grouped, capsys, "--target", _vid(grouped, "run-001"), "--decision", "correct", "--value", WORD)[0] == 2
+    assert _said(grouped, capsys, "--target", _vid(grouped, "run-001"), "--decision", "correct", "--value", WORD)[0] == 0
     reply = _out(grouped, capsys, "--target", _vid(grouped, "run-001"), "--decision", "correct", "--value", "in_situ")
     assert reply["recorded"] and f"This answers your request for '{WORD}' (vr-00001); it is no longer drafted." in reply["statement"]
 
 
 def test_decide_says_what_still_drafts_the_word(grouped, capsys, ticking):
     for rid in ("run-001", "run-002"):
-        assert _said(grouped, capsys, "--target", _vid(grouped, rid), "--decision", "correct", "--value", WORD)[0] == 2
+        assert _said(grouped, capsys, "--target", _vid(grouped, rid), "--decision", "correct", "--value", WORD)[0] == 0
     reply = _out(grouped, capsys, "--target", _vid(grouped, "run-001"), "--decision", "correct", "--value", "in_situ")
     assert (f"This answers your request for '{WORD}' (vr-00001); your other request(s) for it (vr-00002) are still "
             "drafted.") in reply["statement"]
@@ -157,7 +157,7 @@ def test_decide_says_what_still_drafts_the_word(grouped, capsys, ticking):
 
 
 def test_merge_keeps_an_answered_terms_description_only_in_case_the_word_is_asked_again(grouped, capsys, tmp_path, ticking):
-    assert _said(grouped, capsys, "--target", _vid(grouped, "run-001"), "--decision", "correct", "--value", WORD)[0] == 2
+    assert _said(grouped, capsys, "--target", _vid(grouped, "run-001"), "--decision", "correct", "--value", WORD)[0] == 0
     out = tmp_path / "terms.json"
     assert cli.main(["bundle", "propose-terms", str(grouped), "--out", str(out)]) == 0
     doc = json.loads(out.read_text(encoding="utf-8"))
@@ -179,7 +179,7 @@ def test_merge_keeps_an_answered_terms_description_only_in_case_the_word_is_aske
 
 def test_the_out_summary_counts_terms_that_need_a_one_word_form(b, capsys, tmp_path):
     target = next(m for m in M.load(b)["missing_values"] if m["target_field_path"] == REACTION and m["run_id"])
-    assert _said(b, capsys, "--target", target["value_id"], "--decision", "correct", "--value", "ZZ cathodic corrosion")[0] == 2
+    assert _said(b, capsys, "--target", target["value_id"], "--decision", "correct", "--value", "ZZ cathodic corrosion")[0] == 0
     capsys.readouterr()
     assert cli.main(["bundle", "propose-terms", str(b), "--out", str(tmp_path / "terms.json")]) == 0
     assert "1 term(s) need a one-word form (ask)." in capsys.readouterr().out
@@ -220,7 +220,7 @@ def test_validate_passes_its_verdicts_to_pending_vocabulary(grouped, capsys, mon
     assert _decide(grouped, capsys, "--target", group["group_id"], "--decision", "confirm")[0] == 0
     run_id = next(r["run_id"] for r in held["runs"] if r["run_key"] == group["member_run_keys"][0])
     assert _said(grouped, capsys, "--target", _vid(grouped, run_id, CELL), "--decision", "correct",
-                 "--value", "ZZ_static_cell")[0] == 2
+                 "--value", "ZZ_static_cell")[0] == 0
     out = R.validate_records(grouped, run_portal=lambda record: {
         "status": "ran", "result": {"valid": True, "errors": [], "warnings": []}, "outcome": "publish", "held": [],
         "verdict": "publish"})

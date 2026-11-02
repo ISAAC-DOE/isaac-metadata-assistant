@@ -122,7 +122,7 @@ def test_a_run_they_asked_for_the_word_again_is_not_said_as_answered(grouped, tm
     target = next(m for m in M.load(grouped)["missing_values"] if m["target_field_path"] == ENV and m["run_id"] == "run-001")
     capsys.readouterr()
     assert cli.main(["bundle", "decide", str(grouped), "--target", target["value_id"], "--decision", "correct",
-                     "--value", WORD, "--as-said", "--by", WHO]) == 2
+                     "--value", WORD, "--as-said", "--by", WHO]) == 0
     a = _adopt_json(grouped, theirs, tmp_path / "again.xlsx", capsys)  # no --by
     not_kept = a["vocabulary_requests_not_kept"]
     assert not_kept["answered_since"] == [] and [w["term"] for w in not_kept["words"]] == [WORD]

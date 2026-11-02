@@ -915,6 +915,17 @@ def propose_terms(bundle: Mapping, sources: Mapping) -> dict:
                     "draft": draft,
                 }
             )
+        # r5f L4: a spaced request ("cathodic corrosion") whose one-word form the scientist then gave ("cathodic_corrosion",
+        # its own entry on this field, or a term already on the field's lists) is answered: nothing more is asked for it
+        known = set(by_field[path]) | set(lists["portal"] or ()) | set(lists["schema"] or ())
+        for t in terms:
+            d = t["draft"]
+            form = _SEPARATORS.sub("_", t["term"].strip())
+            if not d["drafted"] and d.get("ask") and form != t["term"] and form in known:
+                t["draft"] = {**{k: v for k, v in d.items() if k != "ask"}, "one_word_form_given": form,
+                              "reason": (f"The scientist has since given this term as one word, `{form}` (see its own entry"
+                                         + ("" if form in by_field[path] else ", already on the field's list")
+                                         + "), so nothing more is asked for the spaced form.")}
         fields.append(
             {
                 "field_path": path,

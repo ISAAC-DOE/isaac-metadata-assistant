@@ -101,7 +101,8 @@ it finds one. Show per group, in words:
 - **when scans were skipped** (reason `scans_skipped_lacking_chosen_columns`; flag
   `channel_from_a_later_scan` when the first scan was one of them): the used / readable / skipped
   counts in plain words — "14 of 165 scans were used; 150 had different columns (they may be motor
-  or alignment scans); please confirm these belong in one record". The result's `qc.statements` has the
+  or alignment scans); please confirm these belong in one record". The sentence names each skipped file by its
+  path in the folder (`PtO2_H2O_dir/PtO2_H2O_004.txt`), never by a source id. The result's `qc.statements` has the
   sentence (`bundle show processing-result`; it is not in `qc.json`), and every `list processing-results`
   row has a `scans` line ("5 of 11 scans used; 6 skipped (scan_lacks_chosen_columns)");
 - **which scans the scientist's Athena curve used** (the `…-athena` result's `scans` line and its
@@ -240,6 +241,7 @@ Ask: approve, reject, or needs changes (with a note):
   refuses. Say why in words and offer: reject the result; `needs_changes` (the protocol needs a setting
   the scientist chooses; only on their explicit choice re-process with `--params-file`); or leave the
   group out (`reject` on the group).
+- **Too few common points** (QC `fail`, `failure.code: too_few_common_points`, `detail` = the points the scans share): the scans have too few points in common to merge, so there is no curve. The result has a statement (`qc.statements.too_few_common_points`: how many scans were listed and used, how many points they share, how many the merge needs) and `scans` says "N of M scans used". Processing again with other parameters cannot add points the scans do not have, so the remedies name only: reject the result, or leave the group out; never `--params-file` for it.
 - **A curve that is not a usable spectrum** (QC `fail` naming `edge_step_implausible`, `no_edge` or
   `post_edge_not_at_1`) cannot be approved either, whatever QC status is given: `decide --decision
   approve` exits 2 with the result's own QC sentence and the same three options. `validate` never offers

@@ -90,6 +90,7 @@ group is confirmed the minimum names it in `answer_first` (not counted; never af
   `<isaac> bundle decide <bundle> --question <Q> --same-reading --decision correct --value <v> --by "<name>"`
   answers every open one (its `same_reading_command`). For many runs (30 runs all `1M KOH`), the template's
   File List columns are the easy path: `<isaac> bundle template export <bundle> --out <file.xlsx>`.
+- **A macro and a file name that state different set-points** (`macro_setpoint_disagrees`; `affects_record: true`, on the potential set-point): a macro `run<N>.mac` named a file `…_800mV` that was never acquired, and the file acquired in its place (between run N-1 and run N+1 in time, the only undeclared one there, its name equal but for the potential) is `…_700mV`. Read both aloud with the files; the scientist says which is right (`confirm --value <one reading> --json`). Nothing is raised when the run number or the time does not tie them, or when more than one file could be the one; then the macro's own conflict (`affects_record: false`) is all there is. A bundle imported before this check has none: re-import to get it.
 - **A conflict with `affects_record: false`** (`no_record_field`): the readings differ, but no record
   field carries them (a comment line, a unit spelling). Say how many there are; do not ask each.
 - **A conflict with `covered_by_decisions`** (also `affects_record: false`; counted in
@@ -241,7 +242,7 @@ group is confirmed the minimum names it in `answer_first` (not counted; never af
   (while the question is not answered at all: "… not answered yet (question <Q>)"; on a SPEC beamtime, with no
   clock question, a run whose start-time readings disagree and are unsettled: "start time left out: the start-time
   disagreement is unanswered (question <Q>; …)", whose question offers the `#E` epoch's UTC reading),
-  the record's evidence file keeps that line under `notes`, and `upload --dry-run` repeats it; tell the
+  the record's evidence file keeps that line under `notes`, and `upload --dry-run` says it once with a count; tell the
   scientist before they export. Once a zone is recorded, `defer` is refused (it would not withdraw the
   zone); to change the zone, state it again.
 - **QC status** is asked when approving processing, not here (Step 6).
@@ -263,7 +264,7 @@ group is confirmed the minimum names it in `answer_first` (not counted; never af
 - **Not on the list at all.** When the scientist's answer is a real value the closed list lacks, say so
   and record no decision. If no allowed value fits and they keep their own word, run
   `decide … --value "<their exact word>" --as-said` once: it records no decision but keeps their word as
-  a vocabulary request, in the `--by` name, with the field, runs and where it was said. Never pass a word
+  a vocabulary request, in the `--by` name, with the field, runs and where it was said. The command exits 0 and its reply starts with that (`vocabulary_request_kept`, `decision_recorded: false`). Never pass a word
   they did not say: without `--as-said` an off-list value keeps nothing (the reply says "if this is the
   scientist's own word, repeat with --as-said"), so a value you try while working out a mapping is never
   put in their name. `template import --apply` keeps their own off-list cells the same way, and `template
@@ -293,7 +294,7 @@ group is confirmed the minimum names it in `answer_first` (not counted; never af
   (which hold `surface_oxidation` from before it); the request answered since (vr-…, from their own sheet, 139
   run(s)) is not part of this draft"). Say that sentence; never the answered request's runs as the draft's.
   A term with a space is not drafted (the `--out` summary counts them: "N term(s) need a one-word form (ask)"); its `ask` says what to ask for (one word, e.g. `cathodic_corrosion`):
-  record their one-word answer again, never rewrite it yourself. They write each description themselves on
+  record their one-word answer again, never rewrite it yourself. Once the one-word form is kept too, the spaced request is answered (`one_word_form_given`) and no longer counted. They write each description themselves on
   the Schema Proposals page (Propose a Change → Load drafts from a local import), never in the file and
   never by you. Nothing is sent until they save a proposal; saving one sends the term, its counts and
   its file-name citations to the ISAAC server that page uses (the hosted server when they use the

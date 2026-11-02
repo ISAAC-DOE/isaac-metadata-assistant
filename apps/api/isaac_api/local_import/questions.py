@@ -1159,6 +1159,8 @@ def consolidate(bundle: Mapping, *, compositions_out: dict | None = None, includ
                 "scope": scope,
                 "target_field_path": path,
                 "text": (f"The sources disagree ({cf['kind']}{', ' + str(cf['subject']) if cf['subject'] else ''}). "
+                         # r5f M7: a macro-versus-file-name set-point conflict says what it found (names, run, time slot)
+                         + (f"{cf['explanation']} " if cf["kind"] == B.MACRO_SETPOINT_CONFLICT_KIND and cf.get("explanation") else "")
                          + answer["text"] + _asked_again_text(again, {path: enum} if path else {})),
                 "applies_to": applies,
                 "targets": [{"kind": "conflict", "id": cf["conflict_id"]}],
@@ -3286,13 +3288,21 @@ def minimum_answers_for_one_group(payload: Mapping, bundle: Mapping, scope: str 
             # never "approve its processing result": with no output file `decide` refuses that approval, and without a
             # normalised spectrum it would supply no series. The real steps are named instead.
             pid = curve["result_id"]
+            from .mutations import reprocess_cannot_help
+
+            no_retry = reprocess_cannot_help(curve["reasons"])  # r5f L1: its scans share too few points: re-running adds none
             hard.append(f"its processing result {pid} has no curve ("
                         + ("no output file" if curve["no_output_file"] else "no normalised spectrum")
                         + f"; QC {curve['verdict'] or 'not run'}{': ' + ', '.join(curve['reasons']) if curve['reasons'] else ''}), "
-                        "so there is nothing to approve: reject the result or mark it needs_changes "
-                        f'(`isaac bundle decide <bundle_dir> --target {pid} --decision reject|needs_changes --by "<your name>"`) '
-                        "and re-run `isaac process`, or reject the group if it is not a measurement "
-                        f'(`isaac bundle decide <bundle_dir> --target {gid} --decision reject --by "<your name>"`)')
+                        "so there is nothing to approve: "
+                        + ("reject the result "
+                           f'(`isaac bundle decide <bundle_dir> --target {pid} --decision reject --by "<your name>"`); '
+                           "processing again cannot add points the scans do not have; or reject the group if it is not a measurement "
+                           if no_retry else
+                           "reject the result or mark it needs_changes "
+                           f'(`isaac bundle decide <bundle_dir> --target {pid} --decision reject|needs_changes --by "<your name>"`) '
+                           "and re-run `isaac process`, or reject the group if it is not a measurement ")
+                        + f'(`isaac bundle decide <bundle_dir> --target {gid} --decision reject --by "<your name>"`)')
         elif curve["state"] == "unusable":
             # c8-r: never "approve its processing result": `decide` refuses to approve a curve that is not a usable
             # spectrum (and an older approval of one composes nothing). The steps records.processing_remedy names.
