@@ -622,6 +622,11 @@ export function useRecordSession(
     setLatestRun(null);
     // Same argument again, for the notes-floored summary.
     setLatestNotes(null);
+    // And for the assistant's context inputs: the screen is not remounted when `/record/:id`
+    // changes, so without this the next record's detail settled against the LAST record's open
+    // questions and evidence ("the next missing field" named a question from the record left).
+    setExtras(null);
+    setContextDegraded(false);
   }, [id]);
 
   // Fetch the AgentContext inputs (pending + evidence classification). Keyed on

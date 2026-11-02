@@ -37,7 +37,7 @@
 .chip-ev-supported    { color: var(--verified-text); background: var(--verified-bg); border-color: var(--verified-border); }
 .chip-ev-candidate    { color: var(--inferred-text);  background: var(--inferred-bg);  border-color: var(--inferred-border);  border-style: dashed; }
 .chip-ev-insufficient { color: var(--needsyou-text);  background: var(--needsyou-bg);  border-color: var(--needsyou-border); }
-.chip-ev-conflicting  { color: var(--fail-text);      background: var(--fail-bg);      border-color: var(--fail-border);      font-weight: 600; }
+.chip-ev-conflicting  { color: var(--advisory-text);  background: var(--advisory-bg);  border-color: var(--advisory-border);  font-weight: 600; } /* never the verdict red: an evidence state, not a FAIL (design-system.md) */
 .chip-ev-unknown      { color: var(--missing-text);   background: var(--missing-bg);   border-color: var(--missing-border);   border-style: dashed; }
 /* `unreadable` is a READ FAILURE, not a finding about the record: it borrows the
  * needs-you palette (a human has to look) rather than the missing palette that
@@ -46,9 +46,9 @@
 .chip-ev-unreadable   { color: var(--needsyou-text);  background: var(--needsyou-bg);  border-color: var(--needsyou-border);  border-style: dashed; }
 
 /* Reconciliation axis (P31.3). An absent value is DASHED so it never reads as an
- * established fact; a conflict borrows the fail palette (needs human review). */
+ * established fact; a conflict wears the advisory palette (needs human review), never the verdict red: an evidence state, not a FAIL. */
 .chip-recon-match    { color: var(--verified-text); background: var(--verified-bg); border-color: var(--verified-border); }
-.chip-recon-conflict { color: var(--fail-text);      background: var(--fail-bg);      border-color: var(--fail-border);      font-weight: 600; }
+.chip-recon-conflict { color: var(--advisory-text);  background: var(--advisory-bg);  border-color: var(--advisory-border);  font-weight: 600; }
 .chip-recon-absent   { color: var(--missing-text);   background: var(--missing-bg);   border-color: var(--missing-border);   border-style: dashed; }
 
 /* ---- Unified provenance: two dimensions, and only ONE of them is coloured ----
@@ -129,6 +129,14 @@
   font-size: 11.5px;
   color: var(--text-tertiary);
   margin-top: 10px;
+}
+/* At a phone width the Re-Validate button beside the verdict left its sentence one word a line: the
+   button takes its own row under the verdict, and the card and its tile give back some width. The
+   verdict word itself keeps its size, so it stays the strongest signal on the screen. */
+@media (max-width: 640px) {
+  .verdict { gap: 14px; padding: 18px 16px; }
+  .verdict-tile { width: 40px; height: 40px; }
+  .verdict-head { flex-wrap: wrap; }
 }
 
 /* Schema Errors card (FAIL) */

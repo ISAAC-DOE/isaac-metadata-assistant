@@ -451,10 +451,9 @@ function RecordDescriptionEditor({ experimentId }: { experimentId: string }) {
   if (load.status === 'loading') return <LoadingPanel label="Loading the record's description…" />;
   if (load.status === 'error') return <BackendDown error={load.error} onRetry={reload} />;
 
-  const summaryEntries = [
-    ...Object.entries(localErrors),
-    ...Object.entries(perKeyErrors),
-  ];
+  // One entry per field: a field the server refused and that now also fails a local check is
+  // listed once, with the local message (the same precedence as the field's own error below).
+  const summaryEntries = Object.entries({ ...perKeyErrors, ...localErrors });
 
   return (
     <form className="rdesc" onSubmit={onSubmit} aria-describedby={statusId}>

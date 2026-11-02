@@ -326,16 +326,6 @@
   border-top: 0;
 }
 
-/* The contract's own backtick markup, rendered as code rather than printed. */
-.api-inline-code {
-  font-size: inherit;
-  padding: 0 var(--space-2xs);
-  border-radius: var(--radius-token);
-  background: var(--border-faint);
-  color: var(--text-strong);
-  overflow-wrap: anywhere;
-}
-
 /* The Auth column's info toggle — the legend it opens is the flag's meaning. */
 .api-browser-info {
   display: inline-flex;

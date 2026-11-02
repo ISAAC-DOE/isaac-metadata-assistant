@@ -1,5 +1,5 @@
 import './validate-review.css';
-import { useId, useState } from 'react';
+import { useId, useRef, useState } from 'react';
 import { BlockerItems } from './BlockerItems';
 import { Disclosure } from './Disclosure';
 import { HelpTip } from './HelpTip';
@@ -287,7 +287,11 @@ export function ValidateReview({ experimentId }: { experimentId: string }) {
   const [attention, setAttention] = useState<Attention>({ status: 'idle' });
   const [details, setDetails] = useState<Record<string, Detail>>({});
 
+  // A review's generation: Check Again starts a new one, and an answer from an older one (its summary,
+  // its attention block, or a per-run detail still loading) is dropped rather than shown under the new.
+  const generation = useRef(0);
   const runReview = () => {
+    const mine = ++generation.current;
     setReview({ status: 'checking' });
     setAttention({ status: 'checking' });
     // The per-run details belong to the review that produced them. A fresh review
@@ -295,30 +299,41 @@ export function ValidateReview({ experimentId }: { experimentId: string }) {
     // findings from a previous revision under a run whose summary has moved.
     setDetails({});
     Promise.all([api.validate(experimentId), api.getWarnings(experimentId)])
-      .then(([validate, warnings]) => setReview({ status: 'data', validate, warnings }))
-      .catch((err: unknown) =>
+      .then(([validate, warnings]) => {
+        if (mine === generation.current) setReview({ status: 'data', validate, warnings });
+      })
+      .catch((err: unknown) => {
+        if (mine !== generation.current) return;
         setReview({
           status: 'error',
           message:
             err instanceof Error
               ? err.message
               : 'This record could not be checked. Nothing was changed.',
-        }),
-      );
+        });
+      });
     api
       .getEvidenceClassification(experimentId)
-      .then((data) => setAttention({ status: 'data', data }))
+      .then((data) => {
+        if (mine === generation.current) setAttention({ status: 'data', data });
+      })
       // The message is fixed rather than the server's, because this block asserts
       // nothing about validity and an error string here would read as a finding.
-      .catch(() => setAttention({ status: 'error' }));
+      .catch(() => {
+        if (mine === generation.current) setAttention({ status: 'error' });
+      });
   };
 
   const runDetail = (runId: string) => {
+    const mine = generation.current;
     setDetails((prev) => ({ ...prev, [runId]: { status: 'checking' } }));
     api
       .checkRun(experimentId, runId)
-      .then((data) => setDetails((prev) => ({ ...prev, [runId]: { status: 'data', data } })))
-      .catch((err: unknown) =>
+      .then((data) => {
+        if (mine === generation.current) setDetails((prev) => ({ ...prev, [runId]: { status: 'data', data } }));
+      })
+      .catch((err: unknown) => {
+        if (mine !== generation.current) return;
         setDetails((prev) => ({
           ...prev,
           [runId]: {
@@ -326,8 +341,8 @@ export function ValidateReview({ experimentId }: { experimentId: string }) {
             message:
               err instanceof Error ? err.message : 'This run could not be checked in detail.',
           },
-        })),
-      );
+        }));
+      });
   };
 
   const units = review.status === 'data' ? reviewUnits(review.validate) : [];

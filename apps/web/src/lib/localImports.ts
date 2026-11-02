@@ -687,6 +687,8 @@ export const LOCAL_IMPORTS_COPY = {
   yourNameHint:
     'Recorded with every answer, exactly as the command line’s `--by`. This build does not verify who you are.',
   nameNeeded: 'Type your name before answering: every answer records who gave it.',
+  backToQuestion: 'Back to the question',
+  jumpLabel: 'Jump to',
   settlesManyTitle: 'Answer Once for the Whole Beamtime',
   settlesManyLead:
     'Each of these is asked once and settles many records. Check the groups it applies to before answering for all of them.',
@@ -993,7 +995,8 @@ export function notCountedText(c: LocalProgress['questions'] | LocalQuestionCoun
 
 /** The open-question counts in one line, every tier named, so they add up to the total with `notCountedText`. */
 export function countsText(c: Partial<LocalQuestionCounts>): string {
-  return `${c.blocking ?? 0} blocking export, ${c.conflicts_affecting_a_record ?? 0} conflicts affecting a record, ${c.optional ?? 0} optional`;
+  const conflicts = c.conflicts_affecting_a_record ?? 0;
+  return `${c.blocking ?? 0} blocking export, ${conflicts} ${conflicts === 1 ? 'conflict' : 'conflicts'} affecting a record, ${c.optional ?? 0} optional`;
 }
 
 /** "Deferred by {by}, {date}" for a deferred question (the date of the latest defer, as recorded in UTC). */

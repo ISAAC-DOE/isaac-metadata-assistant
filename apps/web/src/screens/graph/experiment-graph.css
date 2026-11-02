@@ -787,6 +787,12 @@
     gap: 12px;
   }
 
+  /* In a column the search's `flex: 1 1 260px` basis became a 260px HEIGHT: ~220px of blank space
+     between the search box and the zoom buttons. */
+  .expgraph-search {
+    flex: 0 0 auto;
+  }
+
   .expgraph-buttons {
     align-self: stretch;
   }

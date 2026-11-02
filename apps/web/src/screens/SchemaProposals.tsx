@@ -1,4 +1,6 @@
 import './screens.css';
+// The shared `.chip` shape first, so this screen's tone modifiers (and their borders) always come after it.
+import '../components/signals.css';
 import './schema-proposals.css';
 import {
   useCallback,
@@ -17,6 +19,7 @@ import { TopBar } from '../components/TopBar';
 import { LeftNav } from '../components/LeftNav';
 import { BackendDown, LoadingPanel } from '../components/FetchStates';
 import { Copy, Download } from '../components/icons';
+import { InlineCode } from '../components/InlineCode';
 import { LABELS, formatWhen } from '../lib/labels';
 import { api, isHostedBuild } from '../lib/api';
 import { useFetch } from '../lib/useFetch';
@@ -514,6 +517,8 @@ function ProposePanel({
     example: useId(),
     scope: useId(),
     migration: useId(),
+    saveHint: useId(),
+    filing: useId(),
   };
   const limits = vocabulary.limits;
   const sections = vocabulary.proposal_sections;
@@ -534,6 +539,14 @@ function ProposePanel({
     missing: (keyof ApiSchemaProposalGate0)[];
   } | null>(null);
   const descriptionRef = useRef<HTMLTextAreaElement>(null);
+  const filingRef = useRef<HTMLDivElement>(null);
+  /**
+   * The drafts of the loaded file a proposal has been saved from (by `key`), so their rows say so and
+   * cannot be filed twice. They belong to that file: the loader clears them when another file is read.
+   */
+  const [savedDraftKeys, setSavedDraftKeys] = useState<ReadonlySet<string>>(() => new Set());
+  /** "Stop Using This Draft" hands focus back to that draft's restored button; a counter so asking twice re-applies. */
+  const [returnFocus, setReturnFocus] = useState<{ draft: LocalTermDraft; nonce: number } | null>(null);
   // A new field (schema change request).
   const [parentPath, setParentPath] = useState<string | null>(null);
   const [fieldName, setFieldName] = useState('');
@@ -610,6 +623,16 @@ function ProposePanel({
    * and the reviewer notes are the file's counts and citations. Nothing is sent: the scientist
    * writes the description and saves, or does not.
    */
+  /** Stop using the draft; focus goes back to its row's restored button, or to the description box if that row is gone. */
+  function stopUsingDraft() {
+    if (localDraft) setReturnFocus((prev) => ({ draft: localDraft.draft, nonce: (prev?.nonce ?? 0) + 1 }));
+    setLocalDraft(null);
+    window.setTimeout(() => {
+      const active = document.activeElement;
+      if (active === null || active === document.body) descriptionRef.current?.focus();
+    }, 0);
+  }
+
   function openLocalDraft(draft: LocalTermDraft, bundleId: string | null) {
     const section = portalSectionFor(vocabulary, draft.category);
     if (section === null) return;
@@ -623,14 +646,24 @@ function ProposePanel({
     setGate0({ ...filled.gate0 });
     setFrom(null);
     setLocalDraft({ draft, bundleId, missing: filled.missing });
+    setReturnFocus(null);
     setErrors([]);
     setTopMessage(null);
     setSaved(null);
-    // The one box left to the scientist gets focus, after the form has re-rendered.
-    window.setTimeout(() => descriptionRef.current?.focus(), 0);
+    // After the form has re-rendered: the note saying what is being proposed is scrolled to the top of the
+    // view, and the one box left to the scientist gets focus without scrolling that note away again. The box
+    // is described by the note, so a screen reader hears it too.
+    window.setTimeout(() => {
+      filingRef.current?.scrollIntoView?.({ block: 'start' });
+      descriptionRef.current?.focus({ preventScroll: true });
+    }, 0);
   }
 
   const fromLocalDraft = localDraft !== null && type === 'add_term';
+  /** The portal section the draft's list is in, by its label, for the "Proposing:" line. */
+  const draftSectionLabel = localDraft
+    ? (sections.find((s) => s.id === portalSectionFor(vocabulary, localDraft.draft.category))?.label ?? null)
+    : null;
 
   const errorFor = (field: string) => errors.find((e) => e.field === field)?.message;
   const changeFields = ['change', ...['kind', 'parent_path', 'field_name', 'value_type', 'unit', 'required', 'example', 'scope', 'migration'].map((k) => `change.${k}`)];
@@ -658,6 +691,8 @@ function ProposePanel({
       if (text) note[g.key] = text;
     }
     let input: SchemaProposalInput;
+    /** The draft this save files, when it carries the draft's `source`. */
+    let filedDraftKey: string | null = null;
     if (isField) {
       // EVERY CHOICE IS THE READER'S. An unchosen type or "required?" is sent as missing, so the
       // server's own sentence asks for it; nothing is defaulted here.
@@ -687,11 +722,18 @@ function ProposePanel({
         ...(Object.keys(note).length > 0 ? { gate0: note } : {}),
       };
       const source = fromLocalDraft && localDraft ? sourceFromDraft(localDraft.draft, localDraft.bundleId) : null;
-      if (source) input.source = source;
+      if (source) {
+        input.source = source;
+        filedDraftKey = localDraft?.draft.key ?? null;
+      }
     }
     try {
       const response = await api.createSchemaProposal(input);
       setSaved(response);
+      if (filedDraftKey !== null) {
+        const key = filedDraftKey;
+        setSavedDraftKeys((prev) => new Set(prev).add(key));
+      }
       setTerm('');
       setDescription('');
       setGate0({});
@@ -752,7 +794,14 @@ function ProposePanel({
         </div>
       )}
 
-      <LocalDraftsLoader vocabulary={vocabulary} onUse={openLocalDraft} />
+      <LocalDraftsLoader
+        vocabulary={vocabulary}
+        current={fromLocalDraft && localDraft ? localDraft.draft : null}
+        savedKeys={savedDraftKeys}
+        returnFocus={returnFocus}
+        onRead={() => setSavedDraftKeys(new Set())}
+        onUse={openLocalDraft}
+      />
 
       {(topMessage || elsewhere.length > 0) && (
         <div className="sp-error-summary" role="alert" tabIndex={-1} ref={summaryRef}>
@@ -774,13 +823,31 @@ function ProposePanel({
         </p>
       )}
 
+      {/*
+        WHAT IS BEING PROPOSED, said before the form: the one list and the one word, what the drafts
+        file filled in, and the one thing it cannot (the description, which is the scientist's own).
+      */}
       {fromLocalDraft && localDraft && (
-        <div className="sp-notice" role="note">
+        <div className="sp-notice sp-filing" role="note" id={ids.filing} ref={filingRef}>
+          <p className="sp-filing-title" id={`${ids.filing}-what`}>
+            {LABELS.draftFilingLead} add <code className="sp-term">{localDraft.draft.term}</code> to{' '}
+            <code className="sp-term">{localDraft.draft.category}</code>
+            {draftSectionLabel ? ` (${draftSectionLabel})` : ''}
+          </p>
           <p>
-            Opened on a draft from a local import: the list <code className="sp-term">{localDraft.draft.category}</code>{' '}
-            and the term <code className="sp-term">{localDraft.draft.term}</code> as the drafts file holds them. The
-            description is empty: write what the term means and where it is used, in your own words. The reviewer
-            notes below come from the file&apos;s counts and citations; change them if they are wrong.
+            The drafts file from the local import
+            {localDraft.bundleId ? (
+              <>
+                {' '}
+                <code className="sp-term">{localDraft.bundleId}</code>
+              </>
+            ) : null}{' '}
+            filled in the list, the term, and the reviewer notes below (from its counts and citations). Change the
+            notes if they are wrong.
+          </p>
+          <p id={`${ids.filing}-left`}>
+            The description is left to you: write what the term means and where it is used, in your own words, at
+            least {limits.description_min} characters.
           </p>
           {localDraft.missing.length > 0 && (
             <p>
@@ -790,7 +857,7 @@ function ProposePanel({
             </p>
           )}
           <div className="sp-actions">
-            <button type="button" className="btn btn-secondary" onClick={() => setLocalDraft(null)}>
+            <button type="button" className="btn btn-secondary" onClick={stopUsingDraft}>
               Stop Using This Draft
             </button>
           </div>
@@ -1115,7 +1182,7 @@ function ProposePanel({
             onChange={(e) => setDescription(e.target.value)}
             aria-required="true"
             aria-invalid={errorFor('description') ? true : undefined}
-            aria-describedby={`${ids.description}-hint${errorFor('description') ? ` ${ids.description}-err` : ''}`}
+            aria-describedby={`${ids.description}-hint${fromLocalDraft ? ` ${ids.filing}-what ${ids.filing}-left` : ''}${errorFor('description') ? ` ${ids.description}-err` : ''}`}
           />
           <p className="sp-hint" id={`${ids.description}-hint`}>
             At least {limits.description_min} characters, at most {limits.description_max}. {descriptionCount}{' '}
@@ -1151,7 +1218,9 @@ function ProposePanel({
                 <textarea
                   id={fieldId}
                   className="input sp-textarea"
-                  rows={g.rows}
+                  // tall enough for what a draft filled in (one citation a line, and a line's room for one that
+                  // wraps), up to 8 lines; then it scrolls
+                  rows={Math.min(8, Math.max(g.rows, (gate0[g.key] ?? '').split('\n').length + 1))}
                   value={gate0[g.key] ?? ''}
                   onChange={(e) => setGate0((prev) => ({ ...prev, [g.key]: e.target.value }))}
                   aria-required={requiredHere ? true : undefined}
@@ -1187,11 +1256,23 @@ function ProposePanel({
           )}
         </details>
 
-        <div className="sp-actions">
-          <button type="submit" className="btn btn-primary" disabled={submitting}>
-            {submitting ? 'Saving…' : 'Save Proposal'}
-          </button>
-          <span className="sp-hint">Saving keeps a draft here. It does not send it to anyone.</span>
+        {/* On a local draft, what Save does is said on its own line directly above it: one click, no second step. */}
+        <div className="sp-submit">
+          {fromLocalDraft && (
+            <p className="sp-hint" id={ids.saveHint}>
+              Save keeps this proposal as a draft on this server. It does not send it to the ISAAC portal.
+            </p>
+          )}
+          <div className="sp-actions">
+            <button type="submit" className="btn btn-primary" disabled={submitting} aria-describedby={ids.saveHint}>
+              {submitting ? 'Saving…' : 'Save Proposal'}
+            </button>
+            {!fromLocalDraft && (
+              <span className="sp-hint" id={ids.saveHint}>
+                Saving keeps a draft here. It does not send it to anyone.
+              </span>
+            )}
+          </div>
         </div>
       </form>
     </section>
@@ -1237,18 +1318,104 @@ function whyNotFileable(vocabulary: ApiSchemaVocabulary, d: LocalTermDraft): str
   return null;
 }
 
+/** Which group a draft is listed under. */
+type DraftGroup = 'needs' | 'saved' | 'refused' | 'settled';
+
+const DRAFT_GROUPS: { id: DraftGroup; title: string; lead: string }[] = [
+  {
+    id: 'needs',
+    title: 'Needs Your Description',
+    lead: 'The file drafted these. The one thing left to you is a description, in your own words.',
+  },
+  {
+    id: 'saved',
+    title: 'Saved From This File',
+    lead: 'Saved as drafts on this server, so they are not offered again. They are listed under Proposals.',
+  },
+  {
+    id: 'refused',
+    title: 'Cannot Be Proposed From Here',
+    lead: 'The file or this server would refuse these. The reason is on each.',
+  },
+  {
+    id: 'settled',
+    title: 'Nothing Needed From You',
+    lead: 'Answered since it was asked for, or no longer found in the bundle. Kept here for the record.',
+  },
+];
+
+interface DraftRow {
+  draft: LocalTermDraft;
+  whyNot: string | null;
+}
+
+/*
+ * THE GROUP IS DECIDED BY `whyNotFileable` AND NOTHING ELSE, plus what was saved here: a draft it
+ * accepts needs the scientist's description, until a proposal is saved from it; a refused one the
+ * scientist has already settled (answered since, or no longer in the bundle) needs nothing; every
+ * other refusal is the file's or this server's.
+ */
+function groupDrafts(
+  vocabulary: ApiSchemaVocabulary,
+  drafts: LocalTermDraft[],
+  savedKeys: ReadonlySet<string>,
+): Record<DraftGroup, DraftRow[]> {
+  const out: Record<DraftGroup, DraftRow[]> = { needs: [], saved: [], refused: [], settled: [] };
+  for (const draft of drafts) {
+    const whyNot = whyNotFileable(vocabulary, draft);
+    const group: DraftGroup =
+      whyNot === null
+        ? savedKeys.has(draft.key)
+          ? 'saved'
+          : 'needs'
+        : draft.carriedOver || draft.answered
+          ? 'settled'
+          : 'refused';
+    out[group].push({ draft, whyNot });
+  }
+  return out;
+}
+
+/**
+ * "2 need your description · 1 saved as a draft · 1 cannot be proposed. Reading the file sent nothing." — the
+ * counts after "From …:". Zero counts are left out. The closing sentence is about READING the file, so it stays
+ * true after a proposal is saved from it.
+ */
+function draftsCounts(groups: Record<DraftGroup, DraftRow[]>): string {
+  const n = (g: DraftGroup) => groups[g].length;
+  const verb = (k: number) => (k === 1 ? 'needs' : 'need');
+  const parts = [
+    n('needs') > 0 ? `${n('needs')} ${verb(n('needs'))} your description` : null,
+    n('saved') > 0 ? `${n('saved')} saved as ${n('saved') === 1 ? 'a draft' : 'drafts'}` : null,
+    n('refused') > 0 ? `${n('refused')} cannot be proposed` : null,
+    n('settled') > 0 ? `${n('settled')} ${verb(n('settled'))} nothing from you` : null,
+  ].filter((p): p is string => p !== null);
+  return `${parts.join(' · ')}. Reading the file sent nothing.`;
+}
+
 function LocalDraftsLoader({
   vocabulary,
+  current,
+  savedKeys,
+  returnFocus,
+  onRead,
   onUse,
 }: {
   vocabulary: ApiSchemaVocabulary;
+  /** The draft the form below is open on, if any: its row is marked. Matched by identity, so a file read again marks nothing. */
+  current: LocalTermDraft | null;
+  /** Keys of this file's drafts a proposal was saved from. */
+  savedKeys: ReadonlySet<string>;
+  /** The draft whose button should take focus back (after "Stop Using This Draft"). */
+  returnFocus: { draft: LocalTermDraft; nonce: number } | null;
+  /** Another file is being read: what was saved from the last one no longer applies. */
+  onRead: () => void;
   onUse: (draft: LocalTermDraft, bundleId: string | null) => void;
 }) {
-  const ids = { heading: useId(), input: useId(), hint: useId() };
+  const ids = { heading: useId(), input: useId(), hint: useId(), group: useId() };
   const [fileName, setFileName] = useState<string | null>(null);
   const [loaded, setLoaded] = useState<LocalTermDraftsFile | null>(null);
   const [problem, setProblem] = useState<string | null>(null);
-  const [announce, setAnnounce] = useState('');
 
   async function onFileChange(e: ChangeEvent<HTMLInputElement>) {
     const file = e.target.files?.[0];
@@ -1257,7 +1424,7 @@ function LocalDraftsLoader({
     setFileName(file.name);
     setLoaded(null);
     setProblem(null);
-    setAnnounce('');
+    onRead();
     if (file.size > TERM_DRAFTS_MAX_BYTES) {
       setProblem(`This file is ${Math.ceil(file.size / 1024)} KB, larger than a drafts file can be, so it was not read.`);
       return;
@@ -1275,14 +1442,29 @@ function LocalDraftsLoader({
       return;
     }
     setLoaded(parsed.file);
-    const can = parsed.file.drafts.filter((d) => whyNotFileable(vocabulary, d) === null).length;
-    const total = parsed.file.drafts.length;
-    setAnnounce(
-      total === 0
-        ? 'The drafts file lists no terms outside the vocabulary.'
-        : `Read ${total} ${total === 1 ? 'term' : 'terms'} from ${file.name}: ${can} can be proposed, ${total - can} cannot. Nothing was sent.`,
-    );
   }
+
+  const groups = useMemo(
+    () => (loaded ? groupDrafts(vocabulary, loaded.drafts, savedKeys) : null),
+    [loaded, vocabulary, savedKeys],
+  );
+  // The summary is worked out from the same groups the lists are drawn from, so its counts are the rows shown.
+  const summary =
+    !loaded || !groups ? null : loaded.drafts.length === 0 ? (
+      'The drafts file lists no terms outside the vocabulary.'
+    ) : (
+      <>
+        From{' '}
+        {loaded.bundleId ? (
+          <>
+            the local import <code className="sp-term">{loaded.bundleId}</code>
+          </>
+        ) : (
+          (fileName ?? 'the drafts file')
+        )}
+        : {draftsCounts(groups)}
+      </>
+    );
 
   return (
     <section className="sp-notice sp-drafts" aria-labelledby={ids.heading}>
@@ -1306,110 +1488,186 @@ function LocalDraftsLoader({
           {fileName ? ` Last chosen: ${fileName}.` : ''}
         </p>
       </div>
-      <p className="sr-only" role="status" aria-live="polite">
-        {announce}
+      {/* Always in the page, so the screen reader hears it fill; shown once there is something to say. */}
+      <p className={summary ? 'sp-drafts-summary' : 'sr-only'} role="status" aria-live="polite">
+        {summary}
       </p>
       {problem && (
         <p className="sp-field-error" role="alert">
           {problem}
         </p>
       )}
-      {loaded && loaded.drafts.length === 0 && <p>The drafts file lists no terms outside the vocabulary.</p>}
-      {loaded && loaded.drafts.length > 0 && (
-        <ul className="sp-list" aria-label="Drafts in the file">
-          {loaded.drafts.map((d) => (
-            <LocalDraftItem
-              key={d.key}
-              draft={d}
-              whyNot={whyNotFileable(vocabulary, d)}
-              onUse={() => onUse(d, loaded.bundleId)}
-            />
-          ))}
-        </ul>
-      )}
+      {loaded &&
+        groups &&
+        DRAFT_GROUPS.map((g) => {
+          const rows = groups[g.id];
+          if (rows.length === 0) return null;
+          const headingId = `${ids.group}-${g.id}`;
+          return (
+            <div className="sp-draft-group" key={g.id}>
+              <h3 className="sp-h3" id={headingId}>
+                {g.title} ({rows.length})
+              </h3>
+              <p className="sp-note">{g.lead}</p>
+              <ul className="sp-list" aria-labelledby={headingId}>
+                {rows.map(({ draft, whyNot }) => (
+                  <LocalDraftItem
+                    key={draft.key}
+                    draft={draft}
+                    whyNot={whyNot}
+                    group={g.id}
+                    isCurrent={draft === current}
+                    focusNonce={returnFocus?.draft === draft ? returnFocus.nonce : null}
+                    onUse={() => onUse(draft, loaded.bundleId)}
+                  />
+                ))}
+              </ul>
+            </div>
+          );
+        })}
     </section>
   );
 }
 
-function LocalDraftItem({ draft, whyNot, onUse }: { draft: LocalTermDraft; whyNot: string | null; onUse: () => void }) {
+function LocalDraftItem({
+  draft,
+  whyNot,
+  group,
+  isCurrent,
+  focusNonce,
+  onUse,
+}: {
+  draft: LocalTermDraft;
+  whyNot: string | null;
+  group: DraftGroup;
+  isCurrent: boolean;
+  /** Set (and changed) when this row's button should take focus back. */
+  focusNonce: number | null;
+  onUse: () => void;
+}) {
+  const buttonRef = useRef<HTMLButtonElement>(null);
+  useEffect(() => {
+    if (focusNonce !== null) buttonRef.current?.focus();
+  }, [focusNonce]);
   const counts = countsSentence(draft);
   const lists = draft.missingFrom.map((m) => (m === 'portal' ? "the portal's list" : m === 'schema' ? "the ISAAC schema's list" : m));
+  const citationsTotal = draft.citationsTotal ?? draft.citations.length;
+  const citationsShown = draft.citations.slice(0, 3);
+  const chip =
+    group === 'needs'
+      ? { label: LABELS.chipDraftNeedsDescription, tone: 'needsyou' }
+      : group === 'saved'
+        ? { label: LABELS.chipDraftSaved, tone: 'cover' }
+        : group === 'refused'
+          ? { label: LABELS.chipDraftCannotPropose, tone: 'missing' }
+          : { label: draft.carriedOver ? LABELS.chipDraftNoLongerInBundle : LABELS.chipDraftAnswered, tone: 'cover' };
   return (
-    <li className="sp-item">
-      <h3 className="sp-item-title">
-        <code className="sp-term">{draft.term}</code>
-      </h3>
-      <dl className="sp-why-list">
-        <dt>Field</dt>
-        <dd>
-          <code className="sp-term">{draft.fieldPath}</code>
-        </dd>
-        <dt>How often</dt>
-        <dd>
-          {counts ?? 'The file gives no count.'}
-          {draft.runs === null ? ' Runs: not stated in the file.' : ''}
-        </dd>
-        {lists.length > 0 && (
+    <li className={`sp-item sp-draft sp-draft-${group}`} aria-current={isCurrent ? 'true' : undefined}>
+      <div className="sp-draft-head">
+        <h4 className="sp-item-title sp-draft-term">
+          <code className="sp-term">{draft.term}</code>
+        </h4>
+        <span className={`chip sp-chip-${chip.tone}`}>{chip.label}</span>
+      </div>
+      {/* A refusal leads with its reason. A settled term (answered since, or no longer in the bundle) is not
+          refused for a fault, so it says calmly that there is nothing to propose, and its row is shorter. */}
+      {whyNot !== null && (
+        <p className="sp-item-text">
+          <strong>{group === 'settled' ? 'Nothing to propose.' : 'Cannot be proposed from here.'}</strong>{' '}
+          <InlineCode text={whyNot} />
+        </p>
+      )}
+      <dl className="sp-why-list sp-draft-facts">
+        {group !== 'settled' && (
           <>
-            <dt>Not on</dt>
-            <dd>{lists.join(' or ')}</dd>
+            <dt>What it would add</dt>
+            <dd>
+              Adds <code className="sp-term">{draft.term}</code> to <code className="sp-term">{draft.fieldPath}</code>
+              {lists.length > 0 ? `, which is not on ${lists.join(' or ')} today.` : '.'}
+            </dd>
           </>
         )}
-        <dt>Your words</dt>
+        <dt>Who asked, and why</dt>
         <dd>
+          <p className="sp-draft-line">
+            {/* a counts sentence mostly has no full stop of its own (a carried-over one does); one is added before
+                the runs sentence follows it, never a second */}
+            {counts ? (draft.runs === null && !counts.endsWith('.') ? `${counts}.` : counts) : 'The file gives no count.'}
+            {draft.runs === null ? ' Runs: not stated in the file.' : ''}
+          </p>
           {draft.scientistNotes.length > 0 ? (
-            <ul className="sp-notes">
-              {draft.scientistNotes.map((n, i) => (
-                <li key={i}>
-                  <span className="sp-quote">“{n.termAsSaid}”</span>
-                  {n.note !== null && (
-                    <>
-                      {', with the note '}
-                      <span className="sp-quote">“{n.note}”</span>
-                    </>
-                  )}
-                  {` (${noteAttribution(n)})`}
-                </li>
-              ))}
-            </ul>
+            <>
+              <p className="sp-draft-line sp-draft-sub" aria-hidden="true">
+                Your words:
+              </p>
+              <ul className="sp-notes" aria-label="Your words">
+                {draft.scientistNotes.map((n, i) => (
+                  <li key={i}>
+                    <span className="sp-quote">“{n.termAsSaid}”</span>
+                    {n.note !== null && (
+                      <>
+                        {', with the note '}
+                        <span className="sp-quote">“{n.note}”</span>
+                      </>
+                    )}
+                    {` (${noteAttribution(n)})`}
+                  </li>
+                ))}
+              </ul>
+            </>
           ) : (
-            'The file has none for this term.'
+            <p className="sp-draft-line">
+              <span className="sp-draft-sub">Your words:</span> The file has none for this term.
+            </p>
           )}
         </dd>
         {draft.answerNotes.length > 0 && (
           <>
-            <dt>Since it was asked for</dt>
-            <dd>{draft.answerNotes.join(' ')}</dd>
+            <dt className="sp-draft-since-label">{LABELS.draftFactSinceAsked}</dt>
+            <dd className="sp-draft-since">
+              <InlineCode text={draft.answerNotes.join(' ')} />
+            </dd>
           </>
         )}
-        <dt>Where it was read</dt>
-        <dd>
-          {draft.citations.length === 0
-            ? 'The file cites nothing for this term.'
-            : draft.citations.slice(0, 3).map(citationLine).join('\n') +
-              ((draft.citationsTotal ?? draft.citations.length) > 3
-                ? `\nand ${(draft.citationsTotal ?? draft.citations.length) - 3} more`
-                : '')}
-        </dd>
+        {draft.citations.length === 0 && (
+          <>
+            <dt>Where it was read</dt>
+            <dd>The file cites nothing for this term.</dd>
+          </>
+        )}
         {draft.problems.length > 0 && (draft.drafted || !draft.reason) && (
           <>
             <dt>Problems the file reports</dt>
-            <dd>{draft.problems.map((p) => p.message).join(' ')}</dd>
+            <dd>
+              <InlineCode text={draft.problems.map((p) => p.message).join(' ')} />
+            </dd>
           </>
         )}
       </dl>
-      {whyNot === null ? (
-        <div className="sp-actions">
-          <button type="button" className="btn btn-secondary" onClick={onUse}>
-            Propose This Term
-          </button>
-          <span className="sp-hint">Opens the form below with the description empty. Nothing is sent until you save.</span>
-        </div>
-      ) : (
-        <p className="sp-item-text">
-          <strong>Cannot be proposed from here.</strong> {whyNot}
-        </p>
+      {draft.citations.length > 0 && (
+        <details className="sp-draft-cites">
+          <summary>Where it was read ({citationsTotal})</summary>
+          <p className="sp-item-text">
+            {/* "and N more" counts what is not shown: the file's total less the lines above it */}
+            {citationsShown.map(citationLine).join('\n') +
+              (citationsTotal > citationsShown.length ? `\nand ${citationsTotal - citationsShown.length} more` : '')}
+          </p>
+        </details>
       )}
+      {/* A saved draft has its chip and no button: it cannot be filed twice. */}
+      {group === 'needs' &&
+        (isCurrent ? (
+          <div className="sp-actions">
+            <span className="chip sp-chip-current">{LABELS.chipDraftBeingProposed}</span>
+          </div>
+        ) : (
+          <div className="sp-actions">
+            <button type="button" className="btn btn-secondary" onClick={onUse} ref={buttonRef}>
+              Propose This Term
+            </button>
+            <span className="sp-hint">Opens the form below with the description empty. Nothing is sent until you save.</span>
+          </div>
+        ))}
     </li>
   );
 }
@@ -1437,6 +1695,8 @@ function ProposalsPanel({ version }: { version: number }) {
   const [changed, setChanged] = useState<Record<string, ApiSchemaProposal>>({});
 
   const firstData = first.status === 'data' ? first.data : null;
+  const firstRef = useRef(firstData);
+  firstRef.current = firstData;
   useEffect(() => {
     // A fresh first page replaces everything that was appended after the previous one.
     setMore([]);
@@ -1449,9 +1709,16 @@ function ProposalsPanel({ version }: { version: number }) {
     if (nextOffset === null || loadingMore) return;
     setLoadingMore(true);
     setMoreFailed(false);
+    const startedOn = firstRef.current;
     try {
       const page = await api.listSchemaProposals({ limit: PAGE_SIZE, offset: nextOffset });
-      setMore((prev) => [...prev, ...page.proposals]);
+      // A first page read again meanwhile (a save here) already replaced the list: this page belongs to the old one.
+      if (firstRef.current !== startedOn) return;
+      // Newest first by offset: a proposal saved elsewhere since shifts a row onto the next page; it is listed once.
+      setMore((prev) => {
+        const listed = new Set([...(startedOn?.proposals ?? []), ...prev].map((x) => x.id));
+        return [...prev, ...page.proposals.filter((x) => !listed.has(x.id))];
+      });
       setNextOffset(page.next_offset);
     } catch {
       setMoreFailed(true);

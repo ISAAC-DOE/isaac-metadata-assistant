@@ -37,7 +37,7 @@
  * this application cannot perform is the same class of falsehood as the three above.
  */
 import './revision-history.css';
-import { useCallback, useEffect, useId, useState } from 'react';
+import { useCallback, useEffect, useId, useRef, useState } from 'react';
 
 import { api, ApiError } from '../lib/api';
 import {
@@ -144,18 +144,21 @@ function RevisionHistoryBrowser({ experimentId }: { experimentId: string }) {
 
   useEffect(load, [load]);
 
+  // The last revision clicked is the one shown: an earlier click's answer arriving later is dropped.
+  const selectSeq = useRef(0);
   const select = (revisionNo: number) => {
+    const mine = ++selectSeq.current;
     setSelection({ status: 'loading', revisionNo });
     Promise.all([
       api.getRevision(experimentId, revisionNo),
       api.getRevisionDiff(experimentId, revisionNo),
     ])
-      .then(([detail, diff]) =>
-        setSelection({ status: 'data', revisionNo, detail, diff }),
-      )
-      .catch((err: unknown) =>
-        setSelection({ status: 'error', revisionNo, error: asApiError(err) }),
-      );
+      .then(([detail, diff]) => {
+        if (mine === selectSeq.current) setSelection({ status: 'data', revisionNo, detail, diff });
+      })
+      .catch((err: unknown) => {
+        if (mine === selectSeq.current) setSelection({ status: 'error', revisionNo, error: asApiError(err) });
+      });
   };
 
   if (list.status === 'loading') {

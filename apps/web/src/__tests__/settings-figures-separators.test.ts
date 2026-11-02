@@ -11,7 +11,7 @@
  *
  * The second selector means "the left-hand cell of the final row", and it only
  * means that while the grid has TWO columns. Inside
- * `@media (max-width: 640px)` the grid becomes `grid-template-columns: 1fr`,
+ * `@media (max-width: 640px)` the grid becomes one column (`minmax(0, 1fr)`),
  * and an odd-indexed second-to-last cell is then the second-to-last ROW --
  * so dropping its border deletes a separator from the middle of the list.
  *
@@ -51,7 +51,8 @@ function mediaBlocks(css: string): { condition: string; body: string }[] {
   return out;
 }
 
-const SINGLE_COLUMN = /\.settings-figures\s*\{[^}]*grid-template-columns:\s*1fr/;
+// `1fr`, or `minmax(0, 1fr)` (the same single column, with a 0 minimum so a long value cannot widen it)
+const SINGLE_COLUMN = /\.settings-figures\s*\{[^}]*grid-template-columns:\s*(?:1fr|minmax\(0,\s*1fr\))/;
 const NEIGHBOUR = /\.settings-figure:nth-last-child\(2\):nth-child\(odd\)\s*\{([^}]*)\}/;
 
 describe('the settings figure grid keeps its separators at every width', () => {

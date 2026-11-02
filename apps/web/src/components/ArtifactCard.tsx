@@ -56,7 +56,10 @@ export function ArtifactCard({ artifact, onView, onDownload, staleNote }: Artifa
         )}
       </div>
 
-      <div className="artifact-path">{artifact.path}</div>
+      {/* Scrolls sideways when the name is wider than the card (a phone): focusable so a keyboard can scroll it. */}
+      <div className="artifact-path" tabIndex={0} role="group" aria-label="File name">
+        {artifact.path}
+      </div>
       {staleNote && (
         <p className="artifact-card-stale">
           <TriangleAlert size={13} strokeWidth={2} aria-hidden="true" />

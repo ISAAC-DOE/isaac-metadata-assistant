@@ -509,9 +509,8 @@ export const SCHEMA_PROPOSALS_COPY = {
     'download the change-request document to share it with the standard\'s owners.',
   localImportTitle: 'Load drafts from a local import',
   localImportLead:
-    'Choose the drafts file the command below wrote on your computer. This page reads it in your ' +
-    'browser and does not upload it. Each term it lists is shown with its field, how often it was read and ' +
-    'what the file reports; a term the file could draft opens the form below, where you write its description.',
+    'A term proposal asks the standard’s owners to add one word to one list of allowed values; a local ' +
+    'import’s drafts file proposes the words that import found outside those lists.',
   localImportWhereLocal:
     'Nothing leaves your computer: this page talks to the ISAAC server running on this computer, and a ' +
     'proposal you save is kept there as a draft, not sent anywhere.',

@@ -1666,7 +1666,10 @@ export function TranscriptCapturePanel({
       setError(mutationFailureCopy(cause, FALLBACK.finalize));
       setRetryTag('finalize');
       setAnnouncement('');
-      if (cause instanceof ApiError && cause.status === 412) await loadRuns();
+      // The re-read after a 412 refreshes the held version; if it fails too, the refusal above is
+      // still the true statement on screen, and the failure must not escape as an unhandled rejection
+      // (both callers `void` this promise). `loadRunsAttempt` is not used: it would clear that refusal.
+      if (cause instanceof ApiError && cause.status === 412) await loadRuns().catch(() => undefined);
     } finally {
       // See `requestTranscript`'s `finally` for why this is guarded.
       // The commit this schedules renders the result card (it shows only once
