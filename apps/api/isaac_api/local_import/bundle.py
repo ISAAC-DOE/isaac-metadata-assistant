@@ -503,6 +503,104 @@ def all_scan_numbers_known(numbers: Sequence[int | None]) -> bool:
     return bool(numbers) and all(n is not None for n in numbers)
 
 
+# --- scans kept inside the SPEC file itself (r5d H1) ---------------------------------------------
+#
+# The engine takes a SPEC run's scans from its `<stem>_dir/` folder of one-scan exports. Some runs have
+# no such folder: their scans exist only as `#S` blocks of the SPEC acquisition file. Such a run's scans
+# are then those blocks: each energy scan (`gscan`, the command `bl15.spec.gscan_grid` reads as an energy
+# grid) with at least one data row and a `#S` number used once in the file, listed as
+# `{relative_path: <the SPEC file>, scan_index: <its #S number>}`. Every other block is named and left out.
+
+#: The rule that lists a SPEC file's own `#S` blocks as its run's scans.
+SPEC_FILE_SCANS_RULE_ID = "spec_file_energy_scans_v1"
+#: A `#S` command that is an energy scan (its first word).
+SPEC_ENERGY_SCAN_COMMANDS = frozenset({"gscan"})
+_SPEC_S_LINE = re.compile(r"^#S[ \t]+(\S+)[ \t]*(.*)$")
+#: The largest SPEC file read for its `#S` blocks (the engine's own ceiling for one source).
+MAX_SPEC_FILE_BYTES = 64 * 1024 * 1024
+
+
+def spec_file_scans(text: str) -> tuple[list[int], list[dict]]:
+    """``(scan numbers, left out)`` of one SPEC file's own ``#S`` blocks (:data:`SPEC_FILE_SCANS_RULE_ID`).
+
+    A scan is an energy scan (:data:`SPEC_ENERGY_SCAN_COMMANDS`) with at least one data row whose ``#S``
+    number appears once. Each other block is in ``left out`` as ``{scan, command, why}``."""
+    blocks: list[dict] = []
+    for line in text.lstrip("﻿").splitlines():
+        m = _SPEC_S_LINE.match(line)
+        if m:
+            blocks.append({"literal": m.group(1), "command": m.group(2).strip(), "rows": 0})
+        elif blocks and line.strip() and not line.startswith("#"):
+            blocks[-1]["rows"] += 1
+    numbers = [int(b["literal"]) if b["literal"].isdigit() else None for b in blocks]
+    seen: dict[int, int] = {}
+    for n in numbers:
+        if n is not None:
+            seen[n] = seen.get(n, 0) + 1
+    scans: list[int] = []
+    left_out: list[dict] = []
+    for b, n in zip(blocks, numbers):
+        word = b["command"].split()[0] if b["command"] else ""
+        if n is None:
+            why = "its #S number is not a number"
+        elif seen[n] > 1:
+            why = "its #S number appears more than once in the file, so it names no single scan"
+        elif word not in SPEC_ENERGY_SCAN_COMMANDS:
+            why = f"not an energy scan ({word or 'no command'})"
+        elif not b["rows"]:
+            why = "no data rows"
+        else:
+            scans.append(n)
+            continue
+        left_out.append({"scan": b["literal"], "command": word or None, "why": why})
+    return scans, left_out
+
+
+def _read_source_bytes(root: Path, rel: str, *, limit: int = MAX_SPEC_FILE_BYTES) -> bytes | None:
+    """The bytes of ``rel`` under the imported folder or ZIP ``root``, or ``None`` (absent, escaping, a link,
+    a nested ZIP member, too large). Never raises."""
+    import zipfile
+
+    p = PurePosixPath(str(rel or ""))
+    if not rel or p.is_absolute() or ".." in p.parts or "!/" in rel:
+        return None
+    try:
+        if root.is_dir():
+            full = root.joinpath(*p.parts)
+            if full.is_symlink() or not full.is_file() or not full.resolve().is_relative_to(root.resolve()):
+                return None
+            return None if full.stat().st_size > limit else full.read_bytes()
+        if zipfile.is_zipfile(root):
+            with zipfile.ZipFile(root) as zf:
+                info = zf.getinfo(rel)
+                return None if info.is_dir() or info.file_size > limit else zf.read(info)
+    except (OSError, KeyError, ValueError, zipfile.BadZipFile):
+        return None
+    return None
+
+
+def _spec_file_scan_rows(root: Path | None, rel: str | None, sha256: str | None) -> tuple[list[int], list[dict]] | None:
+    """:func:`spec_file_scans` of the SPEC file ``rel``, read under ``root`` and checked against the walk's
+    ``sha256``; ``None`` when it cannot be read as walked."""
+    if root is None or not rel:
+        return None
+    data = _read_source_bytes(root, rel)
+    if data is None or (sha256 and hashlib.sha256(data).hexdigest() != sha256):
+        return None
+    return spec_file_scans(data.decode("utf-8", errors="replace"))
+
+
+def spec_file_scans_statement(numbers: Sequence[int], left_out: Sequence[Mapping]) -> str:
+    """What :data:`SPEC_FILE_SCANS_RULE_ID` did for one run, in words."""
+    said = (f"No scan file was found in a `<stem>_dir` folder, so this run's scans are the {len(numbers)} energy "
+            f"scan(s) inside its SPEC file: #S {', '.join(str(n) for n in numbers)}.") if numbers else (
+            "No scan file was found in a `<stem>_dir` folder, and its SPEC file holds no energy scan with data rows.")
+    if left_out:
+        said += " Left out: " + "; ".join(f"#S {x['scan']} ({x['why']})" for x in left_out[:20]) + (
+            f"; and {len(left_out) - 20} more" if len(left_out) > 20 else "") + "."
+    return said
+
+
 def _selection_numbers(sel: str) -> set[int] | None:
     """``"7"`` -> {7}; ``"1-5"`` -> {1..5}; a reversed or oversized range -> ``None``."""
     a, _, b = sel.partition("-")
@@ -3069,6 +3167,137 @@ def _acquisition_system_section(engine_system: Mapping, runs_seen: int, columns:
     return system
 
 
+# --- the acquisition fingerprint: a beamline HINT from the SPEC headers (r5d H2) -------------------
+#
+# A folder's name is one hint about the beamline. The SPEC headers give another: the account the SPEC
+# session ran under (`#C spec  User = <account>`) and the detector column names (`#L`). Each known
+# fingerprint below was measured on SPEC files of that beamline (account and column names only). A match
+# is a HINT, never an answer: an account or a column name can move between beamlines. The build still
+# applies its one default acquisition system; when the fingerprint names another beamline, the bundle says
+# so plainly and the beamline question quotes both hints. The scientist says which beamline it was.
+
+ACQUISITION_FINGERPRINT_RULE_ID = "spec_acquisition_fingerprint_v1"
+#: ``(fingerprint_id, facility, beamline, SPEC accounts, detector columns, system_id of the build's system
+#: it describes or None)``. Accounts are compared case-folded, after any ``DOMAIN\\`` prefix.
+ACQUISITION_FINGERPRINTS: tuple[dict, ...] = (
+    {"fingerprint_id": "ssrl_bl152_spec", "facility": "SSRL", "beamline": "BL15-2", "branch_stated": True,
+     "spec_accounts": ("specadm", "fifteen"), "channels": ("vortDT", "vortDT2", "vortDT3", "vortDT4"),
+     "system_id": "ssrl_bl152_spec_vortex_channels"},
+    {"fingerprint_id": "ssrl_bl62_spec", "facility": "SSRL", "beamline": "BL6-2", "branch_stated": False,
+     "spec_accounts": ("b_user62",), "channels": ("FF1", "FF2", "FF3", "DTC_FF1", "DTC_FF2", "DTC_FF3"),
+     "system_id": None},
+)
+_SPEC_USER_LITERAL = re.compile(r"(?i)^\s*spec\s+user\s*=\s*(.*?)\s*$")
+_MAX_FINGERPRINT_ACCOUNTS = 20
+
+
+def spec_account(literal: Any) -> str | None:
+    """The account a ``#C spec  User = <account>`` literal names, as written (``None`` for another literal)."""
+    m = _SPEC_USER_LITERAL.match(str(literal or ""))
+    return (m.group(1) or None) if m else None
+
+
+def _account_key(account: str) -> str:
+    return account.replace("/", "\\").rsplit("\\", 1)[-1].strip().casefold()
+
+
+def acquisition_fingerprint(evidence_by_source: Mapping[str, Sequence]) -> dict | None:
+    """``experiment.acquisition_system.fingerprint``: the SPEC accounts and the known fingerprints' detector
+    columns the SPEC headers state, and each known fingerprint they match (:data:`ACQUISITION_FINGERPRINTS`).
+    ``None`` when no SPEC header states an account or a known column."""
+    accounts: dict[str, set[str]] = {}
+    channels: dict[str, set[str]] = {}
+    known = {ch for fp in ACQUISITION_FINGERPRINTS for ch in fp["channels"]}
+    for path, items in evidence_by_source.items():
+        for item in items:
+            concept = getattr(item, "concept", None)
+            if concept == "spec_user_string":
+                account = spec_account(getattr(item, "raw_literal", None))
+                if account:
+                    accounts.setdefault(account, set()).add(path)
+            elif concept == "detector_column" and getattr(item, "raw_literal", None) in known:
+                channels.setdefault(item.raw_literal, set()).add(path)
+    if not accounts and not channels:
+        return None
+    matches = []
+    for fp in ACQUISITION_FINGERPRINTS:
+        wanted = {a.casefold() for a in fp["spec_accounts"]}
+        seen_accounts = sorted(a for a in accounts if _account_key(a) in wanted)
+        seen_channels = [c for c in fp["channels"] if c in channels]
+        if not seen_accounts and not seen_channels:
+            continue
+        matches.append({
+            "fingerprint_id": fp["fingerprint_id"], "facility": fp["facility"], "beamline": fp["beamline"],
+            "branch_stated": fp["branch_stated"], "system_id": fp["system_id"],
+            "accounts_seen": seen_accounts, "account_files": len(set().union(*(accounts[a] for a in seen_accounts))),
+            "channels_seen": seen_channels, "channel_files": len(set().union(*(channels[c] for c in seen_channels))),
+        })
+    return {
+        "rule_id": ACQUISITION_FINGERPRINT_RULE_ID,
+        "spec_accounts": [{"literal": a, "files": len(p)} for a, p in sorted(accounts.items(), key=lambda kv: (-len(kv[1]), kv[0]))][
+            :_MAX_FINGERPRINT_ACCOUNTS],
+        "channels_seen": sorted(channels),
+        "matches": matches,
+    }
+
+
+def fingerprint_said(m: Mapping) -> str:
+    """One match in words: what the SPEC headers state, and whose data it was measured on."""
+    parts = []
+    if m.get("accounts_seen"):
+        parts.append("the SPEC account " + " / ".join(f"'{a}'" for a in m["accounts_seen"])
+                     + f" in {m.get('account_files')} file(s)")
+    if m.get("channels_seen"):
+        parts.append("the detector columns " + ", ".join(m["channels_seen"]) + f" in {m.get('channel_files')} file(s)")
+    where = f"{m['facility']} {m['beamline']} data" + ("" if m.get("branch_stated") else " (branch not stated)")
+    return f"{' and '.join(parts)}, as in {where}"
+
+
+def _fingerprint_section(fp: dict, system: Mapping, folder_label: str | None) -> dict:
+    """``fp`` with whether it agrees with the build's default system, and a plain statement."""
+    from .template import beamline_form  # local: template imports bundle
+
+    ids = {m["system_id"] for m in fp["matches"]}
+    fp["contradicts_build_default"] = bool(fp["matches"]) and system.get("system_id") not in ids
+    names = sorted({m["beamline"] for m in fp["matches"]})
+    said = "; ".join(fingerprint_said(m) for m in fp["matches"])
+    if not fp["matches"]:
+        fp["statement"] = ("The SPEC headers name no account or column of a known beamline fingerprint, so they give "
+                           "no beamline hint.")
+        return fp
+    statement = f"The SPEC headers state {said}."
+    if len(names) > 1:
+        statement += f" They match more than one beamline ({', '.join(names)})."
+    folder_beamline = _folder_beamline(folder_label)
+    if folder_beamline and not any(_beamline_agrees(m, folder_beamline) for m in fp["matches"]):
+        fp["disagrees_with_folder_name"] = {"folder_name": folder_label, "beamline": folder_beamline,
+                                            "compared_as": beamline_form(folder_beamline)}
+        statement += f" The folder's name '{folder_label}' names '{folder_beamline}': the two hints disagree."
+    if fp["contradicts_build_default"]:
+        statement += (" This build still reads every import with its default BL15-2 acquisition system and naming "
+                      "convention, which these headers do not match.")
+    fp["statement"] = statement + (" Both are hints, never answers: the scientist says which beamline it was "
+                                   "(the beamline question).")
+    return fp
+
+
+_FOLDER_BEAMLINE = re.compile(r"(?i)(?<![a-z0-9])BL[-.]?\d+(?:[-.]\d+)?[a-z]?(?![a-z0-9])")
+
+
+def _folder_beamline(label: str | None) -> str | None:
+    """The first ``BL…`` token of a folder's name (``SSRL_BL152_2019`` -> ``BL152``), else ``None``."""
+    m = _FOLDER_BEAMLINE.search(str(label or "").replace("_", " "))
+    return m.group(0) if m else None
+
+
+def _beamline_agrees(match: Mapping, value: str) -> bool:
+    """A fingerprint names ``value``'s beamline: the same one, or (its branch not stated) any branch of it."""
+    from .template import same_beamline, without_branch
+
+    return same_beamline(match["beamline"], value) or (
+        not match.get("branch_stated") and same_beamline(match["beamline"], without_branch(value)))
+
+
 def _naming_profile_shown(entry: dict, acquisition_system_seen: bool) -> dict:
     """A build-default binding scoped to the acquisition system shows its convention's name
     only when the acquisition system is shown (:func:`_acquisition_system_section`), and its
@@ -3140,11 +3369,14 @@ def build_bundle(
     isaac_commit: str | None = None,
     tool_version: str = "0.1.0",
     generic: Any = None,
+    source_root: str | Path | None = None,
 ) -> dict:
     """Build a v1 bundle from ONE :func:`historical_import.read_local_archive` result.
 
     Deterministic given its inputs (``bundle_id`` and ``created_utc`` aside). Raises
     :class:`BundleBoundsExceeded` rather than silently dropping runs or candidates.
+    ``source_root`` (the folder or ZIP read): a SPEC run with no scan file in a ``<stem>_dir`` folder
+    lists the energy scans inside its SPEC file (:data:`SPEC_FILE_SCANS_RULE_ID`); without it, it lists none.
     """
     from isaac_records.ids import new_record_id
 
@@ -3392,6 +3624,8 @@ def build_bundle(
 
     runs: list[dict] = []
     conflicts_of_run: dict[str, list] = {}
+    spec_root = Path(source_root) if source_root is not None else None
+    sha_of = {row["archive_path"]: row.get("content_sha256") for row in manifest}
     for ui, u in enumerate(reading.units):
         run_id = run_ids[ui]
         rel = rel_by_path.get(u.acquisition_path) or (rel_list[ui] if ui < len(rel_list) else {})
@@ -3411,6 +3645,31 @@ def build_bundle(
             for key in ("duplicate_copies", "suppressed_duplicate_acquisitions", "processed_products", "internal_declaration")
             if rel.get(key)
         }
+        scans = [
+            {
+                "source_id": sid_of.get(s.get("path")),
+                "relative_path": s.get("path"),
+                "scan_index": s.get("scan_index"),
+            }
+            for s in rel.get("scans") or ()
+            if isinstance(s, Mapping) and _safe_relative(s.get("path"))
+        ]
+        scan_count = u.scan_count
+        if (not scans and not scan_count and u.run_candidate and u.source_type == "spec_acquisition"
+                and _safe_relative(u.acquisition_path) and u.acquisition_path in sid_of):
+            # r5d H1: no `<stem>_dir` scan file: the energy scans inside the SPEC file are the run's scans
+            found = _spec_file_scan_rows(spec_root, u.acquisition_path, sha_of.get(u.acquisition_path))
+            if found is not None:
+                numbers, left_out = found
+                scans = [{"source_id": sid_of[u.acquisition_path], "relative_path": u.acquisition_path, "scan_index": n}
+                         for n in numbers]
+                scan_count = len(scans)
+                other["scans_in_spec_file"] = {
+                    "rule_id": SPEC_FILE_SCANS_RULE_ID,
+                    "scans": list(numbers),
+                    "left_out": left_out[:50],
+                    "statement": spec_file_scans_statement(numbers, left_out),
+                }
         runs.append(
             {
                 "run_id": run_id,
@@ -3427,16 +3686,8 @@ def build_bundle(
                 "group_token": u.group_token,
                 "sample_id": sample_of_stem.get(u.stem),
                 "acquisition_source_id": sid_of.get(u.acquisition_path),
-                "scans": [
-                    {
-                        "source_id": sid_of.get(s.get("path")),
-                        "relative_path": s.get("path"),
-                        "scan_index": s.get("scan_index"),
-                    }
-                    for s in rel.get("scans") or ()
-                    if isinstance(s, Mapping) and _safe_relative(s.get("path"))
-                ],
-                "scan_count": u.scan_count,
+                "scans": scans,
+                "scan_count": scan_count,
                 "declared_by": [
                     {
                         "macro_source_id": sid_of.get(d.get("macro_path")),
@@ -3925,6 +4176,9 @@ def build_bundle(
         {"candidates": out_candidates, "runs": runs}, dict(reading.acquisition_system)
     )
     acquisition_system = _acquisition_system_section(reading.acquisition_system, acq_runs, acq_columns)
+    fingerprint = acquisition_fingerprint(evidence_by_source)
+    if fingerprint is not None:  # r5d H2: the SPEC headers' own beamline hint, beside the folder's name
+        acquisition_system["fingerprint"] = _fingerprint_section(fingerprint, acquisition_system, reading.root_label)
 
     # -- naming profiles ---------------------------------------------------------------
     naming = [

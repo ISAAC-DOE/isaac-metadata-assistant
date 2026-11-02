@@ -881,6 +881,7 @@ def consolidate(bundle: Mapping, *, compositions_out: dict | None = None, includ
                                 and (reading := _sample_reading_text(sorted({group_of[r] for r in q["runs"] if r in group_of}),
                                                                      sample_written_of_group)) else "")
                              + (_field_hints_text(fh) if (fh := _optional_field_hints(bundle, q["fields"], ai_hints)) else "")
+                             + (S.beamline_hints_sentence(bundle) if "system.facility.beamline" in q["fields"] else "")
                              + _asked_again_text(q["asked_again"], {f: _eligible_values(f) for f in q["fields"]})
                              + _field_reach_text(field_reach)),
                     "asked_again": q["asked_again"],
@@ -1014,6 +1015,7 @@ def consolidate(bundle: Mapping, *, compositions_out: dict | None = None, includ
                           "note": "A PI or group name in a folder name is a HINT to ask about, never an answer."})
         if path.startswith("system.facility."):
             hints += S.facility_hints(bundle)
+            text += S.beamline_hints_sentence(bundle) if path == "system.facility.beamline" else ""  # r5d H2
         ai = ai_hints([t["id"] for t in q["targets"]], scopes=q["per_scope_targets"])
         # the text THIS question's own targets hold comes first (a value-less question is answered from it)
         hints = own_literals + ai + hints

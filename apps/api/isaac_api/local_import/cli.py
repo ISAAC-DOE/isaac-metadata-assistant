@@ -596,6 +596,7 @@ def cmd_import(args) -> int:
             isaac_commit=_isaac_commit(),
             tool_version=__version__,
             generic=generic,
+            source_root=source,
         )
     except B.BundleBoundsExceeded as exc:
         _err(f"Bounds exceeded: {exc}")

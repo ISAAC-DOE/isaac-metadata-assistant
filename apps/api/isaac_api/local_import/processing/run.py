@@ -1690,7 +1690,9 @@ def process_group(group: Mapping, ctx: _Ctx, athena_entry: Mapping | None = None
         if expected and sha256_file(path) != expected:
             entry["skip_reason"] = "source_hash_mismatch"
             continue
-        table = ctx.scan_reader(path)
+        # r5d H1: one scan of a file of several `#S` blocks is read at its own block
+        table = (read_scan_file(path, scan=s["scan_index"]) if ctx.scan_reader is read_scan_file
+                 and isinstance(s.get("scan_index"), int) else ctx.scan_reader(path))
         entry["format"] = table.format_id
         entry["reader_notes"] = table.notes
         if table.error:

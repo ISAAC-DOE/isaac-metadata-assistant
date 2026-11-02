@@ -140,8 +140,8 @@ If `<isaac> bundle group --help` fails, say "grouping is not in this build", ski
 5. Ask the scientist to **confirm, split or merge** each, in batches, with progress. A group that is
    not a result (alignment, a reference foil, a test scan) can be **left out** with `reject`; say it is
    never exported. Several accepted as shown: list each back, then one `--targets-file` confirm; never
-   include a group with a `cannot_export_reason`: say why (no curve can ever be made for it) and offer
-   `reject` or leaving it unconfirmed. A `--same-conditions` merge needs a yes to "same sample AND same
+   include a group with a `cannot_export_reason`: say why (`no_scans`: no scan in a `_dir` folder or its SPEC
+   file; else no ISAAC protocol covers that data yet) and offer `reject` or leaving it unconfirmed. A `--same-conditions` merge needs a yes to "same sample AND same
    conditions? the names differ in: …"; `pristine`/`cycled` are conditions, not labels. After a
    regroup, say any `merge_decisions_not_combined` in words and offer its `next_commands`.
 
@@ -219,7 +219,7 @@ empty; `ISAAC Suggestions` shows what each run's own files say; every `--out` of
 cell, clash, replaced or contradicted file reading, beamtime-wide cell and unread column, and add
 `--apply` only on their yes. Never fill the sheet for them; never import ISAAC's blank template. **They already filled ISAAC's template and say to use it:**
 `<isaac> bundle template adopt` (see "The scientist's own filled sheet" in the reference).
-They may also answer on the local-only *Local Imports* page (see the reference); run `bundle questions` again after.
+They may also answer on the local-only *Local Imports* page (see the reference); run `bundle questions` again after. If the beamline question says "The files' beamline hints disagree", read both hints back and ask; never pick one.
 
 ## Step 8 · Build and validate
 

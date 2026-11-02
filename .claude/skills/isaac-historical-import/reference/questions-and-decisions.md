@@ -349,8 +349,11 @@ and to use it (a sheet you found in the folder is not that; ask first). Never re
    `Disagreements` sheet with their value, EVERY reading of that field for those runs with its source (each
    marked `differs:` or `agrees:`; read both kinds back), and an empty "Your ruling". A Campaign Info
    beamline (or a one-word facility acronym) that names another one than a facility HINT (the folder's name,
-   or the acquisition system the scan headers match: what `ISAAC Suggestions` shows) is a row too, kind
+   the SPEC headers' fingerprint (their SPEC account and column names), or the acquisition system the scan
+   headers match: what `ISAAC Suggestions` shows) is a row too, kind
    `hint`: compared without `BL` and separators, so `BL15-2`, `BL152` and `15-2` agree and `62b` does not. A
+   fingerprint that states no branch (`BL6-2`) agrees with any branch (`62b`). When the hints disagree with each
+   other, the row says so first and marks each hint `differs from` or `agrees with`: read every one back. A
    hint is not a reading; say both and let them rule. The facility's organization is in no hint and is not
    compared. A Campaign Info value that differs from an answer already RECORDED for the runs it reaches (`SLAC
    National Accelerator Laboratory` beside a recorded `SLAC`) is a whole-beamtime row too, kind `recorded`: one ruling

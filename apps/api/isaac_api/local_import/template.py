@@ -581,7 +581,8 @@ _FACILITY_TOKEN = re.compile(r"[A-Z][A-Za-z]{1,9}(?:-[A-Z0-9]{1,4})?")
 
 
 _HINT_WHERE = {"folder_name": "the imported folder's name",
-               "acquisition_system": "the acquisition system the scan headers' column names match"}
+               "acquisition_system": "the acquisition system the scan headers' column names match",
+               "acquisition_fingerprint": "the SPEC headers' fingerprint"}
 
 
 #: Every Unicode dash a scientist's sheet may hold (en and em dash, minus sign, hyphen variants): read as ``-``.
@@ -618,6 +619,23 @@ def beamline_form(value: Any) -> str | None:
     return digits if sep is None else f"{digits[:sep]}-{digits[sep:]}"
 
 
+def without_branch(value: Any) -> Any:
+    """``value``'s first beamline-shaped token without its branch letter (``62b`` -> ``62``, ``BL6-2c`` -> ``6-2``);
+    ``value`` itself when it holds none or has no letter."""
+    parts = _beamline_parts(value)
+    if parts is None or not parts[0][-1:].isalpha():
+        return value
+    digits, sep = parts[0][:-1], parts[1]
+    return digits if sep is None else f"{digits[:sep]}-{digits[sep:]}"
+
+
+def _hint_agrees(reading: Mapping, value: Any) -> bool:
+    """r5d H2: a beamline hint agrees with ``value`` when it names the same beamline; a hint that states no
+    branch (``BL6-2`` from the SPEC headers) agrees with any branch of it (``62b``, ``BL6-2c``)."""
+    return same_beamline(reading["value"], value) or (
+        reading.get("branch_stated") is False and same_beamline(reading["value"], without_branch(value)))
+
+
 def same_beamline(a: Any, b: Any) -> bool:
     """One beamline: the same digits and letter, split at the same place — or one of them written with no
     separator, which says nothing about where it splits (``BL152`` is ``BL15-2``; ``BL11-2`` is never ``BL1-12``,
@@ -649,8 +667,11 @@ def facility_hint_readings(bundle: Mapping, path: str) -> list[dict]:
                 continue
             form = beamline_form(value) if path == BEAMLINE_PATH else value.casefold()
             where = _HINT_WHERE.get(str(h.get("kind")), str(h.get("kind")))
-            out.setdefault((form, literal), {"value": value, "form": form, "kind": "hint",
-                                             "source": f"{where} {literal!r}"})
+            # r5d H2: the SPEC headers' hint is quoted by what the headers state, not by a name it was given
+            source = (f"{where} ({h.get('locator')})" if h.get("kind") == "acquisition_fingerprint"
+                      else f"{where} {literal!r}")
+            out.setdefault((form, literal), {"value": value, "form": form, "kind": "hint", "source": source,
+                                             **({"branch_stated": h["branch_stated"]} if "branch_stated" in h else {})})
     return list(out.values())
 
 
@@ -668,10 +689,26 @@ def facility_hint_lines(bundle: Mapping, path: str, value: Any) -> list[str]:
     if not mine:
         return []
     what = "beamline" if path == BEAMLINE_PATH else "facility"
-    return [f"differs from a hint: {r['source']} names {what} {r['value']!r}"
-            + (f" (compared as {r['form']!r}, yours {mine!r})" if path == BEAMLINE_PATH else "")
-            + "; a hint, never an answer" for r in readings
-            if (not same_beamline(r["value"], value) if path == BEAMLINE_PATH else r["form"] != mine)]
+
+    def agrees(r):
+        return _hint_agrees(r, value) if path == BEAMLINE_PATH else r["form"] == mine
+
+    def named(r):
+        return (f"{r['source']} names {what} {r['value']!r}"
+                + (f" (compared as {r['form']!r}, yours {mine!r})" if path == BEAMLINE_PATH else ""))
+
+    differ = [r for r in readings if not agrees(r)]
+    if not differ:
+        return []
+    agree = [r for r in readings if agrees(r)]
+    among = (path == BEAMLINE_PATH and any(not (_hint_agrees(a, b["value"]) or _hint_agrees(b, a["value"]))
+                                           for a in readings for b in readings)) or (
+        path != BEAMLINE_PATH and len({r["form"] for r in readings}) > 1)
+    if not among:
+        return [f"differs from a hint: {named(r)}; a hint, never an answer" for r in differ]
+    # r5d H2: the files' own hints disagree (the folder's name and the SPEC headers): said plainly, every hint quoted
+    return ([f"the files' hints disagree with each other about the {what}; each is quoted, none is an answer, you rule"]
+            + [f"differs from a hint: {named(r)}" for r in differ] + [f"agrees with a hint: {named(r)}" for r in agree])
 
 
 def agrees_for(path: str | None, a: Any, b: Any) -> bool:
@@ -4451,7 +4488,7 @@ def adopt_template(bundle_dir: Path, their_xlsx: Path, out: Path, *, force: bool
             "(e.g. 0.01 for 0.01 M). It is recorded as Electrolyte Concentration (M) for exactly the runs of that row; the "
             "name goes in 'Your ruling'. Leave it blank on every other row.", "ISAAC")
         what = {"file_reading": "your value contradicts a file reading",
-                "hint": "your value names another one than a hint (the folder's or the acquisition system's name; a hint, "
+                "hint": "your value names another one than a hint (the folder's name, the SPEC headers' fingerprint or the acquisition system's name; a hint, "
                         "not a file reading)",
                 "recorded": "your value differs from the value already recorded for the runs it reaches (whole "
                             "beamtime: one ruling here settles it)",

@@ -343,6 +343,9 @@ an element/edge already named for the group: approved, proposed, or the group's 
 
 ## Groups that need an explanation
 
+- A SPEC run with no `<stem>_dir` folder lists the energy scans (`gscan`) inside its SPEC file. Its
+  `other_relationships.scans_in_spec_file` names the `#S` blocks used and each one left out, with why (an
+  alignment scan, no data rows, a repeated number). Say so when you present the group.
 - `merged_despite_engine_reading`: more than one run was proposed as one group although the importer read
   something that differs. Say what differs in words and ask; confirming is the scientist's call.
 - `sample_key_basis: name_stem`: no file states the sample, so runs were grouped by the stem of their file
@@ -350,7 +353,8 @@ an element/edge already named for the group: approved, proposed, or the group's 
 - **A groups row** (`bundle list <bundle> groups`) has `files` (the first 3 member stems; `files_more`
   counts the rest), `scans`, `reader` (the runs' source type), `exported_file` when a member is the
   scientist's exported/processed file of a run (kept as context, its data not merged: say so), and, when known, `cannot_export_reason`:
-  `no_scans` (no run lists a scan), `processing_not_applicable:<code>` (e.g. an `.mca` or `xes` file:
+  `no_scans` (no run lists a scan: no scan file in a `_dir` folder and no energy scan with data in its SPEC
+  file), `processing_not_applicable:<code>` (e.g. an `.mca` or `xes` file:
   no ISAAC protocol covers it), or `not_a_measurement_run` (every run is a reference standard, an alignment
   or a calibration scan: the import asks nothing about its sample or conditions, so the fields in
   `cannot_export_fields`, e.g. sample form and environment, have nowhere to hold an answer; its curve can be

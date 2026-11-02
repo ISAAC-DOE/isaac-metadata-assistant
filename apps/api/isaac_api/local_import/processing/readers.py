@@ -5,7 +5,9 @@ Formats, chosen by CONTENT (never by extension):
 * ``spec_columns`` — a SPEC-style block: column names from the LAST ``#L`` line before
   the data rows, exactly the convention ``bl15.signals.scan_channel_stats`` uses for the
   BL15-2 ``.dat``/``.txt`` exports (measured there: one scan block per file). A second
-  ``#S`` block stops the read and is flagged.
+  ``#S`` block stops the read and is flagged. Asked for one scan (``scan=<#S number>``), a
+  file of several ``#S`` blocks is read at that block only (a SPEC acquisition file whose run
+  has no ``<stem>_dir`` exports; r5d H1); a file of one block is read whole, as before.
 * ``ssrl_xdac`` — the SSRL "EXAFS Data Collector" text export (BL4-3, BL6-2, BL7-3): a
   free header, ``Data:``, one column name per line, a blank line, then rows.
 * ``delimited_columns`` — a first non-numeric line of column names (tab or whitespace
@@ -91,7 +93,28 @@ def _normalise_newlines(text: str, notes: list[str]) -> list[str]:
     return text.split("\n")
 
 
-def _read_spec(lines: list[str], table: ScanTable) -> ScanTable:
+def _spec_block(lines: list[str], scan: int, table: ScanTable) -> list[str] | None:
+    """The lines of the ``#S <scan>`` block of a file of several ``#S`` blocks (``lines`` itself for a file of
+    at most one); ``None`` with ``table.error`` set when no block, or more than one, has that number."""
+    starts = [i for i, raw in enumerate(lines) if _S_LINE.match(raw.strip())]
+    if len(starts) <= 1:
+        return lines
+    numbers = {i: lines[i].split()[1:2] for i in starts}
+    hits = [i for i in starts if numbers[i] and numbers[i][0].isdigit() and int(numbers[i][0]) == scan]
+    if len(hits) != 1:
+        table.error = f"scan_number_repeated:{scan}" if hits else f"scan_not_in_file:{scan}"
+        return None
+    end = next((i for i in starts if i > hits[0]), len(lines))
+    table.notes.append(f"scan_block_read:{scan}")
+    return lines[hits[0]:end]
+
+
+def _read_spec(lines: list[str], table: ScanTable, scan: int | None = None) -> ScanTable:
+    if scan is not None:
+        block = _spec_block(lines, scan, table)
+        if block is None:
+            return table
+        lines = block
     labels: list[str] | None = None
     rows: list[list[float]] = []
     width = text = 0
@@ -203,7 +226,7 @@ def _read_delimited(lines: list[str], table: ScanTable) -> ScanTable:
     return _fill(table, labels, rows, width, text)
 
 
-def parse_text(text: str) -> ScanTable:
+def parse_text(text: str, scan: int | None = None) -> ScanTable:
     notes: list[str] = []
     if text.startswith("﻿"):
         text = text[1:]
@@ -213,7 +236,7 @@ def parse_text(text: str) -> ScanTable:
     if "Data Collector" in head and head.lstrip().startswith("SSRL"):
         return _read_xdac(lines, ScanTable("ssrl_xdac", notes=notes))
     if any(_L_LINE.match(ln.strip()) for ln in lines[:400]):
-        return _read_spec(lines, ScanTable("spec_columns", notes=notes))
+        return _read_spec(lines, ScanTable("spec_columns", notes=notes), scan)
     return _read_delimited(lines, ScanTable("delimited_columns", notes=notes))
 
 
@@ -227,7 +250,7 @@ def table_from_columns(labels, columns, *, format_id: str, notes=None, header_li
     return _fill(t, labels, rows, 0, 0)
 
 
-def read_scan_file(path: Path) -> ScanTable:
+def read_scan_file(path: Path, scan: int | None = None) -> ScanTable:
     try:
         size = path.stat().st_size
         if size > _MAX_BYTES:
@@ -238,4 +261,4 @@ def read_scan_file(path: Path) -> ScanTable:
     if b"\x00" in data[:4096]:
         # Measured: SSRL XDAC keeps a BINARY twin of every text export (``binary/x.001``).
         return ScanTable(None, error="binary_content")
-    return parse_text(data.decode("utf-8", errors="replace"))
+    return parse_text(data.decode("utf-8", errors="replace"), scan)
