@@ -2,6 +2,7 @@ import './screens.css';
 import './settings/settings-widgets.css';
 import {
   useEffect,
+  useRef,
   type KeyboardEvent as ReactKeyboardEvent,
   type ReactNode,
 } from 'react';
@@ -88,7 +89,8 @@ import { TUTORIAL_ANCHORS } from '../lib/tutorialSteps';
  * EVERY RETIRED `?tab=` ID STILL RESOLVES (`lib/routes.ts`'s
  * `SETTINGS_TAB_ALIASES`): `about` and `help` land on Overview, `api` and `mcp`
  * on Integrations, `explorer` on Advanced — each scrolling the widget it pointed
- * at into view. `privacy` was renamed in place. An absent or unrecognised value
+ * at into view. `privacy` lands on Overview (the Data card holds what that tab
+ * said, 2026-11-02). An absent or unrecognised value
  * still falls back to Overview without throwing.
  *
  * ── THE TABLIST, AND THE ONE IT IS NOT ──────────────────────────────────────
@@ -124,14 +126,14 @@ import { TUTORIAL_ANCHORS } from '../lib/tutorialSteps';
  * module-cached `useHealthState`, which the top bar has already primed.
  *
  * There are NO user-adjustable settings in this build, and none were invented
- * to fill a page; This Build says so in its description.
+ * to fill a page.
  */
 
 /**
- * `short` is the label a NARROW tab row shows (2026-10-18): at 390px the four full
- * labels wrapped onto two rows. Only the visible text changes — the full label is
- * the tab's `sr-only` name at every width, so the accessible name never changes
- * with the viewport (`.section-tab-label-full` / `-short` in `settings-widgets.css`).
+ * `short` is an optional NARROW label (2026-10-18), unused since the fourth tab went
+ * (2026-11-02): no current tab sets it. If one does, only the visible text changes —
+ * the full label stays the tab's `sr-only` name at every width
+ * (`.section-tab-label-full` / `-short` in `settings-widgets.css`).
  */
 const SETTINGS_TABS: { id: SettingsTabId; label: string; short?: string }[] = [
   { id: 'overview', label: 'Overview' },
@@ -246,10 +248,23 @@ function SettingsSectionTabs({
   active: SettingsTabId;
   onSelect: (tab: SettingsTabId) => void;
 }) {
-  /* ~~A measured `data-overflowing` fade and a `scrollIntoView` of the selected
-     tab~~ — both RETIRED 2026-10-18 with the sideways-scrolling row they served:
-     the row now always FITS (one row to 441px, two rows of two below — see
-     `settings-widgets.css`), so no tab, selected or not, can be off-screen. */
+  /* ONE ROW THAT SCROLLS SIDEWAYS WHEN IT OVERFLOWS (2026-11-02, Task 2 review
+     ruling): the row is not relied on to fit at 320px on CI's wider font. The
+     selected tab is kept in view by scrolling the ROW itself (not
+     `scrollIntoView`, which can also scroll the page), on mount and on every
+     change; arrow keys move focus along the row, and focus scrolls it too. */
+  const rowRef = useRef<HTMLDivElement | null>(null);
+  useEffect(() => {
+    const row = rowRef.current;
+    const tab = document.getElementById(tabId(active));
+    if (!row || !tab || row.scrollWidth <= row.clientWidth) return;
+    // The row is `position: relative`, so it is the tab's offset parent and
+    // `offsetLeft` is measured from the row's content start, unaffected by scroll.
+    const left = tab.offsetParent === row ? tab.offsetLeft : tab.offsetLeft - row.offsetLeft;
+    const right = left + tab.offsetWidth;
+    if (left < row.scrollLeft) row.scrollLeft = left;
+    else if (right > row.scrollLeft + row.clientWidth) row.scrollLeft = right - row.clientWidth;
+  }, [active]);
 
   function onKeyDown(e: ReactKeyboardEvent<HTMLButtonElement>, index: number) {
     let nextIndex: number | null = null;
@@ -271,6 +286,7 @@ function SettingsSectionTabs({
 
   return (
     <div
+      ref={rowRef}
       className="section-tabs settings-section-tabs"
       role="tablist"
       aria-label="Settings sections"
@@ -649,8 +665,9 @@ function AdvancedTab({
  */
 function TechnicalDetails({ state }: { state: AboutState }) {
   return (
-    <details className="settings-technical" id="settings-technical-heading">
-      <summary>{COPY.technicalTitle}</summary>
+    /* The app's chevron `Disclosure` (2026-11-02, review Minor 4): one disclosure
+       idiom on the page, never the browser's own triangle. */
+    <Disclosure className="settings-technical" summary={COPY.technicalTitle}>
       <dl className="settings-technical-figures">
         <div className="settings-technical-figure">
           <dt>Build Commit (Full)</dt>
@@ -696,6 +713,6 @@ function TechnicalDetails({ state }: { state: AboutState }) {
           </dd>
         </div>
       </dl>
-    </details>
+    </Disclosure>
   );
 }

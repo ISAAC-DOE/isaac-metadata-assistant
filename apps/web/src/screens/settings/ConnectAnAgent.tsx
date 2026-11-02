@@ -34,7 +34,7 @@
  * a `<details>` a reader can open without ever seeing the sibling that said so.
  * ~~See `API_ACCESS_COPY.connectPrerequisite`~~ — that precondition, and the pointer
  * to Connect Your Agent, were retired 2026-11-02 (owner's direction: no standing
- * disclaimers). The guide is now the eight-minus-one functional steps.
+ * disclaimers). The guide is now the functional setup steps only.
  *
  * On hosted access: that boundary is stated provider-neutrally wherever it
  * appears. Naming the identity layer in front of a deployment would disclose

@@ -45,7 +45,11 @@ import {
   MCP_PERMISSIONS,
   MCP_SETUP_STEPS,
   mcpDeploymentState,
+  mcpStateLine,
 } from '../lib/mcpConnectContent';
+import { CAPTURE_COPY } from '../lib/transcriptCaptureContent';
+import { claudeVoiceState } from '../components/ClaudeVoicePath';
+import { __resetHealthCache } from '../lib/useHealth';
 import {
   SETTINGS_TAB_IDS,
   ROUTES,
@@ -55,6 +59,7 @@ import {
 } from '../lib/routes';
 import {
   stubFetchRoutes,
+  healthSynthetic,
   aboutResponse,
   assistantCompanionUnconfigured,
   graphStatusAvailable,
@@ -64,6 +69,12 @@ import {
 afterEach(() => {
   cleanup();
   vi.unstubAllGlobals();
+  __resetHealthCache();
+});
+
+/** `/api/health` with the agent interface in `posture` (`mcp/deployment.py`). */
+const healthWithPosture = (posture: string | null) => ({
+  'GET /api/health': { body: { ...healthSynthetic, mcp: { posture } } },
 });
 
 const TAB_LABEL = 'Connect Your Agent';
@@ -81,6 +92,7 @@ function fullRoutes() {
        the overwhelming majority of deployments are in, rather than over the
        failed-read branch an unstubbed route would produce. */
     'GET /api/runtime/assistant-companion': { body: assistantCompanionUnconfigured },
+    ...healthWithPosture('unmounted'),
   };
 }
 
@@ -98,7 +110,14 @@ function renderSettings(entry = ROUTES.settingsTab('mcp')) {
 }
 
 /** The panel alone, so the endpoint branch can be driven without a deployment. */
-function renderPanel(endpoint?: string | null, options: { withCompanion?: boolean } = {}) {
+function renderPanel(
+  endpoint?: string | null,
+  options: { withCompanion?: boolean; posture?: string | null } = {},
+) {
+  stubFetchRoutes({
+    'GET /api/runtime/assistant-companion': { body: assistantCompanionUnconfigured },
+    ...healthWithPosture(options.posture === undefined ? 'unmounted' : options.posture),
+  });
   return render(
     <ConnectYourAgentPanel endpoint={endpoint} withCompanion={options.withCompanion} />,
   );
@@ -153,7 +172,7 @@ describe('Connect Your Agent — the tab', () => {
     expect(screen.getByRole('region', { name: TAB_LABEL })).toBeInTheDocument();
   });
 
-  it('opens from the ?tab=mcp deep link, with its real content and not an empty panel', () => {
+  it('opens from the ?tab=mcp deep link, with its real content and not an empty panel', async () => {
     renderSettings();
     expect(screen.getByRole('tab', { name: 'Integrations' })).toHaveAttribute('aria-selected', 'true');
 
@@ -161,7 +180,7 @@ describe('Connect Your Agent — the tab', () => {
     expect(panel).toHaveAttribute('id', 'settings-tabpanel-integrations');
     expect(panel).toHaveAttribute('aria-labelledby', 'settings-tab-integrations');
     const widget = within(panel).getByRole('region', { name: TAB_LABEL });
-    expect(within(widget).getByText(MCP_CONNECT_COPY.stateLine)).toBeInTheDocument();
+    expect(await within(widget).findByText(MCP_CONNECT_COPY.stateLine)).toBeInTheDocument();
   });
 
   it('the deep link helper builds the URL the page actually reads', () => {
@@ -182,19 +201,20 @@ describe('Connect Your Agent — the unconfigured state', () => {
    * line — what an administrator sets up — instead of "Requires Organization
    * Configuration" plus two paragraphs of reasons. It still overstates nothing.
    */
-  it('states the unconfigured state as one plain line about who sets it up', () => {
+  it('states the unconfigured state as one plain line about who sets it up', async () => {
     const { container } = renderPanel();
+    await screen.findByText(MCP_CONNECT_COPY.stateLine);
     expect(norm(visibleText(container))).toContain(norm(MCP_CONNECT_COPY.stateLine));
     expect(MCP_CONNECT_COPY.stateLine).toMatch(/administrator/i);
     expect(MCP_CONNECT_COPY.stateLine).not.toMatch(/\bconnected\b|coming soon|available soon/i);
   });
 
-  it('conveys the state as text inside a live region, not as colour', () => {
+  it('conveys the state as text inside a live region, not as colour', async () => {
     const { container } = renderPanel();
     // The state is announced if it ever changes, and reads identically to a
     // screen reader, a monochrome display and a sighted user.
     const status = screen.getByRole('status');
-    expect(within(status).getByText(MCP_CONNECT_COPY.stateLine)).toBeInTheDocument();
+    expect(await within(status).findByText(MCP_CONNECT_COPY.stateLine)).toBeInTheDocument();
     // Nothing anywhere on the tab leans on a colour word to carry the state.
     expect(visibleText(container)).not.toMatch(/\b(green|amber|red|yellow)\b/i);
   });
@@ -578,6 +598,71 @@ describe('Connect Your Agent — accessibility', () => {
   });
 });
 
+// --- the state line follows the server's own posture ---------------------------
+
+/*
+ * REVIEW 2026-11-02 (Important 1). The declutter pass made the unconfigured line
+ * unconditional — "Not set up on this server" — which is FALSE in `local-only` and
+ * `oauth-mounted`, where an administrator HAS set the interface up. The line is
+ * chosen by `/api/health` → `mcp.posture` again, and no line claims more than the
+ * server reported.
+ */
+describe('Connect Your Agent — the state line follows the server-reported posture', () => {
+  const CASES: Array<[string | null, string]> = [
+    ['unmounted', MCP_CONNECT_COPY.stateLine],
+    ['local-only', CAPTURE_COPY.claudeLocalOnly],
+    ['oauth-mounted', CAPTURE_COPY.claudeNoAddress],
+    ['remote-ready', CAPTURE_COPY.claudeNoAddress],
+    [null, MCP_CONNECT_COPY.stateLineUnreported],
+    ['some-future-posture', MCP_CONNECT_COPY.stateLineUnreported],
+  ];
+
+  for (const [posture, line] of CASES) {
+    it(`posture ${String(posture)} → its own line, in the live region`, async () => {
+      renderPanel(null, { posture });
+      const status = screen.getByRole('status');
+      expect(await within(status).findByText(line)).toBeInTheDocument();
+      for (const [, other] of CASES) {
+        if (other !== line) expect(status.textContent).not.toContain(other);
+      }
+    });
+  }
+
+  it('a failed or absent health read is "not reported", never "not set up"', async () => {
+    stubFetchRoutes({ 'GET /api/runtime/assistant-companion': { body: assistantCompanionUnconfigured } });
+    render(<ConnectYourAgentPanel endpoint={null} />);
+    const status = screen.getByRole('status');
+    expect(await within(status).findByText(MCP_CONNECT_COPY.stateLineUnreported)).toBeInTheDocument();
+    expect(status.textContent).not.toContain(MCP_CONNECT_COPY.stateLine);
+  });
+
+  it('says only that it is checking until the server has answered', () => {
+    expect(mcpStateLine(false, 'unmounted')).toBe(MCP_CONNECT_COPY.stateLineChecking);
+    expect(MCP_CONNECT_COPY.stateLineChecking).not.toMatch(/not set up|set up on|connected/i);
+  });
+
+  it('no line claims a connection, an approval or a future date', () => {
+    for (const [, line] of CASES) {
+      expect(line).not.toMatch(/\bconnected\b|approved|coming soon|available soon|\byet\b/i);
+    }
+  });
+
+  /* PARITY with Record → Capture. `ClaudeVoicePath` maps the same posture to the
+     same two sentences; the two screens must never give two reasons for one
+     deployment. Read through the voice path's own derivation, not a copy of it. */
+  it('agrees with ClaudeVoicePath for every posture both of them name', () => {
+    const health = (posture: string) => ({ ...healthSynthetic, mcp: { posture } }) as never;
+    expect(claudeVoiceState(true, health('local-only'), null)).toEqual({ kind: 'unavailable', reason: 'local-only' });
+    expect(mcpStateLine(true, 'local-only')).toBe(CAPTURE_COPY.claudeLocalOnly);
+    for (const posture of ['oauth-mounted', 'remote-ready']) {
+      expect(claudeVoiceState(true, health(posture), null)).toEqual({ kind: 'unavailable', reason: 'no-address' });
+      expect(mcpStateLine(true, posture)).toBe(CAPTURE_COPY.claudeNoAddress);
+    }
+    expect(claudeVoiceState(true, health('unmounted'), null)).toEqual({ kind: 'unavailable', reason: 'unmounted' });
+    expect(mcpStateLine(true, 'unmounted')).toBe(MCP_CONNECT_COPY.stateLine);
+  });
+});
+
 // --- the branch that exists for the day the decisions land ---------------------
 
 describe('Connect Your Agent — when a deployment does publish an address', () => {
@@ -607,8 +692,10 @@ describe('Connect Your Agent — when a deployment does publish an address', () 
     expect(visibleText(container)).not.toMatch(/\bconnected\b/i);
   });
 
-  it('the unconfigured branch is unaffected — it keeps its own line', () => {
-    const text = norm(visibleText(renderPanel().container));
+  it('the unconfigured branch is unaffected — it keeps its own line', async () => {
+    const { container } = renderPanel();
+    await screen.findByText(MCP_CONNECT_COPY.stateLine);
+    const text = norm(visibleText(container));
     expect(text).toContain(norm(MCP_CONNECT_COPY.stateLine));
     expect(text).not.toContain(norm(MCP_CONNECT_COPY.stateLinePublished));
   });

@@ -443,7 +443,7 @@ function MemorySizeWidget({
         {figures.map((f) => (
           <div className="memory-figure memory-size-figure" key={f.label}>
             <dt>{f.label}</dt>
-            <dd className="mono">
+            <dd>
               <button
                 type="button"
                 className="memory-size-open"

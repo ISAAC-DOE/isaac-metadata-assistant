@@ -74,7 +74,9 @@ import {
   MCP_SETUP_STEPS,
   MCP_WIDGET_COPY,
   mcpDeploymentState,
+  mcpStateLine,
 } from '../../lib/mcpConnectContent';
+import { useHealthState } from '../../lib/useHealth';
 import { AssistantCompanionSection } from './AssistantCompanion';
 
 export const AGENT_WIDGET_HEADING_ID = 'settings-agent-heading';
@@ -87,6 +89,9 @@ export function ConnectYourAgentPanel({
   withCompanion?: boolean;
 }) {
   const unconfigured = mcpDeploymentState(endpoint) === 'requires-configuration';
+  /* The posture only ever chooses WHICH unconfigured line is shown; the published
+     branch is driven by `endpoint` alone, exactly as before. */
+  const { settled, health } = useHealthState();
 
   return (
     <Widget
@@ -99,7 +104,7 @@ export function ConnectYourAgentPanel({
            the same `endpoint`, so they cannot disagree. */
         <div className="settings-agent-state" role="status">
           {unconfigured ? (
-            <p className="settings-state-line">{MCP_CONNECT_COPY.stateLine}</p>
+            <p className="settings-state-line">{mcpStateLine(settled, health?.mcp?.posture)}</p>
           ) : (
             <>
               <p className="settings-state-line">{MCP_CONNECT_COPY.stateLinePublished}</p>

@@ -348,6 +348,44 @@ export const SETTINGS_DEFINITION_DISCLOSURES: Readonly<Record<string, number>> =
 });
 
 /**
+ * How many of Settings' own secondary disclosures each surface mounts: This Build's
+ * `Runtime` rows (Overview) and Advanced's `Technical Details`. Both are the shared
+ * chevron `Disclosure` (`.disclosure.settings-runtime`, `.disclosure.settings-technical`),
+ * collapsed by default, and — unlike a widget Details — sit OUTSIDE `.widget-details`,
+ * so `openWidgetInfoAndViews` never presses them.
+ *
+ * Added 2026-11-02 (Task 2 review, Important 3). Before the declutter, Runtime was a
+ * widget view (revealed for the scan) and Technical Details an open card, so both
+ * were scanned. Collapsed and unopened, axe would skip their content — the Runtime
+ * Mode / Data Regime / Persistence rows and the full SHA, field names, endpoints and
+ * docs — and, with no baseline cell on these surfaces, no number would move. So the
+ * count is declared and each is opened before the scan, exactly like the prose
+ * disclosures above.
+ */
+export const SETTINGS_PAGE_DISCLOSURES: Readonly<Record<string, number>> = Object.freeze({
+  settings: 1,
+  'settings-explorer': 1,
+});
+
+/**
+ * The Project Memory graph's two collapsed disclosures (2026-11-02, Task 3 review,
+ * Important 1): the **Query** toggle, whose command bar (input, Run, Syntax,
+ * Suggestions, history) is UNMOUNTED until pressed, and the **Legend**, a shared
+ * `Disclosure` whose body is `hidden`. Before the declutter both were always on
+ * the surface and scanned; unopened, axe would skip them, and `memory-graph`
+ * records no baseline cell, so no number would move.
+ *
+ * The Legend renders in EXPLORE mode only (Browse has no canvas marks to explain),
+ * and the graph opens in Browse at narrow widths (`graph-mode-follows-viewport`),
+ * so its expected count follows the mode actually on screen: 1 in Explore, 0 in
+ * Browse. Query is on the toolbar in both modes.
+ */
+export const MEMORY_GRAPH_DISCLOSURES: Readonly<Record<string, { query: number; legendInExplore: number }>> =
+  Object.freeze({
+    'memory-graph': { query: 1, legendInExplore: 1 },
+  });
+
+/**
  * Surfaces that MUST mount the COLLAPSED Asset References disclosure.
  *
  * Declared for exactly the reason `FIELD_GROUP_SURFACES` is, and the reason is
@@ -509,6 +547,62 @@ export async function openUnreachableDisclosures(page: Page, surfaceId: string):
       `disclosures; SETTINGS_DEFINITION_DISCLOSURES in e2e/helpers/disclosures.ts declares ` +
       `${expectedDefinitions}. A definition left closed here is exempt from every axe scan.`
   ).toBe(expectedDefinitions);
+
+  /* Settings' own secondary disclosures — see `SETTINGS_PAGE_DISCLOSURES`. Declared
+     count, opened by index, asserted open. */
+  const settingsDisclosures = page.locator(
+    '.disclosure.settings-runtime > .disclosure-trigger, .disclosure.settings-technical > .disclosure-trigger'
+  );
+  const expectedSettings = SETTINGS_PAGE_DISCLOSURES[surfaceId] ?? 0;
+  const settingsCount = await settingsDisclosures.count();
+  expect(
+    settingsCount,
+    `surface "${surfaceId}" mounts ${settingsCount} Settings Runtime / Technical Details ` +
+      `disclosures; SETTINGS_PAGE_DISCLOSURES in e2e/helpers/disclosures.ts declares ` +
+      `${expectedSettings}. One left closed here has its whole content exempt from every axe ` +
+      'scan, and these surfaces record no baseline cell, so the loss would move no number.'
+  ).toBe(expectedSettings);
+  for (let i = 0; i < settingsCount; i++) {
+    const trigger = settingsDisclosures.nth(i);
+    if ((await trigger.getAttribute('aria-expanded')) !== 'true') await trigger.click();
+    await expect(trigger).toHaveAttribute('aria-expanded', 'true');
+  }
+
+  /* The memory graph's Query and Legend — see `MEMORY_GRAPH_DISCLOSURES`. */
+  const graph = MEMORY_GRAPH_DISCLOSURES[surfaceId] ?? { query: 0, legendInExplore: 0 };
+  const queryToggle = page.locator('.memory-graph-controls > .memory-graph-disclosure-btn', {
+    hasText: /^Query$/,
+  });
+  const queryCount = await queryToggle.count();
+  expect(
+    queryCount,
+    `surface "${surfaceId}" mounts ${queryCount} graph Query toggles; MEMORY_GRAPH_DISCLOSURES ` +
+      `declares ${graph.query}. The command bar is unmounted until Query is pressed, so an ` +
+      'unopened toggle exempts the whole bar from every axe scan.'
+  ).toBe(graph.query);
+  if (queryCount > 0) {
+    if ((await queryToggle.getAttribute('aria-expanded')) !== 'true') await queryToggle.click();
+    await expect(queryToggle).toHaveAttribute('aria-expanded', 'true');
+    await expect(page.locator('.graph-cmd-input')).toHaveCount(1);
+    // The bar's own Suggestions panel, so the scan covers what it covered before.
+    const suggestions = page.locator('.graph-cmd-commands-toggle[aria-expanded="false"]');
+    if ((await suggestions.count()) > 0) await suggestions.click();
+  }
+  const exploring =
+    (await page.locator('.memory-graph-modeswitch [role="radio"][aria-checked="true"]', { hasText: 'Explore' }).count()) > 0;
+  const legend = page.locator('.memory-graph-legend .disclosure-trigger');
+  const expectedLegend = exploring ? graph.legendInExplore : 0;
+  const legendCount = await legend.count();
+  expect(
+    legendCount,
+    `surface "${surfaceId}" mounts ${legendCount} graph Legend disclosures in ` +
+      `${exploring ? 'Explore' : 'Browse'} mode; MEMORY_GRAPH_DISCLOSURES declares ${expectedLegend}.`
+  ).toBe(expectedLegend);
+  for (let i = 0; i < legendCount; i++) {
+    const trigger = legend.nth(i);
+    if ((await trigger.getAttribute('aria-expanded')) !== 'true') await trigger.click();
+    await expect(trigger).toHaveAttribute('aria-expanded', 'true');
+  }
 
   await openWidgetInfoAndViews(page, surfaceId);
   for (let i = 0; i < definitionCount; i++) {

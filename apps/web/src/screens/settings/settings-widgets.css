@@ -118,13 +118,20 @@
   color: var(--text-strong);
 }
 
-/* ---- rows: Data Safety's state lines ------------------------------------- */
+/* ---- rows: the Data card's four facts --------------------------------------
+   Two by two from 700px (review Minor 8, 2026-11-02): an auto-fit row put three
+   facts on one line and orphaned the fourth at 1280px. One column below. */
 
 .settings-rows {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(min(100%, 16rem), 1fr));
+  grid-template-columns: minmax(0, 1fr);
   gap: var(--space-md) var(--space-xl);
   margin: 0;
+}
+@media (min-width: 700px) {
+  .settings-rows {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
 }
 .settings-row {
   min-width: 0;
@@ -307,44 +314,36 @@
 }
 
 /* The quiet disclosures this page uses for secondary detail: This Build's Runtime
-   rows (the shared chevron `Disclosure` since 2026-11-02, drawn without its own
-   frame because it sits inside a widget card) and Advanced's Technical Details. */
+   rows and Advanced's Technical Details — both the shared chevron `Disclosure`
+   since 2026-11-02, drawn without its own frame. */
 .settings-runtime,
 .settings-technical {
   margin-top: var(--space-md);
   font-size: var(--font-size-body);
 }
-.settings-runtime.disclosure {
+.settings-runtime.disclosure,
+.settings-technical.disclosure {
   border: 0;
   background: transparent;
 }
-.settings-runtime > .disclosure-trigger {
+.settings-runtime > .disclosure-trigger,
+.settings-technical > .disclosure-trigger {
   width: auto;
   min-height: 0;
   padding: var(--space-2xs) 0;
   color: var(--action);
 }
-.settings-runtime > .disclosure-trigger:hover {
+.settings-runtime > .disclosure-trigger:hover,
+.settings-technical > .disclosure-trigger:hover {
   background: transparent;
   color: var(--action-hover);
 }
-.settings-runtime > .disclosure-trigger .disclosure-chevron {
+.settings-runtime > .disclosure-trigger .disclosure-chevron,
+.settings-technical > .disclosure-trigger .disclosure-chevron {
   color: currentColor;
 }
-.settings-runtime > .disclosure-body > dl {
-  margin-top: var(--space-sm);
-}
-.settings-technical > summary {
-  cursor: pointer;
-  color: var(--action);
-  font-weight: var(--font-weight-medium);
-}
-.settings-technical > summary:focus-visible {
-  outline: 2px solid var(--action);
-  outline-offset: 2px;
-  border-radius: var(--radius-control);
-}
-.settings-technical[open] > dl {
+.settings-runtime > .disclosure-body > dl,
+.settings-technical > .disclosure-body > dl {
   margin-top: var(--space-sm);
 }
 
@@ -449,43 +448,46 @@
   flex: 0 0 auto;
 }
 
-/* ---- the page tab row at a narrow width -------------------------------------
-   At 390px the four full labels wrapped onto two rows. Below 600px "Privacy &
-   Governance" shows its short form; the tab's name is its `sr-only` full label at
-   every width, so it never changes with the viewport.
+/* ---- the page tab row: ONE row, scrolling sideways when it overflows ---------
+   RULED 2026-11-02 (Task 2 review, Important 4): do not rely on the three tabs
+   FITTING at 320px. On CI's wider DejaVu/Liberation face the measured slack on this
+   host (5.5px) disappears, so the row is a single line at every width that scrolls
+   INSIDE its own box when it does not fit (`ALLOW-SETTINGS-TABS-SCROLL` in
+   e2e/layout-allowlist.ts) — the page itself never scrolls. Every tab is a real
+   button reached by the arrow keys (roving tabindex), focus scrolls the row, and
+   `SettingsSectionTabs` scrolls the selected tab into view on every change.
 
-   ~~If a narrower screen still cannot fit it, it scrolls sideways, with a fade~~ —
-   RETIRED 2026-10-18: CI's layout sweep forbids any region that scrolls sideways,
-   and on CI's font (a wider DejaVu/Liberation face than this host's) the
-   single-row tabs measured ~317px against a 312px box at 390 and a 297px one at
-   375. So the four tabs now FIT, by construction rather than by margin:
-     · 441–600px: one row, short label, tighter padding — ~317px of CI-font
-       content in a box of at least ~363px;
-     · ≤440px: two rows of two (a 2 x 2 grid), so each tab gets half the box —
-       at 320px ~121px a cell against "Integrations"' ~101px on CI's font.
-   Nothing scrolls, nothing is hidden, and no selected tab can be off-screen. */
+   The row's rule moves from `border-bottom` to an inset shadow, and the tabs drop
+   their `-1px` overlap: a scroll container clips anything painted outside its
+   padding box, which would have cut the selected tab's underline in half.
+
+   ~~441–600px: one row, short label… ≤440px: two rows of two~~ — history, kept in
+   git; the short-label machinery has no tab using it since the fourth tab went. */
 .section-tab-label-short {
   display: none;
 }
+.settings-section-tabs {
+  position: relative;
+  flex-wrap: nowrap;
+  overflow-x: auto;
+  overflow-y: hidden;
+  scrollbar-width: thin;
+  border-bottom: 0;
+  box-shadow: inset 0 -1px 0 var(--border-faint);
+}
+.settings-section-tabs .section-tab {
+  flex: none;
+  margin-bottom: 0;
+  white-space: nowrap;
+}
 @media (max-width: 600px) {
   .settings-section-tabs {
-    flex-wrap: nowrap;
     gap: 0;
   }
   .settings-section-tabs .section-tab {
-    flex: none;
     padding-inline: var(--space-sm);
-    white-space: nowrap;
-  }
-  .settings-section-tabs .section-tab-label-full {
-    display: none;
-  }
-  .settings-section-tabs .section-tab-label-short {
-    display: inline;
   }
 }
-/* ~~≤440px: a 2 x 2 grid~~ — retired 2026-11-02 with the fourth tab: three short
-   labels fit one row at 320px, so the row is one line at every width. */
 
 /* ---- the Endpoint Explorer's detail pane ---------------------------------- */
 

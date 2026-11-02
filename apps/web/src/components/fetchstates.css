@@ -167,14 +167,17 @@
   font: inherit;
   font-size: 11.5px;
   font-weight: 550;
-  color: var(--action);
-  background: var(--surface);
-  border: 1px solid var(--border);
+  /* The tinted action look `.btn-secondary` uses (2026-11-02, "actions are themed
+     blue"; review Minor 7): same token pairs, so palette-contrast's pairs hold. */
+  color: var(--action-hover);
+  background: var(--action-tint);
+  border: 1px solid var(--action-selected-border);
   border-radius: var(--radius-inner, 8px);
   cursor: pointer;
 }
 .fetch-state-diagnostics-btn:hover {
-  background: var(--surface-subtle);
+  border-color: var(--action);
+  color: var(--action-pressed);
 }
 .fetch-state-diagnostics-btn:focus-visible {
   outline: 2px solid var(--action);

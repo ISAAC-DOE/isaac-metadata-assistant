@@ -119,8 +119,8 @@ export function LibraryToolbar({
           <label className="library-sort-label" htmlFor={sortId}>
             {LABELS.librarySortLabel}
           </label>
-          {/* `aria-label` repeats the visible label so the select keeps its name
-              at phone width, where the label leaves the row (`library.css`). */}
+          {/* `aria-label` repeats the label so the select keeps its name where the
+              label is not shown — on the library bar, at every width (`library.css`). */}
           <select
             id={sortId}
             aria-label={LABELS.librarySortLabel}

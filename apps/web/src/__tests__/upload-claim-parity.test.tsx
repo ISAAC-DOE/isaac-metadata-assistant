@@ -613,8 +613,10 @@ const SHARED_CLAIM: [string, RegExp][] = [
  * must state the whole claim — both readers named, both retention bounds — because a
  * refusal stated alone reads as "no file is read", which §1 proves false.
  */
+/* Widened 2026-11-02 (Task 2 review, Minor 3): "Uploading is turned off.", "Upload is
+   not available." and "We do not accept uploads." each slipped the earlier form. */
 const STATES_A_REFUSAL =
-  /\buploads?\b[^.]{0,40}\b(refus\w+|disabled|blocked|not accepted|turned off|unavailable)\b|\b(refus\w+|disabled|blocked)\b[^.]{0,40}\buploads?\b/i;
+  /\bupload(s|ing)?\b[^.]{0,40}\b(refus\w+|disabled|blocked|not accepted|turned off|unavailable|not available)\b|\b(refus\w+|disabled|blocked|do not accept|does not accept)\b[^.]{0,40}\buploads?\b/i;
 
 describe('R1b §2 · a site that states the refusal states all of it (no half-disclosure)', () => {
   for (const [site, text] of SITES) {
@@ -634,6 +636,10 @@ describe('R1b §2 · a site that states the refusal states all of it (no half-di
       'Records shown here are synthetic; uploads are disabled.',
       'The records shown here are synthetic and uploads are disabled.',
       'Uploads are not accepted here.',
+      // The three near rephrasings the review probed, each a positive control.
+      'Uploading is turned off.',
+      'Upload is not available.',
+      'We do not accept uploads.',
     ]) {
       expect(shipped, shipped).toMatch(STATES_A_REFUSAL);
     }

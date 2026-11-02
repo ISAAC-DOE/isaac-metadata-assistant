@@ -1,6 +1,6 @@
 import { describe, it, expect, afterEach, vi } from 'vitest';
-import { readFileSync } from 'node:fs';
-import { resolve } from 'node:path';
+import { readFileSync, readdirSync, statSync } from 'node:fs';
+import { join, resolve } from 'node:path';
 import { render, screen, fireEvent, within, act, waitFor } from '@testing-library/react';
 import { MemoryRouter, useLocation, useNavigate, type NavigateFunction } from 'react-router-dom';
 
@@ -20,6 +20,8 @@ import {
   REPO_DOCS,
   SETTINGS_SOURCE_ENDPOINTS,
   dataRows,
+  BROWSER_STORAGE_KEYS,
+  BROWSER_STORAGE_SENTENCE,
   settingsFactsFrom,
 } from '../lib/settingsContent';
 import {
@@ -355,16 +357,15 @@ describe('Settings — tabs', () => {
   });
 
   /*
-   * WCAG 2.4.11 at 320px (re-review, 2026-10-18), SOLVED BY LAYOUT, NOT BY
-   * SCROLLING. The narrow tab row used to scroll sideways, and `?tab=advanced`
-   * left the selected tab off-screen; a `scrollIntoView` fixed that, and then CI's
-   * layout sweep refused the sideways-scrolling region outright (on CI's font the
-   * row measured ~317px against a 312px box at 390). So the row now always FITS:
-   * one row of short labels down to 441px, two rows of two below. jsdom computes
-   * no layout, so the rules that guarantee it are what is pinned — and the
-   * absence of the scroll machinery, so a horizontal scroller cannot creep back.
+   * WCAG 2.4.11 at 320px — RULED 2026-11-02 (Task 2 review, Important 4): the row is
+   * NOT relied on to fit. ~~"Solved by layout, not by scrolling"~~ held only while
+   * this host's font left 5.5px of slack, which CI's wider face does not. The row is
+   * one line at every width that scrolls inside its own box, the layout sweep names
+   * it (`ALLOW-SETTINGS-TABS-SCROLL`), and the selected tab is scrolled into view —
+   * so no selected tab can sit off-screen. jsdom computes no layout, so the rules are
+   * pinned from the stylesheet, and the scroll-into-view from a measured row.
    */
-  it('keeps the narrow tab row from ever scrolling sideways', () => {
+  it('keeps the tab row on one line that scrolls sideways inside its own box', () => {
     const css = readFileSync(resolve(__dirname, '..', 'screens/settings/settings-widgets.css'), 'utf8')
       .replace(/\/\*[\s\S]*?\*\//g, '');
     const rulesFor = (selector: string) =>
@@ -372,14 +373,44 @@ describe('Settings — tabs', () => {
         .map((m) => m[1])
         .join('\n');
     const tabRow = rulesFor('.settings-section-tabs');
-    expect(tabRow).not.toMatch(/overflow-x\s*:\s*(auto|scroll)/);
-    // ~~a 2 x 2 grid at ≤440px~~ — retired with the fourth tab (2026-11-02): three
-    // short labels FIT one row at 320px, so the row is one line and never scrolls.
+    expect(tabRow).toMatch(/overflow-x\s*:\s*auto/);
     expect(tabRow).toMatch(/flex-wrap\s*:\s*nowrap/);
     expect(tabRow).not.toMatch(/display\s*:\s*grid/);
-    stubFetchRoutes(fullRoutes());
-    renderSettings('/settings?tab=advanced');
-    expect(pageTablist()).not.toHaveAttribute('data-overflowing');
+    // The layout sweep knows about it, so the deliberate scroller is declared.
+    const allow = readFileSync(resolve(__dirname, '..', '..', 'e2e/layout-allowlist.ts'), 'utf8');
+    expect(allow).toMatch(/id: 'ALLOW-SETTINGS-TABS-SCROLL',\s*match: '\.settings-section-tabs'/);
+  });
+
+  it('scrolls the selected tab into view when the row overflows', () => {
+    const proto = HTMLElement.prototype;
+    const saved = ['scrollWidth', 'clientWidth', 'offsetLeft', 'offsetWidth', 'offsetParent', 'scrollLeft'].map(
+      (k) => [k, Object.getOwnPropertyDescriptor(proto, k)] as const,
+    );
+    const scrolled = new WeakMap<Element, number>();
+    const isRow = (el: Element) => el.getAttribute('role') === 'tablist';
+    const tabIndexOf = (el: Element) => Array.from(el.parentElement?.children ?? []).indexOf(el);
+    Object.defineProperty(proto, 'scrollWidth', { configurable: true, get() { return isRow(this) ? 600 : 0; } });
+    Object.defineProperty(proto, 'clientWidth', { configurable: true, get() { return isRow(this) ? 240 : 0; } });
+    Object.defineProperty(proto, 'offsetWidth', { configurable: true, get() { return this.getAttribute('role') === 'tab' ? 200 : 0; } });
+    Object.defineProperty(proto, 'offsetLeft', { configurable: true, get() { return this.getAttribute('role') === 'tab' ? tabIndexOf(this) * 200 : 0; } });
+    Object.defineProperty(proto, 'offsetParent', { configurable: true, get() { return this.closest('[role="tablist"]'); } });
+    Object.defineProperty(proto, 'scrollLeft', {
+      configurable: true,
+      get() { return scrolled.get(this) ?? 0; },
+      set(v: number) { scrolled.set(this, v); },
+    });
+    try {
+      stubFetchRoutes(fullRoutes());
+      renderSettings('/settings?tab=advanced');
+      // Advanced is the third tab, at 400–600px in a 240px-wide row: the row must
+      // scroll so its right edge is in view.
+      expect(pageTablist().scrollLeft).toBe(600 - 240);
+    } finally {
+      for (const [k, d] of saved) {
+        if (d) Object.defineProperty(proto, k, d);
+        else delete (proto as unknown as Record<string, unknown>)[k];
+      }
+    }
   });
 
   it('uses a roving tabindex: only the selected tab is in the tab order', () => {
@@ -826,10 +857,13 @@ describe('Settings — This Build and Technical Details (was About)', () => {
     expect(screen.queryByText('fakecommit0000settingsp364')).toBeNull();
 
     openTab('Advanced');
-    const technical = document.querySelector('details.settings-technical') as HTMLDetailsElement;
+    // The app's chevron `Disclosure` since 2026-11-02, not a native `<details>`.
+    const technical = document.querySelector('.disclosure.settings-technical') as HTMLElement;
     expect(technical).not.toBeNull();
-    expect(technical.open).toBe(false);
-    expect(technical.querySelector('summary')?.textContent).toBe('Technical Details');
+    expect(document.querySelector('details.settings-technical')).toBeNull();
+    const trigger = technical.querySelector('.disclosure-trigger') as HTMLButtonElement;
+    expect(trigger).toHaveAttribute('aria-expanded', 'false');
+    expect(trigger.textContent).toBe('Technical Details');
     const full = screen.getAllByText('fakecommit0000settingsp364');
     expect(full).toHaveLength(1);
     expect(technical.contains(full[0])).toBe(true);
@@ -838,7 +872,7 @@ describe('Settings — This Build and Technical Details (was About)', () => {
   it('Technical Details carries the raw field names, source endpoints, and doc paths', async () => {
     stubFetchRoutes(fullRoutes());
     renderSettings('/settings?tab=advanced');
-    const technical = document.querySelector('details.settings-technical') as HTMLElement;
+    const technical = document.querySelector('.disclosure.settings-technical') as HTMLElement;
     const labels = Array.from(technical.querySelectorAll('dt')).map((dt) => dt.textContent);
     expect(labels).toEqual([
       'Build Commit (Full)',
@@ -1454,3 +1488,63 @@ describe('Settings — no fact is stated twice across the tabs', () => {
   });
 });
 
+
+// --- the Data card's "In Your Browser" row is the whole list -----------------
+
+/*
+ * REVIEW 2026-11-02 (Important 2). The row named two of the seven things this app
+ * keeps in the browser — and left out a name the reader types. It is now one
+ * sentence over a key registry, and this scan keeps the registry honest: every
+ * `isaac.*` key in a source file that touches `localStorage`/`sessionStorage` must
+ * be listed, and every listed key must still exist in the source.
+ */
+describe('Settings — the Data card says everything the browser keeps', () => {
+  const SRC = resolve(__dirname, '..');
+  const files = (dir: string): string[] =>
+    readdirSync(dir).flatMap((name) => {
+      const path = join(dir, name);
+      if (statSync(path).isDirectory()) return name === '__tests__' || name === 'test' ? [] : files(path);
+      return /\.tsx?$/.test(name) && !/\.test\.tsx?$/.test(name) ? [path] : [];
+    });
+  const sourceKeys = () => {
+    const keys = new Set<string>();
+    for (const path of files(SRC)) {
+      if (path.endsWith(join('lib', 'settingsContent.ts'))) continue;
+      const text = readFileSync(path, 'utf8');
+      if (!/localStorage|sessionStorage/.test(text)) continue;
+      for (const m of text.matchAll(/['`](isaac\.[A-Za-z0-9._-]+)['`]/g)) keys.add(m[1]!);
+    }
+    return keys;
+  };
+
+  it('lists every storage key the source uses, and none it no longer uses', () => {
+    const found = sourceKeys();
+    // Precondition: the scan reaches the known stores, so an empty pass cannot.
+    expect(found.has('isaac.localImports.by')).toBe(true);
+    expect(found.has('isaac.tutorial.session.v1')).toBe(true);
+    const listed = new Set(BROWSER_STORAGE_KEYS.map((k) => k.key));
+    expect([...found].filter((k) => !listed.has(k)), 'stored but not on the Data card').toEqual([]);
+    expect([...listed].filter((k) => !found.has(k)), 'on the Data card but no longer stored').toEqual([]);
+  });
+
+  it('renders that sentence as the In Your Browser row, naming the personal datum', () => {
+    const row = dataRows({ dataRegime: 'synthetic-only', persistence: 'ephemeral', recordSchemaVersion: '1.05' }).find(
+      (r) => r.label === 'In Your Browser',
+    );
+    expect(row?.text).toBe(BROWSER_STORAGE_SENTENCE);
+    expect(BROWSER_STORAGE_SENTENCE).toMatch(/name you enter for Local Imports/);
+    expect(BROWSER_STORAGE_SENTENCE).toMatch(/up to 50 records/);
+    expect(BROWSER_STORAGE_SENTENCE).toMatch(/walkthrough/);
+    expect(BROWSER_STORAGE_SENTENCE).toMatch(/Assistant conversations/);
+  });
+
+  it('on a durable deployment, says exports live outside the database (Minor 1)', () => {
+    const rows = (persistence: string) =>
+      dataRows({ dataRegime: 'synthetic-only', persistence, recordSchemaVersion: '1.05' });
+    const exports = (p: string) => rows(p).find((r) => r.label === 'Exports')!.text;
+    expect(exports('durable')).toMatch(/outside the database/);
+    for (const p of ['durable', 'ephemeral', 'unavailable']) {
+      expect(exports(p)).not.toMatch(/in your browser/i);
+    }
+  });
+});

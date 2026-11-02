@@ -523,7 +523,7 @@ describe('UX-017 — Workspace Statistics is merged into the Library', () => {
     expect(section.textContent ?? '').not.toMatch(/counts over the records in this workspace/i);
   });
 
-  it('B-2 CONTROL — a COMPLETE read still says "Workspace", so the scoping is conditional and not a blanket hedge', async () => {
+  it('B-2 CONTROL — a COMPLETE read shows the sums with no partial-read note, so the scoping is conditional and not a blanket hedge', async () => {
     // Without this arm the fix could be "always hedge", which would understate a
     // read that IS complete — the opposite defect, and just as false.
     stub([row({ title: 'Any', run_count: 2 })]);

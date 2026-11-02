@@ -74,6 +74,8 @@
  * published is not evidence that anything reached it, and this screen contacts
  * nothing.
  */
+import { CAPTURE_COPY } from './transcriptCaptureContent';
+
 export const MCP_ENDPOINT: string | null = null;
 
 /**
@@ -102,6 +104,11 @@ export function mcpDeploymentState(endpoint: string | null): McpDeploymentState 
 export const MCP_CONNECT_COPY = {
   stateLine:
     'Not set up on this server. An administrator connects it in the deployment settings.',
+  /* While `/api/health` has not answered: says what is happening, claims nothing. */
+  stateLineChecking: 'Checking how this server accepts agent connections…',
+  /* Absent block, a failed read, `null` or a posture this client does not know:
+     the server has not said, so neither does this line. */
+  stateLineUnreported: 'This server has not reported whether its agent interface is set up.',
   stateLinePublished: 'This deployment publishes an address for its agent interface:',
   neverSubmitHeading: 'No Agent Can Submit a Record',
   neverSubmitDetail:
@@ -644,3 +651,24 @@ export const MCP_WIDGET_COPY = {
   detailsSummary: 'Setup and Reference',
 } as const;
 
+
+/**
+ * THE UNCONFIGURED STATE LINE, BY THE SERVER'S OWN POSTURE (`/api/health` →
+ * `mcp.posture`, derived by `mcp/deployment.py::posture` from the flags the app
+ * consults). Restored 2026-11-02 after review: a single "Not set up on this server"
+ * line was FALSE in `local-only` and `oauth-mounted`, where an administrator HAS set
+ * the interface up.
+ *
+ * `local-only` and `oauth-mounted`/`remote-ready` reuse the voice-capture view's two
+ * sentences verbatim (`CAPTURE_COPY`, read by `ClaudeVoicePath`), so the two screens
+ * cannot give two different reasons for one deployment. `unmounted` is the plain
+ * "not set up" line. Anything else — no block, a failed read, `null`, an unknown
+ * value — is "not reported": no line claims more than the server reported.
+ */
+export function mcpStateLine(settled: boolean, posture: string | null | undefined): string {
+  if (!settled) return MCP_CONNECT_COPY.stateLineChecking;
+  if (posture === 'unmounted') return MCP_CONNECT_COPY.stateLine;
+  if (posture === 'local-only') return CAPTURE_COPY.claudeLocalOnly;
+  if (posture === 'oauth-mounted' || posture === 'remote-ready') return CAPTURE_COPY.claudeNoAddress;
+  return MCP_CONNECT_COPY.stateLineUnreported;
+}

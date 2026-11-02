@@ -380,8 +380,9 @@ export function GraphHelp({
         <div className="graph-help-section">
           <h4>Commands</h4>
           <p>
-            The command bar accepts a fixed list and nothing else. Each command does what a control
-            on this page does.
+            Open <span className="graph-help-term">Query</span> to type a command. The command bar
+            accepts a fixed list and nothing else, and each command does what a control on this
+            page does.
           </p>
           <p className="graph-help-example">
             examples · <span className="mono">find export</span> ·{' '}
@@ -391,7 +392,7 @@ export function GraphHelp({
             <span className="mono">clear filters</span>
           </p>
           <p>
-            <span className="graph-help-term">Suggested Commands</span>, under the bar, fits a few
+            <span className="graph-help-term">Suggested Commands</span>, under the bar inside Query, fits a few
             to what you have selected. Clicking one puts that exact command in the bar and waits for
             you to press Run. The two exceptions act on the click itself and are labelled as such:{' '}
             <span className="graph-help-term">Fit to View</span> reframes the canvas, and{' '}

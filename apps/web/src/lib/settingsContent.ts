@@ -53,6 +53,29 @@ export interface SettingsDataRow {
   text: string;
 }
 
+/**
+ * EVERYTHING THIS APP KEEPS IN THE BROWSER, by storage key (review 2026-11-02,
+ * Important 2: the row named two of seven, leaving out a name the reader types).
+ * `settings-page.test.tsx` scans `src` for every `isaac.*` key handed to
+ * `localStorage`/`sessionStorage` and fails when one is missing here, so a new key
+ * cannot ship without this row saying so.
+ */
+export const BROWSER_STORAGE_KEYS: readonly { key: string; store: 'local' | 'session'; what: string }[] = [
+  { key: 'isaac.tutorial.v1', store: 'local', what: 'whether you finished or dismissed the walkthrough' },
+  { key: 'isaac.tutorial.session.v1', store: 'session', what: 'the walkthrough step this tab is on' },
+  { key: 'isaac.record-last-view.v1', store: 'local', what: 'the view you last opened on up to 50 records' },
+  { key: 'isaac.assistant-rail-collapsed', store: 'local', what: 'whether the Assistant panel is collapsed' },
+  { key: 'isaac.transcriptCaptureGuidance.v1', store: 'local', what: 'whether the capture guidance is hidden' },
+  { key: 'isaac.localImports.by', store: 'local', what: 'the name you enter for Local Imports' },
+  { key: 'isaac.assistant.session.', store: 'session', what: 'this tab’s Assistant conversations' },
+];
+
+/** The Data card's "In Your Browser" row: one plain sentence over every key above. */
+export const BROWSER_STORAGE_SENTENCE =
+  'Your walkthrough progress, the view you last opened on up to 50 records, whether the ' +
+  'Assistant panel is collapsed and the capture guidance hidden, the name you enter for ' +
+  'Local Imports, and this tab’s Assistant conversations.';
+
 export function dataRows(facts: SettingsFacts): SettingsDataRow[] {
   const { persistence } = facts;
   const records =
@@ -67,16 +90,21 @@ export function dataRows(facts: SettingsFacts): SettingsDataRow[] {
     { label: 'Experiment Records', text: records },
     {
       label: 'Exports',
-      text: 'An export writes the official record and its evidence sidecar on the server. A download saves a copy in your browser.',
+      /* Exported files live in the server's working directory, never in the
+         database (`GET /api/about`: "not held in a database, whatever `persistence`
+         reports"). On a durable deployment that is said, so the Records row beside
+         it ("survive a restart") is not read as covering them too. A download goes
+         to the reader's computer, not to "the browser". */
+      text:
+        persistence === 'durable'
+          ? 'An export writes the official record and its evidence sidecar as files on the server, outside the database. Download a copy to keep it.'
+          : 'An export writes the official record and its evidence sidecar on the server. A download saves a copy to your computer.',
     },
     {
       label: 'Walkthroughs',
       text: 'Each runs in its own temporary workspace, discarded when it ends or expires.',
     },
-    {
-      label: 'In Your Browser',
-      text: 'Whether you finished the walkthrough, and this tab’s Assistant conversations.',
-    },
+    { label: 'In Your Browser', text: BROWSER_STORAGE_SENTENCE },
   ];
 }
 

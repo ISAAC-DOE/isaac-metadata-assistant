@@ -228,18 +228,12 @@
   font-size: var(--font-size-body);
   line-height: var(--line-height-snug);
 }
-.tutorial-offer-lead {
-  color: var(--text-secondary);
-}
 .tutorial-offer .tutorial-offer-title {
   margin: 0;
   font-size: var(--font-size-body);
   font-weight: var(--font-weight-semibold);
   line-height: var(--line-height-snug);
   color: var(--text-heading);
-}
-.tutorial-offer-line {
-  color: var(--text-secondary);
 }
 .tutorial-offer-actions {
   display: flex;
@@ -419,13 +413,9 @@
   }
 }
 
-/* NARROW: the strip keeps the name, the info tip and both controls; the one-line
-   description is the part that goes (it is restated in full behind the tip), so
-   the offer costs two short rows on a phone instead of five. */
+/* NARROW: the strip keeps the name, the info tip and both controls (the lead and
+   the one-line description were cut 2026-11-02 at every width). */
 @media (max-width: 640px) {
-  .tutorial-offer-line {
-    display: none;
-  }
   /* Name, info tip and both controls on ONE row at phone width (review,
      2026-10-18: the tip wrapped onto a line of its own). */
   .tutorial-offer {
@@ -436,7 +426,6 @@
        first experiment row on the first phone screen). */
     margin-bottom: var(--space-sm);
   }
-  .tutorial-offer-lead,
   .tutorial-offer-mark {
     display: none;
   }

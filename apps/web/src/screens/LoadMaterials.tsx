@@ -237,8 +237,8 @@ export function LoadMaterials() {
         {/*
          * The protective refusal. `role="alert"` matches how this screen (and
          * the export conflict on S6) announces a state that appears in answer to
-         * a click; the visual treatment is the same protective slate as the
-         * governance refusal above, never the red error treatment — the backend
+         * a click; the visual treatment is the protective slate, never the red
+         * error treatment — the backend
          * is healthy and has just done the right thing. Focus deliberately stays
          * on the example-run button: the alert announces itself, and the remedy
          * button follows in DOM order.
@@ -273,8 +273,8 @@ export function LoadMaterials() {
         )}
 
         {/*
-         * The scope refusal. Same protective treatment as the drift refusal above
-         * and the governance refusal at the top of the screen — never the red error
+         * The scope refusal. Same protective treatment as the drift refusal above —
+         * never the red error
          * treatment, because nothing failed: the server answered, correctly, that
          * the records this control acts on are not in the workspace this request
          * addressed. `role="alert"` because it appears in answer to a click.

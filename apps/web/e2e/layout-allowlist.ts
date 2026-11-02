@@ -118,6 +118,21 @@ export const OVERFLOW_ALLOWANCES: readonly OverflowAllowance[] = [
     evidence:
       'apps/web/src/components/chrome.css — `@media (max-width: 1024px) .leftnav { flex-wrap: nowrap; overflow-x: auto; }`',
   },
+  {
+    id: 'ALLOW-SETTINGS-TABS-SCROLL',
+    match: '.settings-section-tabs',
+    // 2026-11-02 (Task 2 review ruling): the Settings tab row is one line that
+    // scrolls sideways when it does not fit, rather than relying on it fitting at
+    // 320px on CI's wider font.
+    surfaces: ['settings', 'settings-api', 'settings-explorer'],
+    reason:
+      'The Settings page tablist is a single row of three tabs. When they do not fit, the row ' +
+      'scrolls sideways INSIDE its own box; each tab is a real button reached by the arrow keys ' +
+      '(roving tabindex), focus scrolls the row, and the selected tab is scrolled into view on ' +
+      'every change. The page itself never scrolls with it.',
+    evidence:
+      'apps/web/src/screens/settings/settings-widgets.css — `.settings-section-tabs { flex-wrap: nowrap; overflow-x: auto; }`',
+  },
 ];
 
 /**
