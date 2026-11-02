@@ -1462,59 +1462,176 @@ STATED_UTC_START_QUESTION_ID = _qid("experiment", STATED_UTC_START_KIND, B.XDC_S
 _STATED_UTC_EXAMPLES = 3
 #: The reading states a value it may still settle a start with (a rejected reading never does).
 _STATED_UTC_USABLE_STATES = (B.STATE_CANDIDATE_EXTRACTED, B.STATE_NEEDS_REVIEW, B.STATE_SCIENTIST_CONFIRMED)
+#: r6 review M1: SPEC writes ``#E`` once, in the file header, when the file is CREATED (the header's ``#D`` is the same
+#: instant); each scan writes its own ``#D`` later. A run whose first scan starts more than this long after its file
+#: was created is left out: the file-creation instant is too far from the measurement to stand for its start.
+MAX_FILE_TO_FIRST_SCAN_S = 600
+#: How a SPEC ``#D`` line writes its local clock time (``Fri Apr 11 19:41:57 2025``).
+_SPEC_D_FORMAT = "%a %b %d %H:%M:%S %Y"
+_SCAN_LOCATOR = re.compile(r"\(scan (\d+)\)")
 
 
-def stated_utc_reading(q: Mapping, runs: Sequence[str]) -> tuple[dict | None, str | None]:
-    """r6 I1: ``(the one UTC reading, None)`` that settles a per-group start-time disagreement ``q`` (a
-    ``resolve_conflict`` about :data:`bundle.XDC_START_PATH` for ONE run), or ``(None, why not)``. The reading must be an
-    instant the run's own file states in UTC or as an epoch (:data:`UTC_STATED_RULES`, SPEC ``#E``), and the only
-    distinct one held for the run. A local clock time converted with a zone is never one (DEC-87..89). ``runs``: the
-    conflict's runs (a run kept as context left out)."""
+def file_to_first_scan_gap(conflict: Mapping, source_id: Any) -> float | None:
+    """r6 review M1: seconds from the file-level ``#D`` (the file's creation, as ``#E`` states it) to the first scan's
+    ``#D``, both read in ``source_id`` (the SPEC file that holds the ``#E`` line), or ``None`` when either is not
+    there. Both are times of the same instrument clock, so no time zone is needed to subtract them."""
+    from datetime import datetime
+
+    file_t = scan_t = None
+    first = None
+    for r in conflict.get("readings") or ():
+        try:
+            t = datetime.strptime(" ".join(str(r.get("value") or "").split()), _SPEC_D_FORMAT)
+        except ValueError:
+            continue
+        for w in r.get("witnesses") or ():
+            if w.get("source_id") != source_id:
+                continue
+            loc = str(w.get("locator") or "")
+            m = _SCAN_LOCATOR.search(loc)
+            if m:
+                if first is None or int(m.group(1)) < first:
+                    first, scan_t = int(m.group(1)), t
+            elif "#D" in loc:
+                file_t = t if file_t is None else min(file_t, t)
+    if file_t is None or scan_t is None:
+        return None
+    return (scan_t - file_t).total_seconds()
+
+
+def _utc_reading_of(c: Mapping, source_path_of: Mapping[str, Any]) -> dict:
+    ev = next((e for e in c.get("evidence") or () if e.get("method") != "ai_interpretation"), None) or {}
+    return {"candidate_id": c["candidate_id"], "value": c["value"], "run_id": c.get("run_id"),
+            "observed_literal": (c.get("observed_literals") or [None])[0], "locator": ev.get("locator"),
+            "source_id": ev.get("source_id"), "relative_path": ev.get("relative_path") or source_path_of.get(ev.get("source_id")),
+            "rule_id": next((n.get("rule_id") for n in ev.get("normalization") or () if n.get("rule_id")), None),
+            "value_state": c.get("value_state")}
+
+
+def stated_utc_reading(readings: Sequence[Mapping], runs: Sequence[str],
+                       conflict: Mapping | None = None) -> tuple[dict | None, str | None]:
+    """r6 I1: ``(the one UTC reading, None)`` that settles a start-time disagreement about ONE run, or ``(None, why
+    not)``. ``readings``: the UTC readings the bundle holds for the run (as a conflict question's ``utc_readings``).
+    Every usable one must give the SAME instant (r6 review L1), and it must be an instant the run's own file states in
+    UTC or as an epoch (:data:`UTC_STATED_RULES`, SPEC ``#E``). A local clock time converted with a zone is never one
+    (DEC-87..89). With ``conflict``: the run's first scan must start within :data:`MAX_FILE_TO_FIRST_SCAN_S` of the
+    file's creation (:func:`file_to_first_scan_gap`; the reading then carries ``gap_s``)."""
     if len(runs) != 1:
         return None, f"the disagreement spans {len(runs)} runs, so answer it per group"
-    held = [u for u in q.get("utc_readings") or () if u.get("value_state") in _STATED_UTC_USABLE_STATES]
+    held = [u for u in readings if u.get("value_state") in _STATED_UTC_USABLE_STATES]
     stated = [u for u in held if u.get("rule_id") in UTC_STATED_RULES]
-    if not stated:
-        return None, ("its files state no UTC instant for this start (no #E line), so give the UTC start yourself"
-                      if not held else "its only UTC reading is not an instant a file states in UTC (#E)")
-    values = list(dict.fromkeys(str(u.get("value")) for u in stated))
+    if not held:
+        return None, "its files state no UTC instant for this start (no #E line), so give the UTC start yourself"
+    values = list(dict.fromkeys(str(u.get("value")) for u in held))
     if len(values) > 1:
-        return None, f"its files state {len(values)} different UTC instants for this run, so say which is the start"
-    return stated[0], None
+        return None, (f"its #E readings disagree ({len(values)} different instants), so say which is the start"
+                      if len(stated) == len(held) else
+                      f"its files hold {len(values)} different UTC readings for this run, so say which is the start")
+    if not stated:
+        return None, "its only UTC reading is not an instant a file states in UTC (#E)"
+    if conflict is None:
+        return stated[0], None
+    gap = file_to_first_scan_gap(conflict, stated[0].get("source_id"))
+    if gap is None:
+        return None, ("its file's #D lines do not show both when the file was created and when the first scan "
+                      "started, so say which instant is the start")
+    if gap > MAX_FILE_TO_FIRST_SCAN_S or gap < 0:
+        return None, (f"its first scan started {gap / 60:.0f} min after the file was created (more than "
+                      f"{MAX_FILE_TO_FIRST_SCAN_S // 60} min), so say which instant is the start")
+    return {**stated[0], "gap_s": gap}, None
+
+
+def stated_utc_reach(bundle: Mapping) -> dict[str, dict]:
+    """r6 I1: ``{conflict_id: {"group_id", "reading" (or None), "reason" (or None)}}`` for each start-time
+    disagreement about the runs of a live record group (any state: the caller keeps the open ones), read from the
+    bundle alone: what the beamtime-wide start-time question reaches (:func:`_stated_utc_start_question`) and what the
+    records' start-time warning names (``records._start_time_conflict_warnings``). r6 review M2: a group holding more
+    than one such disagreement is not reached: each run would keep its own start, and the record takes none."""
+    context = B.context_run_ids(bundle)
+    run_by_key = {r["run_key"]: r["run_id"] for r in bundle.get("runs") or ()}
+    group_of: dict[str, str] = {}
+    for g in live_groups(bundle):
+        for k in g.get("member_run_keys") or ():
+            rid = run_by_key.get(k)
+            if rid and rid not in group_of:
+                group_of[rid] = g["group_id"]
+    source_path_of = {x["source_id"]: x.get("relative_path") for x in bundle.get("sources") or ()}
+    start_cands = [c for c in bundle.get("candidates") or () if c.get("target_field_path") == B.XDC_START_PATH]
+    starts = {c["candidate_id"] for c in start_cands}
+    # only the runs a start-time disagreement names are read (linear: never a value check of every run's start)
+    named = {r for cf in bundle.get("conflicts") or () if cf.get("candidate_id") in starts for r in cf.get("run_ids") or ()}
+    utc_by_run: dict[str, list[dict]] = {}
+    for c in start_cands:
+        if (c.get("run_id") in named and c.get("value") is not None
+                and B.value_problem(B.XDC_START_PATH, c["value"]) is None):
+            utc_by_run.setdefault(c["run_id"], []).append(c)
+    out: dict[str, dict] = {}
+    per_group: dict[str, list[str]] = {}
+    for cf in bundle.get("conflicts") or ():
+        rids = cf.get("run_ids") or ()
+        if cf.get("candidate_id") not in starts or not rids or rids[0] not in group_of:
+            continue
+        runs = [r for r in rids if r not in context]
+        if not runs:
+            continue
+        readings = [_utc_reading_of(c, source_path_of) for r in runs for c in utc_by_run.get(r, ())
+                    if c["candidate_id"] != cf.get("candidate_id")]
+        reading, why = stated_utc_reading(readings, runs, cf)
+        gid = group_of[rids[0]]
+        out[cf["conflict_id"]] = {"group_id": gid, "reading": reading, "reason": why}
+        per_group.setdefault(gid, []).append(cf["conflict_id"])
+    for gid, cids in per_group.items():
+        if len(cids) > 1:
+            for cid in cids:
+                out[cid] = {**out[cid], "reading": None,
+                            "reason": (f"the group has {len(cids)} runs, each with its own start-time disagreement: "
+                                       "say which run's start the record takes")}
+    return out
 
 
 def _stated_utc_start_question(questions: list[dict], bundle: Mapping, group_of: Mapping[str, str],
                                run_by_id: Mapping[str, Mapping], decisions: Mapping) -> dict | None:
-    """r6 I1: ONE beamtime-wide decision for the start time: "use the instant each run's own file states in UTC (#E)".
+    """r6 I1: ONE beamtime-wide decision for the start time: "record the instant each run's own file states it was
+    CREATED (#E, UTC) as its start".
 
-    A BL15-2 SPEC run states its start twice: a local clock time with no zone (``#D``, on every scan) and a Unix epoch
-    (``#E``). Its ``#D`` lines disagree, so every group asked its own start-time question (~90 per beamtime), each
-    already offering the ``#E`` instant. This question asks it once: ``confirm`` records, for every group it reaches,
-    the instant that group's own file states (each run keeps its own value; :func:`mutations.decide_question`).
+    A BL15-2 SPEC file writes, in its header, when it was created: ``#E`` (a Unix epoch) and ``#D`` (the same instant
+    as a local clock time with no zone). Each scan then writes its own ``#D``. They disagree, so every group asked its
+    own start-time question (~90 per beamtime), each already offering the ``#E`` instant. This question asks it once:
+    ``confirm`` records, for every group it reaches, the file-creation instant its own file states (each run keeps its
+    own value; :func:`mutations.decide_question`). It says how long after that the first scan started (the largest gap,
+    the same clock) and leaves out a run whose gap is above :data:`MAX_FILE_TO_FIRST_SCAN_S`.
 
-    It reaches each live group's per-group start-time question that :func:`stated_utc_reading` settles; it names every
+    It reaches each live group's per-group start-time question that :func:`stated_utc_reach` settles; it names every
     group with an open start-time question it does not reach, with why. The per-group questions keep their ids and
     stay answerable (``answered_at_once_by`` names this one). Asked only for two or more groups; never for a local
     clock start awaiting a clock zone (those are no conflict, and their readings are not stated in UTC)."""
+    reach = stated_utc_reach(bundle)
     reached: list[tuple[dict, dict]] = []
-    not_reached: list[dict] = []
-    context = B.context_run_ids(bundle)
-    runs_of = {cf["conflict_id"]: [r for r in cf.get("run_ids") or () if r not in context] for cf in bundle["conflicts"]}
+    missed: dict[str, dict] = {}
     for q in questions:
         if (q.get("kind") != "resolve_conflict" or q.get("target_field_path") != B.XDC_START_PATH
                 or not q.get("affects_record") or q.get("covered_by_decisions")
                 or not str(q.get("scope") or "").startswith("group:")):
             continue
-        reading, why = stated_utc_reading(q, runs_of.get(q["targets"][0]["id"]) or ())
-        if reading is None:
-            not_reached.append({"group_id": q["scope"][len("group:"):], "question_id": q["question_id"], "reason": why})
+        r = reach.get(q["targets"][0]["id"])
+        if r is None:
+            continue
+        if r["reading"] is None:
+            gid = q["scope"][len("group:"):]
+            m = missed.setdefault(gid, {"group_id": gid, "question_id": q["question_id"], "question_ids": [],
+                                        "conflict_ids": [], "reason": r["reason"]})
+            m["question_ids"].append(q["question_id"])
+            m["conflict_ids"].append(q["targets"][0]["id"])
         else:
-            reached.append((q, reading))
+            reached.append((q, r["reading"]))
+    not_reached = list(missed.values())
     if len({q["scope"] for q, _ in reached}) < _STATED_UTC_MIN_GROUPS:
         return None
     qid = STATED_UTC_START_QUESTION_ID
+    context = B.context_run_ids(bundle)
+    runs_of = {cf["conflict_id"]: [r for r in cf.get("run_ids") or () if r not in context] for cf in bundle["conflicts"]}
     # the live groups whose start-time disagreement is answered already (not asked here): each keeps its own answer
-    asked_ids = {q["targets"][0]["id"] for q, _ in reached} | {x["question_id"] for x in not_reached}
+    asked_ids = {q["targets"][0]["id"] for q, _ in reached} | {i for x in not_reached for i in x["conflict_ids"]}
     path_of = {c["candidate_id"]: c.get("target_field_path") for c in bundle["candidates"]}
     answered_before = sorted({group_of[r] for cf in bundle["conflicts"]
                               if path_of.get(cf.get("candidate_id")) == B.XDC_START_PATH and cf["conflict_id"] not in asked_ids
@@ -1530,27 +1647,26 @@ def _stated_utc_start_question(questions: list[dict], bundle: Mapping, group_of:
         candidates[cid] = u["candidate_id"]
         runs.update(runs_of.get(cid) or ())
         q["answered_at_once_by"] = qid
-        q["text"] += f" Or answer every such group at once: question {qid}."
+        q["text"] += answered_at_once_sentence(qid)
         if decisions.get(("conflict", cid)) is not None:
             answered += 1
     n_groups = len(per_scope)
+    largest_gap = max(float(u.get("gap_s") or 0) for _, u in reached)
     stem_of = {rid: str(r.get("stem") or rid) for rid, r in run_by_id.items()}
     examples = []
     for q, u in reached[:_STATED_UTC_EXAMPLES]:
         rid = (runs_of.get(q["targets"][0]["id"]) or [None])[0]
         examples.append(f"{stem_of.get(rid, rid)}: {u['value']} (from {u.get('observed_literal')!r} at {u.get('locator')})")
-    text = (f"One answer for the start time of {n_groups} groups. Each of their runs states its start twice: as a local "
-            "clock time with no time zone (#D) and as a UTC instant (#E, a Unix epoch converted exactly). The #D lines "
-            "disagree, so each group asks its own start-time question. Confirm here to record, for each of these groups, "
-            "the UTC instant its own file states (#E). Each run keeps its own value. For example: "
+    text = (f"One answer for the start time of {n_groups} groups. Each of their SPEC files states, in its header, when "
+            "the file was created: as a UTC instant (#E, a Unix epoch converted exactly) and as a local clock time with "
+            "no time zone (#D). Each scan then writes its own #D. These disagree, so each group asks its own start-time "
+            "question. #E is when the file was created, not when the first scan started: in these runs the first scan "
+            f"started at most {largest_gap:.0f} s later (both read on the same clock, so no time zone is needed). A run "
+            f"whose first scan started more than {MAX_FILE_TO_FIRST_SCAN_S // 60} min later is left out. Confirm here only "
+            "if the scientist chooses the file-creation instant as each record's start time: for each of these groups it "
+            "records the #E instant its own file states. Each run keeps its own value. For example: "
             + "; ".join(examples) + (f"; and {len(reached) - len(examples)} more." if len(reached) > len(examples) else ".")
             + f" It reaches {n_groups} group(s) ({len(runs)} run(s)).")
-    several = sorted(sc[len("group:"):] for sc, ids in per_scope.items() if len(ids) > 1)
-    if several:
-        text += (f" In {len(several)} of them more than one run is reached ({', '.join(several[:3])}"
-                 + ("…" if len(several) > 3 else "") + "): each run keeps its own start, and such a group's record "
-                 "carries none while they differ (which run's start a merged record takes is left to the protocol "
-                 "review, DEC-89).")
     if not_reached:
         text += (f" It does not reach {len(not_reached)} group(s) with an open start-time question: "
                  + "; ".join(f"{x['group_id']} ({x['question_id']}): {x['reason']}" for x in not_reached[:5])
@@ -1564,8 +1680,9 @@ def _stated_utc_start_question(questions: list[dict], bundle: Mapping, group_of:
     if answered_before:
         text += (f" {len(answered_before)} other group(s) already hold a start-time answer of their own and keep it "
                  "(answered_before).")
-    text += (" Each per-group question keeps its id and stays answerable: answer one of them to give that group "
-             "another value, or add --only group:<id> here for one group.")
+    text += (" Which instant a record's start should be (file creation or first scan) is for the protocol review "
+             "(DEC-89). Each per-group question keeps its id and stays answerable: answer one of them to give that "
+             "group another value, or add --only group:<id> here for one group.")
     hints = [{"kind": "utc_reading", "literal": u["value"], "candidate_id": u["candidate_id"], "locator": u.get("locator"),
               "source_id": u.get("source_id"), "relative_path": u.get("relative_path"),
               "observed_literal": u.get("observed_literal"), "group_id": q["scope"][len("group:"):]}
@@ -1587,6 +1704,8 @@ def _stated_utc_start_question(questions: list[dict], bundle: Mapping, group_of:
         "per_scope_targets": per_scope,
         "stated_utc_candidates": candidates,
         "answers_at_once": len(reached),
+        "largest_file_to_first_scan_s": largest_gap,
+        "max_file_to_first_scan_s": MAX_FILE_TO_FIRST_SCAN_S,
         "not_reached": not_reached,
         **({"answered_before": answered_before} if answered_before else {}),
         "hints": hints,
@@ -1595,6 +1714,21 @@ def _stated_utc_start_question(questions: list[dict], bundle: Mapping, group_of:
         "answer_command": (f'isaac bundle decide <bundle_dir> --question {qid} --decision confirm --by "<your name>"'
                            "   # one group only: add --only group:<group_id>"),
     }
+
+
+def answered_at_once_sentence(qid: str) -> str:
+    """The sentence a per-group question adds when a beamtime-wide question answers it at once (r6 review L3: the
+    Local Imports page, which does not show that question, leaves it off: :func:`without_answered_at_once`)."""
+    return f" Or answer every such group at once: question {qid}."
+
+
+def without_answered_at_once(q: Mapping) -> Mapping:
+    """``q`` as a screen that does not show the beamtime-wide question shows it: without :func:`answered_at_once_sentence`."""
+    by = q.get("answered_at_once_by")
+    if not by:
+        return q
+    return {**{k: v for k, v in q.items() if k != "answered_at_once_by"},
+            "text": str(q.get("text") or "").replace(answered_at_once_sentence(by), "")}
 
 
 def fold_answered_at_once(questions: Sequence[Mapping], *, scope: str | None, include: bool) -> tuple[list, list]:

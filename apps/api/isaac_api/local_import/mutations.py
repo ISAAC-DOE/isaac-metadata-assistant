@@ -532,30 +532,13 @@ def log_full_message(section: str, held: int, adding: int, bound: int) -> str:
 _INTERPRETABLE = ("candidate", "missing_value", "record_group", "source", "run", "processing_result")
 
 
-#: r6 I4: words a reading uses to say the files state NO value. Such a reading is no value: shown to the scientist it
-#: would read "An AI reading suggests 'not stated'", and propose-terms would draft it as a vocabulary term.
-NOTHING_STATED_READINGS = frozenset({
-    "not stated", "none stated", "nothing stated", "not given", "not specified", "unspecified", "not mentioned",
-    "not reported", "not recorded", "not found", "not available", "no value", "not in the files", "not in file",
-    "unknown", "n/a",
-})
-
-
 def nothing_stated_refusal(kind: str, obj: Mapping, value: Any) -> str | None:
     """r6 I4: why ONE AI reading (``annotate --target``) is refused because it says the files state nothing, or
-    ``None``. A word off a field's list is kept (``propose-terms`` drafts it as a vocabulary request); a reading that
-    says "not stated" is no value, so it is never kept as a suggestion. A value on the field's own list is kept."""
-    if not isinstance(value, str):
-        return None
-    said = re.sub(r"[\s.]+", " ", value.casefold()).strip(" .")
-    if said not in NOTHING_STATED_READINGS:
-        return None
+    ``None`` (:func:`suggestions.nothing_stated_reason`; ``annotate --from-readings`` skips such a finding the same way)."""
+    from . import suggestions as S
+
     path = obj.get("target_field_path") if kind in ("candidate", "missing_value") else None
-    if path and value in (B.allowed_values(path) or ()):
-        return None
-    return (f"{value!r} says the files state no value, so it is not recorded as a reading: it would be shown to the "
-            "scientist as an AI suggestion of a value. When the files state none, record nothing: the question stays "
-            "asked, and the scientist answers it. Say in your report that you found no statement of it.")
+    return S.nothing_stated_reason(value, path)
 
 
 def annotate(
@@ -2331,14 +2314,6 @@ def _decide_stated_utc_starts(bundle_dir: Path, bundle: dict, asked: Mapping, fo
     parts = [f"{verb} the start time of {len(groups)} group(s) ({len(recorded)} run(s)), each the UTC instant its own "
              f"file states (#E): one decision for the beamtime, {qid}." if recorded else
              "Nothing new recorded: every group this question reaches already holds a start-time answer."]
-    from collections import Counter
-
-    split = {g: n for g, n in Counter(x["group_id"] for x in recorded if x["group_id"]).items() if n > 1}
-    if split:
-        parts.append(f"In {len(split)} group(s) more than one run got a start ({', '.join(sorted(split)[:5])}"
-                     + ("…" if len(split) > 5 else "") + "): each run keeps its own, and such a group's record carries "
-                     "none of them while they differ (which run's start a merged record takes is left to the protocol "
-                     "review, DEC-89).")
     if asked.get("answered_before"):
         parts.append(f"{len(asked['answered_before'])} other group(s) already held a start-time answer of their own and "
                      "keep it.")

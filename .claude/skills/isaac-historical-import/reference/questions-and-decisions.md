@@ -111,15 +111,22 @@ group is confirmed the minimum names it in `answer_first` (not counted; never af
   see the next item. A closed field
   (e.g. the technique read from macro names or Python helper lines): show `allowed_values` and record
   the one they name. When only some readings fit, `confirm` one of those.
-- **One answer for every group's start time** (`stated_utc_start_times`, experiment scope). On a SPEC
-  beamtime each run states its start twice: `#D` (a local clock time, no zone) and `#E` (a UTC epoch). When
-  the `#D` lines disagree in two or more groups, this one question asks once: "Use the UTC instant each
-  run's own file states (#E)?". Ask the scientist that. Only on their yes:
+- **One answer for every group's start time** (`stated_utc_start_times`, experiment scope). A SPEC file
+  states in its header when the file was CREATED: `#E` (a UTC epoch) and `#D` (the same instant, a local
+  clock time with no zone). Each scan then writes its own `#D`, a little later. When these disagree in two
+  or more groups, this one question asks once. `#E` is the file's creation, not the first scan's start. The
+  question says the largest gap to the first scan (`largest_file_to_first_scan_s`, read on one clock) and
+  leaves out a run whose gap is above 10 minutes. Ask the scientist: "Use each file's creation instant (#E)
+  as the record's start? The first scan started at most N s later." Only on their yes:
   `decide --question <Q> --decision confirm --by "<name>"` (no `--value`; `--only group:<id>` for one
-  group). Each run gets its own `#E` instant; nothing is shared between runs. The reply says how many
-  groups were recorded, which open groups it does not reach and why (`not_reached`: e.g. no `#E` line),
-  and which groups keep an answer of their own. Answer the groups it does not reach one by one. Tell the
-  scientist that a group with two runs keeps both starts, so its record carries none while they differ.
+  group). Each run gets its own `#E` instant; nothing is shared between runs. Which instant a record's start
+  should be (file creation or first scan) is open for the protocol review (DEC-89): say so. The reply says
+  how many groups were recorded, which open groups it does not reach and why (`not_reached`, one entry per
+  group: no `#E` line, `#E` readings that disagree, a late first scan, or a group with two runs, where the
+  scientist says which run's start the record takes), and which groups keep an answer of their own. Answer
+  the groups it does not reach one by one. A record whose runs were given different starts carries none and
+  warns "start time left out: this group's runs were given different start times". While the question is
+  open, each start-time warning names it too.
   The question is never asked for local clock times waiting on a clock zone (BL4-3; `clock_time_zone`).
   `bundle questions` lists it and folds the per-group start-time questions it answers
   (`answered_at_once`; `--each-group` lists them). Each per-group question keeps its id and stays

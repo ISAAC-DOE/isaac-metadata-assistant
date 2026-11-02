@@ -95,6 +95,12 @@ START_TIME_LEFT_OUT_UNANSWERED = "start time left out: instrument clock zone not
 #: nobody has settled it: the UTC reading the files give is offered only inside that question
 START_TIME_LEFT_OUT_CONFLICT = ("start time left out: the start-time disagreement is unanswered (question {question}; it "
                                 "offers the UTC reading the files give, e.g. a scan's #E epoch)")
+#: r6 review L3: ...while the beamtime-wide start-time question (questions.STATED_UTC_START_QUESTION_ID) reaches it too
+START_TIME_LEFT_OUT_AT_ONCE = " Or answer every such group at once: question {beamtime}."
+#: r6 review M2: a record that carries no start time because its runs were given DIFFERENT start times (a merged group,
+#: each run its own): the composer fills nothing, and the record says so
+START_TIME_LEFT_OUT_DIFFER = ("start time left out: this group's runs were given different start times ({values}); say "
+                              "which run's start the record takes{question}")
 
 
 @functools.lru_cache(maxsize=512)
@@ -455,8 +461,10 @@ def composition_index(bundle: Mapping, decision_of: Mapping[tuple[str, str], Map
         "required_by_mode": {},
         # read from the WHOLE bundle here, never lazily inside compose_group: a group is composed from its own
         # values only, so a lazy read would keep the first group's view for every group
-        "memo": {"local_clock_runs": local_clock_runs(bundle), "open_start_conflicts": open_start_conflicts(bundle),
-                 "athena_choices": athena_choices(bundle)},
+        "memo": {"local_clock_runs": local_clock_runs(bundle), "open_start_conflicts": (opened := open_start_conflicts(bundle)),
+                 "athena_choices": athena_choices(bundle),
+                 # r6 review L3: which open start-time disagreements the beamtime-wide question reaches (whole bundle)
+                 "beamtime_start_reach": _beamtime_start_reach(bundle, opened) if opened else set()},
     }
 
 
@@ -1136,7 +1144,8 @@ def compose_group(bundle: Mapping, group: Mapping, bundle_dir: Path, index: dict
                           + Q.open_circuit_warnings(bundle, group, measured_ids, fields)
                           + _in_situ_warnings(bundle, group, [r for r in member_runs if r["run_id"] in measured_ids], fields,
                                               index["memo"])
-                          + _start_time_warnings(bundle, group, measured_ids, fields, index["memo"]))
+                          + _start_time_warnings(bundle, group, measured_ids, fields, index["memo"],
+                                                 disagreements=report["disagreements"]))
     if chose_other is not None:
         # r5c C1: the record carries an approved result that is not the version the scientist chose last: said at
         # build-records, validate and export (on the record's row), never silent
@@ -1453,7 +1462,7 @@ def local_clock_runs(bundle: Mapping) -> set[str]:
 
 
 def _start_time_warnings(bundle: Mapping, group: Mapping, member_ids: set, fields: Mapping,
-                         memo: dict | None = None) -> list[dict]:
+                         memo: dict | None = None, disagreements: Sequence[Mapping] = ()) -> list[dict]:
     """A :data:`START_TIME_WARNING` for a record that carries no start time while a member run's scan headers write
     one (``bundle.XDC_START_RULE_ID``) and the latest answer to the clock question is ``defer``: the record goes out
     without it, and says so. c16-r L6: so does one while the clock question has no answer yet (no zone, no defer),
@@ -1464,6 +1473,9 @@ def _start_time_warnings(bundle: Mapping, group: Mapping, member_ids: set, field
     if _present(fields, B.XDC_START_PATH) is not None:
         return []
     memo = {} if memo is None else memo
+    differ = next((d for d in disagreements if d.get("path") == B.XDC_START_PATH), None)
+    if differ is not None:
+        return _start_time_differ_warnings(bundle, group, member_ids, differ)
     if "local_clock_runs" not in memo:  # r4-c: read once per composition, never once per group
         memo["local_clock_runs"] = local_clock_runs(bundle)
     if not memo["local_clock_runs"] & set(member_ids):
@@ -1478,6 +1490,36 @@ def _start_time_warnings(bundle: Mapping, group: Mapping, member_ids: set, field
     return [{"code": START_TIME_WARNING, "group_id": group["group_id"], "path": B.XDC_START_PATH,
              "needs": B.XDC_START_PATH, "targets": [], "question_id": Q.CLOCK_QUESTION_ID, "text": text,
              "command": B.CLOCK_ZONE_COMMAND, **({"unanswered": True} if unanswered else {})}]
+
+
+def _start_time_differ_warnings(bundle: Mapping, group: Mapping, member_ids: set, differ: Mapping) -> list[dict]:
+    """r6 review M2: a :data:`START_TIME_WARNING` for a record whose runs were given different start times (the
+    composer's disagreement: it fills nothing), named by the group's first start-time question when it has one."""
+    from . import questions as Q
+
+    start = {c["candidate_id"] for c in bundle.get("candidates") or () if c.get("target_field_path") == B.XDC_START_PATH}
+    cf = next((cf for cf in bundle.get("conflicts") or () if cf.get("run_ids") and cf["run_ids"][0] in member_ids
+               and (cf.get("candidate_id") or "") in start), None)
+    qid = Q._qid(f"group:{group['group_id']}", "resolve_conflict", cf["conflict_id"]) if cf is not None else None
+    values = list(dict.fromkeys(str(v) for v in differ.get("values") or ()))
+    w = {"code": START_TIME_WARNING, "group_id": group["group_id"], "path": B.XDC_START_PATH,
+         "needs": B.XDC_START_PATH, "targets": list(differ.get("from") or ()), "question_id": qid, "differ": True,
+         "values": values[:5]}
+    if qid:
+        w["command"] = f"isaac bundle show question <bundle_dir> {qid}"
+    return [{**w, "text": start_time_text(w)}]
+
+
+def start_time_text(w: Mapping) -> str:
+    """The plain sentence of a :data:`START_TIME_WARNING` (each of its cases)."""
+    if w.get("differ"):
+        return START_TIME_LEFT_OUT_DIFFER.format(values=", ".join(w.get("values") or ()),
+                                                 question=f" (question {w['question_id']})" if w.get("question_id") else "")
+    text = (START_TIME_LEFT_OUT_CONFLICT if w.get("conflict") else START_TIME_LEFT_OUT_UNANSWERED if w.get("unanswered")
+            else START_TIME_LEFT_OUT).format(question=w["question_id"])
+    if w.get("beamtime_question_id"):
+        text += START_TIME_LEFT_OUT_AT_ONCE.format(beamtime=w["beamtime_question_id"])
+    return text
 
 
 def open_start_conflicts(bundle: Mapping) -> list[Mapping]:
@@ -1501,10 +1543,14 @@ def _start_time_conflict_warnings(bundle: Mapping, group: Mapping, member_ids: s
     for cf in memo["open_start_conflicts"]:
         if cf["run_ids"][0] in member_ids:
             qid = Q._qid(f"group:{group['group_id']}", "resolve_conflict", cf["conflict_id"])
-            return [{"code": START_TIME_WARNING, "group_id": group["group_id"], "path": B.XDC_START_PATH,
-                     "needs": B.XDC_START_PATH, "targets": [cf["conflict_id"]], "question_id": qid,
-                     "text": START_TIME_LEFT_OUT_CONFLICT.format(question=qid), "conflict": True,
-                     "command": f"isaac bundle show question <bundle_dir> {qid}"}]
+            if "beamtime_start_reach" not in memo:
+                memo["beamtime_start_reach"] = _beamtime_start_reach(bundle, memo["open_start_conflicts"])
+            w = {"code": START_TIME_WARNING, "group_id": group["group_id"], "path": B.XDC_START_PATH,
+                 "needs": B.XDC_START_PATH, "targets": [cf["conflict_id"]], "question_id": qid, "conflict": True,
+                 "command": f"isaac bundle show question <bundle_dir> {qid}",
+                 **({"beamtime_question_id": Q.STATED_UTC_START_QUESTION_ID}
+                    if cf["conflict_id"] in memo["beamtime_start_reach"] else {})}
+            return [{**w, "text": start_time_text(w)}]
     return []
 
 
@@ -1656,6 +1702,17 @@ def in_situ_text(w: Mapping) -> str:
             f"Ask the scientist ({where}), e.g. {first}")
 
 
+def _beamtime_start_reach(bundle: Mapping, open_conflicts: Sequence[Mapping]) -> set[str]:
+    """r6 review L3: the OPEN start-time disagreements the beamtime-wide start-time question reaches while it is asked
+    (``questions.stated_utc_reach``, two or more groups), else none: a warning on one of them names that question too."""
+    from . import questions as Q
+
+    reach = Q.stated_utc_reach(bundle)
+    open_ids = {cf["conflict_id"] for cf in open_conflicts}
+    reached = {cid: r["group_id"] for cid, r in reach.items() if cid in open_ids and r["reading"] is not None}
+    return set(reached) if len(set(reached.values())) >= Q._STATED_UTC_MIN_GROUPS else set()
+
+
 def potential_sources_text(w: Mapping) -> str:
     """The plain sentence for a :data:`POTENTIAL_SOURCES_WARNING`, ending with its command. c16-r M3: "state
     different potentials" only when both name the SAME scale; else they "write different numbers", each one's scale
@@ -1741,8 +1798,7 @@ def potential_warning_text(w: Mapping) -> str:
     if w.get("code") == ATHENA_NOT_CHOSEN_WARNING:
         return athena_choice_text(w, w["group_id"])
     if w.get("code") == START_TIME_WARNING:
-        return (START_TIME_LEFT_OUT_CONFLICT if w.get("conflict") else START_TIME_LEFT_OUT_UNANSWERED if w.get("unanswered")
-                else START_TIME_LEFT_OUT).format(question=w["question_id"])
+        return start_time_text(w)
     if w.get("open_circuit"):
         return Q.open_circuit_text(w)
     extra = Q.stated_potential_notes(w)

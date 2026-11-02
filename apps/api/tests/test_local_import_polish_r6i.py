@@ -215,13 +215,115 @@ def test_a_local_clock_time_converted_with_a_zone_is_never_a_stated_utc_instant(
     """BL4-3 XDC (DEC-87..89): a start converted with the zone a scientist gave is not an instant a file states."""
     reading = {"candidate_id": "cand-x", "value": "2100-01-01T08:00:00Z", "rule_id": B.CLOCK_ZONE_RULE_ID,
                "value_state": B.STATE_CANDIDATE_EXTRACTED}
-    got, why = Q.stated_utc_reading({"utc_readings": [reading]}, ["run-x"])
+    got, why = Q.stated_utc_reading([reading], ["run-x"])
     assert got is None and "not an instant a file states in UTC" in why
     epoch = {**reading, "rule_id": "bl15.spec.epoch_to_utc_iso.v1"}
-    assert Q.stated_utc_reading({"utc_readings": [epoch]}, ["run-x"])[0] == epoch
-    assert Q.stated_utc_reading({"utc_readings": [epoch, {**epoch, "value": "2100-01-02T00:00:00Z"}]}, ["run-x"])[0] is None
-    assert Q.stated_utc_reading({"utc_readings": [{**epoch, "value_state": B.STATE_REJECTED}]}, ["run-x"])[0] is None
-    assert Q.stated_utc_reading({"utc_readings": [epoch]}, ["run-x", "run-y"])[0] is None
+    assert Q.stated_utc_reading([epoch], ["run-x"])[0] == epoch
+    assert Q.stated_utc_reading([{**epoch, "value_state": B.STATE_REJECTED}], ["run-x"])[0] is None
+    assert Q.stated_utc_reading([epoch], ["run-x", "run-y"])[0] is None
+
+
+def test_readings_that_differ_are_refused_and_said_apart_from_no_epoch():
+    """r6 review L1, L2: every usable UTC reading must give the same instant; #E readings that disagree are said so."""
+    epoch = {"candidate_id": "c1", "value": "2100-01-01T00:00:00Z", "rule_id": "bl15.spec.epoch_to_utc_iso.v1",
+             "value_state": B.STATE_CANDIDATE_EXTRACTED}
+    other = {**epoch, "candidate_id": "c2", "value": "2100-01-02T00:00:00Z"}
+    got, why = Q.stated_utc_reading([epoch, other], ["r"])
+    assert got is None and "#E readings disagree (2 different instants)" in why
+    got, why = Q.stated_utc_reading([epoch, {**other, "rule_id": "some.other.rule"}], ["r"])
+    assert got is None and "2 different UTC readings" in why  # not only among #E readings
+    assert "no #E line" in Q.stated_utc_reading([], ["r"])[1]
+
+
+def _d_conflict(file_t, scan1_t, scan2_t="Fri Jan 01 03:00:00 2100"):
+    return {"readings": [
+        {"value": file_t, "witnesses": [{"source_id": "src-1", "locator": "line 3 header #D"}]},
+        {"value": scan1_t, "witnesses": [{"source_id": "src-1", "locator": "line 8 header #D (scan 1)"},
+                                         {"source_id": "src-2", "locator": "line 2 header #D"}]},
+        {"value": scan2_t, "witnesses": [{"source_id": "src-1", "locator": "line 90 header #D (scan 2)"}]}]}
+
+
+def test_the_gap_from_file_creation_to_the_first_scan_is_read_on_one_clock_and_bounded():
+    """r6 review M1: #E is when the file was created; a run whose first scan started more than 10 min later is left out."""
+    epoch = {"candidate_id": "c1", "value": "2100-01-01T00:00:00Z", "rule_id": "bl15.spec.epoch_to_utc_iso.v1",
+             "value_state": B.STATE_CANDIDATE_EXTRACTED, "source_id": "src-1"}
+    near = _d_conflict("Fri Jan 01 00:00:00 2100", "Fri Jan 01 00:01:38 2100")
+    assert Q.file_to_first_scan_gap(near, "src-1") == 98
+    got, _ = Q.stated_utc_reading([epoch], ["r"], near)
+    assert got["gap_s"] == 98
+    far = _d_conflict("Fri Jan 01 00:00:00 2100", "Fri Jan 01 00:20:00 2100")
+    got, why = Q.stated_utc_reading([epoch], ["r"], far)
+    assert got is None and "20 min after the file was created (more than 10 min)" in why
+    assert Q.file_to_first_scan_gap(far, "src-other") is None
+    assert "do not show both" in Q.stated_utc_reading([epoch], ["r"], {"readings": []})[1]
+
+
+def test_the_question_says_e_is_the_file_creation_and_leaves_out_a_late_first_scan(grouped):
+    b = M.load(grouped)
+    q = _beamtime(Q.consolidate(b))
+    assert "#E is when the file was created, not when the first scan started" in q["text"]
+    assert "at most 0 s later" in q["text"] and q["largest_file_to_first_scan_s"] == 0
+    assert q["max_file_to_first_scan_s"] == Q.MAX_FILE_TO_FIRST_SCAN_S and "more than 10 min later is left out" in q["text"]
+    assert "protocol review (DEC-89)" in q["text"]
+    # one run's first scan 20 min after its file was created: left out, with why
+    late = q["targets"][0]["id"]
+    cf = next(c for c in b["conflicts"] if c["conflict_id"] == late)
+    for r in cf["readings"]:
+        r["witnesses"] = [w for w in r["witnesses"] if "(scan" not in w["locator"]]
+    src = next(w["source_id"] for r in cf["readings"] for w in r["witnesses"] if w["locator"].endswith("header #D"))
+    cf["readings"].append({"reading_index": 9, "value": "Fri Jan 01 00:20:00 2100",
+                           "witnesses": [{"source_id": src, "relative_path": "x", "locator": "line 8 header #D (scan 1)"}]})
+    after = _beamtime(Q.consolidate(b))
+    assert late not in {t["id"] for t in after["targets"]}
+    assert any("20 min after the file was created" in x["reason"] for x in after["not_reached"])
+
+
+def test_a_group_with_two_runs_is_not_reached_and_its_record_says_it_has_no_start(grouped, monkeypatch):
+    """r6 review M2: a merged group would record two starts and the record take none: it is left out, and a record
+    whose runs were given different starts says it ships without one."""
+    monkeypatch.setattr(Q, "_STATED_UTC_MIN_GROUPS", 1)  # three groups in the fixture: two are merged here
+    b = M.load(grouped)
+    q = _beamtime(Q.consolidate(b))
+    first, second = sorted(q["per_scope_targets"])[:2]
+    keys = {g["group_id"]: g for g in b["record_groups"]}
+    g1, g2 = keys[first[len("group:"):]], keys[second[len("group:"):]]
+    g1["member_run_keys"] = list(g1["member_run_keys"]) + list(g2["member_run_keys"])
+    g2["status"] = "rejected"
+    merged = Q.consolidate(b)
+    after = _beamtime(merged)
+    assert first not in after["per_scope_targets"]
+    [miss] = [x for x in after["not_reached"] if x["group_id"] == g1["group_id"]]
+    assert len(miss["question_ids"]) == 2 and "say which run's start the record takes" in miss["reason"]
+    assert len({x["group_id"] for x in after["not_reached"]}) == len(after["not_reached"])  # counted per group
+    # each run given its own start: the composer fills nothing, and the record says so
+    for qid in miss["question_ids"]:
+        cf = Q.question(merged, qid)["targets"][0]["id"]
+        M.record_decision(b, target_ids=[cf], decision="correct",
+                          value=f"2100-01-0{1 + miss['question_ids'].index(qid)}T00:00:00Z", **BY)
+    b = B.apply_derivations(b)
+    report = Q.compositions(b)[g1["group_id"]]
+    [w] = [w for w in report["warnings"] if w["code"] == "start_time_left_out"]
+    assert w["differ"] and "given different start times" in w["text"] and "which run's start" in w["text"]
+    assert w["question_id"] in miss["question_ids"]
+
+
+def test_the_start_time_warning_names_the_beamtime_question_while_it_is_asked(grouped):
+    """r6 review L3."""
+    b = M.load(grouped)
+    q = _beamtime(Q.consolidate(b))
+    reports = Q.compositions(b)
+    named = [w for r in reports.values() for w in r["warnings"] if w["code"] == "start_time_left_out"]
+    reached = {t["id"] for t in q["targets"]}
+    assert named
+    for w in named:
+        if w["targets"][0] in reached:
+            assert w["beamtime_question_id"] == q["question_id"] and q["question_id"] in w["text"]
+        else:
+            assert "beamtime_question_id" not in w and q["question_id"] not in w["text"]
+    # the Local Imports page, which does not show the beamtime question, leaves its sentence off
+    per = next(x for x in Q.consolidate(b)["questions"] if x.get("answered_at_once_by"))
+    shown = Q.without_answered_at_once(per)
+    assert q["question_id"] in per["text"] and q["question_id"] not in shown["text"]
 
 
 def test_the_listing_folds_the_per_group_questions_and_lists_them_on_request(grouped, capsys):
@@ -318,6 +420,24 @@ def test_a_reading_that_says_nothing_is_stated_is_refused_and_a_word_off_the_lis
     open_target = next(c["candidate_id"] for c in b["candidates"] if c["target_field_path"] == "sample.material.name")
     with pytest.raises(M.MutationRefused):
         M.annotate(grouped, target_id=open_target, value="not specified", blind=False, **kw)
+
+
+def test_a_listed_value_is_kept_whatever_its_case_and_a_findings_file_skips_nothing_stated(grouped, monkeypatch):
+    """r6 review L4 and M3."""
+    monkeypatch.setattr(B, "allowed_values", lambda path: ["yes", "no", "unknown"] if path == "x.field" else None)
+    from isaac_api.local_import import suggestions as S
+    assert S.nothing_stated_reason("Unknown", "x.field") is None
+    assert S.nothing_stated_reason("unknown", "y.field") is not None
+    monkeypatch.undo()
+    b = M.load(grouped)
+    run = next(r for r in b["runs"] if r["run_candidate"])
+    findings = {"format": "isaac.reading_findings", "findings": [
+        {"id": "f1", "field_path": CELL, "value": "not stated", "applies_to": {"scope": "runs", "runs": [run["stem"]]},
+         "source": {"path": NOTES, "locator": "line 1"}, "quote": "SYNTHETIC"}]}
+    out = M.annotate_from_readings(grouped, findings, model_id="syn", apply=True)
+    assert out["interpretations"] == 0
+    assert any("state no value" in s["reason"] for s in out["skipped"])
+    assert not M.load(grouped).get("ai_interpretations")
 
 
 # --- I5 ------------------------------------------------------------------------------------------------------------

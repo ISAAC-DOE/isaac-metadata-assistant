@@ -23,6 +23,8 @@ code error can be caught instead of echoed. It is a spot check, never a verifica
    any other, exit 2); a target with no source locators takes any known source. If the files state no
    value, record nothing: a reading like "not stated" or "unknown" is refused (exit 2), because it would be
    shown as an AI suggestion. The question stays asked; say in your report that no statement was found.
+   A findings file (`--from-readings`) skips such a finding the same way and lists it under `skipped`.
+   A value on the field's list is kept whatever its case (`Unknown` where the list has `unknown`).
 6. Only after annotating: `reveal <bundle> <id>` and compare (`agrees_with_parser` and `relation`: the same number, the same
    instant written two ways, or the same string agree; anything else differs). For a numeric field, a
    reading given as text (`--value "0.4"` without `--json`) is compared as the number it parses as, and

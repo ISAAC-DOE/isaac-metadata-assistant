@@ -1437,7 +1437,7 @@ def get_local_bundle_questions(
             rows = [q for q in rows if q["kind"] == kind]
         # r6 I1: the beamtime-wide start-time question is answered with `isaac bundle decide`; this screen has no card for
         # it yet and answers each group's start-time question as before
-        rows = [q for q in rows if q["kind"] != Q.STATED_UTC_START_KIND]
+        rows = [Q.without_answered_at_once(q) for q in rows if q["kind"] != Q.STATED_UTC_START_KIND]
         # r3c LOW-3: hidden by default, counted, as `isaac bundle questions` hides them
         rows, outside = Q.hide_outside_live_groups(rows, scope=scope, include=include_outside_live_groups)
         page = rows[offset: offset + limit]
