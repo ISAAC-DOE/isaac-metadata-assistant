@@ -1,5 +1,6 @@
 import './screens.css';
 import './schema-proposals.css';
+import '../components/signals.css';
 import {
   useCallback,
   useEffect,
@@ -516,6 +517,7 @@ function ProposePanel({
     scope: useId(),
     migration: useId(),
     saveHint: useId(),
+    filing: useId(),
   };
   const limits = vocabulary.limits;
   const sections = vocabulary.proposal_sections;
@@ -536,6 +538,7 @@ function ProposePanel({
     missing: (keyof ApiSchemaProposalGate0)[];
   } | null>(null);
   const descriptionRef = useRef<HTMLTextAreaElement>(null);
+  const filingRef = useRef<HTMLDivElement>(null);
   // A new field (schema change request).
   const [parentPath, setParentPath] = useState<string | null>(null);
   const [fieldName, setFieldName] = useState('');
@@ -628,8 +631,13 @@ function ProposePanel({
     setErrors([]);
     setTopMessage(null);
     setSaved(null);
-    // The one box left to the scientist gets focus, after the form has re-rendered.
-    window.setTimeout(() => descriptionRef.current?.focus(), 0);
+    // After the form has re-rendered: the note saying what is being proposed is scrolled to the top of the
+    // view, and the one box left to the scientist gets focus without scrolling that note away again. The box
+    // is described by the note, so a screen reader hears it too.
+    window.setTimeout(() => {
+      filingRef.current?.scrollIntoView?.({ block: 'start' });
+      descriptionRef.current?.focus({ preventScroll: true });
+    }, 0);
   }
 
   const fromLocalDraft = localDraft !== null && type === 'add_term';
@@ -789,7 +797,7 @@ function ProposePanel({
         file filled in, and the one thing it cannot (the description, which is the scientist's own).
       */}
       {fromLocalDraft && localDraft && (
-        <div className="sp-notice sp-filing" role="note">
+        <div className="sp-notice sp-filing" role="note" id={ids.filing} ref={filingRef}>
           <p className="sp-filing-title">
             Proposing: add <code className="sp-term">{localDraft.draft.term}</code> to{' '}
             <code className="sp-term">{localDraft.draft.category}</code>
@@ -803,12 +811,12 @@ function ProposePanel({
                 <code className="sp-term">{localDraft.bundleId}</code>
               </>
             ) : null}{' '}
-            filled in the list and the term as it holds them, and the reviewer notes below from its counts and
-            citations. Change the notes if they are wrong.
+            filled in the list, the term, and the reviewer notes below (from its counts and citations). Change the
+            notes if they are wrong.
           </p>
           <p>
-            The description is left to you, and it is empty: write what the term means and where it is used, in your
-            own words, at least {limits.description_min} characters.
+            The description is left to you: write what the term means and where it is used, in your own words, at
+            least {limits.description_min} characters.
           </p>
           {localDraft.missing.length > 0 && (
             <p>
@@ -1143,7 +1151,7 @@ function ProposePanel({
             onChange={(e) => setDescription(e.target.value)}
             aria-required="true"
             aria-invalid={errorFor('description') ? true : undefined}
-            aria-describedby={`${ids.description}-hint${errorFor('description') ? ` ${ids.description}-err` : ''}`}
+            aria-describedby={`${ids.description}-hint${fromLocalDraft ? ` ${ids.filing}` : ''}${errorFor('description') ? ` ${ids.description}-err` : ''}`}
           />
           <p className="sp-hint" id={`${ids.description}-hint`}>
             At least {limits.description_min} characters, at most {limits.description_max}. {descriptionCount}{' '}
@@ -1320,8 +1328,8 @@ function groupDrafts(vocabulary: ApiSchemaVocabulary, drafts: LocalTermDraft[]):
   return out;
 }
 
-/** "From the local import B: 2 need your description · 1 cannot be proposed. Nothing was sent." Zero counts are left out. */
-function draftsSummary(from: string, groups: Record<DraftGroup, DraftRow[]>): string {
+/** "2 need your description · 1 cannot be proposed. Nothing was sent." — the counts after "From …:". Zero counts are left out. */
+function draftsCounts(groups: Record<DraftGroup, DraftRow[]>): string {
   const n = (g: DraftGroup) => groups[g].length;
   const verb = (k: number) => (k === 1 ? 'needs' : 'need');
   const parts = [
@@ -1329,7 +1337,7 @@ function draftsSummary(from: string, groups: Record<DraftGroup, DraftRow[]>): st
     n('refused') > 0 ? `${n('refused')} cannot be proposed` : null,
     n('settled') > 0 ? `${n('settled')} ${verb(n('settled'))} nothing from you` : null,
   ].filter((p): p is string => p !== null);
-  return `From ${from}: ${parts.join(' · ')}. Nothing was sent.`;
+  return `${parts.join(' · ')}. Nothing was sent.`;
 }
 
 function LocalDraftsLoader({
@@ -1375,11 +1383,22 @@ function LocalDraftsLoader({
 
   const groups = useMemo(() => (loaded ? groupDrafts(vocabulary, loaded.drafts) : null), [loaded, vocabulary]);
   // The summary is worked out from the same groups the lists are drawn from, so its counts are the rows shown.
-  const summary = !loaded
-    ? ''
-    : loaded.drafts.length === 0
-      ? 'The drafts file lists no terms outside the vocabulary.'
-      : draftsSummary(loaded.bundleId ? `the local import ${loaded.bundleId}` : (fileName ?? 'the drafts file'), groups!);
+  const summary =
+    !loaded || !groups ? null : loaded.drafts.length === 0 ? (
+      'The drafts file lists no terms outside the vocabulary.'
+    ) : (
+      <>
+        From{' '}
+        {loaded.bundleId ? (
+          <>
+            the local import <code className="sp-term">{loaded.bundleId}</code>
+          </>
+        ) : (
+          (fileName ?? 'the drafts file')
+        )}
+        : {draftsCounts(groups)}
+      </>
+    );
 
   return (
     <section className="sp-notice sp-drafts" aria-labelledby={ids.heading}>
@@ -1472,19 +1491,26 @@ function LocalDraftItem({
         <h4 className="sp-item-title sp-draft-term">
           <code className="sp-term">{draft.term}</code>
         </h4>
-        <span className={`sp-chip sp-chip-${chip.tone}`}>{chip.label}</span>
+        <span className={`chip sp-chip-${chip.tone}`}>{chip.label}</span>
       </div>
+      {/* A refusal leads with its reason. A settled term (answered since, or no longer in the bundle) is not
+          refused for a fault, so it says calmly that there is nothing to propose, and its row is shorter. */}
       {whyNot !== null && (
         <p className="sp-item-text">
-          <strong>Cannot be proposed from here.</strong> <InlineCode text={whyNot} />
+          <strong>{group === 'settled' ? 'Nothing to propose.' : 'Cannot be proposed from here.'}</strong>{' '}
+          <InlineCode text={whyNot} />
         </p>
       )}
       <dl className="sp-why-list sp-draft-facts">
-        <dt>What it would add</dt>
-        <dd>
-          Adds <code className="sp-term">{draft.term}</code> to <code className="sp-term">{draft.fieldPath}</code>
-          {lists.length > 0 ? `, which is not on ${lists.join(' or ')} today.` : '.'}
-        </dd>
+        {group !== 'settled' && (
+          <>
+            <dt>What it would add</dt>
+            <dd>
+              Adds <code className="sp-term">{draft.term}</code> to <code className="sp-term">{draft.fieldPath}</code>
+              {lists.length > 0 ? `, which is not on ${lists.join(' or ')} today.` : '.'}
+            </dd>
+          </>
+        )}
         <dt>Who asked, and why</dt>
         <dd>
           <p className="sp-draft-line">
@@ -1555,7 +1581,7 @@ function LocalDraftItem({
       {whyNot === null &&
         (isCurrent ? (
           <div className="sp-actions">
-            <span className="sp-chip sp-chip-current">Being proposed below</span>
+            <span className="chip sp-chip-current">Being proposed below</span>
           </div>
         ) : (
           <div className="sp-actions">

@@ -379,18 +379,10 @@
   align-items: center;
   gap: var(--space-xs) var(--space-sm);
 }
-/* A draft's state is a WORD in a chip. "Needs your description" is the expected, honest needs-you state;
-   "Cannot be proposed" is a not-established state, dashed like every other one; a settled term is plain
-   information. None of them is a verdict colour. */
-.sp-chip {
-  padding: var(--space-2xs) var(--space-sm);
-  border: 1px solid var(--border-strong);
-  border-radius: var(--radius-pill);
-  font-size: var(--font-size-meta);
-  font-weight: var(--font-weight-semibold);
-  line-height: var(--line-height-normal);
-  white-space: nowrap;
-}
+/* A draft's state is a WORD in a chip, on the shared `.chip` shape (components/signals.css) so it reads as
+   one family with every other state chip; only the tone is set here. "Needs your description" is the
+   expected, honest needs-you state; "Cannot be proposed" is a not-established state, dashed like every
+   other one; a settled term is plain information. None of them is a verdict colour. */
 .sp-chip-needsyou { color: var(--needsyou-text); background: var(--needsyou-bg); border-color: var(--needsyou-border); }
 .sp-chip-missing { color: var(--missing-text); background: var(--missing-bg); border-color: var(--missing-border); border-style: dashed; }
 .sp-chip-cover { color: var(--cover-text); background: var(--cover-bg); border-color: var(--cover-border); }
@@ -413,7 +405,8 @@
 @media (min-width: 561px) {
   .sp-draft-since-label { padding-top: var(--space-xs); }
 }
-/* Where a term was read is the long part of a draft, so it is folded; the summary sits on the label track. */
+/* Where a term was read is the long part of a draft, so it is folded below the facts; its summary starts at the
+   row's left edge, where the facts' labels start. */
 .sp-draft-cites > summary {
   cursor: pointer;
   width: fit-content;
@@ -438,6 +431,8 @@
   overflow-wrap: anywhere;
 }
 .sp-notice .sp-filing-title { margin-bottom: var(--space-sm); }
+/* Opening a draft scrolls this note to the top of the view; a step of room keeps it off the edge. */
+.sp-filing { scroll-margin-top: var(--space-md); }
 /* The line on what Save does sits close above the button it is about. */
 .sp-submit { display: flex; flex-direction: column; gap: var(--space-xs); }
 /* At a phone width a label column squeezed the values to a few words a line (and broke a field path in

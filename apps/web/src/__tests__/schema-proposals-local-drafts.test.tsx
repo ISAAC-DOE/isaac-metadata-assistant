@@ -333,6 +333,8 @@ describe('Load drafts from a local import', () => {
     expect(within(loader()).getByRole('status')).toHaveTextContent(
       'From the local import synthetic-bundle-0001: 2 need your description · 1 cannot be proposed. Nothing was sent.',
     );
+    // the bundle id is an identifier, so it is set in mono
+    expect(within(within(loader()).getByRole('status')).getByText('synthetic-bundle-0001', { selector: 'code' })).toBeInTheDocument();
     expect(calls.filter((c) => !c.startsWith('GET '))).toEqual([]);
     expect(sent).toEqual([]);
   });
@@ -361,7 +363,9 @@ describe('Load drafts from a local import', () => {
       '3 readings (1 confirmed by you, 2 AI readings)',
     );
     expect(within(panel).getByLabelText('What would change')).toHaveValue('');
-    expect(draftNote()).toHaveTextContent(/The description is left to you, and it is empty/);
+    expect(draftNote()).toHaveTextContent(/The description is left to you: write what the term means/);
+    // The box focus lands in is described by the note, so a screen reader hears what is being proposed.
+    expect(description.getAttribute('aria-describedby')!.split(' ')).toContain(draftNote().id);
 
     // Nothing was sent by loading the file or opening the draft.
     expect(calls.filter((c) => !c.startsWith('GET '))).toEqual([]);
@@ -490,7 +494,11 @@ describe('Load drafts from a local import', () => {
     await chooseFile(JSON.stringify(file));
     await drafts();
     const item = draftItem('XMCD');
-    expect(item).toHaveTextContent('Cannot be proposed from here.');
+    // settled, not faulted: a calm lead, the reason verbatim, still no button
+    expect(item).toHaveTextContent('Nothing to propose.');
+    expect(item).not.toHaveTextContent('Cannot be proposed from here.');
+    expect(item).not.toHaveTextContent('What it would add');
+    expect(within(item).queryByRole('button')).toBeNull();
     expect(item).toHaveTextContent('no longer found in the bundle');
     expect(within(item).getByText('No longer in the bundle')).toBeInTheDocument();
     expect(rowsOf(groupList(/^Nothing Needed From You/))).toContain(item);
@@ -521,7 +529,11 @@ describe('Load drafts from a local import', () => {
     expect(item.textContent).not.toContain('`');
     const answered = draftItem('ZZANSWERED');
     expect(rowsOf(groupList(/^Nothing Needed From You/))).toContain(answered);
-    expect(answered).toHaveTextContent('Cannot be proposed from here.');
+    // settled, not faulted: a calm lead, the reason verbatim, still no button
+    expect(answered).toHaveTextContent('Nothing to propose.');
+    expect(answered).not.toHaveTextContent('Cannot be proposed from here.');
+    expect(answered).not.toHaveTextContent('What it would add');
+    expect(within(answered).queryByRole('button')).toBeNull();
     expect(answered).toHaveTextContent('so the term is not drafted');
     expect(within(answered).queryByRole('button')).toBeNull();
     expect(calls.filter((c) => !c.startsWith('GET '))).toEqual([]);
@@ -539,7 +551,11 @@ describe('an answered term', () => {
     await chooseFile(JSON.stringify(file));
     await drafts();
     const item = draftItem('XMCD');
-    expect(item).toHaveTextContent('Cannot be proposed from here.');
+    // settled, not faulted: a calm lead, the reason verbatim, still no button
+    expect(item).toHaveTextContent('Nothing to propose.');
+    expect(item).not.toHaveTextContent('Cannot be proposed from here.');
+    expect(item).not.toHaveTextContent('What it would add');
+    expect(within(item).queryByRole('button')).toBeNull();
     expect(item).toHaveTextContent('SYN reason, so the term is not drafted.');
     expect(within(item).queryByRole('button', { name: 'Propose This Term' })).toBeNull();
     expect(calls.filter((c) => !c.startsWith('GET '))).toEqual([]);
@@ -595,7 +611,11 @@ describe('the drafts, grouped', () => {
     expect(answered).toHaveTextContent('Since it was asked for');
     expect(answered).toHaveTextContent(ANSWER_NOTE.replace(/`/g, ''));
     expect(within(answered).getByText('XAS', { selector: 'code' })).toBeInTheDocument();
-    expect(answered).toHaveTextContent('Cannot be proposed from here.');
+    // settled, not faulted: a calm lead, the reason verbatim, still no button
+    expect(answered).toHaveTextContent('Nothing to propose.');
+    expect(answered).not.toHaveTextContent('Cannot be proposed from here.');
+    expect(answered).not.toHaveTextContent('What it would add');
+    expect(within(answered).queryByRole('button')).toBeNull();
     expect(within(answered).queryByRole('button')).toBeNull();
   });
 
@@ -631,6 +651,10 @@ describe('the drafts, grouped', () => {
     expect(within(draftItem('XMCD')).queryByRole('button', { name: 'Propose This Term' })).toBeNull();
     expect(draftItem('simulated')).not.toHaveAttribute('aria-current');
     expect(draftNote()).toHaveTextContent('Proposing: add XMCD to system.technique (System)');
+    expect(draftNote().id).not.toBe('');
+    expect(screen.getByLabelText('Description (required)')).toHaveAccessibleDescription(
+      expect.stringContaining('Proposing: add XMCD to system.technique (System)'),
+    );
     expect(draftNote()).toHaveTextContent('at least 20 characters');
     expect(draftNote()).toHaveTextContent('synthetic-bundle-0001');
     // What Save does is said once, above it.
