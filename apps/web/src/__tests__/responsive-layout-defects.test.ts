@@ -230,39 +230,33 @@ describe('F2 · Load Materials reflows to one column instead of scrolling sidewa
   });
 });
 
-describe('F3 · the Governance & Safety banner wraps instead of shrinking to one word a line', () => {
-  /*
-   * MEASURED on Load Materials, darwin. `.gov-body` was `flex: 1 1 0%` while the
-   * icon (18px) and the "Read Policy" action (83px) were both `flex: none`, so
-   * the paragraph absorbed all of the shrink:
-   *
-   *   1280 → 825 x 94px    5 lines
-   *    768 → 531 x 150px   8 lines
-   *    640 → 403 x 206px  11 lines
-   *    390 → 153 x 544px  29 lines
-   *    320 →  83 x 1125px 60 lines
-   *
-   * A load-bearing honesty disclosure rendering as a 1,125px ribbon.
-   */
-  it('.gov-banner wraps', () => {
-    expect(declaredValue('.gov-banner', 'flex-wrap', TOP_LEVEL)).toBe('wrap');
-  });
-
-  it('.gov-body has a real flex basis, not the zero basis that let it be crushed', () => {
-    const flex = declaredValue('.gov-banner .gov-body', 'flex', TOP_LEVEL);
-    expect(flex).not.toBeNull();
-    // `flex: 1` is `1 1 0%`. The third component must be a real length.
-    const basis = /^\s*\d+\s+\d+\s+(\d+)px\s*$/.exec(flex!);
-    expect(basis, `expected a "<grow> <shrink> <basis>px" triple, got ${JSON.stringify(flex)}`).not.toBeNull();
-    expect(Number(basis![1])).toBeGreaterThan(0);
-  });
-
-  it('the basis keeps the icon and the paragraph on one line at 320px', () => {
-    // The banner's content box measured 208px at a 320px viewport. The icon
-    // costs 18px and one 12px gap, so a basis above 178px would push the
-    // paragraph onto its own line and orphan the icon.
-    const basis = Number(/(\d+)px/.exec(declaredValue('.gov-banner .gov-body', 'flex', TOP_LEVEL)!)![1]);
-    expect(basis).toBeLessThanOrEqual(178);
+/*
+ * ~~F3 · the Governance & Safety banner wraps instead of shrinking to one word a
+ * line~~ — the banner was retired from Load Materials 2026-11-02 (owner's
+ * direction: no standing disclaimers), and its `.gov-banner` rules went with it. The
+ * component file is kept UNMOUNTED only because the committed memory snapshot
+ * indexes it. Pinned now: nothing mounts it, so its layout cannot regress anywhere.
+ */
+describe('F3 · the retired Governance banner is mounted nowhere', () => {
+  it('no source imports GovernanceBanner, and its CSS is gone', () => {
+    const { readdirSync, readFileSync, statSync } = require('node:fs') as typeof import('node:fs');
+    const { join } = require('node:path') as typeof import('node:path');
+    const root = join(__dirname, '..');
+    const offenders: string[] = [];
+    const walk = (dir: string) => {
+      for (const entry of readdirSync(dir)) {
+        const full = join(dir, entry);
+        if (statSync(full).isDirectory()) {
+          if (entry !== '__tests__') walk(full);
+        } else if (/\.tsx?$/.test(entry) && !entry.startsWith('GovernanceBanner')) {
+          if (/from ['"][^'"]*GovernanceBanner['"]/.test(readFileSync(full, 'utf8'))) offenders.push(full);
+        }
+      }
+    };
+    walk(root);
+    expect(offenders).toEqual([]);
+    const chrome = readFileSync(join(root, 'components/chrome.css'), 'utf8').replace(/\/\*[\s\S]*?\*\//g, '');
+    expect(chrome).not.toMatch(/\.gov-banner/);
   });
 });
 
