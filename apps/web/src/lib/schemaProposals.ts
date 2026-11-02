@@ -483,7 +483,7 @@ export const SCHEMA_PROPOSALS_COPY = {
    * does not do: the person sends a proposal to the portal; this page keeps the draft. The server's own
    * `review_note` is deliberately not rendered a second time.
    */
-  boundary: "Save a proposal here, then send it to the ISAAC portal, where the standard's owners decide.",
+  boundary: "Save a proposal here, then share it with the standard's owners, who decide.",
   savedNotice: 'Saved as a draft. Copy or download it to send it to the ISAAC portal.',
   /** The page's three parts: the form's heading, the list's heading, and the folded vocabulary's summary. */
   proposeTitle: 'Propose a Change',
@@ -505,7 +505,7 @@ export const SCHEMA_PROPOSALS_COPY = {
   /* What the third kind produces, said once under the cards when it is chosen. */
   schemaChangeLead: "You get a change-request document for the standard's owners, not a portal proposal.",
   schemaChangeSaved: "Saved as a draft. Copy or download the change request to share it with the standard's owners.",
-  readyLead: 'Propose one to open it in the form, with the description left to you. Nothing is sent until you save.',
+  readyLead: 'Propose one to open it in the form, with the description left to you.',
   /** The one hint beside Save, for a plain proposal and for one opened from a local draft alike. */
   saveHint: 'Saves a draft. Copy or download it from Proposals to send it.',
   localImportFiledFrom: 'From a local import’s drafts file',

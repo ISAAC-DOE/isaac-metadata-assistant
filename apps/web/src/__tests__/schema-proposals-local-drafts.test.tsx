@@ -591,7 +591,7 @@ describe('the drafts, grouped', () => {
     await drafts();
     expect(within(loader()).getAllByRole('heading', { level: 3 }).map((h) => h.textContent)).toEqual(['Ready to Propose (2)']);
     expect(within(loader()).getByText('Ready to Propose (2)').nextElementSibling).toHaveTextContent(
-      'Propose one to open it in the form, with the description left to you. Nothing is sent until you save.',
+      'Propose one to open it in the form, with the description left to you.',
     );
     // Everything else is one fold, closed, with its own sub-headings in order; an empty group has none.
     expect(others()).not.toHaveAttribute('open');
