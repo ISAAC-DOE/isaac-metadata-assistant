@@ -202,14 +202,26 @@ describe('mode chip — the bans are proven on the exact retired strings (negati
     'This deployment is also configured to run a protected, read-only diagnostic against an ' +
     'isolated test database; it returns sanitized aggregate results only, and no database records are displayed.';
 
-  it.each([
-    ['the ordinary-scope accessible name', RETIRED_ARIA_ORDINARY],
-    ['the session-scope accessible name', RETIRED_ARIA_SESSION],
-    ['the diagnostic clause', RETIRED_DIAGNOSTIC],
-    ['the retired base label', 'Example workspace'],
-    ['the first retired label', 'Synthetic'],
-  ])('flags %s', (_what, retired) => {
-    expect(RETIRED_CHIP_CLAIMS.some(([, p]) => p.test(retired))).toBe(true);
+  /** Each ban, paired with the exact retired string it exists for — one per entry, so a
+   *  single narrowed pattern cannot hide behind another that flags the same sentence. */
+  const RETIRED_FOR: Record<string, string> = {
+    'the retired "Example workspace" label': 'Example workspace',
+    'the retired "Synthetic" label': 'Synthetic',
+    'file upload is refused': RETIRED_ARIA_ORDINARY,
+    'no official institutional record is shown': RETIRED_ARIA_SESSION,
+    'the retired emptiness claim (1)': 'Workspace — this workspace holds no records of its own',
+    'the retired emptiness claim (2)': 'Workspace — the built-in example records are not in this workspace',
+    'the retired ordinary-scope enforcement clause': RETIRED_ARIA_ORDINARY,
+    'the retired session clause': RETIRED_ARIA_SESSION,
+    'the retired diagnostic disclosure': RETIRED_DIAGNOSTIC,
+  };
+
+  it('every ban has its own retired-string control', () => {
+    expect(Object.keys(RETIRED_FOR).sort()).toEqual(RETIRED_CHIP_CLAIMS.map(([w]) => w).sort());
+  });
+
+  it.each(RETIRED_CHIP_CLAIMS)('the ban on %s fires on its own retired string', (what, pattern) => {
+    expect(RETIRED_FOR[what]).toMatch(pattern);
   });
 
   it('leaves the current label alone, so the ban is not vacuous in the other direction', () => {

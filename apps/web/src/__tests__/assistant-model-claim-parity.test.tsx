@@ -386,6 +386,14 @@ describe('§2 · the panel still says what it answers over', () => {
  * Module scope rather than inside §3's `describe`, so §6's negative control tests
  * THIS array and not a second copy of it that could be narrowed independently.
  */
+/**
+ * A sentence that mentions a model provider is acceptable only if its negation comes
+ * BEFORE the verb that sends something there, or it names "no model provider" outright.
+ * "…is sent to a model provider, no setup needed" therefore fails, as it must.
+ */
+const NEGATED_PROVIDER =
+  /\b(nothing|no|not|never)\b[^.]*\b(sent|send|sends|reach\w*|goes|go)\b[^.]*\bmodel provider\b|\bno model provider\b/;
+
 const INVERSIONS: RegExp[] = [
   /there is a language model in this build/,
   /(?:what|everything) you type (?:here )?is sent to a model provider/,
@@ -401,7 +409,7 @@ describe('§3 · polarity — no site states a model provider affirmatively', ()
       // leave the other reading as an assertion. A site that no longer mentions a
       // provider at all (the panel, since 2026-11-02) passes by saying nothing.
       for (const sentence of text.split(/(?<=\.)\s+/).filter((x) => /model provider/.test(x))) {
-        expect(sentence).toMatch(/\b(nothing|no|not|never)\b/);
+        expect(sentence).toMatch(NEGATED_PROVIDER);
       }
     });
   }
@@ -602,8 +610,7 @@ describe('§6 · the guards are proven on input that must fail them', () => {
   });
 
   it('the in-sentence negation check rejects an affirmative provider sentence', () => {
-    const sentence = norm('Your question is sent to a model provider.');
-    expect(sentence).not.toMatch(/\b(nothing|no|not|never)\b/);
+    expect(norm('Your question is sent to a model provider.')).not.toMatch(NEGATED_PROVIDER);
   });
 
   it('the polarity check rejects the inverted sentence', () => {
@@ -621,7 +628,16 @@ describe('§6 · the guards are proven on input that must fail them', () => {
     );
     const sentence = drifted.split(/(?<=\.)\s+/).find((s) => /is sent to a model provider/.test(s));
     expect(sentence).toBeDefined();
-    expect(sentence).not.toMatch(/\bnothing\b/);
+    expect(sentence).not.toMatch(NEGATED_PROVIDER);
+  });
+
+  it('the polarity check rejects a trailing negation that does not govern the sending', () => {
+    expect(norm('Your question is sent to a model provider, no setup needed.')).not.toMatch(NEGATED_PROVIDER);
+    // ...and accepts the negated forms that have shipped.
+    expect(norm('Nothing you type here is sent to a model provider.')).toMatch(NEGATED_PROVIDER);
+    expect(
+      norm('Nothing you type, and nothing shown on any screen here, is sent to a model provider.'),
+    ).toMatch(NEGATED_PROVIDER);
   });
 
   it('the provider-implying ratchet fires on a planted "coming soon"', () => {

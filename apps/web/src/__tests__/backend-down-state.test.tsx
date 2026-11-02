@@ -1447,3 +1447,55 @@ describe('an example-record 404 with no worked-example session open', () => {
     expect(view.container.textContent).toContain(`${LABELS.navSettings} \u2192 ${LABELS.settingsTabHelp}`);
   });
 });
+
+/*
+ * 2026-11-02 — THE STANDING "PROTOTYPE" SENTENCE IS RETIRED, AND MAY NOT COME BACK.
+ *
+ * Every error state used to end with "This prototype reads only server-derived truth —
+ * it will never show placeholder data." (six copies, one inline in the local-backend
+ * line). The owner retired standing disclaimers; an error now says what happened and
+ * what to do. This pins the retirement over every branch of the table and over the
+ * source, with a control proving the ban sees the exact retired sentence.
+ */
+describe('error copy — the retired prototype sentence does not return', () => {
+  const RETIRED_PROTOTYPE_SENTENCE =
+    'This prototype reads only server-derived truth — it will never show placeholder data.';
+  const PROTOTYPE_CAVEAT = /\bthis prototype\b|server-derived truth|never show placeholder data/i;
+
+  it('the ban sees the exact retired sentence and its inline variant', () => {
+    expect(RETIRED_PROTOTYPE_SENTENCE).toMatch(PROTOTYPE_CAVEAT);
+    expect(
+      `The local ISAAC API is not responding. ${RETIRED_PROTOTYPE_SENTENCE} Start the backend, then retry:`,
+    ).toMatch(PROTOTYPE_CAVEAT);
+  });
+
+  it('no branch of the error table carries it, hosted or local', () => {
+    const errors = [
+      undefined,
+      new ApiError('x', { status: 404, path: '/experiments/EXP-1' }),
+      new ApiError('x', { status: 404, path: '/experiments/EXP-1/evidence' }),
+      new ApiError('x', { status: 404, path: '/experiments' }),
+      new ApiError('x', { status: 404 }),
+      new ApiError('x', { status: 401 }),
+      new ApiError('x', { status: 403 }),
+      new ApiError('x', { status: 200, htmlIntercept: true }),
+      new ApiError('x', { status: 500 }),
+      new ApiError('x', { status: 422 }),
+      new ApiError('x', { unreachable: true }),
+    ];
+    for (const hosted of [true, false]) {
+      for (const error of errors) {
+        const copy = downCopy(error, hosted);
+        expect(`${copy.title} ${copy.lines.join(' ')}`, copy.kind).not.toMatch(PROTOTYPE_CAVEAT);
+      }
+    }
+  });
+
+  it('the source no longer contains it, and the diagnostics note no longer says "Nothing is uploaded"', () => {
+    const source = readFileSync(resolve(__dirname, '..', 'components/FetchStates.tsx'), 'utf8')
+      .replace(/\/\*[\s\S]*?\*\//g, ' ')
+      .replace(/(^|[^:'"`\\])\/\/[^\n]*/g, '$1');
+    expect(source).not.toMatch(PROTOTYPE_CAVEAT);
+    expect(source).not.toMatch(/Nothing is uploaded\./);
+  });
+});

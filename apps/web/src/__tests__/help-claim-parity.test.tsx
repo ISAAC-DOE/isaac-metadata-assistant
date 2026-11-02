@@ -630,6 +630,10 @@ const REQUIRED_CLAIMS: [string, RegExp][] = [
  * popover, and `upload-claim-parity` §1/§3–§5 still forbid any absolute "no file is
  * read" or "no upload route" claim anywhere in `src`.
  */
+/** Help mentions reading a user's file (singular/plural, JSON/CSV/sheet). Controls below. */
+const HELP_MENTIONS_A_FILE_READ =
+  /\b(reads?|opens?)\b[^.]{0,40}\b(files?|json|csv|sheet)\b|\bfile you (pick|choose)\b|\buploads?\b[^.]{0,40}\b(refus\w+|disabled|blocked|not accepted|turned off|unavailable)\b/i;
+
 const RETIRED_REQUIREMENTS = new Set([
   'no control reads one of your files and fills a field from it',
   'the upload refusal is scoped to the upload ROUTE, not stated of the app',
@@ -656,9 +660,20 @@ describe('UX-003/UX-004 §2 · the Help panel states the functional claims', () 
     for (const retired of RETIRED_REQUIREMENTS) expect(labels.has(retired), retired).toBe(true);
   });
 
+  it('the file-read trigger fires on the shipped half-disclosures (not vacuous)', () => {
+    for (const shipped of [
+      'The Validator reads the JSON you choose.',
+      'Four controls read a file you pick.',
+      'Records shown here are synthetic; uploads are disabled.',
+      'File uploads are refused.',
+    ]) {
+      expect(shipped, shipped).toMatch(HELP_MENTIONS_A_FILE_READ);
+    }
+  });
+
   it('if Help mentions reading a file again, it names every reader (no half-disclosure)', () => {
     const text = helpPanelText();
-    if (!/\b(reads?|opens?)\b[^.]{0,30}\bfiles?\b|\bfile you pick\b/i.test(text)) return;
+    if (!HELP_MENTIONS_A_FILE_READ.test(text)) return;
     for (const pattern of [/validator/i, /(csv|campaign[- ]sheet)/i, /historical import|file staging/i, /schema proposals/i]) {
       expect(text).toMatch(pattern);
     }

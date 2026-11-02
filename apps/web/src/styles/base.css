@@ -256,8 +256,9 @@ a:hover {
  *
  * AFTER `:hover`/`:active`, deliberately: all three selectors are (0,2,0), so
  * source order decides, and a disabled button must not light up on hover. The
- * border stays `--border-strong` (the resting border), so the control keeps its
- * outline and its footprint; only fill, ink and cursor change.
+ * border is the neutral `--border-strong` (not the tinted resting border, since
+ * 2026-11-02), so the control keeps its outline and its footprint but reads as
+ * inactive; fill, ink and cursor change too.
  */
 .btn-secondary:disabled {
   background: var(--border-faint);
@@ -306,6 +307,9 @@ a:hover {
   opacity: 0.55;
   cursor: not-allowed;
 }
+/* Reset the ink the hover rules change, so a disabled control never darkens. */
+.btn-quiet:disabled { color: var(--text-secondary); }
+.btn-ghost:disabled { color: var(--action); }
 
 /* Native radios and checkboxes take the action blue, never the viewer's OS accent. */
 input[type='radio'],

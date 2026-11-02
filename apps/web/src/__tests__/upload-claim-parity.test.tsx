@@ -606,7 +606,8 @@ const SHARED_CLAIM: [string, RegExp][] = [
  * must state the whole claim — both readers named, both retention bounds — because a
  * refusal stated alone reads as "no file is read", which §1 proves false.
  */
-const STATES_A_REFUSAL = /\bupload\b[^.]{0,40}\b(refus\w+|disabled|blocked)\b|\brefus\w+\b[^.]{0,40}\bupload/i;
+const STATES_A_REFUSAL =
+  /\buploads?\b[^.]{0,40}\b(refus\w+|disabled|blocked|not accepted|turned off|unavailable)\b|\b(refus\w+|disabled|blocked)\b[^.]{0,40}\buploads?\b/i;
 
 describe('R1b §2 · a site that states the refusal states all of it (no half-disclosure)', () => {
   for (const [site, text] of SITES) {
@@ -618,8 +619,17 @@ describe('R1b §2 · a site that states the refusal states all of it (no half-di
   }
 
   it('the condition sees a bare refusal, so the all-or-nothing rule is not vacuous', () => {
-    expect('File upload is refused outright.').toMatch(STATES_A_REFUSAL);
-    expect('The upload route refuses every request.').toMatch(STATES_A_REFUSAL);
+    // Singular and plural, including the exact retired Help and GovernanceBanner sentences.
+    for (const shipped of [
+      'File upload is refused outright.',
+      'The upload route refuses every request.',
+      'File uploads are refused.',
+      'Records shown here are synthetic; uploads are disabled.',
+      'The records shown here are synthetic and uploads are disabled.',
+      'Uploads are not accepted here.',
+    ]) {
+      expect(shipped, shipped).toMatch(STATES_A_REFUSAL);
+    }
     // ...and a bare refusal fails the full claim, which is the half-disclosure.
     expect(SHARED_CLAIM.every(([, p]) => p.test('File upload is refused outright.'))).toBe(false);
   });
@@ -1197,7 +1207,8 @@ const RETIRED_HELP_VALUES_SENTENCE =
  * guard: if the section mentions reading a file again, it must name every reader —
  * the half-disclosure the polarity fixture below records is still a failure.
  */
-const MENTIONS_A_FILE_READ = /\b(reads?|opens?)\b[^.]{0,30}\b(your |a )?files?\b|\bfile you pick\b/i;
+const MENTIONS_A_FILE_READ =
+  /\b(reads?|opens?)\b[^.]{0,40}\b(files?|json|csv|sheet)\b|\bfile you (pick|choose)\b/i;
 
 describe('R1b §6a · the Help "Where values come from" section never half-discloses the readers', () => {
   it('if it mentions reading a file, it names every reader', () => {
@@ -1208,6 +1219,13 @@ describe('R1b §6a · the Help "Where values come from" section never half-discl
 
   it('the condition sees the retired sentence (so the guard is not vacuous)', () => {
     expect(RETIRED_HELP_VALUES_SENTENCE).toMatch(MENTIONS_A_FILE_READ);
+    for (const shipped of [
+      'The Validator reads the JSON you choose.',
+      'Four controls read a file you pick.',
+      'The comparison reads the campaign sheet you choose.',
+    ]) {
+      expect(shipped, shipped).toMatch(MENTIONS_A_FILE_READ);
+    }
   });
 
   it('POLARITY: the sentence that shipped names only one of the two', () => {

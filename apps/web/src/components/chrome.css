@@ -415,9 +415,10 @@
  * Project Memory and Statistics left the primary list (2026-09-13) and are now
  * reached from `Settings & API`. A reader standing on one of them would
  * otherwise see a navigation list with nothing marked in it at all. This marks
- * the ANCESTOR: the same tint as `.active` at a lower weight and without the
- * accent label colour, so it reads as "the section you are inside" rather than
- * "the page you are on".
+ * the ANCESTOR with a `--text-tertiary` outline (5.20:1 against the nav's
+ * `--surface-subtle`, clearing WCAG 1.4.11's 3:1 for a state indicator), no fill
+ * and no accent label colour, so it reads as "the section you are inside" rather
+ * than "the page you are on".
  *
  * It carries **no `aria-current`** — `LeftNav.tsx`'s `NAV_PARENT` comment
  * explains why claiming one would be false — so this rule is the entire
@@ -425,14 +426,17 @@
  */
 .nav-item.ancestor {
   background: transparent;
-  border-color: var(--border-strong);
+  border-color: var(--text-tertiary);
   color: var(--text-secondary);
   /* The SAME rung `.nav-item` already rests at — the ancestor is distinguished
-     by tint alone, not by weight, which is what keeps it visibly weaker than
-     `.active`'s semibold. `var()` rather than `500`: UX-001's ratchet refused
-     the raw literal, correctly. */
+     by its outline alone, not by weight, which is what keeps it visibly weaker
+     than `.active`'s semibold. `var()` rather than `500`: UX-001's ratchet
+     refused the raw literal, correctly. */
   font-weight: var(--font-weight-medium);
 }
+/* Declared after the rule above (equal specificity), so the ancestor keeps the
+   hover fill every other item has. */
+.nav-item.ancestor:hover { background: var(--border-faint); }
 .nav-item svg { flex: none; color: var(--text-tertiary); }
 .nav-item.active svg { color: var(--action-hover); }
 

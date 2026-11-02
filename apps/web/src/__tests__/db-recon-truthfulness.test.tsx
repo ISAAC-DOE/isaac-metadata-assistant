@@ -371,8 +371,10 @@ describe('GovernanceBanner copy — scoped to the workspace, so it owes the diag
    * no capability statement at all — which is what makes the missing bounds
    * correct rather than an under-disclosure. `missingBounds` is asserted vacuous
    * rather than assumed so, so that re-adding "may run …" here without its bounds
-   * fails loudly. The capability, with every bound, is still stated by the Help
-   * popover and the policy page this banner links to (both asserted in this file).
+   * fails loudly. ~~The capability, with every bound, is still stated by the Help
+   * popover and the policy page this banner links to (both asserted in this file).~~
+   * Since 2026-11-02 neither is required to state it; both are asserted to make no
+   * unqualified claim and to bound it if they do.
    */
   it('makes no statement about the diagnostic, so it owes none of its bounds', () => {
     const text = bannerText();

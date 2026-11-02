@@ -445,10 +445,19 @@ For this project, the risk-tiered orchestration policy is:
     `upload-claim-parity.test.tsx` §1–§6 (§2 is now all-or-nothing), `help-and-honesty.test.tsx`;
   - "This prototype reads only server-derived truth…" (×6) on every error state, and the
     Reset dialog's "Real data is unaffected — this workspace runs in synthetic-only mode…":
-    `backend-down-state.test.tsx`, `reset-demo.test.tsx` (no whole-content claim).
+    `backend-down-state.test.tsx` ("error copy — the retired prototype sentence does not
+    return": every branch of the error table, hosted and local, plus the FetchStates source,
+    with a control on the exact retired sentence), `reset-demo.test.tsx` (no whole-content
+    claim).
   The backend contract, `mode: synthetic-only`, and `apps/api/tests/test_backend_copy_truthfulness.py`'s
   mirror of `FLAT_WHOLE_APP_CLAIM` / `DIAGNOSTIC_CLAIMS` / `QUALIFICATION` / `CAPABILITY_STATEMENT`
   are unchanged. Do not restore a retired sentence to satisfy an older note below.
+  **One premise re-opened, stated plainly:** `docs/ai-integration-decision-packet.md` §3 justified
+  surfacing no assistant-seam status by the panel saying there is no language model. With
+  `ASSISTANT_NO_MODEL_CLAIM` retired, the panel no longer says so — that mitigation is ABSENT
+  again (the packet's "It exists now" paragraph carries a dated note). No product surface claims a
+  model either way: `assistant-model-claim-parity.test.tsx` §1/§4 ban any copy implying one, and
+  §5 ("no product surface calls the assistant seam") is now the only guard on the §3 decision.
 
 Current state:
 
@@ -909,9 +918,11 @@ Current state:
   user-facing claim lived in Settings → AI & Automation, behind a tab), and ~~now exists as
   `ASSISTANT_NO_MODEL_CLAIM` rendered in the panel's dock on all five mounts~~ — superseded
   2026-11-02, see §11 "2026-11-02 — standing disclaimers retired" — pinned together with
-  the §3 decision by `apps/web/src/__tests__/assistant-model-claim-parity.test.tsx`. It names no
+  the §3 decision by `apps/web/src/__tests__/assistant-model-claim-parity.test.tsx`. ~~It names no
   seam, no provider and no decision, which is precisely why it closes §3's premise without
-  weakening the sentence above. Voice is the opposite case and must not be folded back
+  weakening the sentence above.~~ — superseded 2026-11-02: the claim was retired, so §3's
+  premise is OPEN again. The panel now says nothing about a model either way; §5 of that test
+  (no product surface calls the assistant seam) is the only remaining guard on the decision. Voice is the opposite case and must not be folded back
   in with it: `TranscriptCapturePanel` is a **shipped** voice surface, mounted ungated at
   `apps/web/src/screens/RecordWorkbench.tsx:687`, so any future sentence pairing "assistant and
   voice" as equally unsurfaced is wrong about the second half. See also the D6 supersession, which is
