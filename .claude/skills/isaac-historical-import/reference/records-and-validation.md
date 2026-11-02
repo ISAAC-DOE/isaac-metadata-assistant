@@ -47,7 +47,8 @@ circuit (`OCV`) warns until the control mode is confirmed. `athena_version_no_lo
 approved curve is not the Athena version the scientist chose last (a version approved before they chose
 another, or ISAAC's own curve approved before they chose a version): the record carries the approved curve.
 Its text gives the steps (`isaac process` for the chosen version if needed, reject the old result, approve the
-chosen one); ask before each. None of these is read as a value. It is not a refusal: the record can still be exportable,
+chosen one) and the way to keep the approved curve instead (approve it again, or choose its version again); ask
+before each. None of these is read as a value. It is not a refusal: the record can still be exportable,
 without the condition that defines it. Say each one to the scientist in words and ask the scale question it names (and the set-point when `also_needs` is set); its command is a template: run it only with their answer. Explain the counts first ("all 78 lack the producing group; 70 wait for a curve
 approval; 5 have no protocol"), then open `validation/<group id>.json` only for a group they leave
 unexplained.

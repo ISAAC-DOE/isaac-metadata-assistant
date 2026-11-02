@@ -808,16 +808,44 @@ _NOTHING_RECORDED = re.compile(r"\s*Nothing (?:was|is) recorded\.?\s*$|\s*nothin
 
 def bulk_refusal(held: Sequence[tuple[str, str]], total: int, decision: str) -> str:
     """r5c C4: ONE refusal for a bulk ``decide`` that names EVERY target it refuses, each with its own reason; one
-    refused target keeps its own sentence, as before. Nothing is recorded for any target."""
+    refused target keeps its own sentence, as before. Nothing is recorded for any target. r5c review MED-1: targets
+    refused for the same reason (their own id aside) share one line ("p1, p2: <reason>"), and when every target is
+    refused no "others" are offered."""
     if len(held) == 1:
         return held[0][1]
-    shown = held[:BULK_REFUSALS_SHOWN]
-    items = " ".join(f"({i}) {_NOTHING_RECORDED.sub('', why).strip()}" for i, (_, why) in enumerate(shown, 1))
-    more = f" And {len(held) - len(shown)} more." if len(held) > len(shown) else ""
+    reasons: dict[str, list[str]] = {}
+    for tid, why in held:
+        reasons.setdefault(_NOTHING_RECORDED.sub("", why).strip().replace(tid, "<this target>"), []).append(tid)
+    lines = list(reasons.items())
+    shown = lines[:BULK_REFUSALS_SHOWN]
+    items = " ".join(f"({i}) " + (f"{', '.join(tids)}: {why}" if len(tids) > 1 else why.replace("<this target>", tids[0]))
+                     for i, (why, tids) in enumerate(shown, 1))
+    more = f" And {sum(len(t) for _, t in lines[len(shown):])} more." if len(lines) > len(shown) else ""
     ids = ", ".join(tid for tid, _ in held)
-    return (f"{len(held)} of the {total} targets of this {decision} cannot be recorded in one call, so nothing was "
-            f"recorded. Each one: {items}{more} The others are not refused: to record them now, run the same call "
-            f"without these {len(held)} ({ids}), then decide each of these on its own as its reason says.")
+    head = (f"{len(held)} of the {total} targets of this {decision} cannot be recorded in one call, so nothing was "
+            f"recorded. {'Each one' if len(lines) > 1 else 'Why'}: {items}{more}")
+    if len(held) >= total:
+        return head + " Decide each of them as its reason says."
+    return (head + f" The others are not refused: to record them now, run the same call without these {len(held)} "
+            f"({ids}), then decide each of these on its own as its reason says.")
+
+
+def _bulk_call_problem(planned: Sequence[tuple[str, Mapping]], decision: str, qc_status: str | None,
+                       e0_measured: bool) -> str | None:
+    """r5c review MED-1: why a bulk ``decide`` is refused as a CALL (a flag missing, or given where nothing takes it),
+    said once, before any target is held; ``None`` when it may go on. Each target is still checked after."""
+    kinds = {kind for kind, _ in planned}
+    if decision == "approve" and qc_status is None and "processing_result" in kinds:
+        return ("Approving a processing result needs --qc-status (one of " + ", ".join(qc_status_vocabulary())
+                + "): the QC status is a person's statement. Nothing was recorded.")
+    if qc_status is not None and kinds and "processing_result" not in kinds:
+        return "--qc-status applies to a processing result only, and no target of this call is one. Nothing was recorded."
+    if e0_measured and not any(kind == "processing_result" and "athena_e0_possibly_fixed" in (obj.get("review_flags") or ())
+                               for kind, obj in planned):
+        return ("--e0-measured applies only to a processing result flagged athena_e0_possibly_fixed, and no target of "
+                "this call carries that flag: there is no fixed-E0 question to answer. Decide without --e0-measured. "
+                "Nothing was recorded.")
+    return None
 
 
 def unusable_curve_reasons(result: Mapping) -> list[str]:
@@ -2585,8 +2613,20 @@ def record_decision(
         calibration_said: dict[str, str] = {}
         off_list: OffListRefused | None = None
         held: list[tuple[str, MutationRefused]] = []  # r5c C4: (target, refusal) of each target a bulk call refuses
+        resolved: list[tuple[str, str, dict]] = []
         for tid in target_ids:
-            kind, obj = resolve_target(bundle, tid)
+            try:
+                resolved.append((tid, *resolve_target(bundle, tid)))
+            except MutationRefused as exc:
+                if not bulk:
+                    raise
+                held.append((tid, exc))  # r5c review LOW-3: an unknown id is named with the other refused targets
+        if bulk:
+            # r5c review MED-1: A REFUSAL OF THE CALL ITSELF is said once, never once per target
+            call_level = _bulk_call_problem([(kind, obj) for _, kind, obj in resolved], decision, qc_status, e0_measured)
+            if call_level is not None:
+                raise MutationRefused(call_level)
+        for tid, kind, obj in resolved:
             try:
                 try:
                     _check_decision(bundle, kind, obj, decision, value, bulk=bulk, merge_with=merge_with, split_into=split_into)
@@ -2825,13 +2865,18 @@ def record_decision(
             from . import records as R
 
             said_now = []
+            # r5c review MED-2: the bundle is read ONCE for every target of the call
+            choices, state = R.athena_choices(bundle), B.processing_state_decisions(bundle)
+            approved_of: dict[str, list] = {}
+            for r in bundle.get("processing_results") or ():
+                if r.get("state") == B.STATE_SCIENTIST_CONFIRMED and not B.processing_not_applicable(r):
+                    approved_of.setdefault(r.get("group_id"), []).append(r)
             for kind, obj in planned:
                 if kind != "processing_result" or B.processing_id(obj) not in recorded:
                     continue
-                approved = [r for r in bundle.get("processing_results") or ()
-                            if r.get("group_id") == obj.get("group_id") and r.get("state") == B.STATE_SCIENTIST_CONFIRMED
-                            and not B.processing_not_applicable(r)]
-                if len(approved) == 1 and (m := R.athena_choice_mismatch(bundle, obj["group_id"], approved[0])):
+                approved = approved_of.get(obj.get("group_id")) or []
+                if len(approved) == 1 and (m := R.athena_choice_mismatch(bundle, obj["group_id"], approved[0],
+                                                                         choices, state)):
                     said_now.append({"group_id": obj["group_id"], **m, "text": R.athena_choice_text(m, obj["group_id"])})
             if said_now:
                 result["approved_result_not_chosen"] = said_now

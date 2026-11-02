@@ -460,19 +460,25 @@ _ISAAC_RESULT_ID = re.compile(r"^proc-(?P<group>.+)-r-[0-9a-f]{16}-isaac$")
 
 def athena_choices(bundle: Mapping) -> dict:
     """r5c C1: ``{group_id: (latest select_athena_version decision, its position in the log)}``, the choice made on
-    any ISAAC result of the group (as ``isaac process`` reads it: by the result's group, or its id's), plus
-    ``"_position"``: every decision id's position. Read in one pass; ``{}`` when no version was ever chosen."""
+    any ISAAC result of the group (as ``isaac process`` reads it: by the result's group, or its id's), plus what
+    :func:`athena_choice_mismatch` reads, so a caller composing many groups reads the bundle ONCE (r5c review MED-2):
+    ``"_position"`` (every decision id's position), ``"_select_by_id"`` (each select decision by id) and
+    ``"_athena_of"`` (each group's Athena-version results). ``{}`` when no version was ever chosen."""
     decisions = bundle.get("scientist_decisions") or ()
     if not any(d.get("decision") == B.ATHENA_SELECT_DECISION for d in decisions):
         return {}
-    group_of = {B.processing_id(r): r.get("group_id") for r in bundle.get("processing_results") or ()
-                if r.get("source") == "isaac_protocol"}
-    out: dict = {"_position": {}}
+    results = bundle.get("processing_results") or ()
+    group_of = {B.processing_id(r): r.get("group_id") for r in results if r.get("source") == "isaac_protocol"}
+    out: dict = {"_position": {}, "_select_by_id": {}, "_athena_of": {}}
+    for r in results:
+        if r.get("source") == "scientist_athena" and r.get("athena_version_id"):
+            out["_athena_of"].setdefault(r.get("group_id"), []).append(r)
     for i, d in enumerate(decisions):
         out["_position"][d.get("decision_id")] = i
         t = d.get("target") or {}
         if d.get("decision") != B.ATHENA_SELECT_DECISION or t.get("kind") != "processing_result":
             continue
+        out["_select_by_id"][d.get("decision_id")] = d
         m = _ISAAC_RESULT_ID.match(str(t.get("id")))
         gid = group_of.get(t.get("id")) or (m.group("group") if m else None)
         if gid:
@@ -490,13 +496,25 @@ def _choice_identity(decision: Mapping | None) -> str | None:
     return json.dumps({"decision_id": decision.get("decision_id")})
 
 
+def _same_project_curve(result: Mapping, decision: Mapping) -> bool:
+    """r5c review LOW-1: an Athena result with no version id (the default ``…-athena`` result) that USES the curve the
+    choice names: one of its used inputs is that project file and that Athena group."""
+    prov = decision.get("athena_version_provenance")
+    if not isinstance(prov, Mapping) or not prov.get("prj_relative_path") or not prov.get("athena_group"):
+        return False
+    return any(i.get("relative_path") == prov["prj_relative_path"] and i.get("athena_group") == prov["athena_group"]
+               and i.get("used", True) for i in result.get("inputs") or () if isinstance(i, Mapping))
+
+
 def athena_choice_mismatch(bundle: Mapping, group_id: str, approved: Mapping, choices: Mapping | None = None,
                            state: Mapping | None = None) -> dict | None:
     """r5c C1: what is wrong when the ONE approved result of ``group_id`` is not the Athena version the scientist's
-    latest choice names, else ``None``: ``{approved_result_id, approved_version_id, chosen_value, choice_decision_id,
-    chosen_result_id}``. An approved Athena-version result of ANOTHER version is always a mismatch; an approved result
-    that is no chosen version (ISAAC's own) only when the choice was recorded AFTER its approval (approving ISAAC's
-    own result after choosing a version is the scientist's later word, as the skill says)."""
+    latest choice names, else ``None``: ``{approved_result_id, approved_version_id, approved_kind, chosen_value,
+    choice_decision_id, chosen_result_id}``. An approved Athena-version result of ANOTHER version is always a mismatch;
+    an approved result that is no chosen version (ISAAC's own, or the default Athena result of another curve) only when
+    the choice was recorded AFTER its approval (approving it after choosing a version is the scientist's later word, as
+    the skill says). ``choices`` (:func:`athena_choices`) and ``state`` (``bundle.processing_state_decisions``): read
+    once by a caller deciding many groups; never re-read here."""
     choices = athena_choices(bundle) if choices is None else choices
     got = choices.get(group_id)
     if not got:
@@ -504,30 +522,45 @@ def athena_choice_mismatch(bundle: Mapping, group_id: str, approved: Mapping, ch
     latest, at = got
     want = _choice_identity(latest)
     pid = B.processing_id(approved)
-    by_id = {d.get("decision_id"): d for d in bundle.get("scientist_decisions") or ()
-             if d.get("decision") == B.ATHENA_SELECT_DECISION}
-    if approved.get("source") == "scientist_athena" and approved.get("athena_version_id"):
+    by_id = choices["_select_by_id"]
+    athena = approved.get("source") == "scientist_athena"
+    if athena and approved.get("athena_version_id"):
         made = (approved.get("athena_version_selected") or {}).get("decision_id")
         if made is not None and _choice_identity(by_id.get(made)) == want:
             return None
     else:
+        if athena and _same_project_curve(approved, latest):
+            return None  # the default Athena result IS the chosen curve
         approval = (B.processing_state_decisions(bundle) if state is None else state).get(("processing_result", pid))
         if approval is None or choices["_position"].get(approval.get("decision_id"), -1) > at:
             return None
-    chosen = [r for r in bundle.get("processing_results") or ()
-              if r.get("group_id") == group_id and r.get("source") == "scientist_athena" and r.get("athena_version_id")
-              and _choice_identity(by_id.get((r.get("athena_version_selected") or {}).get("decision_id"))) == want
+    chosen = [r for r in choices["_athena_of"].get(group_id, ())
+              if _choice_identity(by_id.get((r.get("athena_version_selected") or {}).get("decision_id"))) == want
               and r.get("state") != B.STATE_REJECTED]
     return {"approved_result_id": pid, "approved_version_id": approved.get("athena_version_id"),
+            "approved_kind": "athena_version" if approved.get("athena_version_id") else ("athena" if athena else "isaac"),
             "chosen_value": latest.get("value"), "choice_decision_id": latest.get("decision_id"),
+            "choice_target_id": (latest.get("target") or {}).get("id"),
             "chosen_result_id": B.processing_id(chosen[0]) if chosen else None}
 
 
 def athena_choice_text(m: Mapping, group_id: str) -> str:
-    """The plain sentences for :func:`athena_choice_mismatch`: what the record carries, and the steps that make it
-    carry the chosen version (each a command to run only with the scientist's answer)."""
-    what = (f"Athena version {m['approved_version_id']}" if m.get("approved_version_id") else "ISAAC's own curve")
+    """The plain sentences for :func:`athena_choice_mismatch`: what the record carries, the steps that make it carry
+    the chosen version, and (r5c review LOW-2) the step that keeps the approved curve (each a command to run only with
+    the scientist's answer)."""
+    kind = m.get("approved_kind") or ("athena_version" if m.get("approved_version_id") else "isaac")
+    what = {"athena_version": f"Athena version {m.get('approved_version_id')}",
+            "athena": "the scientist's Athena curve from another project or Athena group"}.get(kind, "ISAAC's own curve")
     reject = f'isaac bundle decide <bundle_dir> --target {m["approved_result_id"]} --decision reject --by "<your name>"'
+    approve_again = (f'isaac bundle decide <bundle_dir> --target {m["approved_result_id"]} --decision approve '
+                     '--qc-status <status> --by "<your name>"')
+    if kind == "athena_version" and m.get("choice_target_id"):
+        # a version result is kept by choosing its version again (re-approving it leaves the later choice standing)
+        keep = (f"choose {m['approved_version_id']} again (`isaac bundle decide <bundle_dir> --target "
+                f"{m['choice_target_id']} --decision select_athena_version --value {m['approved_version_id']} "
+                '--by "<your name>"`)')
+    else:
+        keep = f"reject it and approve it again (`{reject}`, then `{approve_again}`)"
     if m.get("chosen_result_id"):
         steps = (f"reject {m['approved_result_id']} (`{reject}`), then approve {m['chosen_result_id']} "
                  f'(`isaac bundle decide <bundle_dir> --target {m["chosen_result_id"]} --decision approve --qc-status '
@@ -538,8 +571,8 @@ def athena_choice_text(m: Mapping, group_id: str) -> str:
                  "then approve the new result")
     return (f"The approved result {m['approved_result_id']} is {what}. The scientist's latest choice of the result of "
             f"record is {m['chosen_value']} ({m['choice_decision_id']}). The record carries the E0 and curve of "
-            f"{m['approved_result_id']}, not of {m['chosen_value']}. To carry the chosen version: {steps}. Ask the "
-            "scientist before each step.")
+            f"{m['approved_result_id']}, not of {m['chosen_value']}. To carry the chosen version: {steps}. Or, to keep "
+            f"this curve, {keep}. Ask the scientist before each step.")
 
 
 def _processing_by_group(bundle: Mapping) -> dict[str, list]:

@@ -296,3 +296,124 @@ def test_the_docs_say_the_new_counts_and_warning():
         assert term in records and term in main, term
     assert json.dumps(M.MATERIAL_NAME_PLACEHOLDER) and "material-name answer" in (
         skill / "reference" / "grouping-and-processing.md").read_text()
+
+
+# --- r5c review: MED-1, MED-2, LOW-1..LOW-4 ------------------------------------------------------------------------
+
+
+def _two_results(bdir_):
+    import copy
+
+    from test_local_import_records import _add_group
+
+    _add_group(bdir_)
+    b = M.load(bdir_)
+    p1 = next(r for r in b["processing_results"] if r["result_id"] == "p1")
+    g1 = next(g for g in b["record_groups"] if g["group_id"] == "g1")
+    p2 = {**copy.deepcopy(p1), "result_id": "p2", "group_id": "g2"}
+    g2 = {**copy.deepcopy(g1), "group_id": "g2", "member_run_keys": [b["runs"][1]["run_key"]]}
+    b["record_groups"].append(g2)
+    b["processing_results"].append(p2)
+    M.save_bundle(bdir_, b)
+
+
+def test_a_bulk_approve_without_qc_status_is_refused_once_as_a_call(bdir):
+    _two_results(bdir)
+    with pytest.raises(M.MutationRefused) as exc:
+        M.decide(bdir, target_ids=["p1", "p2"], decision="approve", value=None, **BY)
+    said = str(exc.value)
+    assert said.count("needs --qc-status") == 1 and "targets of this" not in said and "The others" not in said
+    with pytest.raises(M.MutationRefused) as exc:
+        M.decide(bdir, target_ids=["g1", "g2"], decision="confirm", value=None, qc_status="valid", **BY)
+    assert str(exc.value).count("--qc-status") == 1 and "targets of this" not in str(exc.value)
+    with pytest.raises(M.MutationRefused) as exc:
+        M.decide(bdir, target_ids=["p1", "p2"], decision="approve", value=None, qc_status="valid", e0_measured=True, **BY)
+    assert str(exc.value).count("--e0-measured applies only") == 1 and "no target of this call" in str(exc.value)
+
+
+def test_a_bulk_refusal_merges_identical_reasons_and_offers_no_others_when_all_are_refused():
+    held = [("p-a", "p-a is held: SYN reason. Nothing was recorded."), ("p-b", "p-b is held: SYN reason.")]
+    text = M.bulk_refusal(held, 2, "approve")
+    assert "p-a, p-b: <this target> is held: SYN reason." in text
+    assert "The others are not refused" not in text and "Decide each of them as its reason says." in text
+    mixed = M.bulk_refusal(held + [("p-c", "p-c differs.")], 5, "approve")
+    assert "(1) p-a, p-b:" in mixed and "(2) p-c differs." in mixed and "without these 3 (p-a, p-b, p-c)" in mixed
+
+
+def test_an_unknown_id_in_a_bulk_call_is_named_with_the_other_refused_targets(bdir):
+    _two_results(bdir)
+    b = M.load(bdir)
+    valued = next(c["candidate_id"] for c in b["candidates"] if c.get("value") is not None)
+    unvalued = next(c["candidate_id"] for c in b["candidates"] if c.get("value") is None)
+    with pytest.raises(M.MutationRefused) as exc:
+        M.decide(bdir, target_ids=[valued, "cand-SYN-none", unvalued], decision="confirm", value=None, **BY)
+    said = str(exc.value)
+    assert said.startswith("2 of the 3 targets") and "cand-SYN-none" in said and unvalued in said
+    assert exc.value.code == 6  # the unknown id's exit code
+    with pytest.raises(M.MutationRefused) as one:
+        M.decide(bdir, target_ids=[valued, "cand-SYN-none"], decision="confirm", value=None, **BY)
+    assert str(one.value) == "No target with id 'cand-SYN-none' in this bundle." and one.value.code == 6
+
+
+def _default_athena_case(inputs):
+    ath = {"result_id": "proc-g1-r-" + "0" * 16 + "-athena", "group_id": "g1", "source": "scientist_athena",
+           "state": "scientist_confirmed", "inputs": inputs}
+    isa = {"result_id": "proc-g1-r-" + "0" * 16 + "-isaac", "group_id": "g1", "source": "isaac_protocol",
+           "state": "needs_review"}
+    bundle = {"scientist_decisions": [
+        {"decision_id": "d-00001", "decision": "approve", "target": {"kind": "processing_result", "id": ath["result_id"]}},
+        {"decision_id": "d-00002", "decision": B.ATHENA_SELECT_DECISION, "value": "g1-v01",
+         "target": {"kind": "processing_result", "id": isa["result_id"]},
+         "athena_version_provenance": {"prj_relative_path": "SYN_a.prj", "athena_group": "SYN_X",
+                                       "data_sha256_prefix": "abc"}}],
+        "processing_results": [ath, isa]}
+    return bundle, ath
+
+
+def test_the_default_athena_result_is_called_an_athena_curve_and_its_own_curve_is_no_mismatch():
+    bundle, ath = _default_athena_case([{"relative_path": "SYN_b.prj", "athena_group": "SYN_Y", "used": True}])
+    m = R.athena_choice_mismatch(bundle, "g1", ath)
+    text = R.athena_choice_text(m, "g1")
+    assert m["approved_kind"] == "athena" and "ISAAC's own curve" not in text
+    assert "the scientist's Athena curve from another project or Athena group" in text
+    assert "to keep this curve, reject it and approve it again" in text
+    same, ath2 = _default_athena_case([{"relative_path": "SYN_a.prj", "athena_group": "SYN_X", "used": True}])
+    assert R.athena_choice_mismatch(same, "g1", ath2) is None
+
+
+def test_keeping_an_approved_version_means_choosing_it_again():
+    v02 = _ath("v02", "d-00001")
+    bundle = {"scientist_decisions": [_select("d-00001", "v02"),
+                                      {"decision_id": "d-00002", "decision": "approve",
+                                       "target": {"kind": "processing_result", "id": v02["result_id"]}},
+                                      _select("d-00003", "v01")],
+              "processing_results": [v02]}
+    text = R.athena_choice_text(R.athena_choice_mismatch(bundle, "g1", v02), "g1")
+    assert "to keep this curve, choose g1-v02 again" in text and "--decision select_athena_version --value g1-v02" in text
+
+
+def test_the_mismatch_reads_only_what_the_choices_index_holds():
+    """MED-2: given the index, the mismatch reads no decision log and no result list of the bundle."""
+    v02 = _ath("v02", "d-00001")
+    full = {"scientist_decisions": [_select("d-00001", "v02"),
+                                    {"decision_id": "d-00002", "decision": "approve",
+                                     "target": {"kind": "processing_result", "id": v02["result_id"]}},
+                                    _select("d-00003", "v01")],
+            "processing_results": [v02]}
+    choices = R.athena_choices(full)
+
+    class NoScan(dict):
+        def get(self, key, default=None):
+            if key in ("scientist_decisions", "processing_results"):
+                raise AssertionError(f"read {key}")
+            return super().get(key, default)
+
+    assert R.athena_choice_mismatch(NoScan(), "g1", v02, choices, {})["chosen_value"] == "g1-v01"
+
+
+def test_the_commands_doc_names_both_warning_counts():
+    from pathlib import Path
+
+    commands = (Path(__file__).resolve().parents[3] / ".claude" / "skills" / "isaac-historical-import" / "reference"
+                / "commands.md").read_text()
+    assert "records_ready_with_warnings" in commands and "records_written_with_warnings" in commands
