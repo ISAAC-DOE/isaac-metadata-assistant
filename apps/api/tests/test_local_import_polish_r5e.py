@@ -4,7 +4,11 @@ M1  A sample field asked per group because each group's partition is its whole f
     batched: groups whose names share every SAMPLE token (never a counter, a set-point, a pH, an electrolyte or another
     condition) share a ``same_reading_group``, answered with ``--same-reading``. A related reading made for another
     sample's group is no hint.
-M2  The potential scale and the control mode are asked once for the beamtime, beside the cell type.
+H1  The potential scale and the control mode stay asked per group (DEC-90). For each, the groups whose own AI readings
+    of the field agree are batched (``same_reading_by_field``), answered with ``--field <path> --same-reading``; never
+    an open-circuit run with a potential hold, a reference or ex-situ group, or a group with differing or no readings.
+L1  A temperature, duration, gas or state word, or a code like ``3MOF``, is a sample token unless the parser read it.
+L2  A °F value and a range each have their own refusal; ``℃`` is read as °C.
 M3  ``template adopt`` says which Configurations columns it did not read, with their values, and shows the channel the
     scientist's Configurations row states beside a processing result that chose its channel by name (a hint only).
 M4  The template has Temperature and Gas Atmosphere columns. A temperature is typed with its unit; °C is converted to
@@ -70,9 +74,8 @@ def _stem_of(b, q):
 
 @pytest.mark.parametrize("stem, tokens", [
     ("Q4_06_SYNcat_5wp_pH2_000mV", ["Q4", "SYNcat", "5wp"]),
-    ("SYNcat_10MNaOH_m800mV_25C_Ar_OCV_again_2", ["SYNcat"]),
-    ("ZZ_0p5VRHE_100mMHClO4_30min_CO2sat_after_10_cycles", ["ZZ"]),
-    ("Co_SYN_1M_dry", ["Co", "SYN"]),  # cobalt is no gas; a concentration and a state are no sample
+    ("SYNcat_10MNaOH_m800mV_OCV_again_2", ["SYNcat"]),
+    ("ZZ_0p5VRHE_100mMHClO4_1M", ["ZZ"]),
     ("01_02_pH2_400mV", []),
 ])
 def test_sample_tokens_leave_out_conditions_counters_and_numbers(stem, tokens):
@@ -81,6 +84,19 @@ def test_sample_tokens_leave_out_conditions_counters_and_numbers(stem, tokens):
 
 def test_a_token_the_runs_parser_read_as_a_condition_is_no_sample_token():
     assert G.sample_name_tokens("Q4_SYNcat_5wp", read_as_condition={"5wp"}) == ["Q4", "SYNcat"]
+    assert G.sample_name_tokens("PtC_400C_01", read_as_condition={"400c"}) == ["PtC"]
+
+
+#: r5e L1: a temperature, duration, gas or state word, or a code like 3MOF, can name the sample: these names differ
+@pytest.mark.parametrize("a, b", [
+    ("SYNPtC_400C_01", "SYNPtC_600C_01"), ("SYNTiO2_2h", "SYNTiO2_12h"), ("SYNPt_H2", "SYNPt_O2"),
+    ("SYNNiFe_fresh", "SYNNiFe_aged"), ("SYNIrO2_3MOF", "SYNIrO2_5MOF"),
+])
+def test_names_that_differ_in_a_token_no_parser_read_as_a_condition_keep_their_sample_tokens_apart(a, b):
+    assert G.sample_name_tokens(a) != G.sample_name_tokens(b)
+    qs, bundle = _hand([a, b])
+    Q._note_shared_sample_tokens(qs, bundle)
+    assert not any(q.get("same_reading_group") for q in qs)
 
 
 def test_groups_whose_names_share_every_sample_token_share_one_same_reading_group(stems):
@@ -174,35 +190,104 @@ def test_a_reading_made_for_another_samples_group_is_no_hint(stems):
     assert any(h.get("literal") == "ZZ9" for q in own for h in q["hints"])
 
 
-# --- M2: scale and mode asked once for the beamtime ---------------------------------------------------------------------
+# --- H1: scale and mode stay per group; groups whose own AI readings agree are batched per field ---------------------
+
+#: one OPEN-CIRCUIT run among potential holds; every group is its own (DEC-90: scale and mode are asked per group)
+H1_STEMS = ["Q4_01_SYNcat_pH2_400mV", "Q4_02_SYNcat_pH2_1400mV", "Q4_03_SYNcat_pH2_OCV", "Q4_04_SYNcat_pH2_600mV",
+            "Q4_05_SYNcat_pH2_800mV", "Q4_06_SYNcat_pH2_200mV"]
 
 
-def test_scale_and_mode_are_asked_once_for_the_beamtime_beside_the_cell_type(stems):
-    p = Q.consolidate(M.load(stems))
-    [beamtime] = [q for q in p["questions"] if q["kind"] == "optional_values" and q["scope"] == "experiment"
-                  and q["partition"] is None]
-    assert {SCALE, MODE, CELL} <= set(beamtime["fields"])
-    assert not any(f in q["fields"] for q in p["questions"] if q["kind"] == "optional_values" and q is not beamtime
-                   for f in (SCALE, MODE))
+@pytest.fixture(scope="module")
+def holds_pristine(tmp_path_factory):
+    b = _grouped_stems(tmp_path_factory.mktemp("r5e-h1"), H1_STEMS)
+    bd = M.load(b)
+    src = {s["source_id"]: s for s in bd["sources"]}
+    said = {"Q4_01": "RHE", "Q4_02": "RHE", "Q4_03": "RHE", "Q4_04": "Ag/AgCl", "Q4_06": "RHE"}  # Q4_05: no reading
+    findings = []
+    for r in bd["runs"]:
+        value = next((v for k, v in said.items() if r["stem"].startswith(k)), None)
+        if value:
+            findings.append({"field_path": SCALE, "value": value, "applies_to": {"scope": "runs", "runs": [r["run_id"]]},
+                             "source": {"path": src[r["acquisition_source_id"]]["relative_path"], "locator": "header line 3"},
+                             "quote": f"vs {value}", "strength": "stated", "reasoning": "the scan header names the scale"})
+    rep = M.annotate_from_readings(b, {"format": "isaac.reading_findings", "findings": findings},
+                                   model_id="synthetic-model", apply=True)
+    assert rep["interpretations"] >= 5, rep
+    return b
 
 
-def test_moving_scale_and_mode_changes_no_question_id(stems, monkeypatch):
-    b = M.load(stems)
-    after = {q["question_id"] for q in Q.consolidate(b)["questions"]}
-    monkeypatch.setattr(Q, "SHARED_PATHS", tuple(p for p in Q.SHARED_PATHS if p not in (SCALE, MODE)))
-    assert after == {q["question_id"] for q in Q.consolidate(b)["questions"]}
+@pytest.fixture()
+def holds(holds_pristine, tmp_path):
+    target = tmp_path / "bundle"
+    shutil.copytree(holds_pristine, target)
+    return target
 
 
-def test_one_answer_records_the_scale_for_every_run(stems):
-    p = Q.consolidate(M.load(stems))
-    [beamtime] = [q for q in p["questions"] if q["kind"] == "optional_values" and q["scope"] == "experiment"
-                  and q["partition"] is None]
-    M.decide_question(stems, question_id=beamtime["question_id"], field=SCALE, decision="correct", value="RHE",
+def _per_group(p, field):
+    return [q for q in p["questions"] if q["kind"] == "optional_values" and q["scope"].startswith("group:")
+            and field in q["fields"]]
+
+
+def _stem_of_group(b, q):
+    keys = next(g["member_run_keys"] for g in b["record_groups"] if g["group_id"] == q["scope"][len("group:"):])
+    return next(r["stem"] for r in b["runs"] if r["run_key"] == keys[0])
+
+
+def test_scale_and_mode_stay_per_group_and_agreeing_groups_share_a_batch_for_the_field(holds):
+    b = M.load(holds)
+    p = Q.consolidate(b)
+    assert not Q._is_shared(SCALE) and not Q._is_shared(MODE)  # DEC-90: never asked once for the beamtime
+    qs = _per_group(p, SCALE)
+    assert len(qs) == 6 and all(MODE in q["fields"] for q in qs)
+    batch = {}
+    for q in qs:
+        batch.setdefault(((q.get("same_reading_by_field") or {}).get(SCALE) or {}).get("same_reading_group"), []).append(
+            _stem_of_group(b, q)[:5])
+    # the three RHE potential holds; never the open-circuit run (RHE too), Ag/AgCl, or the group with no reading
+    assert sorted(batch.pop(None)) == ["Q4_03", "Q4_04", "Q4_05"]
+    [(_, batched)] = batch.items()
+    assert sorted(batched) == ["Q4_01", "Q4_02", "Q4_06"]
+    q = next(q for q in qs if (q.get("same_reading_by_field") or {}).get(SCALE))
+    sr = q["same_reading_by_field"][SCALE]
+    assert sr["same_reading_count"] == 3 and f"--same-reading --field {SCALE}" in sr["same_reading_command"]
+    assert "groups' own AI readings all suggest 'RHE'" in q["text"]
+    assert not any((x.get("same_reading_by_field") or {}).get(MODE) for x in qs)  # no reading of the mode: none
+    assert "same_reading_group" not in q  # the question itself is in no batch: only its field
+
+
+def test_a_reference_group_is_never_batched_in(holds):
+    b = M.load(holds)
+    gid = next(q["scope"][len("group:"):] for q in _per_group(Q.consolidate(b), SCALE)
+               if (q.get("same_reading_by_field") or {}).get(SCALE))
+    next(g for g in b["record_groups"] if g["group_id"] == gid)["role"] = "reference"
+    qs = _per_group(Q.consolidate(b), SCALE)
+    left = [q for q in qs if (q.get("same_reading_by_field") or {}).get(SCALE)]
+    assert len(left) == 2 and all(q["scope"] != f"group:{gid}" for q in left)
+
+
+def test_batching_moves_no_question_id(holds, monkeypatch):
+    b = M.load(holds)
+    after = {q["question_id"]: (q["scope"], q["targets"]) for q in Q.consolidate(b)["questions"]}
+    monkeypatch.setattr(Q, "_note_agreeing_field_hints", lambda questions, bundle: None)
+    assert after == {q["question_id"]: (q["scope"], q["targets"]) for q in Q.consolidate(b)["questions"]}
+
+
+def test_one_same_reading_answer_records_the_field_for_its_batch_only_and_each_group_stays_answerable(holds):
+    qs = _per_group(Q.consolidate(M.load(holds)), SCALE)
+    q = next(q for q in qs if (q.get("same_reading_by_field") or {}).get(SCALE))
+    with pytest.raises(M.MutationRefused, match="give --field"):  # batched for one field, so it names it
+        M._same_reading_targets(M.load(holds), q["question_id"], None, MODE, "correct", "potentiostatic")
+    got = M.decide_question(holds, question_id=q["question_id"], field=SCALE, decision="correct", value="RHE",
+                            by=WHO, orcid=None, same_reading=True)
+    assert "--same-reading answered 3 question(s)" in got["statement"], got["statement"]
+    b = M.load(holds)
+    left = sorted(_stem_of_group(b, x)[:5] for x in _per_group(Q.consolidate(b), SCALE))
+    assert left == ["Q4_03", "Q4_04", "Q4_05"]
+    # a group outside the batch is answered on its own question id, with --field, as before
+    other = next(x for x in _per_group(Q.consolidate(b), SCALE) if _stem_of_group(b, x).startswith("Q4_04"))
+    M.decide_question(holds, question_id=other["question_id"], field=SCALE, decision="correct", value="Ag/AgCl",
                       by=WHO, orcid=None)
-    b = M.load(stems)
-    scales = [m for m in b["missing_values"] if m["target_field_path"] == SCALE and m["run_id"]]
-    assert scales and all(m["value_state"] == "scientist_confirmed" for m in scales)
-    assert not any(SCALE in (q.get("fields") or {}) for q in Q.consolidate(b)["questions"])
+    assert len(_per_group(Q.consolidate(M.load(holds)), SCALE)) == 2
 
 
 # --- M3: their Configurations sheet -------------------------------------------------------------------------------------
@@ -269,7 +354,7 @@ def test_no_channel_hint_without_one_stated_channel_for_a_live_result(flags, sta
 
 
 @pytest.mark.parametrize("raw, kelvin, converted", [
-    ("25 °C", 298.15, True), ("25°C", 298.15, True), ("-10 ºC", 263.15, True), ("25 degC", 298.15, True),
+    ("25 °C", 298.15, True), ("25°C", 298.15, True), ("25 ℃", 298.15, True), ("-10 ºC", 263.15, True), ("25 degC", 298.15, True),
     ("298.15 K", 298.15, False), ("300 K", 300, False),
 ])
 def test_a_temperature_is_read_with_its_unit(raw, kelvin, converted):
@@ -277,6 +362,13 @@ def test_a_temperature_is_read_with_its_unit(raw, kelvin, converted):
     assert why is None and value == pytest.approx(kelvin) and bool(conversion) == converted
     if converted:
         assert conversion["typed"] == raw.strip() and conversion["kelvin"] == pytest.approx(kelvin)
+
+
+@pytest.mark.parametrize("raw, why", [("77 °F", T.TEMPERATURE_FAHRENHEIT_REFUSAL), ("77 ℉", T.TEMPERATURE_FAHRENHEIT_REFUSAL),
+                                      ("25-30 °C", T.TEMPERATURE_RANGE_REFUSAL), ("25 to 30 C", T.TEMPERATURE_RANGE_REFUSAL),
+                                      ("25–30°C", T.TEMPERATURE_RANGE_REFUSAL)])
+def test_a_fahrenheit_value_and_a_range_each_say_why(raw, why):
+    assert T.parse_temperature(raw) == (None, why, None)
 
 
 @pytest.mark.parametrize("raw", [25, 25.0, "25", "warm", "-300 °C", "0 K"])

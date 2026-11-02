@@ -352,9 +352,16 @@ def rule_for_path(path: str, *, schema: Mapping | None = None) -> dict:
 
 TEMPERATURE_PATH = "context.temperature_K"
 #: r5e M4: a temperature as typed: a plain decimal and its unit, kelvin or degrees Celsius (``°C``, ``ºC``, ``degC``,
-#: ``C``). Nothing else is read: no unit, no guess.
-_TEMPERATURE_TEXT = re.compile(r"\s*(?P<num>[+-]?(?:\d+(?:\.\d*)?|\.\d+))\s*(?P<unit>K|(?:\u00b0|\u00ba|\u02da)\s?C|deg\s?C|C)\s*",
+#: ``C``, and the one-character ``℃``). Nothing else is read: no unit, no guess.
+_TEMPERATURE_TEXT = re.compile(r"\s*(?P<num>[+-]?(?:\d+(?:\.\d*)?|\.\d+))\s*(?P<unit>K|(?:\u00b0|\u00ba|\u02da)\s?C|deg\s?C|C|\u2103)\s*",
                                re.IGNORECASE)
+#: r5e L2: a Fahrenheit value (``77 °F``, ``77 F``, ``℉``) and a range (``25-30 °C``) each get their own refusal
+_FAHRENHEIT = re.compile(r".*\d\s*(?:(?:\u00b0|\u00ba|\u02da)\s?F|deg\s?F|F|\u2109)\s*", re.IGNORECASE)
+_TEMPERATURE_RANGE = re.compile(r"\s*[+-]?[\d.]+\s*(?:\S*\s*)?(?:-|\u2013|\u2014|~|to)\s*[+-]?[\d.]+.*", re.IGNORECASE)
+TEMPERATURE_FAHRENHEIT_REFUSAL = ("a temperature in °F, which this field does not read: give it in K or °C (ISAAC never "
+                                  "converts °F for you)")
+TEMPERATURE_RANGE_REFUSAL = ("a range, not one temperature: give the one value held during the run, with its unit "
+                             "(e.g. 25 °C)")
 _ZERO_CELSIUS_K = Decimal("273.15")
 TEMPERATURE_UNIT_REFUSAL = ("a number without its unit: write it with its unit, e.g. 298.15 K or 25 °C (ISAAC never "
                             "guesses the unit)")
@@ -373,6 +380,10 @@ def parse_temperature(raw: Any) -> tuple[Any, str | None, dict | None]:
         return None, None, None
     m = _TEMPERATURE_TEXT.fullmatch(raw)
     if m is None:
+        if _TEMPERATURE_RANGE.fullmatch(raw):
+            return None, TEMPERATURE_RANGE_REFUSAL, None
+        if _FAHRENHEIT.fullmatch(raw):
+            return None, TEMPERATURE_FAHRENHEIT_REFUSAL, None
         if _NUMBER_RE.match(raw.strip()):
             return None, TEMPERATURE_UNIT_REFUSAL, None
         return None, f"not a temperature with its unit (e.g. 298.15 K or 25 °C): {raw!r}", None
@@ -4097,7 +4108,7 @@ def _match_runs(bundle: Mapping, their_name: str) -> list[str]:
 
 #: r5e M4: a temperature header that states its unit, as their sheet writes it (``Temperature (°C)``, ``Temp [K]``)
 _THEIR_TEMPERATURE_HEADER = re.compile(
-    r"temp(?:erature)?\s*[(\[]\s*(?P<unit>(?:\u00b0|\u00ba|\u02da)\s?c|deg\s?c|c|k)\s*[)\]]")
+    r"temp(?:erature)?\s*[(\[]\s*(?P<unit>(?:\u00b0|\u00ba|\u02da)\s?c|deg\s?c|c|k|\u2103)\s*[)\]]")
 TEMPERATURE_NO_UNIT_REASON = (
     "a temperature column whose header states no unit ISAAC reads (K or °C; '©' is not read as °C, though a spreadsheet "
     "may turn '(C)' into '©'). ISAAC never guesses the unit: type each value with its unit in the Temperature column "

@@ -80,9 +80,6 @@ SHARED_PATHS = (
     "context.reaction.",
     "context.electrochemistry.reaction",
     "context.electrochemistry.cell_type",
-    # r5e M2: asked once for the beamtime beside the cell type (each run's own answer is still recorded per run)
-    "context.electrochemistry.potential_scale",
-    "context.electrochemistry.control_mode",
     "context.electrochemistry.electrolyte",
 )
 TIER_BLOCKING, TIER_CONFLICT, TIER_OPTIONAL = 1, 2, 3
@@ -1407,6 +1404,7 @@ def consolidate(bundle: Mapping, *, compositions_out: dict | None = None, includ
     _note_same_reading_groups(questions, cand_by_id, bundle)
     _note_shared_reading_groups(questions, cand_by_id, bundle, reading_said)
     _note_shared_sample_tokens(questions, bundle)
+    _note_agreeing_field_hints(questions, bundle)
     _mark_deferred(questions, decisions)
     _covered_by_run_decisions(questions, covered_conflicts, beamtime_decision_ids)
     _say_the_one_group(questions)
@@ -2368,6 +2366,77 @@ def _note_shared_sample_tokens(questions: list[dict], bundle: Mapping) -> None:
                           f"electrolyte or other condition; no parser read them as a sample), one per group "
                           f"(same_reading_group {group}; the files: {shown}). If the {_label(path)} is the same for all "
                           f"of them, answer them together: {command}. If not, answer each on its own.")
+
+
+#: r5e H1: the per-group optional fields (asked per record group, never once for the beamtime: DEC-90) whose groups
+#: are batched when their own AI readings of the field agree
+AGREEING_HINT_FIELDS = ("context.electrochemistry.potential_scale", "context.electrochemistry.control_mode")
+
+
+def _note_agreeing_field_hints(questions: list[dict], bundle: Mapping) -> None:
+    """r5e H1: per-group optional questions keep their ids and stay one per group (DEC-90: one beamtime can hold
+    open-circuit references, potential holds and dry samples), but for each field of :data:`AGREEING_HINT_FIELDS` the
+    groups whose OWN AI readings of that field agree are batched: ``same_reading_by_field[field]`` names one group key,
+    answered together with ``decide --question <id> --field <field> --same-reading``. A group is batched only when every
+    hint it has for the field is an AI reading of one value, read for all its runs. It stays apart when its hints
+    differ, when it has none, when it is a reference or alignment group or recorded ex situ
+    (``mutations.misfit_groups``), and an open-circuit group (an ``OCV``/``OCP`` name token) is never batched with
+    one that is not. Runs whose file names read the field differently (:func:`file_name_readings`) never share one."""
+    from . import mutations as M
+
+    asked = [q for q in questions if q["kind"] == "optional_values" and str(q.get("scope") or "").startswith("group:")
+             and not q.get("outside_live_groups") and any(f in (q.get("fields") or {}) for f in AGREEING_HINT_FIELDS)
+             and any((q.get("field_hints") or {}).get(f) for f in AGREEING_HINT_FIELDS)]
+    if len(asked) < 2:
+        return
+    runs = {r.get("run_id"): r for r in bundle.get("runs") or ()}
+    run_of = {m["value_id"]: m["run_id"] for m in bundle["missing_values"]}
+    index = M.reach_index(bundle)
+    # the groups no cell word describes (a standard, a foil, a run recorded ex situ): never batched in
+    misfit = {x["group_id"] for x in M.misfit_groups(bundle, CONTROL_MODE_PATH, [q["scope"][len("group:"):] for q in asked],
+                                                     index)}
+    from .template import run_names
+
+    def open_circuit(rids: Sequence[str]) -> bool:
+        return any(_OPEN_CIRCUIT_TOKEN.match(t) for rid in rids if rid in runs
+                   for name in run_names(bundle, runs[rid]) for t in re.split(r"[_\s.\-]+", name or ""))
+
+    batches: dict[tuple, list[tuple[dict, list[str]]]] = {}
+    for q in asked:
+        if q["scope"][len("group:"):] in misfit:
+            continue
+        for f in AGREEING_HINT_FIELDS:
+            hints = (q.get("field_hints") or {}).get(f) or ()
+            ids = (q.get("fields") or {}).get(f) or ()
+            if not hints or not ids or any(h.get("kind") != "ai_suggestion" or h.get("read_for") for h in hints):
+                continue
+            values = {json.dumps(h.get("literal"), sort_keys=True, default=str) for h in hints}
+            if len(values) != 1:
+                continue  # the group's own readings differ: asked on its own
+            rids = sorted({rid for t in ids if (rid := run_of.get(t))})
+            if not rids:
+                continue
+            names = tuple(sorted({repr(r["value"]) for rid in rids for r in file_name_readings(bundle, runs[rid], f)}))
+            batches.setdefault((f, next(iter(values)), names, open_circuit(rids)), []).append((q, rids))
+    for (f, value, _names, _ocv), members in batches.items():
+        if len(members) < 2:
+            continue
+        ids = sorted(q["question_id"] for q, _ in members)
+        group = "SR-" + hashlib.sha256((f + "\n" + "\n".join(ids)).encode()).hexdigest()[:10]
+        named = [{"question_id": q["question_id"], "run_id": rid, "file_name": (runs.get(rid) or {}).get("stem")}
+                 for q, rids in sorted(members, key=lambda m: m[0]["question_id"]) for rid in rids]
+        files = list(dict.fromkeys(str(m["file_name"]) for m in named if m["file_name"]))
+        shown = ", ".join(files[:SAME_READING_NAMES_SHOWN]) + (
+            f", and {len(files) - SAME_READING_NAMES_SHOWN} more" if len(files) > SAME_READING_NAMES_SHOWN else "")
+        for q, _rids in members:
+            command = (f"isaac bundle decide <bundle_dir> --question {q['question_id']} {SAME_READING_FLAG} --field {f} "
+                       f'--decision correct --value <one of its allowed values> --by "<your name>"')
+            q.setdefault("same_reading_by_field", {})[f] = {
+                "same_reading_group": group, "same_reading_count": len(members), "same_reading_members": named,
+                "same_reading_command": command}
+            q["text"] += (f" For the {_label(f)}, {len(members)} groups' own AI readings all suggest {json.loads(value)!r} "
+                          f"(not file evidence; same_reading_group {group}; the files: {shown}). If the {_label(f)} is "
+                          f"the same for all of them, answer them together: {command}. If not, answer each on its own.")
 
 
 def _optional_field_reach(bundle: Mapping, fields: Mapping[str, Sequence[str]], index: dict | None = None) -> dict[str, dict]:

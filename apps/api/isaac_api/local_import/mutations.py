@@ -1726,9 +1726,7 @@ def _count(n: int, noun: str) -> str:
 
 
 #: r4-b M4: the words for an electrochemical cell or its control, which do not describe a run measured outside one
-#: (r5e M2: and the potential's reference scale, now asked beside them once for the beamtime)
-CELL_FIELDS = frozenset({"context.electrochemistry.cell_type", "context.electrochemistry.control_mode",
-                         "context.electrochemistry.potential_scale"})
+CELL_FIELDS = frozenset({"context.electrochemistry.cell_type", "context.electrochemistry.control_mode"})
 _GROUP_IDS_SHOWN = 8
 
 
@@ -2268,12 +2266,24 @@ def _same_reading_targets(bundle: Mapping, question_id: str, only: str | None, f
                               f"its answer, decide it again without {Q.SAME_READING_FLAG} (isaac bundle show question "
                               f"<bundle_dir> {question_id} shows what was recorded). Nothing was recorded.")
     group = asked.get("same_reading_group")
-    if not group:
-        raise MutationRefused(f"Question {question_id} names no same_reading_group (it is open, and no other open "
-                              f"question quotes its comment line for this field), so {Q.SAME_READING_FLAG} has nothing "
-                              "more to answer. Nothing was recorded.")
-    members = [q for q in payload["questions"] if q.get("same_reading_group") == group]
-    named = list(asked.get("same_reading_members") or ())
+    by_field = asked.get("same_reading_by_field") or {}
+    path = asked.get("target_field_path")
+    if not group and field and field in by_field:
+        # r5e H1: a per-group optional question batched for ONE field (questions._note_agreeing_field_hints)
+        group, path = by_field[field]["same_reading_group"], field
+        members = [q for q in payload["questions"]
+                   if ((q.get("same_reading_by_field") or {}).get(field) or {}).get("same_reading_group") == group]
+        named = list(by_field[field].get("same_reading_members") or ())
+    elif not group:
+        batched = sorted(by_field)
+        raise MutationRefused(f"Question {question_id} names no same_reading_group"
+                              + (f" for {field}" if field and batched else "")
+                              + (f" (it is batched only for {', '.join(batched)}: give --field <one of them>)" if batched
+                                 else " (it is open, and no other open question quotes its comment line for this field)")
+                              + f", so {Q.SAME_READING_FLAG} has nothing more to answer. Nothing was recorded.")
+    else:
+        members = [q for q in payload["questions"] if q.get("same_reading_group") == group]
+        named = list(asked.get("same_reading_members") or ())
     if value is not None and decision in _VALUE_DECISIONS_SAID:
         said = value
         if isinstance(said, str) and re.fullmatch(r"\s*[-+]?(?:\d+(?:\.\d*)?|\.\d+)(?:[eE][-+]?\d+)?\s*", said):
@@ -2282,7 +2292,6 @@ def _same_reading_targets(bundle: Mapping, question_id: str, only: str | None, f
         against = []
         for m in named:
             run = runs.get(m["run_id"])
-            path = asked["target_field_path"]
             for r in Q.file_name_readings(bundle, run, path) if run is not None else ():
                 if not _agrees(r["value"], said):
                     against.append(f"{m['file_name']} ({m['run_id']}: its file name writes {r['token']}, "

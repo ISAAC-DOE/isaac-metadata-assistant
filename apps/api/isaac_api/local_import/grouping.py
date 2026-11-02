@@ -406,34 +406,42 @@ def counter_tokens(stem: str, *, counter_positions: Iterable[int] = (), known_co
     return [t for i, t in enumerate(toks) if t.isdigit() and _is_counter_token(toks, i, positions, known)]
 
 
-#: r5e M1: file-name tokens that read as a CONDITION, never as a sample: a set-point (``400mV``, ``m800mV``,
-#: ``0p5VRHE``), a pH (``pH2``), a concentration with or without its electrolyte (``10MNaOH``, ``100mMHClO4``, ``1M``),
-#: a temperature (``25C``, ``300K``), a duration (``30min``), a gas (``Ar``, ``CO2sat``) or an open-circuit word.
+#: r5e M1: file-name tokens whose SHAPE alone reads as a condition, never as a sample: a set-point (``400mV``,
+#: ``m800mV``, ``0p5VRHE``), a pH (``pH2``), a bare concentration (``1M``, ``100mM``) or an open-circuit word. r5e L1: a
+#: temperature, a duration, a gas or a state word (``400C``, ``2h``, ``H2``, ``fresh``) can just as well name a sample
+#: (``PtC_400C`` beside ``PtC_600C``), so it is a condition only when the run's own parser read it as one.
 _CONDITION_TOKEN_SHAPES = (
     re.compile(r"[-m]?\d+(?:[p.]\d+)?(?:mV|V)(?:vs)?(?:RHE|SHE|NHE|SCE|MSE|AgAgCl|HgO|HgHgO)?", re.IGNORECASE),
     re.compile(r"pH\d+(?:[p.]\d+)?", re.IGNORECASE),
-    re.compile(r"\d+(?:[p.]\d+)?(?:mM|uM|µM|M)(?:[A-Z][A-Za-z0-9()]*)?"),
-    re.compile(r"[-m]?\d+(?:[p.]\d+)?(?:C|K|degC|°C)", re.IGNORECASE),
-    re.compile(r"\d+(?:[p.]\d+)?(?:s|sec|min|mins|h|hr|hrs)", re.IGNORECASE),
-    # case kept: ``Co`` (cobalt) or ``he`` is no gas
-    re.compile(r"(?:Ar|N2|O2|H2|He|CO2|CO|[Aa]ir)(?:sat|saturated|purged|flow)?"),
+    re.compile(r"\d+(?:[p.]\d+)?(?:mM|uM|\u00b5M|M)"),
     re.compile(r"OC[VP]", re.IGNORECASE),
 )
-#: r5e M1: words that name a state or a step, not a sample (``before_after_state``, ``cycling_state``, ``dry_state``)
-_CONDITION_WORDS = frozenset({"before", "after", "pre", "post", "dry", "wet", "cycle", "cycles", "cycled", "fresh",
-                              "aged", "initial", "final"})
+#: r5e M1/L1: a concentration written onto its electrolyte (``10MNaOH``, ``100mMHClO4``): a capital letter after the
+#: unit, and a formula of three characters or more that :func:`template.electrolyte_formula` takes (``3MOF`` is a
+#: material code, not 3 M of ``OF``)
+_CONCENTRATION_ON_FORMULA = re.compile(r"\d+(?:[p.]\d+)?(?:mM|uM|\u00b5M|M)(?P<formula>[A-Z][A-Za-z0-9()]{2,})")
+
+
+def _condition_shaped(token: str) -> bool:
+    from .template import electrolyte_formula
+
+    if any(p.fullmatch(token) for p in _CONDITION_TOKEN_SHAPES):
+        return True
+    m = _CONCENTRATION_ON_FORMULA.fullmatch(token)
+    return m is not None and electrolyte_formula(m.group("formula"))
 
 
 def sample_name_tokens(stem: str, *, read_as_condition: Container[str] = ()) -> list[str]:
     """r5e M1: the tokens of a run's file name that can name its SAMPLE, as written: every token that holds a letter,
-    except one that reads as a condition (:data:`_CONDITION_TOKEN_SHAPES`, :data:`_CONDITION_WORDS`), a repeat marker,
-    or a token the run's own parser read as a condition or as bookkeeping (``read_as_condition``: casefolded
-    literals). A bare number is never one: it is a counter, a step, or a number no profile reads. ONLY to compare
-    names (which groups' file names share a sample reading); never a value, never a group key."""
+    except one whose shape reads as a condition (:func:`_condition_shaped`), a repeat marker, or a token the run's own
+    parser read as a condition or as bookkeeping (``read_as_condition``: casefolded literals; r5e L1: the only way a
+    temperature, duration, gas or state word is left out). A bare number is never one: it is a counter, a step, or a
+    number no profile reads. ONLY to compare names (which groups' file names share a sample reading); never a value,
+    never a group key."""
     out = []
     for t in _stem_tokens(stem):
-        if (not any(ch.isalpha() for ch in t) or _REPEAT_TOKEN.match(t) or t.casefold() in _CONDITION_WORDS
-                or t.casefold() in read_as_condition or any(p.fullmatch(t) for p in _CONDITION_TOKEN_SHAPES)):
+        if (not any(ch.isalpha() for ch in t) or _REPEAT_TOKEN.match(t) or t.casefold() in read_as_condition
+                or _condition_shaped(t)):
             continue
         out.append(t)
     return out

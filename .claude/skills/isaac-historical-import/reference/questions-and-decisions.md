@@ -140,8 +140,9 @@ group is confirmed the minimum names it in `answer_first` (not counted; never af
   (`0.8` V; the files write it '0p8V', '800mV')". Say the value back, and the spellings.
 - **Material name and form asked per group because no source states the sample** (the partition is each group's
   whole file name, `sample_name_stem`): groups whose names share every sample token share a `same_reading_group`. A sample
-  token is a part of the name with a letter in it that is no counter, set-point, pH, electrolyte, temperature, gas or
-  state word (`Q4`, `SYNcat` and `5wp` of `Q4_06_SYNcat_5wp_pH2_000mV`; `shared_sample_tokens`). The text names the
+  token is a part of the name with a letter in it that is no counter, set-point, pH, concentration or open-circuit
+  word (`Q4`, `SYNcat` and `5wp` of `Q4_06_SYNcat_5wp_pH2_000mV`; `shared_sample_tokens`). A temperature, time, gas or
+  state word (`400C`, `2h`, `H2`, `fresh`) counts as a sample token unless the parser read it as a condition. The text names the
   tokens and the files. A bare number (an electrode, a step) is no sample token, so two electrodes of one material
   share a batch. Ask once ("is the material the same for all N?"); on a yes, run its `same_reading_command`.
   Names that differ in any sample token (`Q4` and `Q5`, `5wt` and `5wp`) are never batched: ask those apart. A
@@ -191,9 +192,12 @@ group is confirmed the minimum names it in `answer_first` (not counted; never af
   groups and runs an answer there lands on; the reply to `--field` says the same. Say those groups, not "the whole
   beamtime". When it says "careful: it would put a cell type on …" (a standard, or a run recorded ex situ), do not
   answer it there: answer only the groups it fits (`--only group:<id>`).
-- **Cell type, potential scale and control mode** are asked once for the beamtime, in its optional question (answer
-  each with `--field`). Each run still gets its own decision. When groups differ, answer per group
-  (`--only group:<id>`). The "careful" warning covers all three.
+- **Potential scale and control mode are asked per group** (DEC-90: one beamtime can hold open-circuit references,
+  potential holds and dry samples). Groups whose own AI readings of the field all agree share a batch for that field
+  (`same_reading_by_field.<field>`: its group key, count, members and `same_reading_command`). Say the suggested value,
+  that it is an AI reading, and the groups; on a yes, run `decide --question <Q> --field <path> --same-reading`. Groups
+  whose readings differ or that have none stay apart. An open-circuit run is never batched with a potential hold, and
+  a reference or ex-situ group is never batched in. Each group's own question id still answers it with `--field`.
 
 ## Recording
 
@@ -323,8 +327,9 @@ group is confirmed the minimum names it in `answer_first` (not counted; never af
   (distinct from "Facility organization") and "Domain"; File List ends with "Reaction Drive" and
   "Reaction Catalysis" (dropdowns of their allowed values), then "Temperature" and "Gas Atmosphere" (template
   1.5.0). A sheet exported by an older build (the old "Organization" label) still imports.
-- Temperature is typed with its unit: `298.15 K` or `25 °C`. A bare number is an invalid cell: ISAAC never guesses
-  the unit. A °C value is converted to kelvin and listed in the preview under "Would convert to kelvin". Read each
+- Temperature is typed with its unit: `298.15 K` or `25 °C` (`℃` too). A bare number is an invalid cell: ISAAC never
+  guesses the unit. A °F value and a range (`25-30 °C`) are invalid too, each with its own reason: ask for one value
+  in K or °C. A °C value is converted to kelvin and listed in the preview under "Would convert to kelvin". Read each
   one back before `--apply`.
 - A deprecated term typed (`three_electrode` for Cell Type) is still recorded as typed. The preview lists it under
   "Deprecated terms" with what to use instead. Say it, and ask whether they meant the cell body (e.g. `beaker_cell`).

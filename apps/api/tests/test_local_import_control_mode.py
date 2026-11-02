@@ -2,8 +2,7 @@
 became at 1.3.0 (DEC-88).
 
 * Its allowed values are the official schema's ``enum``, read at runtime — never a list here.
-* RUN scope, like ``potential_scale``: each run's answer is its own. r5e M2: both are ASKED once for the whole
-  beamtime (as the cell type is), and the answer is recorded per run.
+* RUN scope, like ``potential_scale``: never asked once for the whole beamtime.
 * It is never defaulted and never derived: not from a set-point being present, and no set-point
   from it.
 * The schema's conditional rules key the set-point requirement on it: a draft whose CONFIRMED
@@ -93,8 +92,7 @@ def test_control_mode_is_a_run_scope_local_answer_field_new_in_1_5_0():
     assert CM in B._writable_paths() and CM in B.WRITABLE_ADDED_IN["1.5.0"]
     # 1.6.0 added nothing writable; 1.7.0 the current set-point (test_local_import_current_setpoint)
     assert B._added_since("1.4.0") == frozenset({CM, CURRENT}) and B._added_since("1.5.0") == frozenset({CURRENT})
-    # r5e M2: asked once for the whole beamtime, beside the cell type; each run's answer is still its own (run scope)
-    assert Q._is_shared(CM) and Q._is_shared(SCALE)
+    assert not Q._is_shared(CM) and not Q._is_shared(SCALE)  # never asked once for the whole beamtime
 
 
 def test_every_run_has_a_missing_value_and_nothing_is_defaulted(grouped):
@@ -112,7 +110,7 @@ def test_allowed_values_are_the_schemas_own_enum_in_questions_and_template(group
     target, _ = Q._target_schema()
     assert Q._node(target, CM)["enum"] == vendored  # the pinned portal schema, when installed, agrees
     qs = [q for q in Q.consolidate(M.load(grouped))["questions"] if q["kind"] == "optional_values" and CM in q["fields"]]
-    assert qs and all(q["scope"] == "experiment" for q in qs)  # r5e M2: one beamtime-wide question
+    assert qs and all(q["scope"].startswith("group:") for q in qs)
     assert all(q["field_allowed_values"][CM] == vendored for q in qs)
     assert T.field_rules()[CM]["allowed"] == vendored
 
