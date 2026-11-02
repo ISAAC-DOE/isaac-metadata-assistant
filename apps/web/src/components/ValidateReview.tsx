@@ -302,16 +302,16 @@ export function ValidateReview({ experimentId }: { experimentId: string }) {
       .then(([validate, warnings]) => {
         if (mine === generation.current) setReview({ status: 'data', validate, warnings });
       })
-      .catch((err: unknown) =>
-        mine === generation.current &&
+      .catch((err: unknown) => {
+        if (mine !== generation.current) return;
         setReview({
           status: 'error',
           message:
             err instanceof Error
               ? err.message
               : 'This record could not be checked. Nothing was changed.',
-        }),
-      );
+        });
+      });
     api
       .getEvidenceClassification(experimentId)
       .then((data) => {
@@ -332,8 +332,8 @@ export function ValidateReview({ experimentId }: { experimentId: string }) {
       .then((data) => {
         if (mine === generation.current) setDetails((prev) => ({ ...prev, [runId]: { status: 'data', data } }));
       })
-      .catch((err: unknown) =>
-        mine === generation.current &&
+      .catch((err: unknown) => {
+        if (mine !== generation.current) return;
         setDetails((prev) => ({
           ...prev,
           [runId]: {
@@ -341,8 +341,8 @@ export function ValidateReview({ experimentId }: { experimentId: string }) {
             message:
               err instanceof Error ? err.message : 'This run could not be checked in detail.',
           },
-        })),
-      );
+        }));
+      });
   };
 
   const units = review.status === 'data' ? reviewUnits(review.validate) : [];

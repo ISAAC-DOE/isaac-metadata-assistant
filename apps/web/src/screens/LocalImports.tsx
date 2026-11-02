@@ -393,7 +393,8 @@ function BundleQuestions({ name }: { name: string }) {
   };
   const [returnTo, setReturnTo] = useState<HTMLElement | null>(null);
   const needName = useCallback((from?: HTMLElement | null) => {
-    setReturnTo(from ?? null);
+    // Safari and Firefox on macOS do not focus a clicked button, so `from` can be <body>: only a control inside a card is worth returning to
+    setReturnTo(from && from !== document.body && from.closest('[data-card-id]') ? from : null);
     setNameError((n) => n + 1);
     nameRef.current?.focus();
   }, []);
@@ -480,6 +481,7 @@ function BundleQuestions({ name }: { name: string }) {
   );
   const onWritten = useCallback(
     (id: string, message: string, v: { sentWith: string; now?: string }) => {
+      setReturnTo(null);
       const now = v.now;
       if (now && now !== v.sentWith) {
         setVersions((cur) => ({ superseded: [...cur.superseded, v.sentWith].slice(-50), adopted: now }));
@@ -526,6 +528,7 @@ function BundleQuestions({ name }: { name: string }) {
   /* Previous / Next questions: once the new page has arrived, focus its heading. */
   const pageFocus = useRef(false);
   const onPage = useCallback((next: number) => {
+    setReturnTo(null);
     pageFocus.current = true;
     setOffset(next);
   }, []);
@@ -533,7 +536,9 @@ function BundleQuestions({ name }: { name: string }) {
   // go to the last page there still is, rather than show "Questions 51–50 of 50." and no cards.
   useEffect(() => {
     if (shownData && shownData.returned === 0 && shownData.offset > 0 && shownData.total > 0) {
-      onPage(lastPageOffset(shownData.total, shownData.limit));
+      // only when that is another page: setting the same offset changes nothing, and would leave the focus request pending
+      const last = lastPageOffset(shownData.total, shownData.limit);
+      if (last !== shownData.offset) onPage(last);
     }
   }, [shownData, onPage]);
   useEffect(() => {
@@ -601,6 +606,7 @@ function BundleQuestions({ name }: { name: string }) {
             onChange={(e) => {
               setBlockingOnly(e.target.checked);
               setOffset(0);
+              setReturnTo(null);
             }}
           />
           Only questions that block export
@@ -614,6 +620,7 @@ function BundleQuestions({ name }: { name: string }) {
             onChange={(e) => {
               setKind(e.target.value);
               setOffset(0);
+              setReturnTo(null);
             }}
           >
             <option value="">All types</option>
@@ -745,6 +752,8 @@ function QuestionsBody({
  */
 function SectionJumps({ sections }: { sections: ReturnType<typeof sectionQuestions> }) {
   const go = (e: React.MouseEvent, id: string) => {
+    // a modified click (new tab, window) is the browser's own
+    if (e.metaKey || e.ctrlKey || e.shiftKey || e.altKey || e.button !== 0) return;
     const heading = document.getElementById(id);
     if (!heading) return;
     e.preventDefault();
@@ -836,8 +845,10 @@ function AnsweredList({ kind, writes, handlers }: { kind: string; writes: number
   // a "Change answer" that defers can empty the last answered page: go to the last page there still is
   useEffect(() => {
     if (data && data.returned === 0 && data.offset > 0 && data.total > 0) {
+      const last = lastPageOffset(data.total, data.limit);
+      if (last === data.offset) return; // same offset: nothing would change, and the focus request would stay pending
       pageFocus.current = true;
-      setOffset(lastPageOffset(data.total, data.limit));
+      setOffset(last);
     }
   }, [data]);
 
@@ -1607,7 +1618,9 @@ function QuestionCard({
     setStatus('');
     opener.current = document.activeElement instanceof HTMLElement ? document.activeElement : null;
     if (!handlers.by.trim()) {
-      handlers.needName(opener.current);
+      // a clicked button may not hold focus (Safari, Firefox on macOS): then this card's own title is the place to come back to
+      const el = opener.current;
+      handlers.needName(el && el !== document.body && el.closest('[data-card-id]') ? el : titleRef.current);
       return;
     }
     if (how.scope === undefined && how.scopes === undefined && multi && scopeMode === null) {
@@ -2218,6 +2231,7 @@ function CaptureSection({ data, handlers }: { data: ApiLocalQuestions; handlers:
 }
 
 function useDecision(id: string, handlers: WriteHandlers) {
+  const cardRef = useRef<HTMLLIElement>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<{ text: string; n: number } | null>(null);
   const [recorded, setRecorded] = useState<string | null>(null);
@@ -2225,7 +2239,13 @@ function useDecision(id: string, handlers: WriteHandlers) {
   async function record(input: Omit<Parameters<typeof api.recordLocalDecision>[1], 'by' | 'expected_version'>, done: string) {
     setError(null);
     if (!handlers.by.trim()) {
-      handlers.needName(document.activeElement instanceof HTMLElement ? document.activeElement : null);
+      // as in a question card: a button that was not focused by the click falls back to this card's own title
+      const el = document.activeElement;
+      handlers.needName(
+        el instanceof HTMLElement && el !== document.body && el.closest('[data-card-id]')
+          ? el
+          : cardRef.current?.querySelector<HTMLElement>('[data-li-title]'),
+      );
       return;
     }
     setBusy(true);
@@ -2264,14 +2284,14 @@ function useDecision(id: string, handlers: WriteHandlers) {
       )}
     </>
   );
-  return { busy, record, feedback };
+  return { busy, record, feedback, cardRef };
 }
 
 function MergeCard({ m, handlers }: { m: LocalMergeCandidate; handlers: WriteHandlers }) {
-  const { busy, record, feedback } = useDecision(m.merge_candidate_id, handlers);
+  const { busy, record, feedback, cardRef } = useDecision(m.merge_candidate_id, handlers);
   const [first, ...rest] = m.group_ids;
   return (
-    <li className="li-card" data-card-id={m.merge_candidate_id}>
+    <li className="li-card" data-card-id={m.merge_candidate_id} ref={cardRef}>
       <p className="li-question-text" tabIndex={-1} data-li-title>
         {m.question ?? `Merge or keep apart: groups ${m.group_ids.join(', ')}`}
       </p>
@@ -2308,11 +2328,11 @@ function MergeCard({ m, handlers }: { m: LocalMergeCandidate; handlers: WriteHan
 }
 
 function AthenaCard({ a, handlers }: { a: LocalAthenaSelection; handlers: WriteHandlers }) {
-  const { busy, record, feedback } = useDecision(a.processing_id, handlers);
+  const { busy, record, feedback, cardRef } = useDecision(a.processing_id, handlers);
   const [version, setVersion] = useState(a.versions[0]?.version_id ?? '');
   const id = useId();
   return (
-    <li className="li-card" data-card-id={a.processing_id}>
+    <li className="li-card" data-card-id={a.processing_id} ref={cardRef}>
       <p className="li-question-text" tabIndex={-1} data-li-title>
         {COPY.athenaQuestion} {a.processing_id}
         {a.run_names.length ? ` (runs ${namesText(a.run_names)})` : ''}?

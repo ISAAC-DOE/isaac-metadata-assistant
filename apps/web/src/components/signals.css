@@ -46,9 +46,9 @@
 .chip-ev-unreadable   { color: var(--needsyou-text);  background: var(--needsyou-bg);  border-color: var(--needsyou-border);  border-style: dashed; }
 
 /* Reconciliation axis (P31.3). An absent value is DASHED so it never reads as an
- * established fact; a conflict borrows the fail palette (needs human review). */
+ * established fact; a conflict wears the advisory palette (needs human review), never the verdict red: an evidence state, not a FAIL. */
 .chip-recon-match    { color: var(--verified-text); background: var(--verified-bg); border-color: var(--verified-border); }
-.chip-recon-conflict { color: var(--fail-text);      background: var(--fail-bg);      border-color: var(--fail-border);      font-weight: 600; }
+.chip-recon-conflict { color: var(--advisory-text);  background: var(--advisory-bg);  border-color: var(--advisory-border);  font-weight: 600; }
 .chip-recon-absent   { color: var(--missing-text);   background: var(--missing-bg);   border-color: var(--missing-border);   border-style: dashed; }
 
 /* ---- Unified provenance: two dimensions, and only ONE of them is coloured ----
@@ -137,7 +137,6 @@
   .verdict { gap: 14px; padding: 18px 16px; }
   .verdict-tile { width: 40px; height: 40px; }
   .verdict-head { flex-wrap: wrap; }
-  .verdict-head > .btn { order: 1; }
 }
 
 /* Schema Errors card (FAIL) */

@@ -159,7 +159,7 @@
 .li-bullets .btn { white-space: normal; overflow-wrap: anywhere; text-align: left; }
 /* A recommendation's warning, after its field name: a box of its own on its own line. As an inline
    span its border and padding were drawn once per wrapped line, across the words. */
-.li-bullets .li-warning {
+.li-bullets span.li-warning {
   display: block;
   margin-top: var(--space-2xs);
   padding: var(--space-xs) var(--space-md);

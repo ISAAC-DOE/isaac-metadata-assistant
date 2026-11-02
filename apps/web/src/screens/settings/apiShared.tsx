@@ -53,12 +53,18 @@ export function CopyButton({
     [],
   );
   const copy = () => {
-    // a refused clipboard (no permission, an insecure origin) must not escape as an unhandled rejection
-    navigator.clipboard?.writeText(value)?.catch(() => undefined);
-    setCopied(true);
-    onCopied(what);
-    if (resetTimer.current !== null) window.clearTimeout(resetTimer.current);
-    resetTimer.current = window.setTimeout(() => setCopied(false), 1500);
+    // "Copied" only once the browser says it copied (as HashField does): a refused clipboard (no
+    // permission, an insecure origin) said so anyway, and its rejection went unhandled.
+    const done = navigator.clipboard?.writeText(value);
+    if (!done) return;
+    done
+      .then(() => {
+        setCopied(true);
+        onCopied(what);
+        if (resetTimer.current !== null) window.clearTimeout(resetTimer.current);
+        resetTimer.current = window.setTimeout(() => setCopied(false), 1500);
+      })
+      .catch(() => undefined);
   };
   return (
     <button

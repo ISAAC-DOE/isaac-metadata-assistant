@@ -20,6 +20,7 @@ import {
   type LocalAnsweredQuestion,
   type LocalQuestion,
   currentAnswerText,
+  countsText,
 } from '../lib/localImports';
 
 /**
@@ -517,6 +518,43 @@ describe('the questions screen', () => {
     fireEvent.click(screen.getByRole('button', { name: COPY.backToQuestion }));
     expect(accept).toHaveFocus();
     expect(screen.queryByRole('button', { name: COPY.backToQuestion })).toBeNull();
+  });
+
+  it('where the clicked button took no focus (Safari, Firefox on macOS), "Back to the question" returns to that question\'s own heading', async () => {
+    stubQuestions();
+    renderAt(ROUTES.localImportBundle('synthetic-beamtime'));
+    const heading = await screen.findByRole('heading', { name: envQ.text });
+    const card = heading.closest('li') as HTMLElement;
+    // the click does not focus the button: the active element is <body>
+    (document.activeElement as HTMLElement | null)?.blur();
+    fireEvent.click(within(card).getByRole('button', { name: `${COPY.acceptSuggestion}: ex_situ` }));
+    await screen.findByTestId('li-name-error');
+    fireEvent.click(screen.getByRole('button', { name: COPY.backToQuestion }));
+    expect(heading).toHaveFocus();
+  });
+
+  it('"Back to the question" is dropped once the filters change', async () => {
+    stubQuestions();
+    renderAt(ROUTES.localImportBundle('synthetic-beamtime'));
+    const card = (await screen.findByRole('heading', { name: envQ.text })).closest('li') as HTMLElement;
+    const accept = within(card).getByRole('button', { name: `${COPY.acceptSuggestion}: ex_situ` });
+    accept.focus();
+    fireEvent.click(accept);
+    expect(await screen.findByRole('button', { name: COPY.backToQuestion })).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('checkbox', { name: 'Only questions that block export' }));
+    await waitFor(() => expect(screen.queryByRole('button', { name: COPY.backToQuestion })).toBeNull());
+  });
+
+  it('a modified click on a section link is left to the browser', async () => {
+    stubQuestions();
+    renderAt(ROUTES.localImportBundle('synthetic-beamtime'));
+    const nav = await screen.findByRole('navigation', { name: COPY.jumpLabel });
+    const links = within(nav).getAllByRole('link');
+    // fireEvent returns false when the click's default was prevented
+    expect(fireEvent.click(links[1], { ctrlKey: true })).toBe(true);
+    expect(fireEvent.click(links[1], { metaKey: true })).toBe(true);
+    expect(fireEvent.click(links[1], { shiftKey: true })).toBe(true);
+    expect(fireEvent.click(links[1])).toBe(false);
   });
 
   it('lists the question sections with their counts, each a link that moves focus to its heading', async () => {
@@ -1206,6 +1244,17 @@ describe('review round 2: the minimum’s unasked fields and the counts the spli
     renderAt(ROUTES.localImportBundle('synthetic-beamtime'));
     expect(await screen.findByRole('heading', { level: 2, name: /Questions/ })).toBeInTheDocument();
     expect(screen.queryByTestId('li-not-counted')).toBeNull();
+  });
+});
+
+describe('countsText', () => {
+  it('says "1 conflict" in the singular and "2 conflicts" in the plural', () => {
+    expect(countsText({ blocking: 0, conflicts_affecting_a_record: 1, optional: 3 })).toBe(
+      '0 blocking export, 1 conflict affecting a record, 3 optional',
+    );
+    expect(countsText({ blocking: 1, conflicts_affecting_a_record: 2, optional: 3 })).toBe(
+      '1 blocking export, 2 conflicts affecting a record, 3 optional',
+    );
   });
 });
 

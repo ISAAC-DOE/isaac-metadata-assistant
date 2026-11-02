@@ -1,5 +1,5 @@
 import { describe, it, expect, afterEach, beforeEach, vi } from 'vitest';
-import { render, screen, fireEvent, within } from '@testing-library/react';
+import { render, screen, fireEvent, within, waitFor } from '@testing-library/react';
 import { MemoryRouter } from 'react-router-dom';
 
 import { SettingsPage } from '../screens/SettingsPage';
@@ -196,7 +196,7 @@ function countOccurrences(haystack: string, needle: string): number {
 }
 
 beforeEach(() => {
-  Object.assign(navigator, { clipboard: { writeText: vi.fn() } });
+  Object.assign(navigator, { clipboard: { writeText: vi.fn().mockResolvedValue(undefined) } });
 });
 
 afterEach(() => {
@@ -590,10 +590,22 @@ describe('Settings → API Access — Quick Start', () => {
     // Non-visual signal: a polite status region, not colour or an icon alone.
     // Scoped to the widget: the Connect Your Agent widget beside it has a status
     // region of its own (its state), and the first match would be that one.
+    // (The confirmation waits for the clipboard to resolve.)
     const status = keysRegion().querySelector('[role="status"]') as HTMLElement;
-    expect(status.textContent).toBe('Copied the first-request sample.');
+    await waitFor(() => expect(status.textContent).toBe('Copied the first-request sample.'));
     // Visual signal too.
     expect(within(first).getByRole('button', { name: 'Copied the first-request sample' })).toBeInTheDocument();
+  });
+
+  it('does not say it copied when the clipboard refuses', async () => {
+    (navigator.clipboard.writeText as ReturnType<typeof vi.fn>).mockRejectedValue(new Error('denied'));
+    await openApiAccess();
+    const first = document.querySelector('.api-quickstart-first') as HTMLElement;
+    fireEvent.click(within(first).getByRole('button', { name: 'Copy the first-request sample' }));
+    await waitFor(() => expect(navigator.clipboard.writeText).toHaveBeenCalled());
+    await Promise.resolve();
+    expect(within(first).getByRole('button', { name: 'Copy the first-request sample' })).toBeInTheDocument();
+    expect(keysRegion().querySelector('[role="status"]')?.textContent ?? '').not.toMatch(/Copied/);
   });
 
   /**
@@ -3147,8 +3159,10 @@ describe('Settings → Endpoint Explorer — code examples', () => {
     expect(navigator.clipboard.writeText).toHaveBeenCalledWith(
       expect.stringContaining('import urllib.request'),
     );
-    expect((document.querySelector('[role="status"]') as HTMLElement).textContent).toBe(
-      'Copied the Python sample.',
+    await waitFor(() =>
+      expect((document.querySelector('[role="status"]') as HTMLElement).textContent).toBe(
+        'Copied the Python sample.',
+      ),
     );
   });
 
