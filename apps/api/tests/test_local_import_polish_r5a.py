@@ -297,7 +297,7 @@ def test_a_processed_result_with_disagreeing_reference_edges_says_not_proposed(t
     assert "reference_proposed" not in (bdir / params["relative_path"]).read_text()  # outside the hashed files
 
 
-# --- review H1: the scientist's normalisation is rebuilt from the project's stored step ------------------------------
+# --- review H1 / second review: the curve as Athena makes it ---------------------------------------------------------
 
 
 def _bkg(**kw):
@@ -306,78 +306,109 @@ def _bkg(**kw):
     return SimpleNamespace(**kw)
 
 
-def _edge(T, step=0.015):
+def _curved(T, step=0.015, curve=4.0e-7):
+    """SYNTHETIC: a pre-edge line, an edge of ``step`` and a post-edge that bends (quadratic), on the GRID."""
     import numpy as np
 
     e = T.GRID.copy()
     line = 0.002 + 1.0e-5 * (e - T.E0)
-    mu = line + step * (0.5 + np.arctan((e - T.E0) / 0.5) / np.pi)
-    return e, mu, line
+    mu = line + step * (0.5 + np.arctan((e - T.E0) / 0.5) / np.pi) + curve * np.clip(e - T.E0, 0, None) ** 2
+    return e, mu
 
 
-def test_the_project_stored_step_and_line_rebuild_the_curve():
+def _stored(T, e, mu, np, *, nnorm=3.0, pre=(-60.0, -30.0), nor=(40.0, 130.0)):
+    """The values a current Athena project stores for ``mu``: least-squares fits over its windows (absolute E)."""
+    sel = (e >= T.E0 + pre[0]) & (e <= T.E0 + pre[1])
+    slope, intercept = np.polyfit(e[sel], mu[sel], 1)
+    post = (e >= T.E0 + nor[0]) & (e <= T.E0 + nor[1])
+    nc = list(np.polyfit(e[post], mu[post], int(nnorm) - 1)[::-1]) + [0.0] * 3
+    step = sum(c * T.E0 ** k for k, c in enumerate(nc[:4])) - (intercept + slope * T.E0)
+    bkg = _bkg(slope=slope, int=intercept, nc0=nc[0], nc1=nc[1], nc2=nc[2], nc3=nc[3], nvict=0)
+    params = {"e0": T.E0, "step": step, "fixstep": 0.0, "flatten": 1.0, "eshift": 0.0, "nnorm": nnorm,
+              "pre1": pre[0], "pre2": pre[1], "nor1": nor[0], "nor2": nor[1]}
+    return bkg, params
+
+
+def test_current_stored_values_give_athenas_formula_and_the_flat_form():
     T = _proc()
     import numpy as np
     from isaac_api.local_import.processing import athena as A
 
-    e, mu, line = _edge(T)
-    larch_step = 0.0003  # a re-fit that went wrong: the curve made with it sits 50 steps above the line
-    larch_norm = (mu - line) / larch_step
-    params = {"step": 0.015, "fixstep": 0.0, "flatten": 1.0, "pre1": -60.0, "pre2": -30.0}
-    post_c = (0.002 + 0.015, 1.0e-5)  # the project's post-edge line: pre-edge line + step at E0, the same slope
-    bkg = _bkg(slope=1.0e-5, int=0.002 - 1.0e-5 * T.E0, nc0=post_c[0] - post_c[1] * T.E0, nc1=post_c[1], nc2=0.0, nc3=0.0)
-    got = A.athena_normalisation(e, mu, larch_norm, larch_norm, larch_step, T.E0, bkg, params, np)
-    assert got["edge_step"] == 0.015 and got["said"]["pre_edge_line"] == "project" and got["said"]["flattened_with"] == "project"
+    e, mu = _curved(T)
+    bkg, params = _stored(T, e, mu, np)
+    bad_larch = (mu - mu[0]) / 0.0003  # larch's reading, far off
+    got = A.athena_normalisation(e, mu, bad_larch, 0.0003, bkg, params, np)
+    assert got["basis"] == "stored" and got["edge_step"] == pytest.approx(params["step"])
+    L = bkg.int + bkg.slope * e
+    assert np.allclose(got["norm"], (mu - L) / params["step"])
+    P = sum(getattr(bkg, f"nc{k}") * e ** k for k in range(4))
+    PL0 = sum(getattr(bkg, f"nc{k}") * T.E0 ** k for k in range(4)) - (bkg.int + bkg.slope * T.E0)
+    want = np.where(e >= T.E0, got["norm"] - ((P - L) - PL0) / params["step"], got["norm"])
+    assert np.allclose(got["flat"], want)  # never (mu - P) / step + 1
     post = e > T.E0 + 60
-    assert abs(float(got["norm"][post].mean()) - 1.0) < 0.02 and abs(float(got["flat"][post].mean()) - 1.0) < 0.02
-    assert "ISAAC used the project's stored step" in got["said"]["statement"]
-    assert "not the scientist's processing" in got["said"]["statement"]
-    # a line that does not describe the data (another program's default, slope 0, intercept 7): larch's line is used
-    bad = _bkg(slope=0.0, int=7.0, nc0=0.0, nc1=0.0, nc2=0.0, nc3=0.0)
-    got2 = A.athena_normalisation(e, mu, larch_norm, larch_norm, larch_step, T.E0, bad, params, np)
-    assert got2["said"]["pre_edge_line"] == "larch" and got2["said"]["flattened_with"] == "larch, scaled"
-    assert abs(float(got2["norm"][post].mean()) - 1.0) < 0.02
-    # NEGATIVE CONTROLS: steps that agree within 1 %, no stored step, a negative one: larch's curve stands
-    assert A.athena_normalisation(e, mu, larch_norm, larch_norm, 0.01505, T.E0, bkg, params, np) is None
-    assert A.athena_normalisation(e, mu, larch_norm, larch_norm, larch_step, T.E0, bkg, {**params, "step": None}, np) is None
-    assert A.athena_normalisation(e, mu, larch_norm, larch_norm, larch_step, T.E0, bkg, {**params, "step": -2.0}, np) is None
+    assert abs(float(got["flat"][post].mean()) - 1.0) < 0.02
+    said = got["said"]
+    assert said["basis"] == "stored" and "stored normalisation, which still fits the data" in said["statement"]
+    assert "not the scientist's processing" in said["statement"]
+    # a fixed step: the same flat form with the fixed step
+    fixed = A.athena_normalisation(e, mu, bad_larch, 0.0003, bkg, {**params, "fixstep": 1.0, "step": 0.02}, np)
+    assert fixed["basis"] == "stored" and fixed["edge_step"] == 0.02
+    assert np.allclose(fixed["norm"], (mu - L) / 0.02)
+    # NEGATIVE CONTROL: no E0, no curve
+    assert A.athena_normalisation(e, mu, bad_larch, 0.0003, bkg, {**params, "e0": None}, np) is None
 
 
-def test_a_project_whose_stored_step_differs_is_rebuilt_said_and_judged_on_its_own_curve(tmp_path, monkeypatch):
+def test_stale_stored_values_are_refitted_as_athena_does_never_mixed():
     T = _proc()
-    from larch import Group
-    from larch.io import AthenaProject
-
-    real_prj = T._athena_prj
-
-    def stored_twice(path, groups):  # the project stores twice the step larch's re-fit gives (synthetic)
-        prj = AthenaProject()
-        for label, e, mu in groups:
-            g = Group(energy=e, mu=mu, label=label, filename=label)
-            T.xafs.pre_edge(g, pre1=-50, pre2=-30, norm1=60, norm2=130, nnorm=2)
-            g.edge_step = g.edge_step * 2
-            prj.add_group(g)
-        prj.save(str(path))
-
-    monkeypatch.setattr(T, "_athena_prj", stored_twice)
-    bdir, root = T._athena_case(tmp_path, {"SYN.prj": [("01_SYN_ZZ1_1-2", T.GRID, T.mu_edge(T.GRID) * 1e-2)]})
-    monkeypatch.setattr(T, "_athena_prj", real_prj)
-    out = T.run_process(bdir, source_root=root)
-    sci = next(r for r in out["processing_results"] if r["source"] == "scientist_athena")
-    assert "athena_renormalisation_differs" in sci["review_flags"]
-    said = sci["qc"]["statements"]["athena_renormalisation_differs"]
-    assert "the project stores" in said and "not the scientist's processing" in said
-    ren = sci["renormalised_from_project"]
-    assert ren["project_edge_step"] == pytest.approx(2 * ren["larch_edge_step"])
-    assert sci["outputs"]["edge_step"] == pytest.approx(ren["project_edge_step"])
-    # the curve written for the record is the rebuilt one: it sits at about half a step after the edge
     import numpy as np
+    from isaac_api.local_import.processing import athena as A
 
-    f = next(x for x in sci["outputs"]["files"] if x["role"] == "athena_normalized")
-    rows = [ln.split(",") for ln in (bdir / f["relative_path"]).read_text().splitlines() if ln and ln[0].isdigit()]
-    e, n = np.array([float(r[0]) for r in rows]), np.array([float(r[1]) for r in rows])
-    assert abs(float(n[e > T.E0 + 60].mean()) - 0.5) < 0.05
-    assert "post_edge_level" not in sci["qc"]["metrics"]  # 0.5 is within 0 to 2: judged on the rebuilt curve
+    e, mu = _curved(T)
+    bkg, params = _stored(T, e, mu, np)
+    stale = _bkg(**{**vars(bkg), "slope": 0.0, "int": 7.0})  # a default line another program wrote: not current
+    got = A.athena_normalisation(e, mu, mu * 0, 0.0003, stale, params, np)
+    assert got["basis"] == "athena_refit" and "Athena's own re-fit" in got["said"]["statement"]
+    assert got["edge_step"] != pytest.approx(params["step"], rel=1e-9)  # the step is the re-fit's, not the stored one
+    post = e > T.E0 + 60
+    assert abs(float(got["flat"][post].mean()) - 1.0) < 0.05
+    # a post-edge curve that no longer fits the data is stale too
+    off = _bkg(**{**vars(bkg), "nc0": bkg.nc0 + 0.01})
+    assert A.athena_normalisation(e, mu, mu * 0, 0.0003, off, params, np)["basis"] == "athena_refit"
+    # with a fixed step the re-fit keeps the stored step
+    fx = A.athena_normalisation(e, mu, mu * 0, 0.0003, stale, {**params, "fixstep": 1.0, "step": 0.02}, np)
+    assert fx["basis"] == "athena_refit" and fx["edge_step"] == pytest.approx(0.02)
+    # a window too short to judge: stored when Athena does not re-fit on display, re-fitted when it does
+    short = {**params, "pre1": -30.2, "pre2": -30.0}  # one point
+    assert A.athena_normalisation(e, mu, mu * 0, 0.0003, bkg, short, np)["basis"] == "stored"
+    assert A.athena_normalisation(e, mu, mu * 0, 0.0003, bkg, short, np, refits=True)["basis"] == "athena_refit"
+
+
+def test_the_curve_as_athena_makes_it_reaches_the_result_and_says_which_way(tmp_path):
+    T = _proc()
+    import numpy as np
+    import test_local_import_polish_c2a as C2
+
+    # a project whose stored values are current (written the way Athena stores them)
+    mu = T.mu_edge(C2.FINE) * 1e-2
+    bkg, params = _stored(T, C2.FINE, mu, np, nnorm=2.0, pre=(-50.0, -30.0), nor=(60.0, 130.0))
+    txt = lambda x: repr(float(x))  # noqa: E731
+    args = {"bkg_slope": txt(bkg.slope), "bkg_int": txt(bkg.int), "bkg_nc0": txt(bkg.nc0), "bkg_nc1": txt(bkg.nc1),
+            "bkg_nc2": "0", "bkg_nc3": "0", "bkg_step": txt(params["step"]), "bkg_nnorm": "2", "bkg_pre1": "-50",
+            "bkg_pre2": "-30", "bkg_nor1": "60", "bkg_nor2": "130", "update_norm": "0"}
+    bdir, root, bundle = T.make_case(tmp_path, [("01_SYN_ZZ1", [T.spec_file(T.fluo_scan(s)) for s in (1, 2)],
+                                                 {"sample_name": "ZZ1"})])
+    C2._prj(root / "SYN.prj", "01_SYN_ZZ1_1-2", mu, args)
+    bundle["unread_files"].append({"source_id": "prj-1", "relative_path": "SYN.prj"})
+    (bdir / "bundle.json").write_text(__import__("json").dumps(bundle))
+    sci = next(r for r in T.run_process(bdir, source_root=root)["processing_results"] if r["source"] == "scientist_athena")
+    assert "stored normalisation" in sci["steps"][0]["params"]["reproduced_with"]
+    assert sci["outputs"]["edge_step"] == pytest.approx(params["step"], rel=1e-6)
+    # a stale project (the default line larch writes): Athena's re-fit, said so
+    b2 = tmp_path / "b"
+    b2.mkdir()
+    bdir2, root2 = T._athena_case(b2, {"SYN.prj": [("01_SYN_ZZ1_1-2", T.GRID, T.mu_edge(T.GRID) * 1e-2)]})
+    sci2 = next(r for r in T.run_process(bdir2, source_root=root2)["processing_results"] if r["source"] == "scientist_athena")
+    assert "Athena's re-fit" in sci2["steps"][0]["params"]["reproduced_with"]
 
 
 def test_a_per_scan_set_says_its_members_were_rebuilt():
@@ -438,7 +469,7 @@ def test_a_decided_result_whose_group_moved_to_another_run_is_said():
     assert line["decided_result_id"] == "proc-g1-r-a-isaac" and line["new_result_id"] == "proc-g1-r-b-isaac"
     said = line["statement"]
     assert "matched differently now (3 versions listed before, matched to merge_syn in SYN.prj now)" in said
-    assert "rebuilt from its project's stored edge step" in said
+    assert "made from the project as Athena makes it" in said
     assert "The approval still stands on the old curve" in said
     # NEGATIVE CONTROLS: no decision; the same run; a line already said (a scan now left out)
     assert M.decided_results_on_an_older_run({"scientist_decisions": []}, [old], [old], [new]) == []
@@ -479,12 +510,35 @@ def test_glitch_points_unjudged_is_present_whenever_the_few_scan_sentence_is(tmp
     assert "glitch_check_few_scans" in said and m["glitch_points_unjudged"] == m["glitch_points"] >= 1
 
 
-def test_a_degenerate_larch_refit_is_replaced_by_the_project_stored_step(tmp_path):
+def test_a_degenerate_project_is_refitted_as_athena_does_and_still_fails(tmp_path):
     _proc()
     import test_local_import_polish_c2a as C2
 
-    bdir, root = C2._case(tmp_path, C2.DEGENERATE)  # the project stores the step its curve was made with
+    # a zero-width post-edge range whose stored line is not current: Athena's re-fit, still an implausible step
+    bdir, root = C2._case(tmp_path, C2.DEGENERATE)
     isa, sci = C2._results(C2.run_process(bdir, source_root=root))
-    assert sci["qc"]["metrics"]["edge_step"] < 10 and "edge_step_implausible" not in sci["qc"]["reasons"]
-    assert sci["renormalised_from_project"]["larch_edge_step"] > 1000
-    assert "athena_renormalisation_differs" in sci["review_flags"]
+    assert "Athena's re-fit" in sci["steps"][0]["params"]["reproduced_with"]
+    assert sci["qc"]["verdict"] == "fail" and "edge_step_implausible" in sci["qc"]["reasons"]
+
+
+def test_the_older_run_line_reads_what_the_decided_run_said_and_is_said_once():
+    old = _res("proc-g1-r-a-isaac", "r-a")
+    old_ath = _res("proc-g1-r-a-athena", "r-a", source="scientist_athena",
+                   inputs=[{"relative_path": "SYN.prj", "athena_group": "merge_syn"}])
+    new = _res("proc-g1-r-b-isaac", "r-b")
+    new_ath = _res("proc-g1-r-b-athena", "r-b", source="scientist_athena",
+                   inputs=[{"relative_path": "SYN.prj", "athena_group": "merge_syn"}])
+    bundle = {"scientist_decisions": [{"decision_id": "dec-1", "target": {"kind": "processing_result", "id": old["result_id"]},
+                                       "decision": "approve", "decided_by": {"name": "SYN Scientist"}}]}
+    # run 2: the decided run's Athena result is still in the bundle; the match is the same, so it is not said
+    [line] = M.decided_results_on_an_older_run(bundle, [old, old_ath, new, new_ath], [old], [new, new_ath])
+    assert "matched differently" not in line["statement"]
+    assert old[M.CURVE_WHEN_DECIDED_KEY]["athena_match"] == [["SYN.prj", "merge_syn"]]
+    assert old[M.OLDER_RUN_SAID_KEY] == ["r-b"]
+    # run 3, the same build: said once, never again
+    assert M.decided_results_on_an_older_run(bundle, [old, new, new_ath], [old], [new, new_ath]) == []
+    # run 4, another build: the decided run's sibling is gone, but its recorded match is read (no false change)
+    newer = [_res("proc-g1-r-c-isaac", "r-c"), _res("proc-g1-r-c-athena", "r-c", source="scientist_athena",
+                                                    inputs=[{"relative_path": "SYN.prj", "athena_group": "merge_syn"}])]
+    [line4] = M.decided_results_on_an_older_run(bundle, [old, new, new_ath], [old], newer)
+    assert "matched differently" not in line4["statement"] and old[M.OLDER_RUN_SAID_KEY] == ["r-b", "r-c"]

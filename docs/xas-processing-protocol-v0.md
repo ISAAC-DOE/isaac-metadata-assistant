@@ -437,28 +437,36 @@ both ways, its QC fails `post_edge_not_at_1` (so `decide` refuses to approve it)
 decided before this check is kept as it was, with the flag and the sentence added (its stored verdict
 is not rewritten).
 
-**The scientist's own normalisation** (r5 review, `isaac.athena.project_normalisation.v0`). larch's
-`AthenaProject.read(do_preedge=True)` re-runs the pre-edge fit with the project's ranges but ignores the
-edge step the project stores (`bkg_step`, fitted or fixed with `bkg_fixstep`) and its stored lines. When
-larch's step differs from the stored one by more than 1 %, ISAAC rebuilds the curve as Athena made it:
-`(mu − pre-edge line) / bkg_step`, with the project's pre-edge line (`bkg_slope`, `bkg_int`) when the
-curve made with it averages within 0.1 of 0 before the edge, else larch's line; flattened with the
-project's post-edge curve (`bkg_nc0`–`nc3`) when it gives the stored step at E0 within 5 %, else larch's
-flat scaled by the two steps. A per-scan set is the mean of its members, each rebuilt first. This curve
-is what `athena_normalized.csv` (and so a record) carries, what is compared and what A1 judges. The
-result is flagged `athena_renormalisation_differs` and says ISAAC used the project's stored step; that
-is larch's reproduction, never a fault of the scientist. Measured on the projects of five real
-beamtimes (1,406 Athena groups; 904 not already normalised and with a positive stored step): larch's
-step differed by more than 1 % in 853 and by more than 50 % in 199. On BL4-3 MOF-Co, larch gave 0.0058
-where the project stores 1.566: the three curves that failed the post-edge check above (levels near 82
-and 2.7) were per-scan sets holding such members, and rebuilt they pass and agree with ISAAC's curves.
-Over all 1,406 groups the post-edge check failed 36 sample groups judged on larch's curve; on the
-rebuilt curves 21 of them pass and 15 still fail, all difference spectra (`diff …` groups, levels −3.3
-to 122, no positive stored step to rebuild with). Of 108 reference-channel groups (`Ref …`), 72 fail
-on Athena's own curve (29 on larch's): Athena's normalised reference channel sits 2 to 5 steps above
-its pre-edge line over the window (its flattened curve near 1); one is listed as a version, none is
-matched. Every result whose Athena curve (or a version's) is rebuilt has a new id: 34 on MOF-Co, 9 on
-TiON, 144 on BL15-2 2021-11, 23 on BL6-2c, 0 on BL15-2 2025-04 (no projects). **Thresholds need
+**The scientist's own normalisation** (r5 review, `isaac.athena.project_normalisation.v1`). larch's
+`AthenaProject.read(do_preedge=True)` is not Athena's curve: it passes `bkg_nnorm` to `pre_edge` unchanged,
+while Athena (Ifeffit) counts coefficients (2 is a line, 3 a quadratic), and it ignores what the project
+stores. ISAAC makes the curve as Athena does. With X = stored energy + `bkg_eshift` (`bkg_e0` in that
+frame), L = `bkg_int` + `bkg_slope`·X and P = Σ `bkg_nc<k>`·X^k (all in absolute X; P fits mu itself):
+`norm = (mu − L) / bkg_step`; `flat = norm` below E0 and `norm − [(P − L)(X) − (P − L)(E0)] / bkg_step` at
+and above it (with `bkg_fixstep` too). The stored values are used only when they are current: a fresh
+least-squares line over the stored pre-edge window is within 0.02 of a step of L, a fresh fit of P's own
+degree over the stored normalisation window is within 0.03 of a step of P, and (step not fixed) P − L at E0
+is the stored step within 1 %. A window too short to fit is not judged, unless Athena marks the group for
+re-normalisation (`update_norm`). Otherwise Athena re-fits on display, and so does ISAAC: larch `pre_edge` on
+X with the project's ranges, `nnorm = bkg_nnorm − 1`, and the stored step only with `bkg_fixstep`. Stored and
+re-fitted values are never mixed. A per-scan set is the mean of its members, each made this way first. This
+curve is what `athena_normalized.csv` (and so a record) carries, what is compared and what A1 judges; the
+result's `reproduced_with` says which way it was made. When it differs from larch's reading (by more than
+0.01 anywhere, or the step by more than 1 %), it is flagged `athena_renormalisation_differs` with a sentence:
+larch's reproduction, never a fault of the scientist. Measured on the projects of five real beamtimes
+(1,406 Athena groups): of 799 sample groups with a positive stored step, 763 are current and 36 re-fitted;
+105 of 108 reference-channel groups are re-fitted (their stored values no longer fit the data). The
+tolerances sit between the two: sample groups' lines deviate 0.0002 (median) to 0.009 (95th percentile),
+their post-edge curves 0.002 to 0.022, the stale reference lines 0.1 (median) and up to 26. On BL4-3
+MOF-Co (all 52 groups of the day-2 project current) the three curves that failed the post-edge check on
+larch's reading (levels near 82 and 2.7; larch's step 0.0058 where the project stores 1.566) pass and agree
+with ISAAC's curves. Over all 1,406 groups the check fails 36 sample groups on larch's reading and 17 now,
+all difference spectra (`diff …` groups, levels −3.3 to 122), and 51 reference-channel groups (29 on
+larch's reading); none of those is matched, one is listed as a version. Every result whose Athena curve, or
+a listed version's, changed has a new id (against the first r5 commit: 36 results in 18 groups on MOF-Co,
+11 in 6 on TiON, 150 in 76 on BL15-2 2021-11, 23 on BL6-2c, none on BL15-2 2025-04). The E0 a result
+reports is still `bkg_e0` + `bkg_eshift`, which protocol question pq-005 (`athena.e0_frame`) leaves to Oscar (the real
+shifts are at most 0.1 eV). **Thresholds need
 approval.**
 `qc.json` records metrics, reasons and thresholds. **Thresholds need approval.**
 

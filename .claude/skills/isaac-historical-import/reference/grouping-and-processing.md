@@ -149,8 +149,9 @@ it finds one. Show per group, in words:
   reject or `needs_changes`, never approval. A scientist's Athena curve is judged the same way, over its
   project's own post-edge range (flag `athena_post_edge_not_at_1`, not preferred; a listed version that
   fails carries the flag: say it when asking which version is the result of record). **A rebuilt Athena
-  curve** (flag `athena_renormalisation_differs`): larch's re-run of the project gave another edge step, so ISAAC
-  used the step the project stores; say that sentence plainly and never present it as the scientist's error.
+  curve** (flag `athena_renormalisation_differs`): larch's reading of the project gives another curve than Athena
+  shows, so ISAAC made it as Athena does (the project's stored values where they still fit the data, else Athena's
+  own re-fit; `reproduced_with` says which); say that sentence plainly and never present it as the scientist's error.
   **A decided result kept on its old curve** (`process` reply `decided_results_on_an_older_run`): say the line
   (why the group has new results, and that the approval stands on the old curve) and ask whether the scientist
   wants to review the new result;

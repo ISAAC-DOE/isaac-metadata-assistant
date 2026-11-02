@@ -4844,38 +4844,68 @@ def _athena_match_of(results: Sequence[Mapping], group_id: str, run_id: str | No
     return tuple(matched), versions
 
 
+#: r5 M2 (review MED 4): on a DECIDED result, what its own run said of the scientist's Athena curve, recorded the first
+#: time ``process`` keeps it (its run's other results are still in the bundle then), and the run ids already said
+CURVE_WHEN_DECIDED_KEY = "athena_curve_when_decided"
+OLDER_RUN_SAID_KEY = "older_run_said_for"
+
+
 def decided_results_on_an_older_run(bundle: Mapping, before: Sequence[Mapping], keep: Sequence[Mapping],
                                     fresh: Sequence[Mapping], *, said: set | frozenset = frozenset()) -> list[dict]:
     """r5 M2: one line per DECIDED result kept on its old id whose group this build gives fresh results under ANOTHER
-    run id, saying why the id moved (the Athena match changed; the scientist's Athena curve is now rebuilt from its
-    project's stored step; else the curve or the files its id is made from changed) and that the decision stands on
-    the old curve. A result already said (``said``: a scan now left out) is not said twice. ``[]`` when none."""
+    run id, saying why the id moved (the Athena match changed; the scientist's Athena curve is now made from the
+    project as Athena makes it; else the curve or the files its id is made from changed) and that the decision stands
+    on the old curve. A result already said (``said``: a scan now left out) is not said twice.
+
+    Review MED 4: what the decided result's own run said of the Athena curve is RECORDED on it
+    (:data:`CURVE_WHEN_DECIDED_KEY`) the first time its line is said, while its run's other results are still in the
+    bundle (only a run under a new id replaces them), and read from there afterwards (a later run no longer has them, which made every later line say the match had
+    changed). The line is said ONCE per new run id (:data:`OLDER_RUN_SAID_KEY`), never again on an identical re-run.
+    The recorded fields are outside every hashed file. ``[]`` when none."""
     decisions = B.processing_state_decisions(bundle)
     out = []
     for old in keep:
         pid = B.processing_id(old)
         d = decisions.get(("processing_result", pid))
-        if d is None or pid in said:
+        if d is None:
             continue
-        gid = old.get("group_id")
-        new = [r for r in fresh if r.get("group_id") == gid and r.get("run_id") and r.get("run_id") != old.get("run_id")]
+        gid, run = old.get("group_id"), old.get("run_id")
+        seen = old.get(CURVE_WHEN_DECIDED_KEY)
+        if not isinstance(seen, Mapping):
+            match, versions = _athena_match_of(before, gid, run)
+            seen = {"athena_match": [list(x) for x in match], "athena_versions": versions,
+                    "rebuilt": any(C_ATHENA_RENORM in (r.get("review_flags") or ()) for r in before
+                                   if r.get("group_id") == gid and r.get("run_id") == run)}
+        new = [r for r in fresh if r.get("group_id") == gid and r.get("run_id") and r.get("run_id") != run]
         if not new:
             continue
+        new_run = str(new[0].get("run_id"))
+        if new_run in (old.get(OLDER_RUN_SAID_KEY) or ()):
+            continue
+        if pid in said:  # said already (a scan now left out): recorded the same way, so a later run reads it
+            if isinstance(old, dict):
+                old.setdefault(CURVE_WHEN_DECIDED_KEY, seen)
+                old[OLDER_RUN_SAID_KEY] = [*(old.get(OLDER_RUN_SAID_KEY) or ()), new_run]
+            continue
         why = []
-        was, now = _athena_match_of(before, gid, old.get("run_id")), _athena_match_of(new, gid, None)
+        was = (tuple(tuple(x) for x in seen.get("athena_match") or ()), int(seen.get("athena_versions") or 0))
+        now = _athena_match_of(new, gid, None)
         if was != now:
             why.append("the scientist's Athena curve it is compared with is matched differently now "
                        f"({_said_match(was)} before, {_said_match(now)} now)")
-        rebuilt_before = any(C_ATHENA_RENORM in (r.get("review_flags") or ()) for r in before
-                             if r.get("group_id") == gid and r.get("run_id") == old.get("run_id"))
-        if not rebuilt_before and any(C_ATHENA_RENORM in (r.get("review_flags") or ()) for r in new):
-            why.append("the scientist's Athena curve is now rebuilt from its project's stored edge step "
+        if not seen.get("rebuilt") and any(C_ATHENA_RENORM in (r.get("review_flags") or ()) for r in new):
+            why.append("the scientist's Athena curve is now made from the project as Athena makes it "
                        f"({C_ATHENA_RENORM})")
         if not why:
             why.append("its curve, or a file its id is made from, changed with this build")
         nid = next((B.processing_id(r) for r in new if r.get("source") == old.get("source")), B.processing_id(new[0]))
         what = d.get("decision")
         stands = "The approval still stands" if what == "approve" else f"The decision ({what}) still stands"
+        if isinstance(old, dict):
+            # recorded only when the line is said (a kept result is otherwise left exactly as it was); its run's other
+            # results are still in the bundle until then, since only a run under a new id replaces them
+            old.setdefault(CURVE_WHEN_DECIDED_KEY, seen)
+            old[OLDER_RUN_SAID_KEY] = [*(old.get(OLDER_RUN_SAID_KEY) or ()), new_run]
         out.append({"group_id": gid, "decided_result_id": pid, "new_result_id": nid, "reasons": why,
                     "statement": (f"Group {gid}: {pid} ({what} by {(d.get('decided_by') or {}).get('name')}) is kept on "
                                   f"its old curve; this build gives the group new results ({nid}) because "

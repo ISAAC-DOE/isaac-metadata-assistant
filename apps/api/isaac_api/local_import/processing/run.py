@@ -2548,10 +2548,14 @@ def _athena_result(group: Mapping, entry: Mapping, files: Sequence[Mapping], par
     if A.already_normalized(entry):
         reproduced = (f"none: the group is already normalised (Athena is_nor), so its stored spectrum is used as stored, "
                       f"edge step 1 by definition ({A.ALREADY_NORMALIZED_RULE_ID})")
-    elif renorm:
-        # r5 H1: rebuilt from the project's stored step and lines (larch's own re-fit gave another step)
-        reproduced = (f"the project's stored edge step and lines ({A.ATHENA_RENORM_RULE_ID}); larch "
-                      "AthenaProject.read(do_preedge=True) gave another step")
+    elif entry.get(A.BASIS_KEY):
+        # r5 H1 / review LOW 6: which way the curve was made, as Athena makes it (A.ATHENA_RENORM_RULE_ID)
+        made = {A.BASIS_STORED: "the project's stored normalisation (its stored pre-edge line, post-edge curve and "
+                                "edge step, which still fit the data)",
+                A.BASIS_REFIT: "Athena's re-fit of the project's ranges (larch pre_edge with nnorm = bkg_nnorm - 1, "
+                               "the stored step only when bkg_fixstep), the stored values no longer fitting the data"}
+        reproduced = " and ".join(made.get(b, b) for b in str(entry[A.BASIS_KEY]).split("+")) + (
+            f" ({A.ATHENA_RENORM_RULE_ID})")
     else:
         reproduced = "larch AthenaProject.read(do_preedge=True)"
     res["steps"] = [
