@@ -461,8 +461,7 @@ export function GuidedPrompt({
                 </div>
               ) : (
                 <p className="guided-structured-hint">
-                  A structured value from the reduced pipeline. Confirm the example value above, or
-                  leave it honestly missing — the assistant will not type it for you.
+                  A structured value from the reduced pipeline. Confirm the example value above.
                 </p>
               )
             ) : entryKind === 'series' ? (

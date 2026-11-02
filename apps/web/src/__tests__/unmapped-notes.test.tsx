@@ -1381,7 +1381,7 @@ describe('propose a value from this note', () => {
       screen.queryByRole('button', { name: 'Propose a Value From This Note' }),
     ).toBeNull();
     expect(
-      await screen.findByText(/this build accepts no proposal target yet/),
+      await screen.findByText(/no field accepts a proposal here/),
     ).toBeInTheDocument();
   });
 

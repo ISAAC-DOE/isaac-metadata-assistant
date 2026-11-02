@@ -1746,7 +1746,7 @@ export const LABELS = {
   newProposalAction: 'New Proposal',
   newProposalSubmit: 'Store This Proposal',
   newProposalSubmitBusy: 'Storing…',
-  newProposalUnavailable: 'New Proposal · Unavailable on this deployment',
+  newProposalUnavailable: 'New Proposal · No fields can be proposed',
   /*
    * THE TWO GROUP HEADINGS ARE REGISTER 1 (Title Case) AND THE FIELD LABELS ARE NOT,
    * and the split is a rule rather than an accident. These two label a GROUP — a set

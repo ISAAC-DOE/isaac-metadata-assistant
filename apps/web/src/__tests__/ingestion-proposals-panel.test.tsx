@@ -1223,7 +1223,7 @@ describe('when Accept is withheld, and when it is not', () => {
     });
     renderPanel();
 
-    await screen.findByText(/No write operation in this build accepts a value at this field path/);
+    await screen.findByText(/Accepting cannot write a value at this field path here/);
     expect(screen.queryByRole('button', { name: 'Accept as Proposed' })).toBeNull();
     // A proposal that cannot be applied must still be CLEARABLE — gating the three
     // refusing acts would leave the queue permanently stuck. Supersede and Withdraw
@@ -1232,10 +1232,8 @@ describe('when Accept is withheld, and when it is not', () => {
     fireEvent.click(screen.getByRole('button', { name: 'More Actions' }));
     expect(screen.getByRole('button', { name: 'Withdraw…' })).toBeTruthy();
     expect(screen.getByRole('button', { name: 'Supersede…' })).toBeTruthy();
-    // And the refusal is about THIS BUILD, never about the official schema.
-    expect(
-      screen.getByText(/NOT a statement about the official ISAAC schema/),
-    ).toBeTruthy();
+    // And the refusal is about this application, never about the official schema.
+    expect(screen.getByText(/the official ISAAC schema still defines this field/)).toBeTruthy();
   });
 
   it('Accept is withheld when the proposal names a run at a record-scoped path', async () => {
@@ -1596,10 +1594,9 @@ describe('each refusal keeps the server\'s own distinction', () => {
   it('a human_actor_required refusal is reported as configuration, not as failure', async () => {
     const alert = await refuse(409, { error: 'human_actor_required', message: 'no actor' });
 
-    expect(alert.textContent).toMatch(/NOTHING WAS WRITTEN/);
-    expect(alert.textContent).toMatch(
-      /fact about how this deployment is configured, not a fault in this record/,
-    );
+    expect(alert.textContent).toMatch(/nothing was written/i);
+    // Never blames the record or the reader.
+    expect(alert.textContent).not.toMatch(/\b(invalid|error in) (this )?record\b/i);
     // It must say the retry cannot work — reporting a permanent condition as transient
     // is the loop `CLAUDE.md` §11 records the reset paying for.
     expect(alert.textContent).toMatch(/retrying will not change it/);
@@ -2796,7 +2793,7 @@ describe('the acceptance preflight', () => {
       </MemoryRouter>,
     );
   }
-  const notice = () => screen.queryByText('Acceptance unavailable on this deployment');
+  const notice = () => screen.queryByText('Acceptance unavailable');
 
   it('available: true — Accept is offered and no notice is shown', async () => {
     stubFetchRoutes({ [LIST]: { body: page([proposalFixture()]) } });
@@ -2825,13 +2822,18 @@ describe('the acceptance preflight', () => {
 
     const accepts = await screen.findAllByRole('button', { name: 'Accept as Proposed' });
     // ONE notice for the panel, not one per card.
-    expect(screen.getAllByText('Acceptance unavailable on this deployment')).toHaveLength(1);
-    expect(screen.getByText('Trusted scientist identity has not been enabled yet.')).toBeTruthy();
+    expect(screen.getAllByText('Acceptance unavailable')).toHaveLength(1);
+    // ONE sentence that still says what a scientist can do.
+    expect(
+      screen.getByText(
+        'Scientist sign-in is not enabled; you can still reject or withdraw a proposal, or enter its value in the field directly.',
+      ),
+    ).toBeTruthy();
     // Described by the ONE-LINE sentence (review #277, minor) — not the whole notice,
     // which would also read out its Why? and Reload controls.
     const lock = document.querySelector('.proposals-lock-line') as HTMLElement;
     expect(lock.id).not.toBe('');
-    expect(lock.textContent).toContain('Acceptance unavailable on this deployment');
+    expect(lock.textContent).toContain('Acceptance unavailable');
     expect(lock.textContent).not.toContain('Reload');
     for (const accept of accepts) {
       // LOCKED, and the reason is announced WITH the control.
@@ -2852,17 +2854,14 @@ describe('the acceptance preflight', () => {
     );
   });
 
-  it('Why? opens the account in place, and Reload asks the health again', async () => {
+  it('the known reason carries no Why? explainer, and Reload asks the health again', async () => {
     stubFetchRoutes({ [LIST]: { body: page([proposalFixture()]) } });
     const reload = vi.fn();
     renderWith({ available: false, reason: 'no_verifier_configured' }, reload);
-    await screen.findByText('Acceptance unavailable on this deployment');
-
-    const why = screen.getByRole('button', { name: 'Why?' });
-    expect(why.getAttribute('aria-expanded')).toBe('false');
-    fireEvent.click(why);
-    expect(why.getAttribute('aria-expanded')).toBe('true');
-    expect(screen.getByText(/an acceptance would be refused and nothing would be written/)).toBeTruthy();
+    await screen.findByText('Acceptance unavailable');
+    // The explainer paragraph was retired (declutter, 2026-11-02); the one line is
+    // the whole reason, so no empty disclosure is offered.
+    expect(screen.queryByRole('button', { name: 'Why?' })).toBeNull();
 
     fireEvent.click(screen.getByRole('button', { name: 'Reload' }));
     expect(reload).toHaveBeenCalledTimes(1);
@@ -2871,10 +2870,10 @@ describe('the acceptance preflight', () => {
   it('an unrecognised reason is named verbatim, never swept into the identity sentence', async () => {
     stubFetchRoutes({ [LIST]: { body: page([proposalFixture()]) } });
     renderWith({ available: false, reason: 'maintenance_window' });
-    await screen.findByText('Acceptance unavailable on this deployment');
-    expect(screen.queryByText('Trusted scientist identity has not been enabled yet.')).toBeNull();
+    await screen.findByText('Acceptance unavailable');
+    expect(screen.queryByText(/Scientist sign-in is not enabled/)).toBeNull();
     expect(
-      screen.getByText('This deployment reports that no proposal can be accepted here.'),
+      screen.getByText('No proposal can be accepted here; you can still reject or withdraw one.'),
     ).toBeTruthy();
     expect(screen.getByText('maintenance_window')).toBeTruthy();
   });
@@ -2923,7 +2922,7 @@ describe('the acceptance preflight', () => {
     fireEvent.click(await screen.findByRole('button', { name: 'Accept as Proposed' }));
     const alert = await screen.findByRole('alert');
     expect(alert.classList.contains('proposals-lock')).toBe(true);
-    expect(within(alert).getByText('Acceptance refused on this deployment')).toBeTruthy();
+    expect(within(alert).getByText('Acceptance refused')).toBeTruthy();
     expect(alert.textContent).toMatch(/Nothing was written/);
     // The server-derived account is behind Why?, verbatim — still the whole claim.
     expect(alert.textContent).toMatch(/retrying will not change it/);

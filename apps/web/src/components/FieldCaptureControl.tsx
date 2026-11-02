@@ -160,15 +160,15 @@ export function captureHint(
     return 'A value for this field is entered on a run rather than on the record — in the Runs section on this screen.';
   }
   if (capture.run_overridable) {
-    return 'No operation in this version accepts a value for this field on the record itself. A run of this record can record its own value for it, entered on that run — and that value belongs to that run, not to the record.';
+    return 'This field is not entered on the record itself. A run of this record can record its own value for it, entered on that run — and that value belongs to that run, not to the record.';
   }
   if (capture.open_namespace) {
-    return `There is nothing to type here: no operation in this version accepts a value at this path. The official schema leaves ${capture.open_namespace} open and names no fields inside it, and whether a value there belongs to the experiment or to each run is an open scientific question for a person to settle. This application does not decide it.`;
+    return `There is nothing to type here. The official schema leaves ${capture.open_namespace} open and names no fields inside it, and whether a value there belongs to the experiment or to each run is an open scientific question for a person to settle.`;
   }
   if (path === CREATED_UTC_PATH) {
-    return 'There is nothing to type here: no operation in this version accepts a value at this path. When the record is exported, the exporter keeps a value the draft already holds and stamps the export time only when it holds none.';
+    return 'There is nothing to type here. When the record is exported, the exporter keeps a value the draft already holds and stamps the export time only when it holds none.';
   }
-  return 'There is nothing to type here: no operation in this version accepts a value at this path.';
+  return 'There is nothing to type here.';
 }
 
 /** The `?at=` address `RecordWorkbench` opens Record Description for (QA A-08). */

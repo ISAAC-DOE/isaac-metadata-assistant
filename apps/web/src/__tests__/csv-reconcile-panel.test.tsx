@@ -106,10 +106,15 @@ describe('CsvReconcilePanel — pre-upload', () => {
   // public data only" told the reader nothing they could check, and the product
   // never defines the word for them. What must survive is the INSTRUCTION plus the
   // honest admission that the app performs no such check.
-  it('shows the do-not-upload-real-data warning, and admits it is not a check', () => {
-    renderPanel();
-    expect(screen.getByText(/do not upload real or private data/i)).toBeInTheDocument();
-    expect(screen.getByText(/nothing here checks the file/i)).toBeInTheDocument();
+  it('carries no standing data-governance warning, and never claims to check the file', () => {
+    // The warning banner was retired (declutter, 2026-11-02). What must not appear
+    // in its place is a claim the app cannot back: that it screens the file for
+    // real or private data.
+    const { container } = renderPanel();
+    expect(container.querySelector('.csv-recon-banner-warn')).toBeNull();
+    expect(container.textContent ?? '').not.toMatch(
+      /\b(checks|screens|detects|verifies)\b[^.]{0,40}\b(real|private|synthetic)\b/i,
+    );
   });
 
   it('states this is review evidence, not a write to the record', () => {

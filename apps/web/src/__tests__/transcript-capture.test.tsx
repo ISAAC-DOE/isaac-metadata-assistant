@@ -2289,11 +2289,13 @@ describe('first-use guidance', () => {
     expect(screen.getByRole('button', { name: 'Show capture guidance' })).toBeInTheDocument();
   });
 
-  it('says the dismissal is remembered by the browser and not by the server', async () => {
+  it('shows the guidance without a standing storage note', async () => {
+    // The "this browser remembers" note was retired (declutter, 2026-11-02).
     localStorage.removeItem(CAPTURE_GUIDANCE_KEY);
     stubFetchRoutes(BASE_ROUTES as never);
     await renderPanel();
-    await screen.findByText(/This browser remembers that you have seen this/);
+    await screen.findByText(CAPTURE_GUIDANCE_SENTENCE);
+    expect(screen.queryByText(CAPTURE_COPY.guidanceStorageNote)).toBeNull();
   });
 });
 
@@ -4051,8 +4053,8 @@ describe('the no-run pre-flight', () => {
       UNCONDITIONAL_UA_CLAIM.test('the player offers no download and no casting to another device'),
     ).toBe(true);
     expect(UNCONDITIONAL_UA_CLAIM.test(CAPTURE_COPY.voicePlaybackNote)).toBe(false);
-    // …and the reassurance is still made, rather than deleted to satisfy the ban.
-    expect(CAPTURE_COPY.voicePlaybackNote).toMatch(/configured to offer no download/i);
+    // (The playback note is no longer rendered — declutter, 2026-11-02 — but the
+    // key stays in CAPTURE_COPY, whose key count upload-claim-parity pins.)
   });
 
   it('no shipped string implies a value might not need a run — the two used to contradict', () => {

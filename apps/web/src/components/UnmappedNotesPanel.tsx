@@ -293,12 +293,12 @@ export function UnmappedNotesPanel({
         </h2>
         {/* One line, the full account one `?` away (DEC-35). */}
         <p className="notes-sub">
-          Captured content with no confident field yet. Nothing here is ever deleted.{' '}
+          Captured content with no confident field yet.{' '}
           <HelpTip subject="Unmapped Notes">
             <span>
-              Content captured against this record that has no confident schema home.
-              Nothing here is a field value or evidence, and nothing here is ever
-              deleted — dismissing a note sets it aside and keeps it on the record.
+              Content captured against this record that has no confident schema home. A
+              note is not a field value or evidence; dismissing a note sets it aside and
+              keeps it on the record.
             </span>
           </HelpTip>
         </p>
@@ -994,8 +994,8 @@ function NotesBrowser({
           {proposalCapabilities === null
             ? 'Proposing a value from a note could not be offered: the set of ' +
               'proposable fields could not be read.'
-            : 'Proposing a value from a note is not offered: this build accepts ' +
-              'no proposal target yet.'}
+            : 'Proposing a value from a note is not offered: no field accepts a ' +
+              'proposal here.'}
         </p>
       )}
 

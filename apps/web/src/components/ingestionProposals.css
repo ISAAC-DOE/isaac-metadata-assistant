@@ -761,27 +761,6 @@
   color: var(--text-secondary);
 }
 
-/*
- * A NATIVE `<details>`, so it is keyboard operable and screen-reader announced with
- * no JavaScript and no ARIA of our own — the same choice the Help popover's
- * disclosure made. `summary` keeps the browser's own focus ring rather than
- * suppressing it.
- */
-.new-proposal-why {
-  margin-top: var(--space-sm);
-  font-size: 12px;
-  color: var(--text-secondary);
-}
-
-.new-proposal-why > summary {
-  cursor: pointer;
-  font-weight: var(--font-weight-semibold);
-}
-
-.new-proposal-why > p {
-  margin-top: var(--space-xs);
-}
-
 .new-proposal-form {
   width: 100%;
   max-width: 68ch;

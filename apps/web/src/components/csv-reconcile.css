@@ -49,11 +49,6 @@
   border-color: var(--advisory-border);
   color: var(--advisory-text);
 }
-.csv-recon-banner-warn {
-  background: var(--needsyou-bg);
-  border-color: var(--needsyou-border);
-  color: var(--needsyou-text);
-}
 
 /* upload prompt */
 .csv-recon-drop {

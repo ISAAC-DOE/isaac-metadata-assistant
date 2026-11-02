@@ -448,7 +448,7 @@ const DEPLOYMENT_BLOCKER_TEXT: Readonly<Record<string, string>> = {
     'No attributable person can be established for a request here, and a submission ' +
     'is a declaration by a person. This is a server configuration matter.',
   no_durable_storage:
-    'There is no database to record a submission in.',
+    'No application database is configured to record a durable submission in.',
 };
 
 /* ── availability ──────────────────────────────────────────────────────────── */

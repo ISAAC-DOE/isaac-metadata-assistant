@@ -194,8 +194,7 @@ export function CsvReconcilePanel({
       <header className="csv-recon-head">
         <h2 className="csv-recon-title">Reconcile a Campaign Sheet</h2>
         <p className="csv-recon-sub">
-          Compare a campaign sheet against the current record — a read-only review,
-          not an edit.
+          Compare a campaign sheet against the current record.
         </p>
       </header>
 
@@ -203,16 +202,6 @@ export function CsvReconcilePanel({
         <p className="csv-recon-banner csv-recon-banner-strong">
           CSV values are review evidence — uploading this file does not change the
           official record.
-        </p>
-        {/* R1b — was "Synthetic or public data only — do not upload real or
-            private data." The first clause named a runtime mode the reader has no
-            way to check and the product never defines for them; the instruction is
-            the part that carries the governance boundary, and it is what the app
-            can honestly ask for. Nothing here inspects the file to judge whether
-            it is real (there is no such detection anywhere in the codebase), so
-            this is a request, not a check. */}
-        <p className="csv-recon-banner csv-recon-banner-warn">
-          Do not upload real or private data — nothing here checks the file to tell the difference.
         </p>
         <p className="csv-recon-banner">
           CSV only — the ISAAC campaign metadata sheet (.csv).

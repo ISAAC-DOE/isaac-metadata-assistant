@@ -69,6 +69,7 @@
  * selection, the typed value and the rationale exactly where they are; only a
  * decision the server RECORDED clears the form that produced it.
  */
+import { LABELS } from '../lib/labels';
 import { useCallback, useEffect, useId, useMemo, useRef, useState } from 'react';
 
 import { api, ApiError } from '../lib/api';
@@ -1059,7 +1060,7 @@ function RecordedDecision({ resolution }: { resolution: ApiConflictResolution })
         <dd>
           {resolution.attributed && resolution.subject !== null
             ? resolution.subject
-            : 'Nobody is named. This deployment establishes no identity, so the decision is recorded as unattributed rather than under a name nothing vouched for.'}
+            : LABELS.activityActorSentinel}
         </dd>
       </dl>
 
