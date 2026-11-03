@@ -65,14 +65,26 @@
 }
 .select-trigger[aria-expanded="true"] .select-chevron { transform: rotate(180deg); color: var(--action); }
 
+/* --- compact: the toolbar and filter-row size ----------------------------------------- */
+
+.select-compact .select-trigger {
+  min-height: 34px;
+  padding: 0 8px 0 10px;
+  font-size: var(--font-size-body);
+}
+.select-compact .select-trigger[aria-invalid="true"] { padding-left: 9px; padding-right: 7px; }
+.select-compact .select-option { font-size: var(--font-size-body); }
+
 /* --- the popup ------------------------------------------------------------------------- */
 
+/* Fixed at the trigger (`Select.tsx` sets top, left, min-width, max-width and, when room is short, max-height
+   from the trigger's rect), so a clipping ancestor — a card with `overflow: hidden`, a scroll box, the drawer —
+   cannot cut it off. */
 .select-popup {
-  position: absolute;
+  position: fixed;
   z-index: 40;
-  top: calc(100% + 4px);
+  top: 0;
   left: 0;
-  min-width: 100%;
   width: max-content;
   /* Never wider than the page's own gutters allow, so it never makes the page scroll sideways. */
   max-width: min(32rem, calc(100vw - 2 * var(--space-md)));
@@ -86,7 +98,6 @@
   box-shadow: var(--shadow-card), var(--shadow-emphasis);
 }
 .select-popup[hidden] { display: none; }
-.select-popup.is-above { top: auto; bottom: calc(100% + 4px); }
 
 .select-group + .select-group,
 .select-option + .select-group,
