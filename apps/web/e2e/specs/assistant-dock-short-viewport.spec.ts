@@ -56,6 +56,20 @@
  * viewport cannot show everything; what it must not do is put the one
  * interactive control in the tail where scrolling does not reach it.
  *
+ * ── 2026-11-02: THE DOCK NOW FITS AT THIS SIZE, AND THE SPEC WAS REVISITED ──
+ *
+ * The declutter retired the dock's standing no-model claim and advisory caption,
+ * and the agent controls had already moved into "What Can I Ask?". The dock is
+ * now composer + trigger + one helper sentence: 202.5 CSS px on darwin, 221.8 on
+ * CI's Linux, in the same 284px viewport. The "cannot fit" premise above is
+ * history at this size. The band still applies (it is a viewport rule), so the
+ * spec now asserts both cases instead of assuming one: the real dock at
+ * 320x568@200% (fits today, so the WHOLE dock must be in view at the end of the
+ * scroll; if it stops fitting, the trigger assertion is the regression guard
+ * again), and a dock made taller than the viewport BY CONSTRUCTION (a
+ * viewport-high block below the trigger, where the retired tail used to sit), so
+ * the release-and-pin behaviour stays guarded whatever the font.
+ *
  * ── What this spec asserts, and why each part is here ───────────────────────
  *
  * 1. the dock is released (computed `position`), and released to `relative`
@@ -125,13 +139,78 @@ async function openAssistantDrawer(page: import('@playwright/test').Page) {
   return panel;
 }
 
+/**
+ * (1) the dock is released — and released to a POSITIONED box, so `z-index: 1`
+ * still applies to the opaque dock — and (1b) the trigger's own box is PINNED.
+ * Releasing the dock alone left (2) depending on the height of everything after
+ * the trigger, which is exactly the quantity that differs between this platform
+ * and CI's. Returns the dock's measured height.
+ */
+async function assertReleasedAndPinned(page: import('@playwright/test').Page) {
+  const dock = await page.evaluate(() => {
+    const el = document.querySelector('.assistant-foot')!;
+    const cs = getComputedStyle(el);
+    return { position: cs.position, zIndex: cs.zIndex, height: +el.getBoundingClientRect().height.toFixed(1) };
+  });
+  expect(dock.position).toBe('relative');
+  expect(dock.zIndex).toBe('1');
+  expect(
+    await page.evaluate(() => getComputedStyle(document.querySelector('.assistant-capabilities')!).position),
+  ).toBe('sticky');
+  return dock;
+}
+
+/**
+ * (3) the composer is in view before any scrolling; (2) THE ASSERTION THAT WAS
+ * RED — scrolled to its end (the resting position, not a hand-picked offset),
+ * the whole trigger is inside the viewport and is a real control there; (5)
+ * nothing scrolls sideways.
+ */
+async function assertReachableAtRestAndAtEnd(
+  page: import('@playwright/test').Page,
+  panel: import('@playwright/test').Locator,
+) {
+  const composerAtRest = await FULLY_IN_VIEWPORT(page, '.assistant-composer-input');
+  expect(composerAtRest.found).toBe(true);
+  expect(
+    composerAtRest.inside,
+    `the composer must be visible unscrolled; measured ${composerAtRest.top}..${composerAtRest.bottom}`,
+  ).toBe(true);
+
+  const scroll = await panel.evaluate((el) => {
+    el.scrollTop = el.scrollHeight;
+    return { scrollTop: el.scrollTop, max: el.scrollHeight - el.clientHeight };
+  });
+  expect(scroll.max, 'the drawer must actually be scrollable here').toBeGreaterThan(0);
+  expect(scroll.scrollTop).toBe(scroll.max);
+
+  const triggerAtEnd = await FULLY_IN_VIEWPORT(page, '.assistant-capabilities-trigger');
+  expect(triggerAtEnd.found).toBe(true);
+  expect(
+    triggerAtEnd.inside,
+    `the trigger must be fully in view at the end of the scroll; measured ${triggerAtEnd.top}..${triggerAtEnd.bottom} in a ${ZOOMED_PHONE.height}px viewport`,
+  ).toBe(true);
+  await expect(page.locator('.assistant-capabilities-trigger')).toBeEnabled();
+  await expect(page.locator('.assistant-capabilities-trigger')).toHaveAttribute('aria-expanded', 'false');
+
+  expect(
+    await page.evaluate(() => [
+      document.documentElement.scrollWidth - document.documentElement.clientWidth,
+      (() => {
+        const p = document.querySelector('aside.assistant-drawer-panel')!;
+        return p.scrollWidth - p.clientWidth;
+      })(),
+    ]),
+  ).toEqual([0, 0]);
+}
+
 test.describe('320x568 @200% zoom — the dock is released into normal flow', () => {
   test.use({ viewport: ZOOMED_PHONE, deviceScaleFactor: 2 });
 
   test('@zoom the "What Can I Ask?" trigger is fully reachable at the end of the scroll', async ({
     app,
     page,
-  }) => {
+  }, testInfo) => {
     await app.gotoExample(`/record/${SEED.partial}`);
     const panel = await openAssistantDrawer(page);
 
@@ -141,73 +220,70 @@ test.describe('320x568 @200% zoom — the dock is released into normal flow', ()
       [ZOOMED_PHONE.width, ZOOMED_PHONE.height, 2],
     );
 
-    // (1) released — and released to a POSITIONED box, so `z-index: 1` still
-    //     applies to the opaque dock.
-    const dock = await page.evaluate(() => {
-      const el = document.querySelector('.assistant-foot')!;
-      const cs = getComputedStyle(el);
-      return { position: cs.position, zIndex: cs.zIndex, height: +el.getBoundingClientRect().height.toFixed(1) };
+    const dock = await assertReleasedAndPinned(page);
+
+    // ~~`expect(dock.height).toBeGreaterThan(ZOOMED_PHONE.height)`~~ — the
+    // precondition this test was written on, and it no longer holds: the
+    // 2026-11-02 declutter retired the dock's standing no-model claim and the
+    // advisory caption, and the dock now measures 202.5 (darwin) / 221.8 (CI,
+    // Linux) in this 284px viewport. That comment said to revisit the spec if the
+    // dock started to fit, and this is the revisit. The dock is still released
+    // here (the band is a viewport rule, not a content rule), so BOTH cases are
+    // now asserted honestly rather than one being assumed:
+    //
+    //   * it does NOT fit — the original finding. Covered for certain by the next
+    //     test, which makes the dock taller than the viewport by construction, so
+    //     the release-and-pin behaviour stays guarded on any font;
+    //   * it FITS — the case measured today. Then the stronger property is
+    //     available and is required: the WHOLE dock, not only the trigger, is in
+    //     view at the end of the scroll.
+    const fits = dock.height <= ZOOMED_PHONE.height;
+    testInfo.annotations.push({
+      type: 'dock-fit',
+      description: `dock ${dock.height}px in a ${ZOOMED_PHONE.height}px viewport — ${fits ? 'fits' : 'does not fit'}`,
     });
-    expect(dock.position).toBe('relative');
-    expect(dock.zIndex).toBe('1');
 
-    // (1b) …and the trigger's own box is PINNED. Releasing the dock alone left
-    //      assertion (2) below depending on the height of everything after the
-    //      trigger, which is exactly the quantity that differs between this
-    //      platform and CI's.
-    expect(
-      await page.evaluate(
-        () => getComputedStyle(document.querySelector('.assistant-capabilities')!).position,
-      ),
-    ).toBe('sticky');
+    await assertReachableAtRestAndAtEnd(page, panel);
 
-    // The precondition for the whole finding: the dock genuinely cannot fit.
-    // If a future change makes it fit, this spec should be revisited rather than
-    // passing for a reason it was not written for.
+    if (fits) {
+      const footAtEnd = await FULLY_IN_VIEWPORT(page, '.assistant-foot');
+      expect(
+        footAtEnd.inside,
+        `a dock that fits (${dock.height}px) must be wholly in view at the end of the scroll; measured ` +
+          `${footAtEnd.top}..${footAtEnd.bottom} in a ${ZOOMED_PHONE.height}px viewport`,
+      ).toBe(true);
+    }
+  });
+
+  test('@zoom a dock taller than the viewport still leaves the trigger reachable at the end of the scroll', async ({
+    app,
+    page,
+  }) => {
+    await app.gotoExample(`/record/${SEED.partial}`);
+    const panel = await openAssistantDrawer(page);
+
+    // THE ORIGINAL FINDING, KEPT ALIVE BY CONSTRUCTION. The real dock no longer
+    // overflows this viewport (see the test above), so content is added BELOW the
+    // trigger — exactly where the retired caption and agent controls used to sit,
+    // and where a wider font's extra line lands. Its height is the viewport's own,
+    // so the dock overflows on every platform whatever the font: no px literal
+    // from either machine is involved. Browser-side only; nothing is written.
+    await page.evaluate((h) => {
+      const tail = document.createElement('div');
+      tail.id = 'e2e-dock-tail';
+      tail.setAttribute('aria-hidden', 'true');
+      tail.style.cssText = `height: ${h}px; flex: none;`;
+      document.querySelector('.assistant-foot')!.appendChild(tail);
+    }, ZOOMED_PHONE.height);
+
+    const dock = await assertReleasedAndPinned(page);
+    // The precondition for this test: the dock genuinely cannot fit.
     expect(dock.height).toBeGreaterThan(ZOOMED_PHONE.height);
 
-    // (3) the composer is in view before any scrolling.
-    const composerAtRest = await FULLY_IN_VIEWPORT(page, '.assistant-composer-input');
-    expect(composerAtRest.found).toBe(true);
-    expect(
-      composerAtRest.inside,
-      `the composer must be visible unscrolled; measured ${composerAtRest.top}..${composerAtRest.bottom}`,
-    ).toBe(true);
-
-    // (2) THE ASSERTION THAT WAS RED. Scroll the drawer to its end — the
-    //     resting position, not a hand-picked offset — and require the whole
-    //     control to be inside the viewport.
-    const scroll = await panel.evaluate((el) => {
-      el.scrollTop = el.scrollHeight;
-      return { scrollTop: el.scrollTop, max: el.scrollHeight - el.clientHeight };
-    });
-    expect(scroll.max, 'the drawer must actually be scrollable here').toBeGreaterThan(0);
-    expect(scroll.scrollTop).toBe(scroll.max);
-
-    const triggerAtEnd = await FULLY_IN_VIEWPORT(page, '.assistant-capabilities-trigger');
-    expect(triggerAtEnd.found).toBe(true);
-    expect(
-      triggerAtEnd.inside,
-      `the trigger must be fully in view at the end of the scroll; measured ${triggerAtEnd.top}..${triggerAtEnd.bottom} in a ${ZOOMED_PHONE.height}px viewport`,
-    ).toBe(true);
-
-    // …and it is a real control there, not merely a visible rectangle.
-    await expect(page.locator('.assistant-capabilities-trigger')).toBeEnabled();
-    await expect(page.locator('.assistant-capabilities-trigger')).toHaveAttribute(
-      'aria-expanded',
-      'false',
-    );
-
-    // (5) nothing scrolls sideways.
-    expect(
-      await page.evaluate(() => [
-        document.documentElement.scrollWidth - document.documentElement.clientWidth,
-        (() => {
-          const p = document.querySelector('aside.assistant-drawer-panel')!;
-          return p.scrollWidth - p.clientWidth;
-        })(),
-      ]),
-    ).toEqual([0, 0]);
+    // The trigger's top at the end of the scroll would be `284 - 34 - tail` if it
+    // were scrolled past — far above the viewport with this tail. Only the pin
+    // keeps it in view, which is the behaviour this guards.
+    await assertReachableAtRestAndAtEnd(page, panel);
   });
 
   test('@zoom the dock note is still rendered, unhidden, and still describes the composer', async ({
