@@ -908,10 +908,15 @@ const STATES: readonly VisualState[] = [
       await settled(page);
       const heading = page.getByRole('heading', { name: 'Comparing two runs' }).first();
       await expect(heading).toBeVisible({ timeout: 20_000 });
-      // The panel states that it neither writes nor judges. Asserted because it
-      // is the claim a screenshot of a table headed "Comparison" most invites a
-      // reviewer to doubt.
-      await expect(page.locator('.rc-scope').first()).toContainText(/nothing here changes either run/i);
+      // The panel says what it is and never claims to judge. Asserted because a
+      // table headed "Comparison" most invites the reading that the app decides
+      // which run is right. RE-POINTED 2026-11-02 (record-side declutter): the
+      // standing read-only caveat ("Nothing here changes either run …") was
+      // retired, so this pins the scope sentence that replaced it and the absence
+      // of the opposite claim, as `run-compare.test.tsx` → `scope` does.
+      const scope = page.locator('.rc-scope').first();
+      await expect(scope).toContainText(/side-by-side of what each run records/i);
+      await expect(scope).not.toContainText(/\b(correct|right|better) (value|run)\b|recommend/i);
       return heading;
     },
     // `RunCompare.tsx:276`. The panel is the state; the record page around it is
