@@ -29,6 +29,17 @@
  *      acceptable if the content is genuinely scrollable and the surrounding
  *      page is not.
  *
+ * ── A SECOND READER: the occlusion probe (2026-11-02) ───────────────────────
+ *
+ *   `findObscuredControls` reads `OVERFLOW_ALLOWANCES` too. A control whose
+ *   nearest horizontally-scrolling ancestor matches one of these classes (and
+ *   really overflows) is scrolled into view INSIDE that box before it is re-tested,
+ *   as Tab or a swipe would; every other ancestor is held still. So an entry here
+ *   now also says "a control half-scrolled out of this row is reachable, not a
+ *   sliver". That is the same claim the entry already makes — the content is
+ *   genuinely scrollable inside its own box — and it is why the class list, not
+ *   geometry, decides: `main.screen-main` computes `overflow-x: auto` as well.
+ *
  * Every entry here was MEASURED before it was written down: at widths
  * 1280 / 1024 / 768 / 640 / 390 / 375 / 320, against the `ceea656` production
  * bundle and again against a later rebuild of it. Candidates that were proposed
@@ -114,7 +125,10 @@ export const OVERFLOW_ALLOWANCES: readonly OverflowAllowance[] = [
     reason:
       'The phone/tablet primary navigation is a single row of destinations. When they do not ' +
       'fit, the row scrolls sideways INSIDE its own box (every item is a real link, reachable ' +
-      'by Tab, which scrolls it into view); the page itself never scrolls with it.',
+      'by Tab, which scrolls it into view); the page itself never scrolls with it. Still needed ' +
+      'after the occlusion probe learned to scroll a deliberate row sideways: the nested-overflow ' +
+      'probe reports `.leftnav` without it, and the occlusion probe reads this entry to know the ' +
+      'row is deliberate (see the header).',
     evidence:
       'apps/web/src/components/chrome.css — `@media (max-width: 1024px) .leftnav { flex-wrap: nowrap; overflow-x: auto; }`',
   },
