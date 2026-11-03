@@ -70,7 +70,7 @@ export interface SelectProps {
   /** Passed to the trigger, for forms that validate when a field is left. */
   onFocus?: (e: FocusEvent<HTMLButtonElement>) => void;
   onBlur?: (e: FocusEvent<HTMLButtonElement>) => void;
-  /** `compact` is the toolbar and filter-row size: a shorter trigger in meta-size text. */
+  /** `compact` is the toolbar and filter-row size: a 34px trigger in body-size text. */
   density?: 'regular' | 'compact';
   /** `data-*` attributes go on the trigger, where a caller's own lookups expect the control. */
   [dataAttribute: `data-${string}`]: string | undefined;

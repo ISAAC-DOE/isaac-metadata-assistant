@@ -3,6 +3,7 @@ import '../components/assistant.css';
 import {
   useCallback,
   useEffect,
+  useId,
   useMemo,
   useRef,
   useState,
@@ -1161,6 +1162,9 @@ function ConceptLookupBrowser({ available, concepts, focusConceptId }: ConceptLo
   const [query, setQuery] = useState('');
   const [docFilter, setDocFilter] = useState<string>(CONCEPT_FILTER_ALL);
   const [clusterFilter, setClusterFilter] = useState<string>(CONCEPT_FILTER_ALL);
+  /* Per instance, so a second mounted lookup cannot repeat the pickers' ids (or the listbox and option ids
+     `Select` derives from them). */
+  const filterIdBase = useId();
   const [selectedId, setSelectedId] = useState<string | null>(null);
   // Roving-tabindex cursor for the master list. Focus and SELECTION are
   // deliberately separate: an arrow key moves the reading cursor, Enter/Space
@@ -1353,9 +1357,9 @@ function ConceptLookupBrowser({ available, concepts, focusConceptId }: ConceptLo
           />
         </label>
         <div className="concept-lookup-filter">
-          <label htmlFor="concept-lookup-doc-filter">Anchor source</label>
+          <label htmlFor={`${filterIdBase}-doc`}>Anchor source</label>
           <Select
-            id="concept-lookup-doc-filter"
+            id={`${filterIdBase}-doc`}
             density="compact"
             value={docFilter}
             onChange={setDocFilter}
@@ -1369,9 +1373,9 @@ function ConceptLookupBrowser({ available, concepts, focusConceptId }: ConceptLo
           />
         </div>
         <div className="concept-lookup-filter">
-          <label htmlFor="concept-lookup-cluster-filter">Cluster</label>
+          <label htmlFor={`${filterIdBase}-cluster`}>Cluster</label>
           <Select
-            id="concept-lookup-cluster-filter"
+            id={`${filterIdBase}-cluster`}
             density="compact"
             value={clusterFilter}
             onChange={setClusterFilter}

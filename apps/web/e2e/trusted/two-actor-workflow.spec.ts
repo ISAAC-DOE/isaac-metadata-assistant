@@ -310,7 +310,7 @@ test.describe('two scientists, one record, end to end', () => {
     await recordPanel.getByRole('button', { name: /^Record Description/ }).click();
     // A closed enum renders a picker, and that is a schema fact rather than a
     // styling choice: a text box at this path could produce a value that cannot export.
-    await chooseValue(recordPanel.getByLabel('Technique'), recordTarget.chosen);
+    await chooseValue(recordPanel.getByRole('combobox', { name: 'Technique' }), recordTarget.chosen);
     await recordPanel.getByRole('button', { name: 'Save record description' }).click();
     await expect
       .poll(

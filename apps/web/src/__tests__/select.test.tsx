@@ -470,13 +470,36 @@ describe('Select', () => {
       Object.defineProperty(window, 'innerHeight', { configurable: true, value: 800 });
       const { c, list } = renderClipped();
       fireEvent.click(c);
+      // The trigger is OUT of view while the popup scrolls its own options: the popup's own scroll is
+      // ignored, so it stays open (without the guard, this scroll would close it).
+      stubRect(c, { top: -200, left: 40, width: 200, height: 40 });
       fireEvent.scroll(list);
       expect(c).toHaveAttribute('aria-expanded', 'true');
-      stubRect(c, { top: -200, left: 40, width: 200, height: 40 });
+      // The page scrolling it out of view does close it.
       act(() => {
         window.dispatchEvent(new Event('scroll'));
       });
       expect(c).toHaveAttribute('aria-expanded', 'false');
+    });
+
+    it('re-places on resize while open, and removes its listeners when it closes', () => {
+      Object.defineProperty(window, 'innerWidth', { configurable: true, value: 1000 });
+      Object.defineProperty(window, 'innerHeight', { configurable: true, value: 800 });
+      const { c, list } = renderClipped();
+      const removed = vi.spyOn(window, 'removeEventListener');
+      fireEvent.click(c);
+      expect(list.style.top).toBe('144px');
+      stubRect(c, { top: 300, left: 60, width: 200, height: 40 });
+      act(() => {
+        window.dispatchEvent(new Event('resize'));
+      });
+      expect(list.style.top).toBe('344px');
+      expect(list.style.left).toBe('60px');
+      removed.mockClear();
+      fireEvent.keyDown(c, { key: 'Escape' });
+      expect(c).toHaveAttribute('aria-expanded', 'false');
+      const types = removed.mock.calls.map(([type]) => type);
+      expect(types).toEqual(expect.arrayContaining(['resize', 'scroll']));
     });
   });
 });

@@ -108,7 +108,7 @@ import {
 } from './fixtures';
 import { FIXTURE_ACTOR_SUBJECT, FIXTURE_TRUST_BASIS, TRUSTED_API_BASE, TRUSTED_BASE_URL } from './env';
 import { RECORD_FIELDS } from '../../src/lib/recordFields';
-import { chooseValue } from '../helpers/select';
+import { chooseValue, expectValue } from '../helpers/select';
 
 /**
  * How long a background poller may take to notice a colleague's write.
@@ -390,7 +390,7 @@ async function bFinalizesATranscript(
      region, so the form is addressed inside the capture workspace itself. */
   await bPage.getByRole('link', { name: /Start Writing/ }).click();
   const capture = bPage.locator('#record-workspace-capture');
-  await chooseValue(capture.getByLabel('Run These Notes Describe'), runId);
+  await chooseValue(capture.getByRole('combobox', { name: 'Run These Notes Describe' }), runId);
   await capture.getByLabel('Transcript', { exact: true }).fill(text);
   await capture.getByRole('button', { name: 'Finalize and Read' }).click();
 
@@ -475,7 +475,10 @@ test.describe('two scientists, two real browsers, one record', () => {
           'step 1: nor a material name',
         ).toBeNull();
 
-        await chooseValue(recordPanel.getByLabel(recordFieldLabel('system.technique'), { exact: true }), technique);
+        await chooseValue(
+          recordPanel.getByRole('combobox', { name: recordFieldLabel('system.technique'), exact: true }),
+          technique,
+        );
         await recordPanel
           .getByLabel(recordFieldLabel('sample.material.name'), { exact: true })
           .fill(MATERIAL_NAME);
@@ -505,10 +508,11 @@ test.describe('two scientists, two real browsers, one record', () => {
           recordPanel.getByLabel(recordFieldLabel('sample.material.name'), { exact: true }),
           'step 1: the free-text record value is re-read from the server after a reload',
         ).toHaveValue(MATERIAL_NAME);
-        await expect(
-          recordPanel.getByLabel(recordFieldLabel('system.technique'), { exact: true }),
+        await expectValue(
+          recordPanel.getByRole('combobox', { name: recordFieldLabel('system.technique'), exact: true }),
+          technique,
           'step 1: and so is the enum one',
-        ).toHaveValue(technique);
+        );
 
         await plantSameDocumentMark(page);
 
@@ -563,7 +567,7 @@ test.describe('two scientists, two real browsers, one record', () => {
 
       await test.step('1 (continued) · run one and run two hold different values, and stay isolated', async () => {
         const runOneCard = await openRun(page, 0);
-        await chooseValue(runOneCard.getByLabel('Environment'), envOne);
+        await chooseValue(runOneCard.getByRole('combobox', { name: 'Environment' }), envOne);
         /*
          * POLLED ON THE SERVER, NOT READ BACK OFF THE CONTROL. `RunCard` has no
          * per-field Save: `runAutosaveStore` flushes after a debounce through
@@ -599,7 +603,7 @@ test.describe('two scientists, two real browsers, one record', () => {
           runTwoCard.locator('.run-card-name'),
           'step 1: Next run opened the SECOND run',
         ).toHaveText(runTwo.label);
-        await chooseValue(runTwoCard.getByLabel('Environment'), envTwo);
+        await chooseValue(runTwoCard.getByRole('combobox', { name: 'Environment' }), envTwo);
         await expect
           .poll(
             () => runFieldValue(server, id, runTwo.id, 'context.environment'),
@@ -849,9 +853,9 @@ test.describe('two scientists, two real browsers, one record', () => {
           'step 3: its card is on B’s screen once B reloads — see the finding above',
         ).toBeVisible();
         await noteCard.getByRole('button', { name: /^Propose a Value From This Note$/i }).click();
-        await chooseValue(noteCard.getByLabel('Field this value is for'), 'context.environment');
-        await chooseValue(noteCard.getByLabel('Run this value is about'), runTwo.id);
-        await chooseValue(noteCard.getByLabel('Environment', { exact: true }), envProposed);
+        await chooseValue(noteCard.getByRole('combobox', { name: 'Field this value is for' }), 'context.environment');
+        await chooseValue(noteCard.getByRole('combobox', { name: 'Run this value is about' }), runTwo.id);
+        await chooseValue(noteCard.getByRole('combobox', { name: 'Environment', exact: true }), envProposed);
         await noteCard.getByRole('button', { name: 'Propose This Value' }).click();
 
         await expect

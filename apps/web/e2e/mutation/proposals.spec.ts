@@ -965,10 +965,11 @@ test('an unsaved correction survives a background change-feed refresh', async ({
   // `system.technique` is a closed list in the official schema, so the correction is
   // a CHOICE over that list (QA A-10), not a text box. `STM` is a member, so it is the
   // preselected value; the reader then chooses a different member.
-  const editor = card.getByLabel('The corrected value', { exact: true });
+  // A choice (the themed picker, a `combobox`), not a text box: found by role, so it cannot also match
+  // the open popup, which carries the same name.
+  const editor = card.getByRole('combobox', { name: 'The corrected value', exact: true });
   await expect(editor).toBeVisible();
-  // A choice (the themed picker, a `combobox`), not a text box.
-  await expect(editor).toHaveAttribute('role', 'combobox');
+  await expect(card.getByRole('textbox', { name: 'The corrected value', exact: true })).toHaveCount(0);
   // Prefilled once, from the proposed value, exactly as stored.
   await expectValue(editor, 'STM');
 
