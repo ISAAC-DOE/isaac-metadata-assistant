@@ -2145,6 +2145,7 @@ def decide_question(
     as_said: bool = False,
     same_reading: bool = False,
     same_sample: bool = False,
+    names_differ_ok: bool = False,
 ) -> Any:
     """``isaac bundle decide --question`` — the CLI and the local questions screen both call this.
 
@@ -2191,7 +2192,7 @@ def decide_question(
             try:
                 # r8: several --only answer each of those groups with the one value (labels.decide)
                 result = L.decide(on, asked_label, decision=decision, value=value, only=list(only_scopes) if only_scopes else only,
-                                  by=by, orcid=orcid, note=note, same_sample=same_sample)
+                                  by=by, orcid=orcid, note=note, same_sample=same_sample, names_differ_ok=names_differ_ok)
             except L.LabelRefused as exc:
                 raise MutationRefused(str(exc)) from None
             if dry_run:
@@ -2200,7 +2201,7 @@ def decide_question(
             if result.get("slots_recorded"):
                 save_bundle(bundle_dir, bundle)
             return (result, bundle_version(bundle_dir)) if with_version else result
-        if same_sample:
+        if same_sample or names_differ_ok:
             raise MutationRefused(f"--same-sample answers the sample-id question (a condition label) only; question "
                                   f"{question_id} is not one. Nothing was recorded.")
         resolve = dict(decision=decision, only=only, field=field, positions=positions, only_scopes=only_scopes)

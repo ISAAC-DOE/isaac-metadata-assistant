@@ -1489,6 +1489,16 @@ def _stale_text(p: Mapping) -> str:
             "now, it is asked again here; answer it with --only group:<id> (a bulk confirm never overwrites an answer).")
 
 
+def _held_ending(held: Sequence[Mapping]) -> str:
+    """r9 review LOW: what follows the held rows, by their kind. A held set is settled by what its reason names; a group
+    whose conditions differ from its chain's has nothing to settle (its conditions are what its files state)."""
+    sets = any(h.get("kind") != OFF_CONDITION for h in held)
+    off = any(h.get("kind") == OFF_CONDITION for h in held)
+    return ((" Settle what each held set's reason names and its links are proposed here." if sets else "")
+            + (" A group whose conditions differ from its chain's is not linked, and there is nothing to answer for it "
+               "here." if off else ""))
+
+
 def _held_chains_question(p: Mapping, include_answered: bool) -> dict:
     qid = p["question_id"]
     held = p["not_proposed"]
@@ -1499,8 +1509,7 @@ def _held_chains_question(p: Mapping, include_answered: bool) -> dict:
                 if sets else "")
              + ("; " if sets and off else "")
              + (f"{off} group(s) match a chain on sample id and stage but not on their conditions" if off else "")
-             + ". " + _held_text(held, qid, every=True)
-             + ". Settle what each reason names and the links are proposed here." if held else
+             + ". " + _held_text(held, qid, every=True) + "." + _held_ending(held) if held else
              "No follows link is proposed now.") + _stale_text(p))
     q = _base_question(qid, p, text=text, applies_to={"groups": len({g for h in held for g in h["group_ids"]}),
                                                       "runs": 0, "targets": 0},
@@ -1508,7 +1517,8 @@ def _held_chains_question(p: Mapping, include_answered: bool) -> dict:
                        stale_answers=[dict(x) for x in p.get("stale") or ()],
                        proposals=[], not_proposed=[dict(h) for h in held], hints=[], allowed_decisions=[],
                        informational=True, lands_in_record=False,
-                       answer_command="# nothing to answer here: settle what each reason names, then the links are asked")
+                       answer_command=("# nothing to answer here: settle what each held set's reason names, then its links "
+                                       "are asked" if sets else "# nothing to answer here"))
     q["why"] = "Informational: why no follows link is proposed for these groups."
     if include_answered:
         q["answered"] = False
@@ -1751,36 +1761,51 @@ def _onlys(only: Any) -> list[str] | None:
     return [only] if isinstance(only, str) else list(dict.fromkeys(only))
 
 
+#: r9 review MED: the scientist's second statement that lets ``--same-sample`` join two groups whose names or roles
+#: differ (:func:`_same_sample_caution`); never two different parsed sample names (:func:`_same_sample_problem`)
+NAMES_DIFFER_OK = "--names-differ-ok"
+
+
 def _sample_tokens(f: _Facts) -> set[str]:
-    """r9 LOW 2: the file-name tokens that can name ``f``'s sample: its parsed sample names' tokens where the files
-    state one, else each token of its file names that starts with a letter and is no cycling-history or filter token
-    (a token starting with a digit is a number or a quantity: 060mV, 3hrs)."""
+    """r9 LOW 2: the tokens of ``f``'s file names that can name a sample: each that starts with a letter and is no
+    cycling-history or filter token (a token starting with a digit is a number or a quantity: 060mV, 3hrs)."""
     from . import grouping as G
 
-    if f.names:
-        return {t.casefold() for n in f.names for t in G._stem_tokens(n) if t}
     return {t.casefold() for s in f.stems for t in G._stem_tokens(s)
             if t[:1].isalpha() and not _HISTORY.search(t) and not re.fullmatch(r"(?:filter|f)\d+", t, re.IGNORECASE)}
 
 
+def _same_sample_caution(a: _Facts, b: _Facts) -> str | None:
+    """r9 LOW 2 / review MED: why ISAAC does not join groups ``a`` and ``b`` on ``--same-sample`` alone, or ``None``:
+    one is a standard or reference measurement and the other is not (a role read from the files, which a scientist
+    cannot correct), or their file names share no word that can name a sample (a powder beside an electrode). Each side
+    is read on the same basis: the parsed sample names when both have one (equal names share), else the file-name
+    tokens of both. Neither proves two samples (one powder may be written ``Ir_IV_Oxide`` and ``IrO2``): the scientist
+    may record the join with :data:`NAMES_DIFFER_OK`."""
+    from . import grouping as G
+
+    if (a.role == G.ROLE_REFERENCE) != (b.role == G.ROLE_REFERENCE):
+        ref, other = (a, b) if a.role == G.ROLE_REFERENCE else (b, a)
+        return (f"ISAAC reads {ref.stems[0]} as a standard or reference measurement and {other.stems[0]} as "
+                f"{'a ' + other.role if other.role else 'not one'}")
+    if a.names and b.names:
+        return None  # equal parsed names (different ones are a problem, never a caution)
+    ta, tb = _sample_tokens(a), _sample_tokens(b)
+    if ta and tb and not ta & tb:
+        return (f"the file names {a.stems[0]} and {b.stems[0]} share no word that can name a sample "
+                f"({', '.join(sorted(ta))} against {', '.join(sorted(tb))})")
+    return None
+
+
 def _same_sample_problem(a: _Facts, b: _Facts, position: int | None) -> str | None:
-    """MED 3 (r8): why groups ``a`` and ``b`` cannot be one physical sample by their own files, or ``None``: their
-    sample names differ, or the numbers at the electrode position (where it is known) differ. r9 LOW 2: or one is a
-    standard or reference measurement and the other is not, or their file names share no token that can name a sample
-    (a powder with no parsed sample name beside an electrode)."""
+    """MED 3 (r8): why groups ``a`` and ``b`` cannot be one physical sample by their own file names, or ``None``: their
+    parsed sample names differ, or the numbers at the electrode position (where it is known) differ. Firm: no second
+    statement lifts it (r9 review MED); a softer difference is :func:`_same_sample_caution`."""
     from . import grouping as G
 
     if a.names and b.names and a.names != b.names:
         return (f"{a.stems[0]} is sample {'/'.join(a.names_said)} and {b.stems[0]} is sample "
                 f"{'/'.join(b.names_said)}")
-    if (a.role == G.ROLE_REFERENCE) != (b.role == G.ROLE_REFERENCE):
-        ref, other = (a, b) if a.role == G.ROLE_REFERENCE else (b, a)
-        return (f"{ref.stems[0]} is a standard or reference measurement and {other.stems[0]} is not "
-                f"(its role is {other.role or 'not stated'})")
-    ta, tb = _sample_tokens(a), _sample_tokens(b)
-    if ta and tb and not ta & tb:
-        return (f"{a.stems[0]} and {b.stems[0]} share no sample-name token ({', '.join(sorted(ta))} against "
-                f"{', '.join(sorted(tb))})")
     for p in sorted({x for x in (position, a.position, b.position) if x}):
         ta = [t[p - 1] for t in (G._stem_tokens(s) for s in a.stems) if len(t) >= p]
         tb = [t[p - 1] for t in (G._stem_tokens(s) for s in b.stems) if len(t) >= p]
@@ -1894,7 +1919,8 @@ def _file_of_run(bundle: Mapping) -> dict[str, str]:
 
 
 def decide(bundle: dict, asked: Mapping, *, decision: str, value: Any, only: Any, by: str,
-           orcid: str | None, note: str | None, same_sample: bool = False, stamp: Mapping | None = None) -> dict:
+           orcid: str | None, note: str | None, same_sample: bool = False, stamp: Mapping | None = None,
+           names_differ_ok: bool = False) -> dict:
     """``decide --question`` on a label question, under the caller's lock, on ``bundle`` in memory (the caller
     saves). ``confirm`` records the proposed values; ``correct`` records the scientist's value (for ids and filters a
     pattern, ``{electrode}`` / ``{filter}``); ``reject`` records that the label is not written.
@@ -1910,7 +1936,9 @@ def decide(bundle: dict, asked: Mapping, *, decision: str, value: Any, only: Any
     group ISAAC could not place (``not_proposed``) takes an id other runs hold or are proposed only with
     ``same_sample``: the scientist's statement that it is the same physical sample, said in the reply and the
     decision's note. Even then it is refused when the two groups' own file names state another sample name, or
-    another number at the electrode position (MED 3, r8). A later bulk answer that gives an electrode the id such a
+    another number at the electrode position (MED 3, r8): firmly. It is held, unless the scientist also gives
+    ``names_differ_ok`` (``--names-differ-ok``, said in the note and the reply), when one is a standard or reference
+    and the other is not, or their file names share no word that can name a sample (r9). A later bulk answer that gives an electrode the id such a
     group holds is recorded and names it (``shares_id_with``). One decision per run's slot, through
     :func:`mutations.record_decision`."""
     from . import mutations as M
@@ -1922,13 +1950,15 @@ def decide(bundle: dict, asked: Mapping, *, decision: str, value: Any, only: Any
             raise LabelRefused("--same-sample goes with the sample-id question. Nothing was recorded.")
         return _decide_position(bundle, asked, decision=decision, value=value, only=only, by=by, orcid=orcid, note=note)
     if asked.get("informational"):
-        raise LabelRefused(f"Question {qid} proposes no link: it says why each chain was held ("
-                           + _held_text(asked.get("not_proposed") or (), qid) + "). Settle that, and the links are "
-                           "asked. Nothing was recorded.")
+        rows = asked.get("not_proposed") or ()
+        raise LabelRefused(f"Question {qid} proposes no link: it says why each chain was held (" + _held_text(rows, qid)
+                           + ")." + _held_ending(rows) + " Nothing was recorded.")
     if decision not in DECISIONS[label] or (decision == "confirm" and not asked["proposals"]):
         raise LabelRefused(f"`{decision}` does not answer question {qid} ({KIND}); use one of: "
                            f"{', '.join(asked['allowed_decisions'])}. Nothing was recorded.")
     onlys = _onlys(only)
+    if names_differ_ok and not same_sample:
+        raise LabelRefused(f"{NAMES_DIFFER_OK} goes with --same-sample. Nothing was recorded.")
     if same_sample and (label != "sample_id" or not onlys or decision != "correct"):
         raise LabelRefused("--same-sample goes with the sample-id question, --only group:<id> and --decision correct "
                            "--value <id>. Nothing was recorded.")
@@ -2050,14 +2080,24 @@ def decide(bundle: dict, asked: Mapping, *, decision: str, value: Any, only: Any
                         facts = {r: f for f in _facts(bundle, Q.live_groups(bundle), ctx) for r in f.runs}
                     a, b = facts.get(i["run_ids"][0]), facts.get(rid)
                     pos = ctx.position[0] if ctx.position else None
-                    problem = _same_sample_problem(a, b, pos) if a is not None and b is not None and a is not b else None
+                    two = a is not None and b is not None and a is not b
+                    problem = _same_sample_problem(a, b, pos) if two else None
                     if problem:
                         raise LabelRefused(
-                            f"--same-sample refused: {problem}. Their own files say they are not one physical "
-                            f"sample, so {v!r} cannot name both. Give {named(i['group_id'])} its own id; if the file "
-                            "names are wrong, say so in the beamtime notes and ask the beamline. Nothing was recorded.")
+                            f"--same-sample refused: {problem}. Their own file names give two different samples (or "
+                            f"electrode numbers), so {v!r} cannot name both; {NAMES_DIFFER_OK} does not lift this. "
+                            f"Give {named(i['group_id'])} its own id; if the file names are wrong, say so in the "
+                            "beamtime notes and ask the beamline. Nothing was recorded.")
+                    caution = _same_sample_caution(a, b) if two else None
+                    if caution and not names_differ_ok:
+                        raise LabelRefused(
+                            f"--same-sample held: {caution}. That does not prove they are two samples (one sample can "
+                            f"be named two ways), but ISAAC does not give {named(i['group_id'])} and "
+                            f"{file_of.get(rid, rid)} one id ({v!r}) on --same-sample alone. If the scientist confirms "
+                            f"they are one physical sample all the same, add {NAMES_DIFFER_OK} too: it is recorded in "
+                            "the decision's note. Otherwise give it its own id. Nothing was recorded.")
                     joined.append({"group_id": i["group_id"], "with_run": rid, "with_file": file_of.get(rid, rid),
-                                   "value": v})
+                                   "value": v, **({"names_differ": caution} if caution else {})})
                 else:
                     shares.append({"group_id": i["group_id"], "first_file": i.get("first_file"), "with_run": rid,
                                    "with_file": file_of.get(rid, rid), "value": v})
@@ -2092,9 +2132,13 @@ def decide(bundle: dict, asked: Mapping, *, decision: str, value: Any, only: Any
         # and, for the scientist's own wording, the pattern exactly as they gave it (stamped first, LOW 3)
         stamp = {"call": uuid.uuid4().hex[:12], "question": qid,
                  **({"pattern": value} if decision == "correct" and isinstance(value, str) else {})}
+    differ = list(dict.fromkeys(j["names_differ"] for j in joined if j.get("names_differ")))
+    differ_text = (differ[0] + (f" (and {len(differ) - 1} more such difference(s) with the other runs of that id)"
+                                if len(differ) > 1 else "")) if differ else ""
     if joined:
         said += (" The scientist stated this group is the same physical sample as "
-                 + ", ".join(sorted({j["with_file"] for j in joined})) + " (--same-sample).")
+                 + ", ".join(sorted({j["with_file"] for j in joined})) + " (--same-sample)."
+                 + (f" They confirmed it although {differ_text} ({NAMES_DIFFER_OK})." if differ else ""))
     if contradicts:
         said += " It contradicts the files: " + "; ".join(contradicts) + "."
     try:
@@ -2116,7 +2160,9 @@ def decide(bundle: dict, asked: Mapping, *, decision: str, value: Any, only: Any
         statement = f"Nothing new recorded: every group question {qid} reaches already holds that answer."
     if joined:
         statement += (f" Recorded as the same physical sample as {joined[0]['with_file']} ({joined[0]['value']!r}), "
-                      "as the scientist stated (--same-sample).")
+                      "as the scientist stated (--same-sample)."
+                      + (f" Recorded although {differ_text}, as the scientist confirmed ({NAMES_DIFFER_OK}); "
+                         "the decision's note says so." if differ else ""))
     if shares:
         statement += (" " + "; ".join(f"{x['first_file']} now shares {x['value']!r} with {x['with_file']}, which a "
                                       "scientist gave that id on its own" for x in shares[:3])

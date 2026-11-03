@@ -5,8 +5,10 @@ confirms that stage's start time (its ``resolve_conflict`` answer), the hold nam
 words say the shared run number IS the electrode. Every other guard stays: a run number the stages share that is not
 the electrode (DEC-46/Q16) holds the chain whatever the times; equal instants hold it.
 LOW 1: a group of a chain's sample and stage whose conditions differ only by an extra file-name token is listed.
-LOW 2: ``--same-sample`` is refused between file names that share no sample-name token, and between a standard or
-reference measurement and one that is not; both files are named.
+LOW 2: ``--same-sample`` is held between file names that share no sample word, and between a standard or reference
+measurement and one that is not; both files are named. Review MED: each side is read on the same basis, the hold says
+it proves nothing, and ``--names-differ-ok`` records the join (in the note and the reply); two different parsed sample
+names stay refused, firmly. Review LOW: a conditions_differ row is never told to be "settled".
 """
 
 from __future__ import annotations
@@ -39,7 +41,9 @@ OTHER_POTENTIAL = "02_03_ZZ2_base_beforeCycling_filter10_600mV"
 #: two invented powders whose names write no number (no electrode), one of them twice
 POWDER = "Synthetic_Hexachloro_Powder"
 POWDER2 = ("Synthetic_Oxide_Powder", "Synthetic_Oxide_Powder_shortExposure")
-STEMS = (*E1, *E2, EXTRA, OTHER_POTENTIAL, POWDER, *POWDER2)
+#: the review's variant: one invented powder written two ways (one with a parsed sample name, one without)
+VARIANT = ("Ir_IV_Oxide", "IrO2")
+STEMS = (*E1, *E2, EXTRA, OTHER_POTENTIAL, POWDER, *POWDER2, *VARIANT)
 BASE_E = 4102447200
 #: E1[0]'s second #E header: an hour and a half after its first, after E1[1] started
 LATE_E = BASE_E + 3600 * 1 + 5400
@@ -246,34 +250,94 @@ def test_a_group_matching_a_chain_on_sample_and_stage_but_not_conditions_is_list
 # --- LOW 2: --same-sample is refused across file names that share no sample-name token ----------
 
 
-def test_same_sample_is_refused_between_a_powder_and_an_electrode_naming_both_files(bdir):
+def _residual(b: dict) -> dict:
+    return next(q for q in L.label_questions(b) if q["question_id"] == L.question_id("sample_id", L.RESIDUAL))
+
+
+def test_same_sample_is_held_between_a_powder_and_an_electrode_naming_both_files(bdir):
     b = _ready(bdir)
     sid = f"{FOLDER}:ZZ1-01"
-    residual = next(q for q in L.label_questions(b) if q["question_id"] == L.question_id("sample_id", L.RESIDUAL))
+    residual = _residual(b)
     assert _gid(b, POWDER) in {h["group_id"] for h in residual["not_proposed"]}
     with pytest.raises(M.MutationRefused) as exc:
         _answer(bdir, residual["question_id"], "correct", value=sid, only=f"group:{_gid(b, POWDER)}", same_sample=True)
     said = str(exc.value)
-    assert "share no sample-name token" in said and POWDER in said and E1[0] in said and "Nothing was recorded" in said
+    assert "share no word that can name a sample" in said and POWDER in said and E1[0] in said
+    assert "does not prove" in said and L.NAMES_DIFFER_OK in said and "Nothing was recorded" in said
+    assert "files say they are not one physical sample" not in said
     # two powders whose names share their sample words are one sample if the scientist says so
     out = _answer(bdir, residual["question_id"], "correct", value="SYN-oxide-powder",
                   only=[f"group:{_gid(b, s)}" for s in POWDER2], same_sample=True)
-    assert out["statement"]
+    assert out["statement"] and L.NAMES_DIFFER_OK not in out["statement"]
     b = M.load(bdir)
-    assert all(b2["decision"] == "correct" for b2 in b["scientist_decisions"][-2:])
+    assert all(d["decision"] == "correct" for d in b["scientist_decisions"][-2:])
 
 
-def test_same_sample_is_refused_between_a_reference_and_a_sample(bdir):
+def test_the_review_variant_one_powder_written_two_ways_is_held_then_recorded_on_the_second_flag(bdir):
+    b = _ready(bdir)
+    facts = {f.stems[0]: f for f in L._facts(b, Q.live_groups(b))}
+    a, c = facts[VARIANT[0]], facts[VARIANT[1]]
+    assert not a.names and c.names, "one side has a parsed sample name, the other none"
+    assert L._same_sample_problem(a, c, 1) is None, "no two parsed names differ: never a firm refusal"
+    said = L._same_sample_caution(a, c)
+    assert said and VARIANT[0] in said and VARIANT[1] in said and "ir, iv, oxide against iro2" in said, \
+        "both sides read on one basis: the file-name words"
+    only = [f"group:{_gid(b, s)}" for s in VARIANT]
+    qid = _residual(b)["question_id"]
+    with pytest.raises(M.MutationRefused, match="does not prove they are two samples"):
+        _answer(bdir, qid, "correct", value="SYN-iro2-powder", only=only, same_sample=True)
+    with pytest.raises(M.MutationRefused, match="goes with --same-sample"):
+        _answer(bdir, qid, "correct", value="SYN-iro2-powder", only=only, names_differ_ok=True)
+    out = _answer(bdir, qid, "correct", value="SYN-iro2-powder", only=only, same_sample=True, names_differ_ok=True)
+    assert L.NAMES_DIFFER_OK in out["statement"] and "share no word" in out["statement"]
+    assert any(j.get("names_differ") for j in out["same_sample"])
+    b = M.load(bdir)
+    notes = [d["note"] for d in b["scientist_decisions"][-2:]]
+    assert all(L.NAMES_DIFFER_OK in n and "They confirmed it although" in n for n in notes)
+    assert {d["value"] for d in b["scientist_decisions"][-2:]} == {"SYN-iro2-powder"}
+
+
+def test_two_different_parsed_sample_names_stay_refused_whatever_the_flags(bdir):
+    b = M.load(bdir)  # no electrode position yet: the groups are ISAAC's to place, the scientist's to join
+    qid = L.question_id("sample_id")
+    _answer(bdir, qid, "correct", value="SYN-ZZ1-e1", only=f"group:{_gid(b, E1[0])}")
+    with pytest.raises(M.MutationRefused) as exc:
+        _answer(bdir, qid, "correct", value="SYN-ZZ1-e1", only=f"group:{_gid(b, E2[0])}", same_sample=True,
+                names_differ_ok=True)
+    said = str(exc.value)
+    assert E1[0] in said and E2[0] in said and f"{L.NAMES_DIFFER_OK} does not lift this" in said
+
+
+def test_same_sample_is_held_between_a_reference_and_a_sample(bdir):
     b = _ready(bdir)
     facts = {f.stems[0]: f for f in L._facts(b, Q.live_groups(b))}
     a, c = facts[E1[0]], facts[E1[1]]
-    assert L._same_sample_problem(a, c, 1) is None, "one electrode at two stages"
+    assert L._same_sample_caution(a, c) is None and L._same_sample_problem(a, c, 1) is None, "one electrode, two stages"
     c.role = "reference"
-    said = L._same_sample_problem(a, c, 1)
+    said = L._same_sample_caution(a, c)
     assert said and "standard or reference" in said and E1[0] in said and E1[1] in said
-    assert L._same_sample_problem(facts[POWDER2[0]], facts[POWDER2[1]], 1) is None
-    said = L._same_sample_problem(facts[POWDER], facts[E2[0]], 1)
+    assert L._same_sample_problem(a, c, 1) is None, "a role is a caution the scientist may override, never firm"
+    assert L._same_sample_caution(facts[POWDER2[0]], facts[POWDER2[1]]) is None
+    said = L._same_sample_caution(facts[POWDER], facts[E2[0]])
     assert said and POWDER in said and E2[0] in said
+
+
+# --- review LOW: a conditions_differ row is never told to be settled ------------------------------
+
+
+def test_the_held_follows_question_words_its_ending_per_row_kind():
+    off = {"group_ids": ["rg-x"], "first_files": ["X_01a"], "run_ids": [], "kind": L.OFF_CONDITION, "reason": "r"}
+    held = {"group_ids": ["rg-y", "rg-z"], "first_files": ["Y", "Z"], "run_ids": [], "reason": "s"}
+    p = {"question_id": L.question_id("follows"), "label": "follows", "partition": None, "path": L.FOLLOWS_PATH,
+         "items": [], "stale": []}
+    only_off = L._held_chains_question({**p, "not_proposed": [off]}, False)
+    assert "Settle" not in only_off["text"] and "nothing to answer for it" in only_off["text"]
+    assert "settle" not in only_off["answer_command"]
+    both = L._held_chains_question({**p, "not_proposed": [held, off]}, False)
+    assert "Settle what each held set's reason names" in both["text"] and "nothing to answer for it" in both["text"]
+    with pytest.raises(L.LabelRefused) as exc:
+        L.decide({}, only_off, decision="confirm", value=None, only=None, note=None, **BY)
+    assert "Settle" not in str(exc.value) and "nothing to answer" in str(exc.value)
 
 
 # --- ids --------------------------------------------------------------------------------------

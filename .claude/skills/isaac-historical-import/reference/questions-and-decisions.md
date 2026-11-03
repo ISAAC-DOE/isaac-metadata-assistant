@@ -260,7 +260,11 @@ experiment scope. Nothing is written until the scientist answers. Most take one 
   names, or when groups of one condition differ at a position the scientist said is not a counter.
   A group in `not_proposed` takes an id that other runs hold only when the scientist says it is the same physical
   sample: add `--same-sample`. Say that back first. It is refused even then when the two groups' own file names
-  give another sample name, or another number at the electrode position.
+  give another sample name, or another number at the electrode position: nothing lifts that. It is held when one
+  group is a standard or reference and the other is not, or the two file names share no word that can name a
+  sample (a powder beside an electrode, or one powder written `Ir_IV_Oxide` and `IrO2`). That proves nothing:
+  read the reason back, and only if the scientist confirms it is one sample all the same, add `--names-differ-ok`
+  too (the decision's note and the reply say so).
 - **Filter** (`system.configuration.beam_attenuator`, the portal vocabulary's key). Proposed as `filter<n>`, the
   filter count a file name or the scan header's `filter` motor states. `filter0` means no filter. Each example says
   where it was read. Their own wording: `--value "{filter} filters"`, and for the no-filter groups their words
