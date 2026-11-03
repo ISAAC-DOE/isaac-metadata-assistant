@@ -366,6 +366,56 @@ export const MEMORY_GRAPH_DISCLOSURES: Readonly<Record<string, { query: number; 
   });
 
 /**
+ * The Evidence screen's two collapsed regions (2026-11-02, record-side declutter):
+ *
+ *   - **Show All N** (`button.evclass-show-all`, `aria-expanded`) in Evidence
+ *     Support. By default the panel lists only the rows that are NOT "Supported";
+ *     the supported rows are UNMOUNTED until the button is pressed.
+ *   - **Reconcile a Campaign Sheet** (`.disclosure.csv-recon-disclosure`, the
+ *     shared chevron `Disclosure`). Its lead, upload control and helper text sit in
+ *     a `hidden` body.
+ *
+ * Before the declutter the whole classification list and the whole CSV panel were
+ * on the page and scanned. Unopened, axe would skip them; the `evidence@*` cells
+ * hold only three `color-contrast` nodes, none of them in either region, so the
+ * loss would move no number. So the count is declared and each is opened before
+ * the scan, exactly like `SETTINGS_PAGE_DISCLOSURES` and `MEMORY_GRAPH_DISCLOSURES`.
+ *
+ * `evidence-graph` is the same route on `?view=graph`, which renders the graph
+ * panel in place of the list view and mounts neither, so it keeps the default 0.
+ */
+export const EVIDENCE_DISCLOSURES: Readonly<Record<string, { showAll: number; csvReconcile: number }>> =
+  Object.freeze({
+    evidence: { showAll: 1, csvReconcile: 1 },
+  });
+
+/**
+ * The two record graphs' native `<details>` (2026-11-02, record-side declutter).
+ * Before the declutter every one of these was printed on the panel and scanned:
+ *
+ *   - **About This Graph** (`details.expgraph-about` / `details.evgraph-about`): the
+ *     intro, the drawn / undrawn / label lines, the notes, the kinds hint and list.
+ *     One per graph surface, DECLARED.
+ *   - **Where this came from** (`details.*-detail-producer`) in the details pane of
+ *     the selected node: the API route or module that produced it. One per graph
+ *     surface (the pane always shows the anchor on load), DECLARED.
+ *   - **Why** (`details.*-conn-more`), one per connection of the selected node. NOT
+ *     declared, for the reason `EXTENDED_CONTEXT_DISCLOSURE_SURFACES` gives for its
+ *     per-entry disclosures: the number is the seeded record's connection count,
+ *     data rather than structure. Every one found is opened and asserted open.
+ *
+ * Measured when this was added: opening all of them moved no axe count and no
+ * passing-rule count on either graph surface at desktop or mobile. That is why no
+ * baseline cell moved, and it is not a reason to leave them closed: a closed one
+ * would hide a future defect in its body from every scan at every viewport.
+ */
+export const GRAPH_DETAILS_DISCLOSURES: Readonly<Record<string, { about: number; producer: number }>> =
+  Object.freeze({
+    'record-graph': { about: 1, producer: 1 },
+    'evidence-graph': { about: 1, producer: 1 },
+  });
+
+/**
  * Surfaces that MUST mount the COLLAPSED Asset References disclosure.
  *
  * Declared for exactly the reason `FIELD_GROUP_SURFACES` is, and the reason is
@@ -566,6 +616,63 @@ export async function openUnreachableDisclosures(page: Page, surfaceId: string):
     const trigger = legend.nth(i);
     if ((await trigger.getAttribute('aria-expanded')) !== 'true') await trigger.click();
     await expect(trigger).toHaveAttribute('aria-expanded', 'true');
+  }
+
+  /* The Evidence screen's Show All and CSV Reconcile — see `EVIDENCE_DISCLOSURES`.
+     Declared count, opened by index, asserted open. */
+  const evidence = EVIDENCE_DISCLOSURES[surfaceId] ?? { showAll: 0, csvReconcile: 0 };
+  const showAll = page.locator('button.evclass-show-all');
+  const showAllCount = await showAll.count();
+  expect(
+    showAllCount,
+    `surface "${surfaceId}" mounts ${showAllCount} Evidence Support "Show All" toggles; ` +
+      `EVIDENCE_DISCLOSURES in e2e/helpers/disclosures.ts declares ${evidence.showAll}. The ` +
+      'supported rows are unmounted until it is pressed, so an unpressed toggle exempts them ' +
+      'from every axe scan.'
+  ).toBe(evidence.showAll);
+  for (let i = 0; i < showAllCount; i++) {
+    const toggle = showAll.nth(i);
+    if ((await toggle.getAttribute('aria-expanded')) !== 'true') await toggle.click();
+    await expect(toggle).toHaveAttribute('aria-expanded', 'true');
+  }
+  const csvReconcile = page.locator('.disclosure.csv-recon-disclosure > .disclosure-heading > .disclosure-trigger');
+  const csvCount = await csvReconcile.count();
+  expect(
+    csvCount,
+    `surface "${surfaceId}" mounts ${csvCount} "Reconcile a Campaign Sheet" disclosures; ` +
+      `EVIDENCE_DISCLOSURES in e2e/helpers/disclosures.ts declares ${evidence.csvReconcile}. One ` +
+      'left closed has its whole body exempt from every axe scan.'
+  ).toBe(evidence.csvReconcile);
+  for (let i = 0; i < csvCount; i++) {
+    const trigger = csvReconcile.nth(i);
+    if ((await trigger.getAttribute('aria-expanded')) !== 'true') await trigger.click();
+    await expect(trigger).toHaveAttribute('aria-expanded', 'true');
+  }
+
+  /* The record graphs' About This Graph, Where this came from and per-connection Why
+     — see `GRAPH_DETAILS_DISCLOSURES`. The first two declared; the third opened as found. */
+  const graphDetails = GRAPH_DETAILS_DISCLOSURES[surfaceId] ?? { about: 0, producer: 0 };
+  const graphGroups: [string, string, number | null][] = [
+    ['About This Graph', 'details.expgraph-about, details.evgraph-about', graphDetails.about],
+    ['Where this came from', 'details.expgraph-detail-producer, details.evgraph-detail-producer', graphDetails.producer],
+    ['connection Why', 'details.expgraph-conn-more, details.evgraph-conn-more', null],
+  ];
+  for (const [what, selector, declared] of graphGroups) {
+    const all = page.locator(selector);
+    const found = await all.count();
+    if (declared !== null) {
+      expect(
+        found,
+        `surface "${surfaceId}" mounts ${found} graph "${what}" disclosures; ` +
+          `GRAPH_DETAILS_DISCLOSURES in e2e/helpers/disclosures.ts declares ${declared}. One left ` +
+          'closed has its whole body exempt from every axe scan.'
+      ).toBe(declared);
+    }
+    for (let i = 0; i < found; i++) {
+      const one = all.nth(i);
+      if ((await one.getAttribute('open')) === null) await one.locator('> summary').click();
+      await expect(one).toHaveAttribute('open', '');
+    }
   }
 
   await openWidgetInfoAndViews(page, surfaceId);
