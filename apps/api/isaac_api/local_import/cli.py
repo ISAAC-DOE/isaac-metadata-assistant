@@ -1860,6 +1860,8 @@ def cmd_bundle_decide(args) -> int:
         if args.same_sample and not args.question:
             raise M.MutationRefused("--same-sample goes with --question <the sample-id question> --only group:<id>. "
                                     "Nothing was recorded.")
+        if getattr(args, "names_differ_ok", False) and not args.same_sample:
+            raise M.MutationRefused("--names-differ-ok goes with --same-sample. Nothing was recorded.")
         if args.same_reading and not args.question:
             raise M.MutationRefused("--same-reading goes with --question <id> (a question that names a "
                                     "same_reading_group). Nothing was recorded.")
@@ -1876,6 +1878,7 @@ def cmd_bundle_decide(args) -> int:
                 extra_targets=targets,
                 same_reading=args.same_reading,
                 same_sample=args.same_sample,
+                names_differ_ok=getattr(args, "names_differ_ok", False),
                 decision=args.decision,
                 value=M.parse_value(args.value, args.json),
                 by=args.by,
@@ -2416,6 +2419,10 @@ def build_parser(prog: str = "isaac") -> argparse.ArgumentParser:
     q.add_argument("--same-sample", action="store_true",
                    help="with --question on the sample-id question and --only group:<id>: the scientist states this "
                         "group is the same physical sample as the runs that already hold (or are proposed) that id")
+    q.add_argument("--names-differ-ok", action="store_true",
+                   help="with --same-sample: the scientist confirms the join although one group is a standard or "
+                        "reference and the other is not, or their file names share no sample word (recorded in the "
+                        "decision's note); never two different parsed sample names")
     q.add_argument("--decision", required=True,
                    help="candidate / missing value / conflict: confirm correct reject defer; record group: confirm split merge "
                         "reject defer approve_calibration set_absorber; processing result: approve reject needs_changes defer, "
