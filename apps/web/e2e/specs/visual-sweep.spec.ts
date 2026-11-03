@@ -527,7 +527,14 @@ const STATES: readonly VisualState[] = [
       await expect(
         empty.getByRole('heading', { level: 2, name: 'Start Your First Experiment' })
       ).toBeVisible();
-      await expect(empty).toContainText('Start fresh, or bring in work you already have.');
+      // ~~`toContainText('Start fresh, or bring in work you already have.')`~~ — that
+      // lede was cut 2026-11-02 (declutter: `ExperimentsHome.tsx`, "the three cards
+      // below say it"). What the state now pictures under its heading is the list of
+      // ways to begin, so that list — by its accessible name — and its three cards
+      // are what is asserted.
+      const choices = empty.getByRole('list', { name: 'Ways to begin' });
+      await expect(choices).toBeVisible();
+      await expect(choices.getByRole('listitem')).toHaveCount(3);
       // The empty state's own primary. It did not exist when this sweep was
       // written; the heading stood in for it because the screen offered nothing.
       // ~~`'Start Guided Walkthrough'`~~ (CI, PR #291): the control is named by this
