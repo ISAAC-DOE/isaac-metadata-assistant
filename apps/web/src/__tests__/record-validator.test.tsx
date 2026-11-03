@@ -98,14 +98,18 @@ describe('RecordValidator — stated purpose (P36R S8 copy)', () => {
 // --- honest scope + empty state -------------------------------------------------
 
 describe('RecordValidator — pre-validation', () => {
-  it('states the synthetic/local scope: nothing is uploaded to a model or stored', () => {
+  it('states the in-memory scope, and that the size limit describes the field', () => {
     render(<RecordValidator />);
-    expect(screen.getByText(/nothing here is uploaded to a model/i)).toBeInTheDocument();
+    expect(screen.getByText(/checked in memory and discarded/i)).toBeInTheDocument();
+    expect(textarea()).toHaveAccessibleDescription(/Accepts JSON up to 512 KB/);
   });
 
-  it('shows an empty state before any record is checked', () => {
+  // ~~"No Record Checked Yet" and "Paste or upload JSON, then Validate."~~ — cut
+  // 2026-11-02: an idle form needs no state line, and the hint restated the buttons.
+  it('an idle form carries no empty-state headline and no hint restating the buttons', () => {
     render(<RecordValidator />);
-    expect(screen.getByText(/no record checked yet/i)).toBeInTheDocument();
+    expect(screen.queryByText(/no record checked yet/i)).toBeNull();
+    expect(screen.queryByText(/Paste or upload JSON, then Validate/i)).toBeNull();
   });
 
   it('exposes a keyboard-reachable textarea, file input, and Validate button', () => {

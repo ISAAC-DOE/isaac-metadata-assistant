@@ -140,6 +140,26 @@
   }
 }
 
+/* PHONE (2026-11-02): the floating Assistant pill shrinks to its icon so it covers
+   less of the page. The label is clipped (the `.sr-only` pattern), not
+   `display: none`, so it stays the button's accessible name. 10px on every side
+   keeps the box 38px tall, which is what `--assistant-trigger-reserve` in chrome.css
+   is measured against. */
+@media (max-width: 620px) {
+  .assistant-drawer-trigger { padding: 10px; }
+  .assistant-drawer-trigger-label {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    padding: 0;
+    margin: -1px;
+    overflow: hidden;
+    clip: rect(0, 0, 0, 0);
+    white-space: nowrap;
+    border: 0;
+  }
+}
+
 /*
  * PR-E — the desktop rail collapse. Scoped to `(min-width: 1025px)` rather
  * than the bare absence of the ≤1024px query above, so the boundary is

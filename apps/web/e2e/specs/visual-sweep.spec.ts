@@ -527,7 +527,14 @@ const STATES: readonly VisualState[] = [
       await expect(
         empty.getByRole('heading', { level: 2, name: 'Start Your First Experiment' })
       ).toBeVisible();
-      await expect(empty).toContainText('Start fresh, or bring in work you already have.');
+      // ~~`toContainText('Start fresh, or bring in work you already have.')`~~ — that
+      // lede was cut 2026-11-02 (declutter: `ExperimentsHome.tsx`, "the three cards
+      // below say it"). What the state now pictures under its heading is the list of
+      // ways to begin, so that list — by its accessible name — and its three cards
+      // are what is asserted.
+      const choices = empty.getByRole('list', { name: 'Ways to begin' });
+      await expect(choices).toBeVisible();
+      await expect(choices.getByRole('listitem')).toHaveCount(3);
       // The empty state's own primary. It did not exist when this sweep was
       // written; the heading stood in for it because the screen offered nothing.
       // ~~`'Start Guided Walkthrough'`~~ (CI, PR #291): the control is named by this
@@ -614,7 +621,7 @@ const STATES: readonly VisualState[] = [
   },
   {
     id: 'settings',
-    what: 'Settings → Overview — Data Safety, This Build, Guided Walkthrough',
+    what: 'Settings → Overview — Data, This Build, Guided Walkthrough',
     async reach({ page, app }) {
       await app.goto('/settings');
       await settled(page);
@@ -678,13 +685,13 @@ const STATES: readonly VisualState[] = [
     async reach({ page, app }) {
       await app.goto('/settings?tab=mcp');
       await settled(page);
-      /* The Connect Your Agent widget's headline — THIS BUILD'S REAL STATE
-         (`MCP_ENDPOINT` is `null`). The day a deployment publishes an address the
-         widget renders a different headline, and this must be revisited rather
-         than loosened into a regex that matches both. */
-      const heading = page
-        .getByRole('heading', { name: 'Requires Organization Configuration' })
-        .first();
+      /* The Connect Your Agent widget, whose one state line is THIS BUILD'S REAL
+         STATE (`MCP_ENDPOINT` is `null`). ~~The "Requires Organization
+         Configuration" heading~~ was retired 2026-11-02 (owner's direction). */
+      const heading = page.getByRole('region', { name: 'Connect Your Agent' }).first();
+      await expect(
+        heading.getByText('Not set up on this server. An administrator connects it in the deployment settings.'),
+      ).toBeVisible({ timeout: 20_000 });
       await expect(heading).toBeVisible({ timeout: 20_000 });
       return heading;
     },

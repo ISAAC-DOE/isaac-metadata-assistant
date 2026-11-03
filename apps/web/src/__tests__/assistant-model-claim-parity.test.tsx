@@ -1,4 +1,27 @@
 /*
+ * 2026-11-02 — THE PANEL'S NO-MODEL SENTENCE WAS RETIRED, AND THIS FILE NOW PINS "NO
+ * FALSE CLAIM" INSTEAD OF "THIS SENTENCE IS PRESENT".
+ *
+ * The owner directed that standing disclaimers go, so `ASSISTANT_NO_MODEL_CLAIM`
+ * ("There is no language model in this build. Nothing you type here is sent to a model
+ * provider.") and `SUBORDINATE_CAPTION` left all five mounts. What this file existed to
+ * prevent was never the sentence's absence — it was a screen IMPLYING a model or
+ * provider exists, is connected, or is coming, and a product surface calling the
+ * assistant seam. Both are still pinned:
+ *
+ *  §1 the panel, on every mount, claims no model or provider exists, the retired
+ *     sentences do not return, and the composer's description does not dangle;
+ *  §2 the panel still says what it answers over (functional, not a disclaimer);
+ *  §3 POLARITY, on every site that still mentions a model provider (Settings until
+ *     its card is retired): any such sentence carries its own negation;
+ *  §4 no site implies a provider exists, is connected, or is coming — text AND attributes;
+ *  §5 §3's decision, mechanically: no product surface calls the assistant seam;
+ *  §6 negative controls for every ban, run against the exact retired strings and
+ *     planted claims.
+ *
+ * The history below is kept as written: it explains why the guard exists. Where it
+ * says the panel must carry the claim, read "carried, until 2026-11-02".
+ *
  * ONE claim about a language model, two sites — and the decision that a third
  * site must not exist.
  *
@@ -125,9 +148,11 @@ import { describe, it, expect, afterEach } from 'vitest';
 import { cleanup, render, screen } from '@testing-library/react';
 
 import { AssistantPanel } from '../components/AssistantPanel';
-import { ASSISTANT_COMPOSER_HELPER, ASSISTANT_NO_MODEL_CLAIM } from '../lib/assistant';
+import { ASSISTANT_COMPOSER_HELPER, ASSISTANT_COMPOSER_HELPER_MEMORY } from '../lib/assistant';
 import { CAPABILITIES_BOUNDARY } from '../lib/assistantCapabilities';
-import { settingsConcepts } from '../lib/settingsContent';
+import { API_ACCESS_COPY, SETTINGS_WIDGET_COPY, dataRows } from '../lib/settingsContent';
+import { MCP_CONNECT_COPY, MCP_WIDGET_COPY } from '../lib/mcpConnectContent';
+import { ASSISTANT_COMPANION_COPY } from '../lib/assistantCompanionContent';
 import type { AssistantMessage } from '../lib/types';
 
 afterEach(cleanup);
@@ -241,195 +266,127 @@ const SETTINGS_FACTS = {
   recordSchemaVersion: '1.05',
 };
 
-/** Settings → AI & Automation → `no-external-model-calls`, summary + detail. */
+/**
+ * ~~Settings → AI & Automation → `no-external-model-calls`~~ — that card was retired
+ * 2026-11-02 with the Privacy & Governance tab. The Settings site is now EVERY string
+ * the Settings copy modules author (Data rows on every persistence arm, API Access,
+ * the widget titles, Connect Your Agent and the companion), so no Settings sentence
+ * can imply a model either.
+ */
 function settingsModelClaim(): string {
-  const found = settingsConcepts(SETTINGS_FACTS).find((c) => c.id === 'no-external-model-calls');
-  if (!found) throw new Error('no such concept: no-external-model-calls');
-  return `${found.heading} ${found.summary} ${found.detail}`;
+  const strings = (o: Record<string, unknown>) =>
+    Object.values(o).filter((v): v is string => typeof v === 'string');
+  return [
+    ...['ephemeral', 'durable', 'unavailable'].flatMap((persistence) =>
+      dataRows({ ...SETTINGS_FACTS, persistence }).map((r) => `${r.label}. ${r.text}`),
+    ),
+    ...strings(API_ACCESS_COPY),
+    ...strings(SETTINGS_WIDGET_COPY),
+    ...strings(MCP_CONNECT_COPY),
+    ...strings(MCP_WIDGET_COPY),
+    ...strings(ASSISTANT_COMPANION_COPY),
+  ].join(' ');
 }
 
-/**
- * The Assistant panel's disclosure, RENDERED — never read off the constant.
- *
- * Reading `ASSISTANT_NO_MODEL_CLAIM` would pass for a string that is exported
- * and never mounted, which is exactly the failure mode `upload-claim-parity`
- * names ("copy that exists in the module and is not shown"). The panel is
- * rendered with the minimum props every mounting screen supplies.
- */
-function panelDisclosureText(): string {
-  mountPanel();
-  const node = document.querySelector('.assistant-no-model');
-  if (node === null) throw new Error('the panel renders no no-model disclosure');
-  return node.textContent ?? '';
+/** Everything a reader meets on one mount of the panel, as rendered text. */
+function panelText(extra: Record<string, unknown> = {}): string {
+  const { container, unmount } = mountPanel(extra);
+  const text = container.textContent ?? '';
+  unmount();
+  return text;
 }
 
 const SITES: [string, () => string][] = [
-  ['the Assistant panel, beneath the composer', panelDisclosureText],
-  ['Settings → AI & Automation → no-external-model-calls', settingsModelClaim],
+  ['the Assistant panel (record mount)', () => panelText()],
+  ['the Assistant panel (Project Memory mount)', () => panelText({ queryScope: 'memory' })],
+  ['Settings — every authored copy string', settingsModelClaim],
 ];
 
-/*
- * FOUR FACTS, TWO OWNERS — and parity is measured only over the two that BOTH
- * sites must make.
- *
- * The temptation is to require every site to recite all four, and that is the
- * inverse of `upload-claim-parity.test.tsx`'s actual lesson. The defect there was
- * three sites making a claim BROADER than each could defend ("no file is read,
- * parsed, or inspected", asserted one tab away from a validator that reads files).
- * Settings speaks for the whole application; the panel speaks for the panel.
- *
- *  · no model in this build        BOTH. Without it, "nothing is sent to a
- *                                 provider" reads as a routing detail rather
- *                                 than as an absence.
- *  · nothing typed reaches a       BOTH. The question a scientist actually has,
- *    model provider               and the one that becomes false the day
- *                                 capability B ships.
- *  · a bounded deterministic set   SETTINGS, and on the panel by its own
- *    over the deployment's data   controls — see PANEL_OWNED_ELSEWHERE.
- *  · refuses rather than guesses   likewise. §6.4's no-guessing rule.
+/** The two sentences retired from the dock on 2026-11-02, verbatim — negative controls. */
+const RETIRED_NO_MODEL_CLAIM =
+  'There is no language model in this build. Nothing you type here is sent to a model provider.';
+const RETIRED_SUBORDINATE_CAPTION =
+  'The Assistant is advisory: it explains artifacts and points to sources. It never validates — deterministic validation remains authoritative.';
+
+/**
+ * A claim that a model or provider is IN USE. Any of these on the panel is the false
+ * claim this file exists to stop. Deliberately about use, not the word "model": a
+ * negated statement ("no model provider is configured") is §3's business.
  */
-const SUB_CLAIMS: [string, RegExp][] = [
-  ['there is no language model in this build', /there is no language model in this build/],
-  ['nothing typed is sent to a model provider', /is sent to a model provider/],
+const CLAIMS_A_MODEL: [string, RegExp][] = [
+  ['powered by / backed by a model', /\b(powered|backed|driven)\s+by\s+(an?\s+)?(ai|llm|(language\s+)?model)\b/i],
+  ['AI-powered', /\bai[- ](powered|assistant|generated)\b/i],
+  ['a named model vendor', /\b(gpt-?\d|chatgpt|openai|anthropic|claude|gemini|llama|mistral)\b/i],
+  ['an answer attributed to a model', /\b(the|our|a)\s+(ai|llm|model)\s+(says|answered|thinks|generated|wrote)\b/i],
+  ['a question sent to a model', /\b(sent|forwarded|passed)\s+to\s+(an?\s+|the\s+)?(ai|llm|(language\s+)?model)\b/i],
 ];
 
-/*
- * The other two facts, and the panel control that owns each.
- *
- * They are NOT absent from the panel — they are stated where they belong, and
- * this array is what stops "the panel does not repeat them" from quietly becoming
- * "the panel does not say them". `CAPABILITIES_BOUNDARY` sits inside the "What
- * Can I Ask?" popover, which is a control of this panel rather than another
- * screen; that placement is the panel's own and is checked by
- * `assistant-capabilities.test.tsx`, so what is asserted here is only that the
- * constants still carry the claims.
- */
-const PANEL_OWNED_ELSEWHERE: [string, string, RegExp][] = [
-  [
-    'the grounded scopes, beneath the composer',
-    ASSISTANT_COMPOSER_HELPER,
-    /ask about this record, its evidence, workflow, export readiness/i,
-  ],
-  [
-    'the bounded set, in "What Can I Ask?"',
-    CAPABILITIES_BOUNDARY,
-    /these families are the whole set/i,
-  ],
-  [
-    'refused rather than guessed, in "What Can I Ask?"',
-    CAPABILITIES_BOUNDARY,
-    /refused, not guessed/i,
-  ],
-];
+// --- §1 the panel claims no model, on every mount ------------------------------
 
-// --- §1 the claim is where the question arises, and it is announced ----------
-
-describe('§1 · the disclosure is on the panel a scientist types into', () => {
-  it('renders beneath the composer, in the dock, not behind a disclosure control', () => {
-    mountPanel();
-    const foot = document.querySelector('.assistant-foot');
-    const claim = document.querySelector('.assistant-no-model');
-    expect(claim).not.toBeNull();
-    // In the sticky dock, so it is visible without scrolling the transcript.
-    expect(foot?.contains(claim as Node)).toBe(true);
-    // NOT inside a <details>. §3's own lesson (`voiceSeamUnreported`) is that a
-    // disclosure conditional on being opened is not a disclosure.
-    expect(claim?.closest('details')).toBeNull();
-    expect(claim?.getAttribute('hidden')).toBeNull();
+describe('§1 · the panel a scientist types into claims no model', () => {
+  it.each([
+    ['record mount', {}],
+    ['Project Memory mount', { queryScope: 'memory' }],
+  ] as const)('%s: no claim that a model or provider is in use', (_mount, extra) => {
+    const text = norm(panelText(extra));
+    for (const [what, pattern] of CLAIMS_A_MODEL) {
+      expect(text, `the panel claims ${what}`).not.toMatch(pattern);
+    }
   });
 
-  it('is the composer input’s accessible description, together with the scope helper', () => {
+  it('the retired dock sentences do not return, on any mount', () => {
+    for (const extra of [{}, { queryScope: 'memory' }]) {
+      const text = norm(panelText(extra));
+      expect(text).not.toContain(norm(RETIRED_NO_MODEL_CLAIM));
+      expect(text).not.toContain(norm(RETIRED_SUBORDINATE_CAPTION));
+      expect(text).not.toMatch(/there is no language model/);
+      expect(text).not.toMatch(/it never validates/);
+    }
+    expect(document.querySelector('.assistant-no-model')).toBeNull();
+    expect(document.querySelector('.assistant-caption')).toBeNull();
+  });
+
+  it('the composer input’s description resolves to the scope helper, and nothing dangles', () => {
     mountPanel();
     const input = screen.getByLabelText('Ask the assistant a question');
     const described = (input.getAttribute('aria-describedby') ?? '').split(/\s+/).filter(Boolean);
-    expect(described.length).toBe(2);
-    // Neither id may dangle — a description pointing at nothing is silence.
+    expect(described.length).toBeGreaterThan(0);
     const texts = described.map((id) => {
       const el = document.getElementById(id);
       expect(el, `dangling aria-describedby: ${id}`).not.toBeNull();
       return el?.textContent ?? '';
     });
-    // The disclosure is one of the two, and the scope helper is the other.
-    expect(texts.some((t) => norm(t) === norm(ASSISTANT_NO_MODEL_CLAIM))).toBe(true);
-    expect(texts.some((t) => /ask about this record/i.test(t))).toBe(true);
-  });
-
-  it('the exported constant and the rendered text are the same string', () => {
-    // A drifting constant would make the other guards here read the module while
-    // the reader reads something else.
-    expect(norm(panelDisclosureText())).toBe(norm(ASSISTANT_NO_MODEL_CLAIM));
-  });
-
-  it('renders on every mount, with no availability, context or agent props', () => {
-    // The panel takes ~15 optional props and mounts on five screens. A
-    // disclosure that appeared only on the record surfaces would be absent from
-    // Project Memory, which is where a reader is most likely to mistake the
-    // assistant for a chatbot.
-    mountPanel({ queryScope: 'memory' });
-    expect(document.querySelectorAll('.assistant-no-model').length).toBe(1);
+    expect(texts.some((t) => norm(t) === norm(ASSISTANT_COMPOSER_HELPER))).toBe(true);
   });
 });
 
-// --- §2 parity ---------------------------------------------------------------
+// --- §2 the panel still says what it answers over --------------------------------
 
-describe('§2 · both sites make the same sub-claims', () => {
-  for (const [site, read] of SITES) {
-    it.each(SUB_CLAIMS)(`${site} states: %s`, (_what, pattern) => {
-      expect(norm(read())).toMatch(pattern);
-    });
-  }
+/*
+ * Functional copy, not a disclaimer: what the composer answers over, and that the
+ * "What Can I Ask?" catalog is the whole set (anything else is refused, not guessed).
+ */
+const PANEL_SCOPE_FACTS: [string, string, RegExp][] = [
+  [
+    'the grounded scopes, beneath the composer',
+    ASSISTANT_COMPOSER_HELPER,
+    /ask about this record, its evidence, workflow, export readiness/i,
+  ],
+  ['the memory scope, beneath the composer', ASSISTANT_COMPOSER_HELPER_MEMORY, /project memory/i],
+  ['the bounded set, in "What Can I Ask?"', CAPABILITIES_BOUNDARY, /these families are the whole set/i],
+  ['refused rather than guessed, in "What Can I Ask?"', CAPABILITIES_BOUNDARY, /refused, not guessed/i],
+];
 
-  it.each(PANEL_OWNED_ELSEWHERE)(
-    'the panel still carries, elsewhere: %s',
-    (_where, text, pattern) => {
-      // The two clauses the panel deliberately does NOT restate in the dock. If a
-      // later slice deletes one of these, the panel stops saying it ANYWHERE and
-      // the shortening above stops being justified — which is the failure this
-      // array exists to convert into a red test rather than a stale comment.
-      expect(norm(text)).toMatch(pattern);
-    },
-  );
-
-  it('Settings, which speaks for the application, still states all four', () => {
-    const text = norm(settingsModelClaim());
-    for (const [, pattern] of SUB_CLAIMS) expect(text).toMatch(pattern);
-    expect(text).toMatch(/bounded, deterministic catalog over the deployment's own data/);
-    expect(text).toMatch(/refuses anything outside it rather than guessing/);
+describe('§2 · the panel still says what it answers over', () => {
+  it.each(PANEL_SCOPE_FACTS)('%s', (_where, text, pattern) => {
+    expect(norm(text)).toMatch(pattern);
   });
 
-  it('the panel does NOT restate the two Settings owns, so the dock stays short', () => {
-    /*
-     * Not a style rule — it is a length budget for a sticky dock at 11px inside a
-     * content-sized rail.
-     *
-     * THE FIGURE IS MEASURED HERE RATHER THAN WRITTEN DOWN, and that is a
-     * correction. An earlier revision of this comment stated the full paragraph
-     * was ~~244 characters~~ and the kept pair 92. The 92 is exact. The 244 was
-     * NOT reproducible from anything committed: Settings' real paragraph
-     * (`settingsContent.ts:587`) is 272, and a panel-scoped reconstruction of the
-     * four clauses comes to 238. 244 described a draft that no longer exists in
-     * the tree, stated as fact in the one file whose subject is that a stated
-     * measurement must be true.
-     *
-     * So both numbers are now computed from the committed strings on every run.
-     * They cannot go stale, and a reader can reproduce them by reading this test.
-     */
-    const claim = norm(ASSISTANT_NO_MODEL_CLAIM);
-    const settings = settingsModelClaim();
-    expect(claim).not.toMatch(/bounded, deterministic catalog/);
-
-    // The kept pair, exact — the raw constant, not the normalised copy.
-    expect(ASSISTANT_NO_MODEL_CLAIM.length).toBe(92);
-    // Settings' detail paragraph, which is what the panel declines to restate.
-    const detail = settingsConcepts(SETTINGS_FACTS).find(
-      (c) => c.id === 'no-external-model-calls',
-    )!.detail;
-    expect(detail.length).toBe(272);
-    // The budget, as a relation rather than a magic number: the dock carries
-    // comfortably under half of what Settings does.
-    expect(ASSISTANT_NO_MODEL_CLAIM.length).toBeLessThan(detail.length / 2);
-    expect(claim.length).toBeLessThan(140);
-    expect(settings.length).toBeGreaterThan(claim.length);
+  it('the helper renders on each mount (the memory mount names no record)', () => {
+    expect(norm(panelText())).toContain(norm(ASSISTANT_COMPOSER_HELPER));
+    const memory = norm(panelText({ queryScope: 'memory' }));
+    expect(memory).toContain(norm(ASSISTANT_COMPOSER_HELPER_MEMORY));
+    expect(memory).not.toContain('ask about this record');
   });
 });
 
@@ -445,24 +402,31 @@ describe('§2 · both sites make the same sub-claims', () => {
  * Module scope rather than inside §3's `describe`, so §6's negative control tests
  * THIS array and not a second copy of it that could be narrowed independently.
  */
+/**
+ * A sentence that mentions a model provider is acceptable only if its negation comes
+ * BEFORE the verb that sends something there, or it names "no model provider" outright.
+ * "…is sent to a model provider, no setup needed" therefore fails, as it must.
+ */
+const NEGATED_PROVIDER =
+  /\b(nothing|no|not|never)\b[^.]*\b(sent|send|sends|reach\w*|goes|go)\b[^.]*\bmodel provider\b|\bno model provider\b/;
+
 const INVERSIONS: RegExp[] = [
   /there is a language model in this build/,
   /(?:what|everything) you type (?:here )?is sent to a model provider/,
 ];
 
-describe('§3 · polarity — an inverted disclosure must not pass', () => {
+describe('§3 · polarity — no site states a model provider affirmatively', () => {
   for (const [site, read] of SITES) {
     it(`${site} is not inverted`, () => {
       const text = norm(read());
       for (const bad of INVERSIONS) expect(text).not.toMatch(bad);
-      // The "nothing ... is sent" clause must carry its own negation WITHIN the
-      // sentence that mentions the provider — not two sentences away, where a
-      // later edit could delete one and leave the other reading as an assertion.
-      const sentence = text
-        .split(/(?<=\.)\s+/)
-        .find((s) => /is sent to a model provider/.test(s));
-      expect(sentence, 'no sentence mentions a model provider').toBeDefined();
-      expect(sentence).toMatch(/\bnothing\b/);
+      // Any sentence that mentions a model provider must carry its own negation WITHIN
+      // that sentence — not two sentences away, where a later edit could delete one and
+      // leave the other reading as an assertion. A site that no longer mentions a
+      // provider at all (the panel, since 2026-11-02) passes by saying nothing.
+      for (const sentence of text.split(/(?<=\.)\s+/).filter((x) => /model provider/.test(x))) {
+        expect(sentence).toMatch(NEGATED_PROVIDER);
+      }
     });
   }
 });
@@ -639,15 +603,30 @@ describe('§5 · no product surface consumes the assistant seam', () => {
 // --- §6 negative controls ---------------------------------------------------
 
 describe('§6 · the guards are proven on input that must fail them', () => {
-  it('the sub-claim patterns reject text that omits each claim', () => {
-    // The panel's own sentence with one clause removed, one at a time. Each
-    // mutant must fail exactly the pattern for the clause it dropped.
-    const full = norm(ASSISTANT_NO_MODEL_CLAIM);
-    const mutants: [RegExp, string][] = [
-      [SUB_CLAIMS[0][1], full.replace(/there is no language model in this build\.\s*/, '')],
-      [SUB_CLAIMS[1][1], full.replace(/nothing you type here is sent to a model provider\./, '')],
-    ];
-    for (const [pattern, mutant] of mutants) expect(mutant).not.toMatch(pattern);
+  it('the retired-sentence ban sees the exact retired strings', () => {
+    expect(norm(RETIRED_NO_MODEL_CLAIM)).toMatch(/there is no language model/);
+    expect(norm(RETIRED_SUBORDINATE_CAPTION)).toMatch(/it never validates/);
+  });
+
+  it.each([
+    ['powered by / backed by a model', 'Answers powered by a language model.'],
+    ['AI-powered', 'Your AI-powered assistant for this record.'],
+    ['a named model vendor', 'Answers come from Claude.'],
+    ['an answer attributed to a model', 'The model says this field is missing.'],
+    ['a question sent to a model', 'Your question is sent to a model for an answer.'],
+  ])('the model-claim ban fires on a planted "%s"', (what, planted) => {
+    const hit = CLAIMS_A_MODEL.find(([label]) => label === what)!;
+    expect(norm(planted)).toMatch(hit[1]);
+  });
+
+  it('the model-claim ban leaves the shipped helper copy alone (not vacuous the other way)', () => {
+    for (const shipped of [ASSISTANT_COMPOSER_HELPER, ASSISTANT_COMPOSER_HELPER_MEMORY, CAPABILITIES_BOUNDARY]) {
+      for (const [, pattern] of CLAIMS_A_MODEL) expect(norm(shipped)).not.toMatch(pattern);
+    }
+  });
+
+  it('the in-sentence negation check rejects an affirmative provider sentence', () => {
+    expect(norm('Your question is sent to a model provider.')).not.toMatch(NEGATED_PROVIDER);
   });
 
   it('the polarity check rejects the inverted sentence', () => {
@@ -665,7 +644,16 @@ describe('§6 · the guards are proven on input that must fail them', () => {
     );
     const sentence = drifted.split(/(?<=\.)\s+/).find((s) => /is sent to a model provider/.test(s));
     expect(sentence).toBeDefined();
-    expect(sentence).not.toMatch(/\bnothing\b/);
+    expect(sentence).not.toMatch(NEGATED_PROVIDER);
+  });
+
+  it('the polarity check rejects a trailing negation that does not govern the sending', () => {
+    expect(norm('Your question is sent to a model provider, no setup needed.')).not.toMatch(NEGATED_PROVIDER);
+    // ...and accepts the negated forms that have shipped.
+    expect(norm('Nothing you type here is sent to a model provider.')).toMatch(NEGATED_PROVIDER);
+    expect(
+      norm('Nothing you type, and nothing shown on any screen here, is sent to a model provider.'),
+    ).toMatch(NEGATED_PROVIDER);
   });
 
   it('the provider-implying ratchet fires on a planted "coming soon"', () => {

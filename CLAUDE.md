@@ -424,6 +424,69 @@ For this project, the risk-tiered orchestration policy is:
 
 ## 11. Current Phase Context
 
+- **2026-11-02 — standing disclaimers retired at the owner's direction** (Krish: "remove all
+  those things that say 'ISAAC never does this', 'this is all local first', 'this isn't a
+  plugged-in online thing, it's just a demo'"). Retired from the web app's shell, and the test
+  that now pins **"no false claim"** in place of "this sentence is present" (polarity checks,
+  negative controls on the exact retired strings, and preconditions kept):
+  - the mode chip on the ordinary scope (`Workspace`), its accessible-name disclosure
+    (`file upload is refused, and no official institutional record is shown`, the scope
+    clauses, the test-DB diagnostic) and its hover popover — the chip now renders only in a
+    worked-example session or for an anomalous `health.mode`: `mode-chip.test.tsx`, the chip
+    blocks of `db-recon-truthfulness.test.tsx`, `e2e/specs/{tutorial,workspace-scope}.spec.ts`;
+  - `ASSISTANT_NO_MODEL_CLAIM` and `SUBORDINATE_CAPTION` on all five Assistant mounts, and
+    "Assistant (advisory)": `assistant-model-claim-parity.test.tsx` (no copy implies a model or
+    provider; no product surface calls the assistant seam);
+  - the left-nav `isaac v0.1.0 · local dev` badge and the footer `local dev · no telemetry`:
+    `hosted-truthfulness.test.tsx` (no environment badge, and no source carries either literal);
+  - Help's "Synthetic workspace" section and its "About this deployment" paragraph, and the
+    file-reader/upload-route sentences in "Where values come from":
+    `db-recon-truthfulness.test.tsx` §9 and §13–14, `help-claim-parity.test.tsx` §2/§5,
+    `upload-claim-parity.test.tsx` §1–§6 (§2 is now all-or-nothing), `help-and-honesty.test.tsx`;
+  - "This prototype reads only server-derived truth…" (×6) on every error state, and the
+    Reset dialog's "Real data is unaffected — this workspace runs in synthetic-only mode…":
+    `backend-down-state.test.tsx` ("error copy — the retired prototype sentence does not
+    return": every branch of the error table, hosted and local, plus the FetchStates source,
+    with a control on the exact retired sentence), `reset-demo.test.tsx` (no whole-content
+    claim);
+  - Settings → Privacy & Governance (the twelve concept cards, the governance-policy rows),
+    the Overview "Data Safety" card, "No API Keys in This Build" and its rows, Connect Your
+    Agent's "Requires Organization Configuration" and its endpoint/activity/revocation
+    paragraphs, the companion's limits, the Load Materials "Can I Load My Own Files?"
+    widget, "Try an Upload" and the GovernanceBanner: `db-recon-truthfulness.test.tsx`
+    §7–§13 (bans over `?tab=privacy`, now Overview, and over the Data card's rows on every
+    persistence arm), `upload-claim-parity.test.tsx` (§2 all-or-nothing over the same
+    sites), `hosted-truthfulness.test.tsx` (verified-edge and content-classification bans
+    over every source), `connect-your-agent.test.tsx` and `settings-api.test.tsx` (no
+    connected state, no key, no disabled control), `reset-claim-parity.test.tsx` (the
+    categorical ban over the Data card). `?tab=privacy` is an alias of Overview.
+  - Home, Historical Import, Memory and the walkthrough: My Experiments' storage footer
+    ("…saved in this deployment's database…" / "…cleared when the server restarts"; only
+    the failure state still speaks): `create-experiment.test.tsx` (`DURABILITY_PROMISE`,
+    with a control on both retired lines) and `e2e/specs/workspace-scope.spec.ts`; the
+    tutorial banner's "New here?" lead and pitch line; Historical Import's
+    `filesNotReadableHelp`, "deterministic and offline: no language model is involved",
+    "not sent to ISAAC" and the other §9 "this build" caveats: `historical-import.test.tsx`
+    (`MODEL_IMPLIED`, with an AI-sentence control), `import-file-staging.test.tsx`,
+    `upload-claim-parity.test.tsx` §1; Memory's "Graphify is a memory plane…", the long
+    intro, "Project Memory is advisory … never a verdict", the graph's `:853` "Navigation
+    leads to verify…" line and the unavailable panel's two-conditions and "Future path"
+    paragraphs: `memory-graph.test.tsx` (exactly one "leads to verify" on the route),
+    `graph-help-concision.test.tsx`, `memory-status.test.tsx`, `diagnostics.test.tsx`; the
+    walkthrough steps' "nothing here is a score…", "nothing you do here reaches an
+    institutional system", "it says so plainly" (false once Settings stopped saying it) and
+    "there is no account behind it": `tutorial-flow.test.tsx` (bans, with a control on each
+    retired sentence).
+  The backend contract, `mode: synthetic-only`, and `apps/api/tests/test_backend_copy_truthfulness.py`'s
+  mirror of `FLAT_WHOLE_APP_CLAIM` / `DIAGNOSTIC_CLAIMS` / `QUALIFICATION` / `CAPABILITY_STATEMENT`
+  are unchanged. Do not restore a retired sentence to satisfy an older note below.
+  **One premise re-opened, stated plainly:** `docs/ai-integration-decision-packet.md` §3 justified
+  surfacing no assistant-seam status by the panel saying there is no language model. With
+  `ASSISTANT_NO_MODEL_CLAIM` retired, the panel no longer says so — that mitigation is ABSENT
+  again (the packet's "It exists now" paragraph carries a dated note). No product surface claims a
+  model either way: `assistant-model-claim-parity.test.tsx` §1/§4 ban any copy implying one, and
+  §5 ("no product surface calls the assistant seam") is now the only guard on the §3 decision.
+
 Current state:
 
 - The deterministic truth/export/validation/audit core and the synthetic XANES draft→export→sidecar→audit flow are in place and passing.
@@ -506,8 +569,10 @@ Current state:
   - **Three claims that were FALSE and are now scoped, not deleted.** Governance & Safety and Load
     Materials asserted *"no file is read, parsed, or inspected"* while `RecordValidator` (one tab
     away) and `CsvReconcilePanel` read and POST a chosen file. The refusal claim is true of
-    `POST /api/uploads` only. `__tests__/upload-claim-parity.test.tsx` pins all three sites — and
-    pins **polarity**, because its first version passed an inverted disclosure.
+    `POST /api/uploads` only. ~~`__tests__/upload-claim-parity.test.tsx` pins all three sites~~ —
+    superseded 2026-11-02, see §11 "2026-11-02 — standing disclaimers retired": a site may now say nothing; if it states the refusal it
+    must state all of it — and the file still pins
+    **polarity**, because its first version passed an inverted disclosure.
   - **`VerdictCard` no longer renders `isaac validate --official · exit N`.** No CLI is ever
     invoked; `exitCode` was a client-side literal. Do not reintroduce a command transcript.
   - **`export.transform` guards `series` with `is not None`, not truthiness.** The old falsy guard
@@ -541,7 +606,9 @@ Current state:
     workspace, own dev server, `workers: 1`, `retries: 0`. Do NOT fold it into the read-only suite —
     that one asserts canonical seed CONTENT across five parallel projects and would break.
   - **Guided tutorial** with browser-local versioned completion; replay never calls
-    `POST /api/demo/reset`. ~~The mode chip reads **"Example workspace"** and its *accessible
+    `POST /api/demo/reset`. ~~The mode chip, its scope-dependent label and its accessible-name
+    claims, below~~ — superseded 2026-11-02, see §11 "2026-11-02 — standing disclaimers retired" (no chip on the ordinary scope; no
+    caveat in its name). ~~The mode chip reads **"Example workspace"** and its *accessible
     name* carries the three claims the word "Synthetic" used to carry.~~ — **corrected
     2026-09-09: the "Example workspace" literal was itself retired the very next day, in
     `709af2a4` ("feat(tutorial): rehome the reset into worked-example chrome; scope-truthful
@@ -876,11 +943,14 @@ Current state:
   `docs/ai-integration-decision-packet.md` §9. **Added 2026-08-25, so the next reader does not
   re-derive it:** §3's stated mitigation for surfacing no seam status — that the Assistant panel
   already says there is no language model — **was absent on the panel when §3 relied on it** (the
-  user-facing claim lived in Settings → AI & Automation, behind a tab), and now exists as
-  `ASSISTANT_NO_MODEL_CLAIM` rendered in the panel's dock on all five mounts, pinned together with
-  the §3 decision by `apps/web/src/__tests__/assistant-model-claim-parity.test.tsx`. It names no
+  user-facing claim lived in Settings → AI & Automation, behind a tab), and ~~now exists as
+  `ASSISTANT_NO_MODEL_CLAIM` rendered in the panel's dock on all five mounts~~ — superseded
+  2026-11-02, see §11 "2026-11-02 — standing disclaimers retired" — pinned together with
+  the §3 decision by `apps/web/src/__tests__/assistant-model-claim-parity.test.tsx`. ~~It names no
   seam, no provider and no decision, which is precisely why it closes §3's premise without
-  weakening the sentence above. Voice is the opposite case and must not be folded back
+  weakening the sentence above.~~ — superseded 2026-11-02: the claim was retired, so §3's
+  premise is OPEN again. The panel now says nothing about a model either way; §5 of that test
+  (no product surface calls the assistant seam) is the only remaining guard on the decision. Voice is the opposite case and must not be folded back
   in with it: `TranscriptCapturePanel` is a **shipped** voice surface, mounted ungated at
   `apps/web/src/screens/RecordWorkbench.tsx:687`, so any future sentence pairing "assistant and
   voice" as equally unsurfaced is wrong about the second half. See also the D6 supersession, which is
@@ -1732,7 +1802,10 @@ Current state:
   with `POST /api/transcription`'s unconstrained `audio_ref: str` as a live counterexample), and
   **the first widened guard caught 1 of 8 plausible rephrasings** — a one-word edit of the retired
   sentence walked straight through. Both were caught by review and re-measured: the ban now runs
-  over all five surfaces and catches **8 of 8**.
+  over all five surfaces and catches **8 of 8**. ~~(`voiceAudioHandling` as a required
+  disclosure site)~~ — superseded 2026-11-02, see §11 "2026-11-02 — standing disclaimers retired": the bans (`upload-claim-parity` §3–§5,
+  including the 8-of-8 probe over `CAPTURE_COPY`) stand; no surface is required to carry the
+  sentence.
 
   **`If-Match: *` IS ACCEPTED BY THE PROPOSAL CREATE AND REVIEW ROUTES — measured over HTTP, not
   read.** The contract claimed `409 wildcard_precondition_refused`; no wildcard refusal exists on

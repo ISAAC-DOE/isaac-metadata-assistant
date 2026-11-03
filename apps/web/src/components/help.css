@@ -173,26 +173,6 @@
   font-weight: var(--font-weight-semibold);
 }
 
-/* The Synthetic workspace section's own small disclosure: the mode token and
- * every bound of the diagnostic, together. */
-.help-inline-more {
-  margin-top: var(--space-xs);
-}
-.help-inline-more > summary {
-  cursor: pointer;
-  font-size: var(--font-size-body);
-  font-weight: var(--font-weight-medium);
-  color: var(--action);
-}
-.help-inline-more > summary:focus-visible {
-  outline: 2px solid var(--action);
-  outline-offset: 2px;
-  border-radius: var(--radius-token);
-}
-.help-inline-more[open] > p {
-  margin-top: var(--space-sm);
-}
-
 /* The Guided Walkthrough row — last, one control. */
 .help-walkthrough {
   display: flex;

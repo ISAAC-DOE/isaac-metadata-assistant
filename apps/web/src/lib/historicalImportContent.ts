@@ -153,8 +153,6 @@ export const IMPORT_COPY = {
     'Rebuild a past experiment’s metadata as suggestions you accept, correct or ' +
     'refuse — ISAAC reads one layout today and records any other file as a reference.',
 
-  /** The Imports widget's one-line description (the question it answers). */
-  landingSub: 'Each import is a working area for one past experiment’s files.',
   /** The inline name field's label, kept visible beside the control it names. */
   nameLabel: 'Name (optional)',
   namePlaceholder: 'e.g. Cu K-edge campaign, 2019',
@@ -232,22 +230,21 @@ export const IMPORT_COPY = {
 
   /** The parse step, before it has run. States what it will and will not do. */
   parseLead:
-    'Reading applies every reader this build has to every source that has one, and ' +
-    'reports what each source said and what it passed over. A line it could not read is ' +
-    'listed with the reason rather than dropped. Nothing about any record changes.',
+    'Reading applies each available reader to every source it fits, and reports what ' +
+    'each source said and what it passed over. A line it could not read is listed with ' +
+    'the reason rather than dropped.',
 
   /**
-   * THE RECONSTRUCTION, and what it is. "No language model is involved" is a
-   * statement about THIS operation and is measured: the provider is
-   * `deterministic_fake`, no provider is configured anywhere in this build, and
-   * every model seam answers `501`.
+   * THE RECONSTRUCTION, and what it does. ~~"It is deterministic and offline: no
+   * language model is involved, and no request leaves this deployment."~~ — cut
+   * 2026-11-02 (owner direction: no standing "ISAAC never does this" prose). What
+   * stays is how a key becomes a candidate, which is how a reader judges one.
+   * `historical-import.test.tsx` pins that the lead implies no model either way.
    */
   reconstructLead:
-    'Reconstruction reads what the sources said and proposes what they add up to. It is ' +
-    'deterministic and offline: no language model is involved, and no request leaves ' +
-    'this deployment. A key becomes a candidate for an official ISAAC field only when ' +
-    'the key IS that field’s path, exactly — there is no alias list and no ' +
-    'guessing, so every key it could not place is listed instead.',
+    'Reconstruction reads what the sources said and proposes what they add up to. A key ' +
+    'becomes a candidate for an official ISAAC field only when the key is that field’s ' +
+    'path, exactly, so every key it could not place is listed instead.',
 
   /**
    * THE BEAMLINE PROFILE. `BL15-002` is blocked, and the constraint that a
@@ -255,11 +252,8 @@ export const IMPORT_COPY = {
    * rather than only in the code.
    */
   profileNote:
-    'No beamline conventions are applied. A beamline profile would let the same source ' +
-    'be read the same way twice — filename patterns, column names, local terminology — ' +
-    'and this build’s profile is empty, because encoding a convention nobody has ' +
-    'measured would be inventing one. A profile is a reading aid either way and never ' +
-    'decides whether a value is valid: the official ISAAC schema does that.',
+    'No beamline conventions are applied. A profile is a reading aid; whether a value ' +
+    'is valid is decided by the official ISAAC schema.',
 
   /** Where sources disagree. Says what was NOT done, which is the useful part. */
   disagreementNote:
@@ -275,10 +269,7 @@ export const IMPORT_COPY = {
     'only when someone accepts it on that record.',
 
   /** Empty states. */
-  emptyTitle: 'No imports yet',
-  emptyBody:
-    'Start an import to assemble the files a past experiment is scattered across, see ' +
-    'what ISAAC can read out of them, and review what it thinks they say.',
+  emptyTitle: 'No imports yet.',
   emptySourcesBody:
     'Add the files this experiment is scattered across. A reference is a pointer to ' +
     'where a file lives; an example source is a file ISAAC ships so you can see the ' +
@@ -569,7 +560,7 @@ export const IMPORT_STAGE_COPY = {
   temperatureWhy: 'Why no temperature is filled in',
   peopleTitle: 'People Named in the Notes',
   peopleHelp:
-    'Recorded as provenance only. A person is never the reason a file is read one way or another, and is never the actor of anything in ISAAC.',
+    'Recorded as provenance only.',
   signalTitle: 'HERFD Signal',
   signalHelp:
     'Per run, ISAAC suggests a primary channel only when exactly one carries live signal and one element is established. A suggestion is never a decision.',
@@ -604,7 +595,7 @@ export const IMPORT_STAGE_COPY = {
     forbidden:
       'Both acquisitions are kept, and nothing will be chosen: nobody can say which one is right.',
     fixtureOnly:
-      'This build records a choice between readings for archive imports only. Enter the value on the record yourself.',
+      'A choice between readings is recorded for archive imports only. Enter the value on the record yourself.',
   },
   rulesTitle: 'Reading Rules',
   rulesHelp:
@@ -615,7 +606,7 @@ export const IMPORT_STAGE_COPY = {
   confirmedBy: 'Confirmed by',
   /* ~~'Unattributed'~~ (2026-10-18, QA `C-23`): the wire's sentinel, shown as a word. What
      it means is said instead; the sentinel is still what the server records. */
-  unattributed: 'not recorded — this build cannot yet identify who confirms a rule',
+  unattributed: 'not recorded',
   /* The owner's own three phrases (QA H1). A rule for an Experiment or a convention
      is stored on the Experiment chosen just below, so "this" is that one. */
   scopeOptions: {
@@ -631,7 +622,7 @@ export const IMPORT_STAGE_COPY = {
     'A rule for an experiment or a convention is kept on a record, and this workspace has none yet.',
 
   bindingTitle: 'Read Some Runs With Another Convention',
-  bindingOne: 'One naming convention is registered in this build, so there is nothing to switch to.',
+  bindingOne: 'Only one naming convention is registered.',
   bindingSubmit: 'Record This Convention',
   signalConfirm: 'Confirm This Channel',
   /* 2026-10-18 (QA `C-26`): said where the reader pressed it, not only in a live region. */
@@ -661,10 +652,10 @@ export const IMPORT_STAGE_COPY = {
   /* RETIRED from the report 2026-10-18 (QA `C-17`): `acceptanceBefore` says it once,
      before a send. Kept so a test can assert the report no longer repeats it. */
   acceptanceNote:
-    'Accepting a proposal needs a reviewer this deployment can identify, and it cannot identify one yet. The proposals stay open on the record until it can.',
+    'Accepting a proposal needs a reviewer the server can identify. The proposals stay open on the record until then.',
   /* 2026-10-18 (QA `C-17`): the same fact, said BEFORE sending rather than only after. */
   acceptanceBefore:
-    'Sending works, and accepting does not yet: accepting a proposal needs a reviewer this deployment can identify, and it cannot identify one. Sent proposals stay open on the record until it can.',
+    'Accepting a proposal needs a reviewer the server can identify, so sent proposals stay open on the record until then.',
   /* 2026-10-18 (QA `C-25`): the report's counts, worded so they agree with each other. */
   /* ~~"N proposals on this record"~~ (review, 2026-10-18): it counts only THIS send. */
   sentNow: (n: number) => `${n.toLocaleString('en-US')} sent now`,
@@ -701,10 +692,10 @@ export const IMPORT_STAGE_COPY = {
   techniqueNeedsRecord: 'It is set on the record chosen above — choose one, or make one there, first.',
   /* 2026-10-18 (QA `C-16`): what this deployment can read, said where files are chosen. */
   filesTitle: 'Files From This Computer',
-  filesNotReadable:
-    'Not readable here — a file you choose is recorded by name and size only.',
-  filesNotReadableHelp:
-    'Real files are read only from a staging area on the server, which an operator turns on. It is off in this deployment, so ISAAC never receives a file you choose here — only its name, size and type, and a checksum if you compute one in your browser.',
+  filesNotReadable: 'A file you choose here is recorded by name and size only.',
+  /* ~~filesNotReadableHelp~~ ("Real files are read only from a staging area on the
+     server… It is off in this deployment, so ISAAC never receives a file you choose
+     here…") — REMOVED 2026-11-02 (owner direction): the line above is the fact. */
   filesReadable:
     'Files an operator staged on the server are listed under Add an Archive. A file you choose here is still recorded by name and size only.',
   filesTryExample: 'To see the whole workflow, add the example archive:',

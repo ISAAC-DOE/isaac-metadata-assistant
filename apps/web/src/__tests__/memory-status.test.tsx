@@ -60,12 +60,14 @@ describe('P24.10 · status card — available, fully current', () => {
 
     await findByText('Memory Available');
 
-    // counts come only from the API overview
+    // counts come only from the API overview. "How Big Is It?" states THREE
+    // figures since 2026-11-02 — files, nodes, concepts — each a link to its tab;
+    // edges and communities are graph detail, stated on the Graph tab and in
+    // Statistics, not restated here.
     expect(getByText('2296')).toBeInTheDocument();
-    expect(getByText('3447')).toBeInTheDocument();
-    expect(getByText('214')).toBeInTheDocument();
     expect(getByText('190')).toBeInTheDocument(); // "Served Files (Path Set)" = file_count
     expect(getByText('19')).toBeInTheDocument();
+    expect(container.querySelector('.memory-size-figures')?.textContent ?? '').not.toMatch(/3447|214/);
 
     // the three separated axes, each individually honest
     expect(getByText('Snapshot Integrity')).toBeInTheDocument();
@@ -123,7 +125,6 @@ describe('P24.10 · status card — pre-regen snapshot (available, currency not 
 
     // available → real counts render ("Served Files (Path Set)" = file_count = 9)
     expect(getByText('42')).toBeInTheDocument();
-    expect(getByText('17')).toBeInTheDocument();
     expect(getByText('9')).toBeInTheDocument();
     expect(getByText('3')).toBeInTheDocument();
 
@@ -219,17 +220,16 @@ describe('P24.10 · status card — unavailable (no artifact present)', () => {
     const { findByText, container } = renderScreen();
 
     await findByText('Memory Unavailable');
-    expect(
-      await findByText(/no memory graph artifact was found where this build reads it/i),
-    ).toBeInTheDocument();
-    // The verifiable fact: the artifacts ARE shipped.
-    expect(container.textContent).toMatch(/ships its memory artifacts with the application/i);
-    // Two possible conditions, neither asserted — no signal separates them.
-    expect(container.textContent).toMatch(/cannot tell which of two conditions applies/i);
-    expect(container.textContent).toMatch(/not included in this build/i);
-    expect(container.textContent).toMatch(
-      /configured to read a memory source that is not present/i,
-    );
+    /*
+     * ONE LINE SINCE 2026-11-02 (owner direction: no standing caveat or roadmap
+     * prose). The two-conditions paragraph and the "Future path" paragraph are
+     * retired. What survives is the honesty this test exists for: it says memory is
+     * unavailable, names no cause it cannot know, and brings none of the retired
+     * claims back.
+     */
+    expect(await findByText(/Project memory is unavailable — no memory graph was found/i)).toBeInTheDocument();
+    const panelText = container.querySelector('.memory-unavailable')!.textContent ?? '';
+    expect(panelText).not.toMatch(/because|was not included|is configured to|misconfigured/i);
     // The retired claims must not come back.
     expect(container.textContent).not.toMatch(/hosted demo does not currently ship/i);
     expect(container.textContent).not.toMatch(/Graphify graph artifacts/i);
@@ -239,9 +239,8 @@ describe('P24.10 · status card — unavailable (no artifact present)', () => {
     expect(container.querySelector('.memory-unavailable')!.textContent).not.toMatch(
       /\blocal\b|\blocally\b|localhost|uvicorn/i,
     );
-    // The forward-looking sentence is kept, with the corrected access vocabulary.
-    expect(container.textContent).toMatch(/pointed at a richer approved source/i);
-    expect(container.textContent).toMatch(/ISAAC manages no accounts or roles/i);
+    // The forward-looking "Future path" paragraph is retired with the rest.
+    expect(container.textContent).not.toMatch(/Future path/i);
 
     // no counts / figures rendered, and never the error/verdict visual language
     expect(container.querySelector('.memory-figures')).toBeNull();

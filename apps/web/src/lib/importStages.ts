@@ -669,7 +669,7 @@ export const UNSENT_CATEGORY_LABELS: Readonly<Record<UnsentCategory, string>> = 
   whole_import: 'Stated for the whole import — send each to the run you mean, from Review',
   local_time: 'Local times with no time zone — never sent to a UTC field',
   no_field: 'No field in the official schema takes them — kept as evidence',
-  no_write_route: 'Official fields this build has no write route for',
+  no_write_route: 'Official fields with no write route',
   needs_decision: 'Need a decision before they can go forward',
   needs_a_run: 'Need a run to belong to',
   other: 'Could not be sent',

@@ -15,6 +15,13 @@ import {
   memoryConceptDetailWithLeads,
 } from '../test/apiFixtures';
 
+/** The canvas scale, as the retired visible readout read ("zoom N%"). The readout
+ *  was dropped from the screen 2026-11-02; `.graph-explore` carries the scale as
+ *  `data-zoom`, so the viewport assertions below still measure the same thing. */
+const zoomReadout = (root: ParentNode) =>
+  `zoom ${root.querySelector('.graph-explore')?.getAttribute('data-zoom') ?? '?'}%`;
+
+
 /*
  * The Project Memory "Graph" tab — a deterministic, capped, served-file
  * REFERENCE projection from GET /api/memory/graph.
@@ -201,18 +208,19 @@ describe('Graph tab — counts and disclosure', () => {
     expect(view.queryByRole('dialog')).toBeNull();
     // …but every statement is in the document.
     const text = card.textContent ?? '';
-    expect(text).toMatch(/does not represent scientific truth or causality/);
     expect(text).toMatch(/3 files/);
     expect(text).toMatch(/2 concepts/);
     expect(text).toMatch(/served-file reference projection only, never the full source graph/);
     expect(text).toMatch(/Not scientific relationships, and not causality/);
 
-    // ONE short clause is VISIBLE on the card, outside the hidden disclosure.
-    const visible = card.querySelector('.memory-graph-boundary') as HTMLElement;
-    expect(visible).not.toBeNull();
-    expect(visible.closest('[hidden]')).toBeNull();
-    expect(visible.textContent).toMatch(/leads? to verify/i);
-    expect(visible.textContent).toMatch(/not .*truth/i);
+    // ~~ONE short clause is VISIBLE on the card~~ — cut 2026-11-02 (declutter): it
+    // restated the page lead, which is now the route's ONE visible "verify, not
+    // truth" statement. Pinned here so the duplicate does not come back.
+    expect(card.querySelector('.memory-graph-boundary')).toBeNull();
+    const lead = view.container.querySelector('.memory-intro') as HTMLElement;
+    expect(lead.closest('[hidden]')).toBeNull();
+    expect(lead.textContent).toMatch(/leads to verify, not truth/);
+    expect((view.container.textContent ?? '').match(/leads to verify/g) ?? []).toHaveLength(1);
 
     // And the hidden body is what opens: same node, now exposed as the dialog.
     openHelp(view);
@@ -238,7 +246,9 @@ describe('Graph tab — counts and disclosure', () => {
     expect(text).toMatch(/2988 nodes/);
     expect(text).toMatch(/4465 edges/);
     expect(text).toMatch(/257 clusters/);
-    expect(text).toMatch(/not embedded/i);
+    // ~~/not embedded/~~ — "It is not embedded in this deployment." was retired
+    // 2026-11-02 (owner direction); the counts above still say it is the source graph.
+    expect(text).not.toMatch(/not embedded in this deployment/i);
     expect(text).toMatch(/served-file reference projection only, never the full source graph/);
 
     // ...and all four layers, with the counts they carried on the surface.
@@ -506,11 +516,14 @@ describe('Graph tab — the default Explore view', () => {
     stubFetchRoutes(graphRoutes);
     const view = renderScreen();
     await view.findByText('Graph', { selector: 'h2' });
-    // 3 of the 5 fixture nodes carry no edge at all.
-    expect(view.container.textContent).toMatch(
-      /no recorded reference at all and sit on the outer rings/,
-    );
-    expect(view.container.textContent).toMatch(/not a relationship between them/);
+    // 2026-11-02: the ring sentence moved from under the canvas into About This
+    // Graph, which already said it — so it is explained, once, where the canvas's
+    // other marks are explained.
+    expect(view.container.querySelector('.graph-canvas-isolated')).toBeNull();
+    openHelp(view);
+    const dialog = view.getByRole('dialog', { name: 'About This Graph' });
+    expect(dialog.textContent).toMatch(/no recorded reference sit on the outer rings/);
+    expect(dialog.textContent).toMatch(/not a relationship\s+between them/);
   });
 });
 
@@ -574,7 +587,14 @@ describe('Graph tab — legend', () => {
     for (const swatch of legend.querySelectorAll('.graph-legend-swatch')) {
       expect(swatch).toHaveAttribute('aria-hidden', 'true');
     }
-    expect(legend.querySelector('.graph-legend-heading')?.textContent).toBe('Legend');
+    // The Legend is a closed chevron disclosure since 2026-11-02; its trigger
+    // carries the name, inside an <h3>, and the body is still in the DOM.
+    const disclosure = legend.closest('.memory-graph-legend') as HTMLElement;
+    expect(disclosure).not.toBeNull();
+    const trigger = disclosure.querySelector('.disclosure-trigger') as HTMLButtonElement;
+    expect(trigger.textContent).toBe('Legend');
+    expect(trigger.closest('h3')).not.toBeNull();
+    expect(trigger).toHaveAttribute('aria-expanded', 'false');
   });
 
   it('shows relationship types with readable labels, keeping the raw values visible', async () => {
@@ -654,7 +674,7 @@ describe('Graph tab — node selection and detail panel', () => {
     const detail = document.querySelector('.memory-graph-detail') as HTMLElement;
     expect(
       within(detail).getByText(
-        'This deployment does not carry the file itself — open it in the project to read it.',
+        'Open this file in the project to read it.',
       ),
     ).toBeInTheDocument();
     // `on_disk` says nothing about snapshot membership (R9) — this node IS in
@@ -796,14 +816,14 @@ describe('Graph tab — viewport', () => {
     const view = renderScreen();
     await view.findByText('Graph', { selector: 'h2' });
 
-    expect(view.container.textContent).toMatch(/zoom 100%/);
+    expect(zoomReadout(view.container)).toMatch(/zoom 100%/);
     fireEvent.click(view.getByRole('button', { name: 'Zoom in' }));
-    expect(view.container.textContent).toMatch(/zoom 125%/);
+    expect(zoomReadout(view.container)).toMatch(/zoom 125%/);
     fireEvent.click(view.getByRole('button', { name: 'Zoom out' }));
-    expect(view.container.textContent).toMatch(/zoom 100%/);
+    expect(zoomReadout(view.container)).toMatch(/zoom 100%/);
     fireEvent.click(view.getByRole('button', { name: 'Zoom in' }));
     fireEvent.click(view.getByRole('button', { name: 'Reset View' }));
-    expect(view.container.textContent).toMatch(/zoom 100%/);
+    expect(zoomReadout(view.container)).toMatch(/zoom 100%/);
   });
 
   it('fit changes the viewBox without changing the node set', async () => {
@@ -981,9 +1001,9 @@ describe('Graph tab — a11y', () => {
     node.focus();
 
     fireEvent.keyDown(node, { key: '+' });
-    expect(view.container.textContent).toMatch(/zoom 125%/);
+    expect(zoomReadout(view.container)).toMatch(/zoom 125%/);
     fireEvent.keyDown(node, { key: '-' });
-    expect(view.container.textContent).toMatch(/zoom 100%/);
+    expect(zoomReadout(view.container)).toMatch(/zoom 100%/);
     fireEvent.keyDown(node, { key: 'f' });
     expect(svg.getAttribute('viewBox')).not.toBe(initialViewBox);
     fireEvent.keyDown(node, { key: '0' });

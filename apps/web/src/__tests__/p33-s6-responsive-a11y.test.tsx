@@ -230,11 +230,22 @@ describe('RESP-1 · AssistantDrawer — dialog behaviour (viewport-independent)'
     expect(document.activeElement).toBe(trigger);
   });
 
-  it('honours a custom accessible label (Project Memory rail)', () => {
-    const { view, trigger } = renderDrawer('Assistant (advisory)');
-    expect(trigger.textContent).toContain('Assistant (advisory)');
+  // Project Memory used "Assistant (advisory)" here until 2026-11-02; every mount now
+  // takes the default "Assistant". The prop itself is still honoured.
+  it('honours a custom accessible label', () => {
+    const { view, trigger } = renderDrawer('Ask ISAAC');
+    expect(trigger.textContent).toContain('Ask ISAAC');
     fireEvent.click(trigger);
-    expect(view.getByRole('dialog', { name: 'Assistant (advisory)' })).toBeTruthy();
+    expect(view.getByRole('dialog', { name: 'Ask ISAAC' })).toBeTruthy();
+  });
+
+  it('keeps the label as the trigger’s accessible name when it is visually hidden on a phone', () => {
+    const { trigger } = renderDrawer();
+    const label = trigger.querySelector('.assistant-drawer-trigger-label');
+    expect(label?.textContent).toBe('Assistant');
+    // In the DOM and not aria-hidden, so the clipped label still names the button.
+    expect(label?.getAttribute('aria-hidden')).toBeNull();
+    expect(trigger.getAttribute('aria-label')).toBeNull();
   });
 });
 

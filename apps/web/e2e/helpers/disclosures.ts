@@ -185,35 +185,36 @@ export const WIDGET_INFO_PANELS: Readonly<Record<string, number>> = Object.freez
   /* Settings and Governance & Safety, MEASURED in Chromium on 2026-10-19 (the merge
      of #289 into the Settings branch), each read out of this helper's own failure
      ("mounts N widget info panel(s) … declares 0"):
-       settings (Overview)      3 — Data Safety, This Build, Guided Walkthrough
-       settings-privacy         0 — the four question widgets carry no info panel
-                                    (their definitions are Details; see
-                                    SETTINGS_DEFINITION_DISCLOSURES)
-       settings-api             2 — Connect Your Agent, API Access
-       settings-explorer        1 — Project Memory's launcher
+       settings (Overview)      2 — This Build, Guided Walkthrough (2026-11-02: the
+                                    Data card that replaced Data Safety has none)
+       ~~settings-privacy~~     retired 2026-11-02 with the tab
+       settings-api             0 — 2026-11-02: neither Integrations card has an info
+                                    panel any more (each is one state line + one
+                                    disclosure)
+       settings-explorer        0 — 2026-11-02: the launcher cards became one Related
+                                    Tools list
        validator                1 — the Standalone Validator
        schema-reference         1 — the Schema Reference
      `imports` is #290's Historical Import surface, measured in the same run and
      declared here so the merged branch's sweep is complete. */
-  settings: 3,
-  'settings-api': 2,
-  'settings-explorer': 1,
+  settings: 2,
   validator: 1,
   'schema-reference': 1,
   imports: 1,
   /* The pages slice (#291), MEASURED in Chromium on 2026-10-19 on the merged branch
      (`.widget-info` counted after load, the memory surfaces served a valid snapshot):
-       experiments-example  1 — What Needs Me? (the library widget renders only
-                                with rows, so the EMPTY `experiments` surface
-                                mounts 0 and keeps the default)
-       load                 2 — Try a Worked Example, Can I Load My Own Files?
+       ~~experiments-example  1 — What Needs Me?~~ — 0 since 2026-11-02: the
+                                library card became one row of filter chips
+                                beside search and sort, with no info panel, so
+                                it keeps the default like `experiments`
+       load                 1 — Guided Walkthrough (2026-11-02: the upload widget
+                                retired)
        memory               1 — Can I Trust the Snapshot? (How Big Is It? and
                                 Where Did It Come From? carry no info panel)
      `memory-graph` and `not-found` mount no widget, so they keep the default 0. The
      `HelpTip` info tips these pages also use are a different control (`.helptip`),
      not counted here. */
-  'experiments-example': 1,
-  load: 2,
+  load: 1,
   memory: 1,
 });
 
@@ -322,26 +323,47 @@ export const SETTINGS_CONCEPT_DISCLOSURES: Readonly<Record<string, number>> = Ob
    */
 });
 
+/* ~~SETTINGS_DEFINITION_DISCLOSURES~~ — removed 2026-11-02 (final review Minor 3): it
+   counted `.settings-grid-privacy` Details, which nothing renders since the Privacy &
+   Governance tab was retired, and so asserted 0 everywhere. */
+
 /**
- * How many widget Details disclosures holding the Privacy & Governance
- * DEFINITIONS each surface mounts — the successor of `SETTINGS_CONCEPT_DISCLOSURES`.
+ * How many of Settings' own secondary disclosures each surface mounts: This Build's
+ * `Runtime` rows (Overview) and Advanced's `Technical Details`. Both are the shared
+ * chevron `Disclosure` (`.disclosure.settings-runtime`, `.disclosure.settings-technical`),
+ * collapsed by default, and — unlike a widget Details — sit OUTSIDE `.widget-details`,
+ * so `openWidgetInfoAndViews` never presses them.
  *
- * The four question widgets each keep their concepts' full definitions (and the
- * governance policy's paragraphs) behind one `Full Definitions` Details, a
- * `button[aria-expanded]` over a `hidden` body. The nested `details.settings-more`
- * drawers stay CLOSED, unchanged — they were closed before too.
- *
- * ~~Opened here … Other widget Details, info panels and collapsible views on the
- * Settings tabs are NOT opened~~ — SUPERSEDED BY THE MERGE WITH #289 (2026-10-19):
- * `openWidgetInfoAndViews` now opens every widget info panel, every widget Details
- * and reveals every widget view on EVERY surface, Settings included, so the
- * coverage gap the struck sentence named is closed rather than merely named. This
- * map stays as a COUNT declaration only — the one thing that helper does not
- * assert for these four Details.
+ * Added 2026-11-02 (Task 2 review, Important 3). Before the declutter, Runtime was a
+ * widget view (revealed for the scan) and Technical Details an open card, so both
+ * were scanned. Collapsed and unopened, axe would skip their content — the Runtime
+ * Mode / Data Regime / Persistence rows and the full SHA, field names, endpoints and
+ * docs — and, with no baseline cell on these surfaces, no number would move. So the
+ * count is declared and each is opened before the scan, exactly like the prose
+ * disclosures above.
  */
-export const SETTINGS_DEFINITION_DISCLOSURES: Readonly<Record<string, number>> = Object.freeze({
-  'settings-privacy': 4,
+export const SETTINGS_PAGE_DISCLOSURES: Readonly<Record<string, number>> = Object.freeze({
+  settings: 1,
+  'settings-explorer': 1,
 });
+
+/**
+ * The Project Memory graph's two collapsed disclosures (2026-11-02, Task 3 review,
+ * Important 1): the **Query** toggle, whose command bar (input, Run, Syntax,
+ * Suggestions, history) is UNMOUNTED until pressed, and the **Legend**, a shared
+ * `Disclosure` whose body is `hidden`. Before the declutter both were always on
+ * the surface and scanned; unopened, axe would skip them, and `memory-graph`
+ * records no baseline cell, so no number would move.
+ *
+ * The Legend renders in EXPLORE mode only (Browse has no canvas marks to explain),
+ * and the graph opens in Browse at narrow widths (`graph-mode-follows-viewport`),
+ * so its expected count follows the mode actually on screen: 1 in Explore, 0 in
+ * Browse. Query is on the toolbar in both modes.
+ */
+export const MEMORY_GRAPH_DISCLOSURES: Readonly<Record<string, { query: number; legendInExplore: number }>> =
+  Object.freeze({
+    'memory-graph': { query: 1, legendInExplore: 1 },
+  });
 
 /**
  * Surfaces that MUST mount the COLLAPSED Asset References disclosure.
@@ -490,26 +512,63 @@ export async function openUnreachableDisclosures(page: Page, surfaceId: string):
     await expect(one).toHaveAttribute('open', '');
   }
 
-  /* The Privacy & Governance definitions — the four widget Details that replaced
-     the twelve rows above. DECLARED here, OPENED by `openWidgetInfoAndViews` below
-     (which presses every `.widget-details` trigger on every surface), so they are
-     not handled twice: this block only asserts the declared count, which is the
-     part that helper does not check — a definition widget that stopped mounting
-     would otherwise leave the scan without moving a number. */
-  const definitions = page.locator('.settings-grid-privacy .widget-details .disclosure-trigger');
-  const expectedDefinitions = SETTINGS_DEFINITION_DISCLOSURES[surfaceId] ?? 0;
-  const definitionCount = await definitions.count();
+  /* Settings' own secondary disclosures — see `SETTINGS_PAGE_DISCLOSURES`. Declared
+     count, opened by index, asserted open. */
+  const settingsDisclosures = page.locator(
+    '.disclosure.settings-runtime > .disclosure-trigger, .disclosure.settings-technical > .disclosure-trigger'
+  );
+  const expectedSettings = SETTINGS_PAGE_DISCLOSURES[surfaceId] ?? 0;
+  const settingsCount = await settingsDisclosures.count();
   expect(
-    definitionCount,
-    `surface "${surfaceId}" mounts ${definitionCount} Privacy & Governance definition ` +
-      `disclosures; SETTINGS_DEFINITION_DISCLOSURES in e2e/helpers/disclosures.ts declares ` +
-      `${expectedDefinitions}. A definition left closed here is exempt from every axe scan.`
-  ).toBe(expectedDefinitions);
+    settingsCount,
+    `surface "${surfaceId}" mounts ${settingsCount} Settings Runtime / Technical Details ` +
+      `disclosures; SETTINGS_PAGE_DISCLOSURES in e2e/helpers/disclosures.ts declares ` +
+      `${expectedSettings}. One left closed here has its whole content exempt from every axe ` +
+      'scan, and these surfaces record no baseline cell, so the loss would move no number.'
+  ).toBe(expectedSettings);
+  for (let i = 0; i < settingsCount; i++) {
+    const trigger = settingsDisclosures.nth(i);
+    if ((await trigger.getAttribute('aria-expanded')) !== 'true') await trigger.click();
+    await expect(trigger).toHaveAttribute('aria-expanded', 'true');
+  }
+
+  /* The memory graph's Query and Legend — see `MEMORY_GRAPH_DISCLOSURES`. */
+  const graph = MEMORY_GRAPH_DISCLOSURES[surfaceId] ?? { query: 0, legendInExplore: 0 };
+  const queryToggle = page.locator('.memory-graph-controls > .memory-graph-disclosure-btn', {
+    hasText: /^Query$/,
+  });
+  const queryCount = await queryToggle.count();
+  expect(
+    queryCount,
+    `surface "${surfaceId}" mounts ${queryCount} graph Query toggles; MEMORY_GRAPH_DISCLOSURES ` +
+      `declares ${graph.query}. The command bar is unmounted until Query is pressed, so an ` +
+      'unopened toggle exempts the whole bar from every axe scan.'
+  ).toBe(graph.query);
+  if (queryCount > 0) {
+    if ((await queryToggle.getAttribute('aria-expanded')) !== 'true') await queryToggle.click();
+    await expect(queryToggle).toHaveAttribute('aria-expanded', 'true');
+    await expect(page.locator('.graph-cmd-input')).toHaveCount(1);
+    // The bar's own Suggestions panel, so the scan covers what it covered before.
+    const suggestions = page.locator('.graph-cmd-commands-toggle[aria-expanded="false"]');
+    if ((await suggestions.count()) > 0) await suggestions.click();
+  }
+  const exploring =
+    (await page.locator('.memory-graph-modeswitch [role="radio"][aria-checked="true"]', { hasText: 'Explore' }).count()) > 0;
+  const legend = page.locator('.memory-graph-legend .disclosure-trigger');
+  const expectedLegend = exploring ? graph.legendInExplore : 0;
+  const legendCount = await legend.count();
+  expect(
+    legendCount,
+    `surface "${surfaceId}" mounts ${legendCount} graph Legend disclosures in ` +
+      `${exploring ? 'Explore' : 'Browse'} mode; MEMORY_GRAPH_DISCLOSURES declares ${expectedLegend}.`
+  ).toBe(expectedLegend);
+  for (let i = 0; i < legendCount; i++) {
+    const trigger = legend.nth(i);
+    if ((await trigger.getAttribute('aria-expanded')) !== 'true') await trigger.click();
+    await expect(trigger).toHaveAttribute('aria-expanded', 'true');
+  }
 
   await openWidgetInfoAndViews(page, surfaceId);
-  for (let i = 0; i < definitionCount; i++) {
-    await expect(definitions.nth(i)).toHaveAttribute('aria-expanded', 'true');
-  }
   await openDraftBlocks(page, surfaceId);
   await openAssetReferences(page, surfaceId);
   await openExtendedContext(page, surfaceId);

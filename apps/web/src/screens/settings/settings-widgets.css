@@ -35,37 +35,32 @@
 
 @container settings-panel (min-width: 720px) {
   .settings-grid-overview,
-  .settings-grid-privacy,
-  .settings-grid-integrations,
-  .settings-grid-advanced {
+  .settings-grid-integrations {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
-  .settings-grid-overview > .settings-widget-safety {
+  .settings-grid-overview > .settings-widget-data {
     grid-column: 1 / -1;
   }
 }
 
 @container settings-panel (min-width: 1080px) {
-  /* Overview: the safety question takes the left two thirds, the walkthrough
-     sits under it, and This Build — the tallest of the three, with its views and
-     Copy Diagnostics — holds the right third across both rows. */
+  /* Overview: Data takes the left two thirds, the walkthrough sits under it, and
+     This Build — the tallest of the three, with Copy Diagnostics — holds the
+     right third across both rows. */
   .settings-grid-overview {
     grid-template-columns: repeat(3, minmax(0, 1fr));
     grid-template-areas:
-      'safety safety build'
+      'data data build'
       'walk walk build';
   }
-  .settings-grid-overview > .settings-widget-safety {
-    grid-area: safety;
+  .settings-grid-overview > .settings-widget-data {
+    grid-area: data;
   }
   .settings-grid-overview > .settings-widget-build {
     grid-area: build;
   }
   .settings-grid-overview > .settings-widget-walkthrough {
     grid-area: walk;
-  }
-  .settings-grid-advanced {
-    grid-template-columns: repeat(4, minmax(0, 1fr));
   }
 }
 
@@ -84,10 +79,6 @@
    its pill variant are retired. */
 
 /* ---- state lines ----------------------------------------------------------- */
-
-.settings-state-heading {
-  margin: 0;
-}
 .settings-state-line {
   margin: 0;
   max-width: 68ch;
@@ -106,30 +97,21 @@
 /* The one boundary the agent widget keeps visible. A STATEMENT, not a control
    (2026-10-18, review: the hairline box with a shield read as a button): no box,
    no fill — a shield beside a bold line, at the body's own measure. */
-.settings-boundary {
-  display: flex;
-  align-items: center;
-  gap: var(--space-xs);
-}
-.settings-boundary-icon {
-  flex: none;
-  color: var(--text-slate);
-}
-.settings-boundary-heading {
-  margin: 0;
-  font-size: var(--font-size-body);
-  font-weight: var(--font-weight-semibold);
-  line-height: var(--line-height-snug);
-  color: var(--text-strong);
-}
 
-/* ---- rows: Data Safety's state lines ------------------------------------- */
+/* ---- rows: the Data card's four facts --------------------------------------
+   Two by two from 700px (review Minor 8, 2026-11-02): an auto-fit row put three
+   facts on one line and orphaned the fourth at 1280px. One column below. */
 
 .settings-rows {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(min(100%, 16rem), 1fr));
+  grid-template-columns: minmax(0, 1fr);
   gap: var(--space-md) var(--space-xl);
   margin: 0;
+}
+@media (min-width: 700px) {
+  .settings-rows {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
 }
 .settings-row {
   min-width: 0;
@@ -176,41 +158,7 @@
 
 /* ---- rows: a boundary's state, visible ------------------------------------- */
 
-.settings-points {
-  display: flex;
-  flex-direction: column;
-  gap: var(--space-md);
-}
-.settings-point + .settings-point {
-  padding-top: var(--space-md);
-  border-top: 1px solid var(--border-faint);
-}
-.settings-point-heading {
-  margin: 0;
-  font-size: var(--font-size-body);
-  font-weight: var(--font-weight-semibold);
-  line-height: var(--line-height-snug);
-  color: var(--text-heading);
-}
-.settings-point-text {
-  margin: var(--space-xs) 0 0;
-  max-width: 72ch;
-  font-size: var(--font-size-body);
-  line-height: var(--line-height-normal);
-  color: var(--text-secondary);
-}
-
 /* ---- Details: definitions, Q&A, capability lists --------------------------- */
-
-.settings-definitions,
-.settings-qa {
-  display: flex;
-  flex-direction: column;
-  gap: var(--space-lg);
-  padding-top: var(--space-sm);
-}
-.settings-definition-heading,
-.settings-qa-heading,
 .settings-view-heading {
   margin: 0;
   font-size: var(--font-size-body);
@@ -218,10 +166,7 @@
   line-height: var(--line-height-snug);
   color: var(--text-heading);
 }
-.settings-definition-text,
-.settings-qa-item p,
-.settings-view-lead,
-.settings-view-note {
+.settings-view-lead {
   margin: var(--space-xs) 0 0;
   max-width: 72ch;
   font-size: var(--font-size-body);
@@ -238,9 +183,6 @@
 .settings-companion > .settings-view-heading:first-child,
 .api-connect-bare > .settings-view-heading:first-child {
   margin-top: 0;
-}
-.settings-qa-item .settings-jump-btn {
-  margin-top: var(--space-sm);
 }
 
 .settings-defs {
@@ -290,6 +232,75 @@
   display: inline-flex;
   align-items: center;
   gap: var(--space-2xs);
+}
+
+/* Advanced → Related Tools (2026-11-02): one link list instead of three launcher
+   cards, with Technical Details as a bare `<details>` beneath it. */
+.settings-related {
+  display: grid;
+  gap: var(--space-sm);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.settings-related-item {
+  display: grid;
+  gap: var(--space-2xs);
+}
+.settings-related-sub {
+  font-size: var(--font-size-body);
+  line-height: var(--line-height-normal);
+  color: var(--text-secondary);
+}
+
+/* The quiet disclosures this page uses for secondary detail: This Build's Runtime
+   rows and Advanced's Technical Details — both the shared chevron `Disclosure`
+   since 2026-11-02, drawn without its own frame. */
+.settings-runtime,
+.settings-technical {
+  margin-top: var(--space-md);
+  font-size: var(--font-size-body);
+}
+.settings-runtime.disclosure,
+.settings-technical.disclosure {
+  border: 0;
+  background: transparent;
+}
+.settings-runtime > .disclosure-trigger,
+.settings-technical > .disclosure-trigger {
+  width: auto;
+  min-height: 0;
+  padding: var(--space-2xs) 0;
+  color: var(--action);
+}
+.settings-runtime > .disclosure-trigger:hover,
+.settings-technical > .disclosure-trigger:hover {
+  background: transparent;
+  color: var(--action-hover);
+}
+.settings-runtime > .disclosure-trigger .disclosure-chevron,
+.settings-technical > .disclosure-trigger .disclosure-chevron {
+  color: currentColor;
+}
+.settings-runtime > .disclosure-body > dl,
+.settings-technical > .disclosure-body > dl {
+  margin-top: var(--space-sm);
+}
+
+/* Integrations: the reference sections, in sequence inside one disclosure. */
+.settings-sequence {
+  display: grid;
+  gap: var(--space-lg);
+}
+.settings-sequence-item > :first-child {
+  margin-top: 0;
+}
+.settings-sequence-anchor:focus {
+  outline: none;
+}
+.settings-agent-endpoint {
+  margin: var(--space-2xs) 0 0;
+  overflow-wrap: anywhere;
 }
 
 /* ---- the Endpoint Explorer, full width ----------------------------------------
@@ -356,7 +367,6 @@
   display: none;
 }
 
-
 /* The Guided Walkthrough: the state and the replay control on one row. */
 .settings-walkthrough-action {
   margin: 0 0 0 auto;
@@ -377,48 +387,53 @@
   flex: 0 0 auto;
 }
 
-/* ---- the page tab row at a narrow width -------------------------------------
-   At 390px the four full labels wrapped onto two rows. Below 600px "Privacy &
-   Governance" shows its short form; the tab's name is its `sr-only` full label at
-   every width, so it never changes with the viewport.
+/* ---- the page tab row: ONE row, scrolling sideways when it overflows ---------
+   RULED 2026-11-02 (Task 2 review, Important 4): do not rely on the three tabs
+   FITTING at 320px. On CI's wider DejaVu/Liberation face the measured slack on this
+   host (5.5px) disappears, so the row is a single line at every width that scrolls
+   INSIDE its own box when it does not fit (`ALLOW-SETTINGS-TABS-SCROLL` in
+   e2e/layout-allowlist.ts) — the page itself never scrolls. Every tab is a real
+   button reached by the arrow keys (roving tabindex), focus scrolls the row, and
+   `SettingsSectionTabs` scrolls the selected tab into view on every change.
 
-   ~~If a narrower screen still cannot fit it, it scrolls sideways, with a fade~~ —
-   RETIRED 2026-10-18: CI's layout sweep forbids any region that scrolls sideways,
-   and on CI's font (a wider DejaVu/Liberation face than this host's) the
-   single-row tabs measured ~317px against a 312px box at 390 and a 297px one at
-   375. So the four tabs now FIT, by construction rather than by margin:
-     · 441–600px: one row, short label, tighter padding — ~317px of CI-font
-       content in a box of at least ~363px;
-     · ≤440px: two rows of two (a 2 x 2 grid), so each tab gets half the box —
-       at 320px ~121px a cell against "Integrations"' ~101px on CI's font.
-   Nothing scrolls, nothing is hidden, and no selected tab can be off-screen. */
+   The row's rule moves from `border-bottom` to an inset shadow, and the tabs drop
+   their `-1px` overlap: a scroll container clips anything painted outside its
+   padding box, which would have cut the selected tab's underline in half.
+
+   ~~441–600px: one row, short label… ≤440px: two rows of two~~ — history, kept in
+   git; the short-label machinery has no tab using it since the fourth tab went. */
 .section-tab-label-short {
   display: none;
 }
+.settings-section-tabs {
+  position: relative;
+  flex-wrap: nowrap;
+  overflow-x: auto;
+  overflow-y: hidden;
+
+  scrollbar-width: thin;
+  border-bottom: 0;
+  box-shadow: inset 0 -1px 0 var(--border-faint);
+}
+.settings-section-tabs .section-tab {
+  flex: none;
+  margin-bottom: 0;
+  white-space: nowrap;
+}
+/* THE FOCUS RING STAYS INSIDE THE ROW (final review I-3). A scroll container clips
+   at its padding box, and the shared `:focus-visible` outline sits 2px OUTSIDE the
+   tab, so the ring was cut on all four sides of the row. Inset by its own width it
+   is drawn wholly within the tab — visible at every width, with no padding that
+   would push the active underline off the row's rule or widen the row at 320px. */
+.settings-section-tabs .section-tab:focus-visible {
+  outline-offset: -2px;
+}
 @media (max-width: 600px) {
   .settings-section-tabs {
-    flex-wrap: nowrap;
     gap: 0;
   }
   .settings-section-tabs .section-tab {
-    flex: none;
     padding-inline: var(--space-sm);
-    white-space: nowrap;
-  }
-  .settings-section-tabs .section-tab-label-full {
-    display: none;
-  }
-  .settings-section-tabs .section-tab-label-short {
-    display: inline;
-  }
-}
-@media (max-width: 440px) {
-  .settings-section-tabs {
-    display: grid;
-    grid-template-columns: repeat(2, minmax(0, 1fr));
-  }
-  .settings-section-tabs .section-tab {
-    text-align: left;
   }
 }
 

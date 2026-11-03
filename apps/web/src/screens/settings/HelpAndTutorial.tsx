@@ -103,19 +103,6 @@ export function HelpAndTutorialPanel() {
             walkthrough ends. Your own work is not touched: no field of yours is answered, no record
             of yours is exported, and nothing of yours is restored or removed.
           </p>
-          <p>
-            Whether you have finished the walkthrough is remembered by this browser only — this
-            build has no account to file it under — so another browser, another device, or a cleared
-            browser will be offered it again. While a walkthrough is open, this tab also holds which
-            worked example it is using and which step you reached, so a reload puts you back where
-            you were. Both are forgotten when the walkthrough ends — with one deliberate exception: if
-            the check this tab makes on a walkthrough you had open fails for a reason it cannot
-            identify, that note is kept, because discarding it would throw away your only route back
-            into a walkthrough that may still be open. Nothing else about the walkthrough is stored:
-            neither of those two entries holds record content, a field value, or an identity. What
-            the assistant panel keeps is separate and is described under {LABELS.navSettings} &rarr;
-            Privacy &amp; Governance.
-          </p>
         </>
       }
       infoLabel={`About the ${LABELS.settingsTabHelp}`}

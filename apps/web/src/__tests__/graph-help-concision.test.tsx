@@ -9,6 +9,13 @@ import {
   memoryGraphAvailable,
 } from '../test/apiFixtures';
 
+/** The canvas scale, as the retired visible readout read ("zoom N%"). The readout
+ *  was dropped from the screen 2026-11-02; `.graph-explore` carries the scale as
+ *  `data-zoom`, so the viewport assertions below still measure the same thing. */
+const zoomReadout = (root: ParentNode) =>
+  `zoom ${root.querySelector('.graph-explore')?.getAttribute('data-zoom') ?? '?'}%`;
+
+
 /*
  * P36V.1 Unit G Slice 10 — About This Graph as IN-PRODUCT HELP.
  *
@@ -163,8 +170,11 @@ describe('About This Graph — the first screenful orients, it does not document
     const text = (dialog.textContent ?? '').replace(/\s+/g, ' ');
     // One callout element, and one occurrence of the authority sentence.
     expect(dialog.querySelectorAll('.graph-help-note').length).toBe(1);
-    expect(text.match(/authorises an export/g) ?? []).toHaveLength(1);
-    expect(text.match(/Project Memory is advisory/g) ?? []).toHaveLength(1);
+    // 2026-11-02 (owner direction): the "Project Memory is advisory … never a
+    // verdict … authorises an export" paragraph is retired; the page lead says
+    // "leads to verify, not truth" once. Pinned so it does not return here.
+    expect(text.match(/authorises an export/g) ?? []).toHaveLength(0);
+    expect(text.match(/Project Memory is advisory/g) ?? []).toHaveLength(0);
   });
 });
 
@@ -174,10 +184,11 @@ describe('About This Graph — concision never buys itself a caveat', () => {
   it('keeps the non-authority statement visible in the first screenful', async () => {
     const { dialog } = await openHelp();
     const visible = visibleText(dialog);
-    expect(visible).toContain('Project Memory is advisory');
-    expect(visible).toContain('it returns leads to verify, never a verdict');
-    expect(visible).toContain('authorises an export');
-    expect(visible).toContain('the official schema and the deterministic validators');
+    // The advisory paragraph was retired 2026-11-02. What stays visible in the first
+    // screenful is the boundary note's structure/content statement, and the "what
+    // this graph is not" list — neither behind a disclosure.
+    expect(visible).toContain('Not scientific relationships, and not causality');
+    expect(visible).toContain('two separate axes');
     // Not inside any <details>, in the real DOM.
     const note = dialog.querySelector('.graph-help-boundary') as HTMLElement;
     expect(note.closest('details')).toBeNull();
@@ -359,12 +370,12 @@ describe('About This Graph — every documented key is a key the canvas honours'
       ['_', 'zoom 100%'],
     ] as const) {
       fireEvent.keyDown(svg(), { key });
-      await waitFor(() => expect(view.container.textContent).toContain(expected));
+      await waitFor(() => expect(zoomReadout(view.container)).toContain(expected));
     }
     fireEvent.keyDown(svg(), { key: '+' });
-    await waitFor(() => expect(view.container.textContent).toContain('zoom 125%'));
+    await waitFor(() => expect(zoomReadout(view.container)).toContain('zoom 125%'));
     fireEvent.keyDown(svg(), { key: '0' });
-    await waitFor(() => expect(view.container.textContent).toContain('zoom 100%'));
+    await waitFor(() => expect(zoomReadout(view.container)).toContain('zoom 100%'));
     const beforeFit = box();
     fireEvent.keyDown(svg(), { key: 'f' });
     await waitFor(() => expect(box()).not.toBe(beforeFit));
@@ -390,6 +401,10 @@ describe('About This Graph — every documented key is a key the canvas honours'
 
     // The command-bar keys: ↑ recalls, Tab accepts a completion, Esc closes the
     // list and then clears the input.
+    // The command bar is behind the graph's "Query" disclosure (2026-11-02).
+    if (!view.queryByRole('combobox', { name: 'Graph command' })) {
+      fireEvent.click(view.getByRole('button', { name: 'Query' }));
+    }
     const bar = view.getByRole('combobox', { name: 'Graph command' }) as HTMLInputElement;
     fireEvent.change(bar, { target: { value: 'type file' } });
     fireEvent.keyDown(bar, { key: 'Enter' });

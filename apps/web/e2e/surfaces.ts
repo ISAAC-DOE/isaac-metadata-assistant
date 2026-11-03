@@ -535,21 +535,19 @@ export const SURFACES: readonly Surface[] = [
        renders at once, so the gate is the widget's own title. */
     ready: { role: 'heading', name: 'This Build' },
   },
-  {
-    id: 'settings-privacy',
-    name: 'Settings — Privacy & Governance',
-    path: '/settings?tab=privacy',
-    scope: 'ordinary',
-    /* The first concept row, which renders only once `/api/about` has resolved,
-       so the scan cannot race the widgets' rows. */
-    ready: { role: 'heading', name: 'Synthetic-Only Mode' },
-  },
+  /*
+   * ~~`settings-privacy` — "Settings — Privacy & Governance", `?tab=privacy`~~ —
+   * RETIRED 2026-11-02 with the tab (owner's direction: no standing disclaimers).
+   * `?tab=privacy` now lands on Overview, which `settings` scans; its facts are the
+   * Data card there. It recorded no a11y cell, so no count moves with it.
+   */
   {
     id: 'settings-api',
     name: 'Settings — Integrations (via ?tab=api)',
     path: '/settings?tab=api',
     scope: 'ordinary',
-    ready: { role: 'heading', name: 'No API Keys in This Build' },
+    /* ~~'No API Keys in This Build'~~ — retired 2026-11-02; the widget's own title. */
+    ready: { role: 'heading', name: 'API Access' },
   },
   {
     id: 'settings-explorer',
@@ -638,8 +636,8 @@ export const SURFACES: readonly Surface[] = [
 
 /**
  * Every route the Assistant panel mounts on. Verified in the running app:
- * an `<aside>` with an accessible name of "Assistant" (record surfaces) or
- * "Assistant (advisory)" (Project Memory), containing `role="log"`.
+ * an `<aside>` with the accessible name "Assistant" on every mount (Project Memory's
+ * "Assistant (advisory)" was retired 2026-11-02), containing `role="log"`.
  *
  * Carries its own `scope` for the same reason `Surface` does: four of the five
  * mounts are record surfaces and exist only inside a worked-example session,
@@ -701,7 +699,8 @@ export const TABBED_SURFACES = [
        Integrations · Advanced. The tab COUNT the APG-structure spec asserts is
        derived from this array, so the list stays the single place a tab is
        declared. */
-    tabs: ['Overview', 'Privacy & Governance', 'Integrations', 'Advanced'],
+    /* THREE TABS SINCE 2026-11-02 — Privacy & Governance was retired. */
+    tabs: ['Overview', 'Integrations', 'Advanced'],
     panelIdPrefix: 'settings-tabpanel-',
   },
   {

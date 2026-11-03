@@ -1,4 +1,10 @@
 /**
+ * 2026-11-02 (owner's direction: no standing disclaimers): API Access shows ONE
+ * plain state line and ONE disclosure holding Quick Start and Program an Agent in
+ * sequence. ~~The view buttons, "How Access Works Today", the key-requirement list
+ * and the footer Endpoint Explorer jump~~ are retired; the explorer is on Advanced,
+ * and the guide's own jumps still open it.
+ *
  * Settings → Integrations → the API Access widget (2026-10-12; it was the whole
  * API Access tab before that — P36V PR3 slice C, restructured by P36V-1 slices
  * 11 & 13).
@@ -45,125 +51,71 @@
  * LANDMARKS. The widget is one named region; Quick Start's section keeps its
  * own name inside it. Nothing else here is a landmark.
  */
-import { useState, type ReactNode } from 'react';
+import { useRef, type ReactNode } from 'react';
 
-import { Widget, widgetIds } from '../../components/Widget';
+import { Widget } from '../../components/Widget';
 import { LoadingPanel, BackendDown } from '../../components/FetchStates';
-import { ChevronRight, FileText, Lock, Play } from '../../components/icons';
-import {
-  API_ACCESS_COPY,
-  API_ACCESS_ROWS,
-  API_KEY_REQUIREMENTS,
-  SETTINGS_WIDGET_COPY as COPY,
-} from '../../lib/settingsContent';
+import { Lock } from '../../components/icons';
+import { API_ACCESS_COPY, SETTINGS_WIDGET_COPY as COPY } from '../../lib/settingsContent';
 import type { ApiOpenApiResponse } from '../../lib/types';
 import type { useFetch } from '../../lib/useFetch';
 import { ApiProgramAgentView, ApiQuickStartView } from './ApiDocs';
 
 type OpenApiState = ReturnType<typeof useFetch<ApiOpenApiResponse>>;
 
-/** The widget heading's id — also the region's accessible name. */
 export const API_WIDGET_HEADING_ID = 'settings-apiaccess-heading';
 
 export function ApiKeysPanel({
   state,
   onOpenExplorer,
 }: {
-  /** The page-level `GET /api/openapi` read — the two views are derived from it. */
   state: OpenApiState;
   onOpenExplorer: () => void;
 }) {
-  const [view, setView] = useState<string | null>(null);
+  const programRef = useRef<HTMLDivElement>(null);
 
-  /** Quick Start's "Program an Agent" jump: switch views in place, and move
-   *  focus to the control that now says which view is open. */
+  /** Quick Start's "Program an Agent" jump: the guide is the next section down. */
   function openProgram() {
-    setView('program');
-    (document.getElementById(widgetIds.tab(API_WIDGET_HEADING_ID, 'program')) as HTMLElement | null)?.focus();
+    const target = programRef.current;
+    target?.scrollIntoView?.({ block: 'start' });
+    target?.focus();
   }
 
-  /** A view that needs the contract waits for it, honestly, inside the view. */
   function contractBody(render: (schema: ApiOpenApiResponse) => ReactNode) {
     if (state.status === 'loading') return <LoadingPanel label="Loading the API contract…" />;
     if (state.status === 'error') return <BackendDown error={state.error} onRetry={state.reload} />;
     return render(state.data);
   }
 
-  /* The two reference views — `Widget`'s toggle-button switcher, controlled here
-     so Quick Start's "Program an Agent" jump can switch views in place. */
-  const views = [
-    {
-      id: 'quick-start',
-      label: COPY.apiViewQuickStart,
-      icon: <Play size={14} strokeWidth={2} />,
-      content: contractBody((schema) => (
-        <ApiQuickStartView
-          schema={schema}
-          onOpenExplorer={onOpenExplorer}
-          onOpenProgram={openProgram}
-        />
-      )),
-    },
-    {
-      id: 'program',
-      label: COPY.apiViewProgram,
-      icon: <FileText size={14} strokeWidth={2} />,
-      content: contractBody((schema) => (
-        <ApiProgramAgentView schema={schema} onOpenExplorer={onOpenExplorer} />
-      )),
-    },
-  ];
-
   return (
     <Widget
       id={API_WIDGET_HEADING_ID}
       title={COPY.apiTitle}
       icon={<Lock size={18} strokeWidth={2} />}
-      sub={COPY.apiSub}
-      info={<p>{API_ACCESS_COPY.statusBody}</p>}
-      headline={
-        <h3 className="widget-state settings-state-heading">{API_ACCESS_COPY.statusHeading}</h3>
-      }
+      headline={<p className="settings-state-line">{API_ACCESS_COPY.stateLine}</p>}
       details={{
-        summary: COPY.apiHowAccessWorks,
+        summary: COPY.apiSetup,
         content: (
-          <>
-            <dl className="settings-defs">
-              {API_ACCESS_ROWS.map((row) => (
-                <div className="settings-def" key={row.term}>
-                  <dt>{row.term}</dt>
-                  <dd>{row.detail}</dd>
-                </div>
+          <div className="settings-sequence">
+            <section className="settings-sequence-item">
+              {contractBody((schema) => (
+                <ApiQuickStartView
+                  schema={schema}
+                  onOpenExplorer={onOpenExplorer}
+                  onOpenProgram={openProgram}
+                />
               ))}
-            </dl>
-            <h3 className="settings-view-heading">{COPY.apiTechnicalRequirements}</h3>
-            <p className="settings-view-note">{API_ACCESS_COPY.requirementsNote}</p>
-            <ul className="settings-steps">
-              {API_KEY_REQUIREMENTS.map((item) => (
-                <li key={item}>{item}</li>
-              ))}
-            </ul>
-            {/* FINDING E — the requirement that is NOT the application's, so the
-                five app-owned ones are not read as the whole path to shipping. */}
-            <p className="settings-view-note">{API_ACCESS_COPY.requirementsBoundary}</p>
-          </>
+            </section>
+            <section className="settings-sequence-item">
+              <div ref={programRef} tabIndex={-1} className="settings-sequence-anchor">
+                {contractBody((schema) => (
+                  <ApiProgramAgentView schema={schema} onOpenExplorer={onOpenExplorer} />
+                ))}
+              </div>
+            </section>
+          </div>
         ),
       }}
-      viewSwitcher="buttons"
-      collapsible
-      view={view}
-      onViewChange={setView}
-      onViewCollapse={() => setView(null)}
-      views={views}
-      footer={
-        <button type="button" className="settings-jump-btn" onClick={onOpenExplorer}>
-          Endpoint Explorer
-          <ChevronRight size={13} strokeWidth={2.2} aria-hidden="true" />
-        </button>
-      }
-    >
-      <p className="settings-state-line">{API_ACCESS_COPY.credentialLine}</p>
-
-    </Widget>
+    />
   );
 }

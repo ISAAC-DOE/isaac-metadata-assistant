@@ -29,6 +29,17 @@
  *      acceptable if the content is genuinely scrollable and the surrounding
  *      page is not.
  *
+ * ── A SECOND READER: the occlusion probe (2026-11-02) ───────────────────────
+ *
+ *   `findObscuredControls` reads `OVERFLOW_ALLOWANCES` too. A control whose
+ *   nearest horizontally-scrolling ancestor matches one of these classes (and
+ *   really overflows) is scrolled into view INSIDE that box before it is re-tested,
+ *   as Tab or a swipe would; every other ancestor is held still. So an entry here
+ *   now also says "a control half-scrolled out of this row is reachable, not a
+ *   sliver". That is the same claim the entry already makes — the content is
+ *   genuinely scrollable inside its own box — and it is why the class list, not
+ *   geometry, decides: `main.screen-main` computes `overflow-x: auto` as well.
+ *
  * Every entry here was MEASURED before it was written down: at widths
  * 1280 / 1024 / 768 / 640 / 390 / 375 / 320, against the `ceea656` production
  * bundle and again against a later rebuild of it. Candidates that were proposed
@@ -105,6 +116,37 @@ export const OVERFLOW_ALLOWANCES: readonly OverflowAllowance[] = [
       '280px-tall box.',
     evidence: 'apps/web/src/screens/screens.css:2637-2648 — `.api-samples-code { overflow: auto; white-space: pre; }`',
   },
+  {
+    id: 'ALLOW-LEFTNAV-SCROLL',
+    match: '.leftnav',
+    // 2026-11-02: the collapsed (<=1024px) primary nav became ONE row that scrolls
+    // sideways instead of wrapping onto a second row. Shared chrome, so every surface.
+    surfaces: [ANY_SURFACE],
+    reason:
+      'The phone/tablet primary navigation is a single row of destinations. When they do not ' +
+      'fit, the row scrolls sideways INSIDE its own box (every item is a real link, reachable ' +
+      'by Tab, which scrolls it into view); the page itself never scrolls with it. Still needed ' +
+      'after the occlusion probe learned to scroll a deliberate row sideways: the nested-overflow ' +
+      'probe reports `.leftnav` without it, and the occlusion probe reads this entry to know the ' +
+      'row is deliberate (see the header).',
+    evidence:
+      'apps/web/src/components/chrome.css — `@media (max-width: 1024px) .leftnav { flex-wrap: nowrap; overflow-x: auto; }`',
+  },
+  {
+    id: 'ALLOW-SETTINGS-TABS-SCROLL',
+    match: '.settings-section-tabs',
+    // 2026-11-02 (Task 2 review ruling): the Settings tab row is one line that
+    // scrolls sideways when it does not fit, rather than relying on it fitting at
+    // 320px on CI's wider font.
+    surfaces: ['settings', 'settings-api', 'settings-explorer'],
+    reason:
+      'The Settings page tablist is a single row of three tabs. When they do not fit, the row ' +
+      'scrolls sideways INSIDE its own box; each tab is a real button reached by the arrow keys ' +
+      '(roving tabindex), focus scrolls the row, and the selected tab is scrolled into view on ' +
+      'every change. The page itself never scrolls with it.',
+    evidence:
+      'apps/web/src/screens/settings/settings-widgets.css — `.settings-section-tabs { flex-wrap: nowrap; overflow-x: auto; }`',
+  },
 ];
 
 /**
@@ -123,6 +165,15 @@ export const OVERFLOW_ALLOWANCES: readonly OverflowAllowance[] = [
  * name. Their text is never intended to be seen.
  */
 export const HIDDEN_TEXT_ALLOWANCES: readonly OverflowAllowance[] = [
+  {
+    // 2026-11-02: below 620px the floating Assistant pill is icon-only; its text label
+    // is clipped with the `.sr-only` pattern so it stays the button's accessible name.
+    id: 'ALLOW-ASSISTANT-TRIGGER-LABEL',
+    match: '.assistant-drawer-trigger-label',
+    surfaces: [ANY_SURFACE],
+    reason: 'Visually-hidden accessible name of the icon-only Assistant trigger at phone width.',
+    evidence: 'apps/web/src/components/assistant-drawer.css — `@media (max-width: 620px)`',
+  },
   {
     id: 'ALLOW-SR-ONLY',
     match: '.sr-only',

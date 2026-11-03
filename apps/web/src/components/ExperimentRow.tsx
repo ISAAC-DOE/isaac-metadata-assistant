@@ -45,6 +45,7 @@ const LIFECYCLE_LABEL: Record<ExperimentSummary['lifecycle'], string> = {
  */
 export function ExperimentRow({ exp }: ExperimentRowProps) {
   const t = exp.trailing;
+  const when = exp.updated ?? exp.date ?? null;
   const accessibleName = describeAccessibleName(exp);
   /*
    * LIB-005 — REOPEN-AND-CONTINUE. Route to the workspace this BROWSER last saw
@@ -112,7 +113,8 @@ export function ExperimentRow({ exp }: ExperimentRowProps) {
             exp.technique ||
             exp.beamline ||
             exp.runCount ||
-            exp.openProposalCount,
+            exp.openProposalCount ||
+            when,
         ) && (
           <div className="exp-meta">
             {exp.disambiguator && (
@@ -154,38 +156,29 @@ export function ExperimentRow({ exp }: ExperimentRowProps) {
                 {exp.openProposalCount} proposal{exp.openProposalCount === 1 ? '' : 's'} waiting
               </span>
             ) : null}
+            {/*
+              THE DATE, AS PLAIN TEXT AT THE END OF THE META LINE (2026-11-02). It
+              was a chip on a line of its own beside the lifecycle chip, so every
+              row was five layers deep. TWO DATES ARE NEVER BOTH SHOWN: `updated`
+              is what a returning scientist reads a list for, so it wins when the
+              server sent one; `date` (created) is the fallback.
+            */}
+            {when && (
+              <time className="exp-meta-item exp-date" dateTime={when.iso} aria-label={when.accessible}>
+                {when.display}
+              </time>
+            )}
           </div>
         )}
-        <div className="exp-sub">
-          <StatusChip kind={exp.lifecycle} />
-          {/*
-            TWO DATES ARE NEVER BOTH SHOWN, and the choice is the Library's need
-            rather than a preference. `updated` is what a returning scientist
-            reads a list for ("what was I last doing?"), so it wins when the
-            server sent one; `date` (created) is the fallback for a response that
-            carried no `updated_utc`. Showing both would put two dates a second
-            apart on every example record and invite a reader to compare them,
-            which a whole-second timestamp cannot support.
-          */}
-          {exp.updated ? (
-            <time
-              className="exp-date"
-              dateTime={exp.updated.iso}
-              aria-label={exp.updated.accessible}
-            >
-              {exp.updated.display}
-            </time>
-          ) : (
-            exp.date && (
-              <time className="exp-date" dateTime={exp.date.iso} aria-label={exp.date.accessible}>
-                {exp.date.display}
-              </time>
-            )
-          )}
-        </div>
       </div>
 
       <div className="exp-trailing">
+        {/* THE LIFECYCLE CHIP ONLY WHEN IT ADDS SOMETHING (2026-11-02). Every record
+            that is not exported is a draft, so a "Draft" chip sat on four of five
+            rows — including the one under "Ready to Export" — saying nothing the
+            group header did not. "Exported" is the one state worth a chip; the
+            row's accessible name still carries the lifecycle either way. */}
+        {exp.lifecycle === 'exported' && <StatusChip kind="exported" />}
         {t.needsYouCount !== undefined && (
           <StatusChip
             kind="needsYou"

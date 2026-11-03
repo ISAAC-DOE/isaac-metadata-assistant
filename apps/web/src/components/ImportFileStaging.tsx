@@ -284,8 +284,8 @@ export function ImportFileStaging({ onRecord, busy = false }: ImportFileStagingP
             `Record as source` believing it had already happened. Found by
             independent review.
           */}
-          Choosing a file lets you record its name, size and type in this import.{' '}
-          <strong>The file itself is not sent to ISAAC</strong>, and no upload route is called.
+          Choosing a file lets you record its name, size and type in this import; the
+          file itself stays on this computer.
         </p>
       </div>
 
@@ -299,7 +299,6 @@ export function ImportFileStaging({ onRecord, busy = false }: ImportFileStagingP
                 <span className="ifs-row-meta">
                   {formatBytes(row.size)}
                   {row.mediaType === '' ? '' : ` · ${row.mediaType}`}
-                  {row.sha256 === null ? '' : ' · checksum computed in your browser'}
                 </span>
                 {row.sha256 !== null && (
                   <span className="ifs-row-digest mono" title={row.sha256}>
@@ -312,7 +311,7 @@ export function ImportFileStaging({ onRecord, busy = false }: ImportFileStagingP
               {/* STATE IS A WORD, NOT A COLOUR. Each row says where it stands in
                   text; the class only tints what the text already said. */}
               <span className="ifs-row-state">
-                {row.state === 'local' && 'Local only — not sent to ISAAC'}
+                {row.state === 'local' && 'Local only'}
                 {row.state === 'recording' && 'Recording…'}
                 {row.state === 'recorded' && 'Recorded as a source'}
                 {row.state === 'failed' && 'Not recorded'}

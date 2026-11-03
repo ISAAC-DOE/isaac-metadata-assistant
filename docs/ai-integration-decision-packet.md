@@ -407,7 +407,14 @@ lived only in `lib/settingsContent.ts:580,587` — Settings → AI & Automation,
 or where their words go.** So the mitigation this decision cites as the reason no surface is
 needed did not exist on the surface it names.
 
-It exists now. `ASSISTANT_NO_MODEL_CLAIM` — *"There is no language model in this build.
+> **2026-11-02 — STALE: the claim below was retired.** At the owner's direction every standing
+> disclaimer left the web app, including `ASSISTANT_NO_MODEL_CLAIM`, so the panel no longer says
+> there is no language model and §3's stated mitigation is absent again. The panel claims no model
+> either way: `apps/web/src/__tests__/assistant-model-claim-parity.test.tsx` bans any copy that
+> implies one, and its §5 (no product surface calls the assistant seam) is the remaining guard on
+> the decision. See `CLAUDE.md` §11, "2026-11-02 — standing disclaimers retired".
+
+~~It exists now.~~ `ASSISTANT_NO_MODEL_CLAIM` — *"There is no language model in this build.
 Nothing you type here is sent to a model provider."* — renders in the panel's dock beneath
 the composer on all five mounts, as an `aria-describedby` target of the composer input
 (neither it nor the pre-existing composer helper had any programmatic relation to that

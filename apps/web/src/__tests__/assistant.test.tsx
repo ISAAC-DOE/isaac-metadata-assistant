@@ -6,7 +6,6 @@ import {
   ASSISTANT_COMPOSER_HELPER,
   GUIDED_ONLY_NOTE,
   MEMORY_UNAVAILABLE_CAVEAT,
-  SUBORDINATE_CAPTION,
   hasVerdictLanguage,
 } from '../lib/assistant';
 import { compose } from '../lib/assistantComposer';
@@ -233,28 +232,15 @@ describe('assistant final placeholder form: guided prompts + source-labeled answ
     expect(getByText(ASSISTANT_COMPOSER_HELPER)).toBeInTheDocument();
     // … and the legacy standalone guided-note is never surfaced.
     expect(queryByText(GUIDED_ONLY_NOTE)).toBeNull();
-    // subordinate-to-deterministic-validation caption remains the single footer.
-    // P36V S-A re-worded it and DROPPED the explicit negative claim "It never
-    // validates"; the review restored it. Both halves are pinned separately so
-    // neither can be dropped again silently:
-    //   · the exact approved sentence, verbatim, in exactly one element;
-    //   · the standalone POSITIVE assertion that the claim is present.
-    const caption = container.querySelector('.assistant-caption') as HTMLElement;
-    expect(caption).not.toBeNull();
-    expect(caption.textContent).toBe(SUBORDINATE_CAPTION);
-    expect(caption.textContent).toBe(
-      'The Assistant is advisory: it explains artifacts and points to sources. ' +
-        'It never validates — deterministic validation remains authoritative.',
-    );
-    expect(getByText(SUBORDINATE_CAPTION)).toBeInTheDocument();
-    expect(container.querySelectorAll('.assistant-caption').length).toBe(1);
-    // the explicit NEGATIVE capability claim, and the authority it defers to
-    expect(getByText(/never validates/i)).toBeInTheDocument();
-    expect(caption.textContent).toMatch(/never validates/i);
-    expect(caption.textContent).toMatch(/deterministic validation remains authoritative/i);
-    // the retired wording is gone (no stale duplicate advisory sentence survives)
+    // ~~The subordinate caption ("The Assistant is advisory … It never validates …")
+    // as the single footer~~ — retired 2026-11-02 (owner's direction: no standing
+    // disclaimers). Pinned now as "no false claim": neither the caption nor its
+    // retired wordings come back, and the dock note ends with the scope helper.
+    expect(container.querySelector('.assistant-caption')).toBeNull();
+    expect(queryByText(/never validates/i)).toBeNull();
     expect(queryByText(/advisory — it explains/i)).toBeNull();
-    expect(caption.textContent).not.toMatch(/points to sources; deterministic/);
+    const note = container.querySelector('.assistant-dock-note') as HTMLElement;
+    expect(note.lastElementChild?.textContent).toBe(ASSISTANT_COMPOSER_HELPER);
   });
 
   it('prompt chips remain keyboard-accessible real buttons', () => {

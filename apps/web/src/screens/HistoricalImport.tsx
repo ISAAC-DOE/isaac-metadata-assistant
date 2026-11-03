@@ -6,7 +6,7 @@ import { AppShell } from '../components/AppShell';
 import { TopBar } from '../components/TopBar';
 import { LeftNav } from '../components/LeftNav';
 import { BackendDown, LoadingPanel } from '../components/FetchStates';
-import { Inbox, Plus, TriangleAlert } from '../components/icons';
+import { Plus, TriangleAlert } from '../components/icons';
 import { ImportFileStaging } from '../components/ImportFileStaging';
 import { ArchiveRuns, CorpusReadOverview } from '../components/ImportCorpusReview';
 import { ImportCandidateRow } from '../components/ImportCandidateRow';
@@ -273,7 +273,6 @@ function ImportsLanding({
     <Widget
       id="hi-imports"
       title="Imports"
-      sub={IMPORT_COPY.landingSub}
       infoLabel="How Historical Import works"
       info={
         <div className="hi-how-it-works">
@@ -312,16 +311,11 @@ function ImportsLanding({
       }
     >
       {error !== null && <Refusal error={error} />}
+      {/* ONE LINE, INSIDE THE CARD (2026-11-02): it was a bordered box with an
+          icon, a heading and a sentence — a card inside a card restating the
+          button above it. */}
       {data.total === 0 ? (
-        <div className="hi-empty">
-          <span className="hi-empty-mark" aria-hidden="true">
-            <Inbox size={18} strokeWidth={1.75} />
-          </span>
-          <div className="hi-empty-main">
-            <h3 className="hi-empty-title">{IMPORT_COPY.emptyTitle}</h3>
-            <p className="hi-empty-body">{IMPORT_COPY.emptyBody}</p>
-          </div>
-        </div>
+        <p className="hi-empty">{IMPORT_COPY.emptyTitle}</p>
       ) : (
         <ul className="hi-list">
           {data.imports.map((row) => (
@@ -817,7 +811,7 @@ function DiscardDialog({
           {error !== null && <Refusal error={error} />}
         </div>
         <div className="reset-dialog-actions">
-          <button ref={keepRef} type="button" className="btn btn-secondary" onClick={onKeep} disabled={busy}>
+          <button ref={keepRef} type="button" className="btn btn-quiet" onClick={onKeep} disabled={busy}>
             {IMPORT_COPY.discardKeep}
           </button>
           <button type="button" className="btn btn-danger" onClick={onConfirm} disabled={busy}>
@@ -1072,8 +1066,7 @@ function SourceBundleStage({
           <TriangleAlert size={14} strokeWidth={2.1} aria-hidden="true" />
           {data.unreadable_source_count} entr
           {data.unreadable_source_count === 1 ? 'y' : 'ies'} in this bundle could not be
-          read by this build. They are kept exactly as they are and nothing has been
-          discarded.
+          read. They are kept as they are.
         </p>
       )}
 
@@ -1169,7 +1162,6 @@ function SourceBundleStage({
           <h4 className="hi-group-title" id={`hi-files-${importId}`}>
             {STAGE.filesTitle}
           </h4>
-          {!ingestion?.enabled && <HelpTip subject={STAGE.filesTitle}>{STAGE.filesNotReadableHelp}</HelpTip>}
         </div>
         <p className="hi-note">{ingestion?.enabled ? STAGE.filesReadable : STAGE.filesNotReadable}</p>
         {!ingestion?.enabled && !hasArchive && defaultArchive && (
@@ -1387,7 +1379,7 @@ function ReadStage({
         <p className="hi-counts">
           {counts.total} source{counts.total === 1 ? '' : 's'} · {counts.parsed} read ·{' '}
           {counts.no_content_path} held as a pointer · {counts.failed} could not be read ·{' '}
-          {counts.parsable_by_this_build} readable by this build
+          {counts.parsable_by_this_build} readable
         </p>
       </div>
       {/* NEVER A BARE DISABLED BUTTON: the sentence beside it says why — and, for a bundle
@@ -1573,8 +1565,6 @@ function RunsStage({
         <p className="hi-note">
           Nothing has been read yet, so there is nothing to reconstruct from. Add an archive
           or an example source in Source Bundle — it is read as soon as it is added.
-          Reconstruction is deterministic in this build — it reads the statements already
-          parsed and calls no model.
         </p>
       )}
 

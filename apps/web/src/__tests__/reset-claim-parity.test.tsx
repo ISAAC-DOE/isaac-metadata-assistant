@@ -88,7 +88,7 @@ import { join } from 'node:path';
 import { describe, it, expect } from 'vitest';
 
 import { LABELS } from '../lib/labels';
-import { settingsConcepts } from '../lib/settingsContent';
+import { dataRows } from '../lib/settingsContent';
 
 // --- locating the real sources -----------------------------------------------
 
@@ -117,15 +117,26 @@ function resetDialogAlertText(): string {
   return `${LABELS.resetStaleTitle}. ${LABELS.resetStaleBody}`;
 }
 
-function resetAndDeletionText(): string {
-  const found = settingsConcepts(SETTINGS_FACTS).find((c) => c.id === 'reset-and-deletion');
-  if (!found) throw new Error('no such concept: reset-and-deletion');
-  return `${found.heading} ${found.summary} ${found.detail}`;
+/**
+ * ~~Settings → Governance → `reset-and-deletion`~~ — the card was retired 2026-11-02
+ * with the Privacy & Governance tab, so it is no longer a site that must STATE the
+ * claim (§2). Its successor, the Overview Data card, is still held to the ban (§3):
+ * it may say nothing about a reset, but never the categorical "nothing was reset".
+ */
+function settingsDataText(): string {
+  return ['ephemeral', 'durable', 'unavailable']
+    .flatMap((persistence) => dataRows({ ...SETTINGS_FACTS, persistence }))
+    .map((r) => `${r.label}. ${r.text}`)
+    .join(' ');
 }
 
-const SITES: [string, () => string][] = [
-  ['the Reset Worked Example stale alert', resetDialogAlertText],
-  ['Settings → Governance → reset-and-deletion', resetAndDeletionText],
+/** The sites that must STATE the refusal and its reason. */
+const SITES: [string, () => string][] = [['the Reset Worked Example stale alert', resetDialogAlertText]];
+
+/** Every site the categorical no-mutation ban runs over. */
+const BAN_SITES: [string, () => string][] = [
+  ...SITES,
+  ['Settings → Overview → Data (successor of reset-and-deletion)', settingsDataText],
 ];
 
 // --- §1 the per-record abort this ban is justified by -------------------------
@@ -179,7 +190,7 @@ const CLAIM_PARTS: [string, RegExp][] = [
   ['because the workspace/walkthrough moved', /(this workspace changed|moved in between)/i],
 ];
 
-describe('C2 §2 · both sites state the same refusal, with its reason', () => {
+describe('C2 §2 · the site that states the refusal states it with its reason', () => {
   it.each(SITES)('%s states the whole claim', (_where, text) => {
     const body = text();
     for (const [what, pattern] of CLAIM_PARTS) {
@@ -232,7 +243,7 @@ const BANNED: [string, RegExp][] = [
 ];
 
 describe('C2 §3 · no site claims the reset changed nothing', () => {
-  it.each(SITES)('%s makes no categorical no-mutation claim', (_where, text) => {
+  it.each(BAN_SITES)('%s makes no categorical no-mutation claim', (_where, text) => {
     const body = text();
     for (const [what, pattern] of BANNED) {
       expect(body, `states the banned claim: ${what}`).not.toMatch(pattern);

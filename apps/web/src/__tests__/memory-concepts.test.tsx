@@ -310,7 +310,7 @@ describe('P36R S7 · Concept Lookup — category filters', () => {
 
 describe('P36R S7 · Concept Lookup — the aggregate missing-file note is true of the rows below it', () => {
   const AGGREGATE_NOTE =
-    'This deployment does not carry any of the documents cited below — open them in the project to read them.';
+    'Open these documents in the project to read them.';
 
   it('states the fact once when every VISIBLE anchored concept is absent, and withdraws it when the visible rows cite no document at all', async () => {
     stubFetchRoutes({
@@ -485,7 +485,7 @@ describe('P24.5 · Concept Lookup — empty-leads honesty', () => {
     // same snapshot is what serves its provenance.
     expect(
       scoped.getByText(
-        'This deployment does not carry the file itself — open it in the project to read it.',
+        'Open this file in the project to read it.',
       ),
     ).toBeInTheDocument();
     expect(detailPane(container).textContent).not.toMatch(/snapshot/i);
@@ -532,16 +532,12 @@ describe('P24.9 · Concept Lookup — null-anchor honesty', () => {
     // The missing-file note is suppressed when there is no anchor path.
     expect(
       scoped.queryByText(
-        'This deployment does not carry the file itself — open it in the project to read it.',
+        'Open this file in the project to read it.',
       ),
     ).toBeNull();
-    // M5: with nothing citable, the boundary paragraph does not tell the reader
-    // to open a source that was never named.
-    expect(
-      scoped.getByText(
-        'A concept is a pointer into project documents — never a definition of the term, and never a scientific conclusion.',
-      ),
-    ).toBeInTheDocument();
+    // M5: with nothing citable, nothing tells the reader to open a source that was
+    // never named. (The boundary paragraph itself was retired 2026-11-02.)
+    expect(scoped.queryByText(/Open the cited source/)).toBeNull();
     // No "open in Source Index" action for a path that was withheld.
     expect(scoped.queryByText('open in Source Index')).toBeNull();
   });
@@ -755,15 +751,13 @@ describe('P24.5 · Concept Lookup — no verdict or scientific-authority languag
     fireEvent.click(getByRole('button', { name: /Provenance/ }));
     await findByText('src/other_mod.py');
 
-    // The boundary sentence itself NEGATES two of these phrases ("never a
-    // definition of the term"), so it is asserted separately and removed before
-    // the scan — otherwise the disclaimer would trip the guard it exists for.
-    const boundary =
-      'A concept is a pointer into project documents — never a definition of the term, and never a ' +
-      'scientific conclusion. Open the cited source to judge it yourself.';
-    expect(within(detailPane(container)).getByText(boundary)).toBeInTheDocument();
-
-    const text = (container.textContent ?? '').replace(boundary, '');
+    // ~~The boundary sentence ("A concept is a pointer into project documents —
+    // never a definition of the term…")~~ was retired 2026-11-02 at the owner's
+    // direction. What survives is the guard it existed for: nothing on the surface
+    // makes an AFFIRMATIVE claim of scientific authority. With the negating sentence
+    // gone, the scan now runs over the whole surface rather than around it.
+    expect(within(detailPane(container)).queryByText(/never a definition of the term/)).toBeNull();
+    const text = container.textContent ?? '';
     // No AFFIRMATIVE claim of scientific authority anywhere else on the surface.
     expect(text).not.toMatch(
       /\b(definition of|defined as|means that|established|proven|confirmed finding|scientifically)\b/i,
@@ -1084,8 +1078,9 @@ describe('P36V S-A · Concepts — concision without deleting a claim', () => {
     const text = container.textContent ?? '';
     const count = (needle: string) => text.split(needle).length - 1;
     expect(count('memory leads, not scientific conclusions')).toBe(1); // page-level
-    expect(count('never a definition of the term')).toBe(1); // advisory note
-    expect(count('Open the cited source to judge it yourself')).toBe(1);
+    // The concept boundary note was retired 2026-11-02 (owner direction).
+    expect(count('never a definition of the term')).toBe(0);
+    expect(count('Open the cited source to judge it yourself')).toBe(0);
     expect(count('leads — open the cited file to verify')).toBe(0); // removed
   });
 });

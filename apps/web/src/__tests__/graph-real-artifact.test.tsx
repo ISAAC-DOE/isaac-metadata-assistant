@@ -9,6 +9,13 @@ import { decodeDeepGraph, type ApiGraphDetailResponse, type DeepIndex } from '..
 import { MAX_DEEP_NODES } from '../lib/graphDeep';
 import { graphStatusUnavailable, memoryGraphAvailable, stubFetchRoutes } from '../test/apiFixtures';
 
+/** The canvas scale, as the retired visible readout read ("zoom N%"). The readout
+ *  was dropped from the screen 2026-11-02; `.graph-explore` carries the scale as
+ *  `data-zoom`, so the viewport assertions below still measure the same thing. */
+const zoomReadout = (root: ParentNode) =>
+  `zoom ${root.querySelector('.graph-explore')?.getAttribute('data-zoom') ?? '?'}%`;
+
+
 /*
  * P36V.1 Unit F — REAL-SCALE measurements, against the committed artifact.
  *
@@ -327,7 +334,7 @@ describe('bounded DOM — measured at REAL payload size, at every level', () => 
     // re-culled each time, so the element count must not creep upward.
     for (let i = 0; i < 6; i += 1) {
       fireEvent.click(view.getByRole('button', { name: 'Zoom in' }));
-      await waitFor(() => expect(view.container.textContent).toMatch(/zoom \d+%/));
+      await waitFor(() => expect(zoomReadout(view.container)).toMatch(/zoom \d+%/));
       expect(svgElements()).toBeLessThan(ELEMENT_BOUND);
       expect(deepMarks().length).toBeLessThanOrEqual(MAX_DEEP_NODES);
     }

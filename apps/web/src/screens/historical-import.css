@@ -663,49 +663,15 @@
  * double-CTA argument at length ("a SECOND call to action ... the empty state
  * wins the CTA"). A second button with the same label 200px lower would be that
  * defect, so the card states the situation and points at nothing.
+ *
+ * SUPERSEDED 2026-11-02 (declutter): the copied card was a card inside the
+ * Imports card. The empty state is now ONE plain line inside the card, with no
+ * border and no icon; the history above is kept for the reasoning it records.
  */
 .hi-empty {
-  display: flex;
-  align-items: flex-start;
-  gap: var(--space-md);
-  padding: var(--space-lg);
-  background: var(--surface-subtle);
-  border: 1px solid var(--border);
-  border-radius: var(--radius-inner);
-}
-
-.hi-empty-mark {
-  flex: none;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  width: 30px;
-  height: 30px;
-  border-radius: var(--radius-token);
-  background: var(--action-tint);
-  color: var(--action);
-}
-
-/* min-width:0 so the paragraph wraps inside the flex row instead of forcing the
-   row wider than the card at 320px — the same reason `.queue-empty-lede-text`
-   carries it (`queue.css:424-430`). */
-.hi-empty-main {
-  min-width: 0;
-  max-width: var(--hi-prose);
-}
-
-.hi-empty-title {
-  margin: 0 0 var(--space-xs);
-  font-size: var(--font-size-heading-sm);
-  font-weight: var(--font-weight-semibold);
-  color: var(--text-heading);
-}
-
-.hi-empty-body {
   margin: 0;
   font-size: var(--font-size-body);
   color: var(--text-secondary);
-  line-height: var(--line-height-relaxed);
 }
 
 .hi-empty-inline {
@@ -1918,9 +1884,9 @@
 
 /* ---- the landing widget ------------------------------------------------- */
 
-.hi-screen > .widget {
-  max-width: 880px;
-}
+/* ~~max-width: 880px~~ — UNCAPPED 2026-11-02 ("use the width"): the landing card
+   fills the content area like every other work screen; its prose keeps
+   `--hi-prose`. */
 
 /* The inline start row: the name field and `Start an Import` share one baseline and
    one height (QA `C-29`: the field used to be shorter than its own button). */

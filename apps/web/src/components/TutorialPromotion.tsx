@@ -59,13 +59,13 @@ export function TutorialPromotion() {
         <Compass size={16} strokeWidth={2} />
       </span>
       <div className="tutorial-offer-body">
-        <span className="tutorial-offer-lead">{LABELS.tutorialOfferLead}</span>
         {/* h2 under the screen's h1 — the outline stays one level deep, which the
-            heading-outline guard checks on every routed surface. */}
+            heading-outline guard checks on every routed surface. The "New here?"
+            lead and the one-line pitch were cut 2026-11-02: the title, the info
+            tip, Start and the dismiss say it. */}
         <h2 id="tutorial-offer-title" className="tutorial-offer-title">
           {LABELS.tutorialOfferTitle}
         </h2>
-        <span className="tutorial-offer-line">{LABELS.tutorialOfferLine}</span>
         <HelpTip subject={LABELS.tutorialOfferTitle} kind="info">
           <span>{LABELS.tutorialOfferBody}</span>
         </HelpTip>

@@ -594,7 +594,8 @@ describe('§5 · a convention reads sources; a person is provenance only', () =>
       f.textContent?.includes(C.peopleTitle),
     )!;
     expect(people.textContent).toContain('Z. Fakename');
-    expect(people.textContent).toContain('never the actor');
+    // SHORTENED 2026-11-02 to the fact: "Recorded as provenance only."
+    expect(people.textContent).toContain('Recorded as provenance only.');
     expect(conventions.textContent).not.toContain('Z. Fakename');
   });
 });
@@ -649,7 +650,8 @@ describe('§6 · reading rules are attributed honestly and adopted only on purpo
     // ~~`Confirmed by Unattributed`~~ (2026-10-18, QA `C-23`): the wire's sentinel shown as
     // a word. The row now says what it MEANS — and still never names anyone.
     expect(row.textContent).toContain(`${C.confirmedBy}: ${C.unattributed}`);
-    expect(C.unattributed).toMatch(/cannot yet identify/);
+    // SHORTENED 2026-11-02 to the plain fact; it still names no one.
+    expect(C.unattributed).toBe('not recorded');
     expect(row.textContent).not.toContain('unattributed');
   });
 

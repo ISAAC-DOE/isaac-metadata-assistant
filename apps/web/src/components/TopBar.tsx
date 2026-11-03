@@ -1,5 +1,5 @@
 import './chrome.css';
-import { useEffect, useLayoutEffect, useRef, useState } from 'react';
+import { useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { AudioWaveform, Check, Copy, Shield, ChevronRight } from './icons';
 import { LABELS } from '../lib/labels';
@@ -10,18 +10,16 @@ import { SearchDialog } from './SearchDialog';
 import { useHealth } from '../lib/useHealth';
 import { useTutorialState } from '../lib/tutorialController';
 import type { ChipKind } from '../lib/status';
-import type { ApiHealth, ApiHealthDatabase } from '../lib/types';
+import type { ApiHealth } from '../lib/types';
 
 /**
  * An UNEXPECTED `health.mode`, capitalized for display, or `null` when the mode is
  * the expected one (or unknown).
  *
  * `synthetic-only` is the only mode this build boots in (`runtime_mode.py` refuses
- * to start in `real`), and a missing/failed health check tells us nothing — in both
- * of those cases the chip names the SCOPE the reader is looking at instead. But a
- * real value we did not anticipate must be surfaced, visibly and distinctly, rather
- * than masked behind a friendly scope label. This chip is the only surface in the
- * app that reports it, which is why it is still rendered in every scope.
+ * to start in `real`), and a missing/failed health check tells us nothing. A real
+ * value we did not anticipate must be surfaced, visibly and distinctly, rather than
+ * masked: this chip is the only surface in the app that reports it.
  *
  * The MODE'S OWN NAME is untouched by any label change here: `synthetic-only` is
  * what `/api/health` reports, what `runtime_mode.py` enforces, and what the machine
@@ -33,351 +31,39 @@ function anomalousMode(mode: string | undefined): string | null {
 }
 
 /**
- * Slice 2A — the chip's SECOND axis, independent of `mode`.
+ * The chip's text, or `null` when there is no chip.
  *
- * The deployment may be configured to run a protected, read-only diagnostic
- * against an isolated test database holding production-derived records. An
- * unqualified workspace chip would under-state what the deployment does, so this
- * state is disclosed — and nothing more. Since D3 it is read in the chip's
- * accessible name rather than appended to its visible text; the input, the two
- * states, and the reasoning below are unchanged.
- *
- * `none` is the ONLY state for an absent/failed health check: we then know
- * nothing about the database, and inventing either disclosure would be a guess.
- */
-type DbChipState = 'none' | 'diagnostics' | 'failed';
-
-/**
- * WHY "check failed" AND NOT "unavailable" — do not "improve" this back.
- *
- * GET /api/health performs ZERO I/O in its `database` block (it is the
- * Kubernetes readiness-probe target, so a sick database must never be able to
- * fail a probe). `last_recon` is therefore a memo of the last diagnostic RUN in
- * the server process: it may be minutes old, and it is absent entirely until
- * something runs a scan. "Unavailable" would assert PRESENT unreachability that
- * nothing has measured. "check failed" says only what is true — the last
- * recorded check did not complete. Approved by Krish (I5).
- *
- * By the same reasoning `configured: true` means "set up to run the
- * diagnostic", never "a database is currently reachable", so the diagnostics
- * qualifier is deliberately a capability statement and not a liveness one.
- *
- * A status outside {refused, error} — including a future/unknown value — is not
- * treated as a failure: only an outcome we know to be a failure may claim one.
- */
-function databaseChipState(database: ApiHealthDatabase | undefined): DbChipState {
-  if (!database?.configured) return 'none';
-  const status = database.last_recon?.status;
-  return status === 'refused' || status === 'error' ? 'failed' : 'diagnostics';
-}
-
-/**
- * The chip's VISIBLE text: which workspace scope the reader is looking at, or an
- * anomalous mode when there is one.
- *
- * TWO THINGS CHANGED HERE (D3), and neither is cosmetic.
- *
- * 1. THE SCOPE DECIDES THE LABEL. "Example workspace" was rendered on every
- *    ordinary screen, naming that scope after content this build never puts there —
- *    the examples are created only inside a worked-example session, so only that
- *    scope is named after them. (Deliberately phrased as what the build does, not as
- *    "the examples are not there": see `ORDINARY_ONLY` below, where two successive
- *    versions of that contents claim had to be retired.)
- *
- * 2. THE DATABASE QUALIFIER IS NO LONGER APPENDED. "Example workspace · test DB
- *    diagnostics" put an infrastructure disclosure in the primary header of every
- *    product screen. It is not dropped: it is still derived from the same
- *    `health.database` input and still stated in this chip's ACCESSIBLE NAME (see
- *    `chipAriaDetail`), and four surfaces that already carry technical disclosure
- *    state it at length — the Governance banner, Governance & Safety → Policy, the
- *    Help panel, and Settings → Data & Privacy.
- *
- * An anomalous mode outranks the scope name: a deployment reporting a mode we did
- * not anticipate is more important than which workspace is open, and naming the
- * scope instead would mask it.
+ * ~~Rendered in every scope, with a ~90-word governance disclosure in its accessible
+ * name and a hover/focus popover.~~ RETIRED 2026-11-02 at the owner's direction
+ * (standing disclaimers removed). The chip now renders only when it says something
+ * the reader needs: inside a worked-example session (`Worked Example`), or when
+ * `health.mode` is anomalous, which outranks the scope name so it is never masked.
+ * On the ordinary scope there is no chip at all.
  *
  * Never renders a host, database name, user, secret name, connection detail, record
  * count, or any record content — the only inputs are `mode` and whether a session
- * is open.
+ * is open (`db-recon-truthfulness.test.tsx` scans every health state for that).
  */
-function chipText(health: ApiHealth | undefined, inExampleSession: boolean): string {
+function chipText(health: ApiHealth | undefined, inExampleSession: boolean): string | null {
   const anomaly = anomalousMode(health?.mode);
   if (anomaly !== null) return anomaly;
-  return inExampleSession ? LABELS.modeWorkedExample : LABELS.modeOrdinaryWorkspace;
+  return inExampleSession ? LABELS.modeWorkedExample : null;
 }
 
-/**
- * The accessible name always OPENS with the exact visible text (WCAG 2.5.3
- * label-in-name), then states, in plain language, what is true of the scope.
- *
- * THE VISIBLE LABEL HAS BEEN SHORTENED TWICE, and each time the claims it carried
- * had to survive somewhere. It once read "Synthetic"; then "Example workspace ·
- * test DB diagnostics"; it now names the scope alone. What the chip is responsible
- * for asserting has NOT shrunk with it — this accessible name states all of it:
- *
- *   · what the built-in example records are in THIS scope (present and rebuilt from
- *     committed reference files, or structurally absent);
- *   · file upload is refused;
- *   · no official institutional record is shown;
- *   · and, when `health.database` says so, the protected read-only test-database
- *     diagnostic and its last recorded outcome.
- *
- * The first three are the SAME claims the Governance banner, the Governance & Safety
- * policy tab and the Help panel make at length, and those three keep their exact
- * technical wording — a chip is not where a governance guarantee is defined, but it
- * must not be where one silently disappears either.
- *
- * SCOPE-DEPENDENT, and that is a correctness fix rather than a rewording. The single
- * sentence used to open with "the records here are rebuilt from reference files
- * committed to this build". That was true when the five built-in examples were
- * materialised into the ordinary workspace on every read. They are not any more:
- * they exist only inside a worked-example session, so in the ordinary scope the clause
- * described records that are not there.
- *
- * Split, so each scope states what is actually true of it. The two claims that hold
- * unconditionally — upload refused, no official institutional record shown — are
- * shared and must never be dropped from either branch.
- *
- * THE ORDINARY BRANCH HAS NOW BEEN CORRECTED TWICE, and the second correction is the
- * interesting one. The first fix replaced the stale clause with "this workspace holds no
- * records of its own" — an EMPTINESS claim nothing in this app measures. The second fix
- * replaced THAT with "the built-in example records are not in this workspace", which is a
- * narrower emptiness claim and still an assertion about what a directory CONTAINS. Both
- * were false in the same situation. See `ORDINARY_ONLY` below for the third wording, which
- * states what the BUILD ENFORCES instead, and for why that distinction is the whole point.
- */
-export const CHIP_CLAIMS_ALWAYS =
-  'file upload is refused, and no official institutional record is shown.';
-
-/**
- * Ordinary workspace: a claim about what this BUILD DOES, never about what the
- * directory holds.
- *
- * TWO EARLIER WORDINGS WERE FALSE IN THE SAME SITUATION, and the second one was false
- * while a comment here argued it was proven. Keeping both on the record, because the
- * second mistake was made by a reader of the first correction:
- *
- *  1. "this workspace holds no records of its own" — an emptiness claim derived from
- *     `sessionId === null` alone. The chip reads no count and asks the backend nothing.
- *  2. "the built-in example records are not in this workspace" — a NARROWER emptiness
- *     claim, and narrower did not make it measured. The justification given for it was
- *     that `_materialise_seed` requires a `session_id`, which establishes only that THIS
- *     BUILD cannot put one there. It does not establish that none IS there.
- *
- * WHY THAT GAP IS REAL, MEASURED RATHER THAN REASONED. `list_experiments(None)`
- * (`apps/api/isaac_api/workspace.py:922`) enumerates whatever is on disk under the
- * workspace root, and there is NO startup migration. On a workspace pre-populated as the
- * retired `ensure_seeded()` would have left it, that call returns all five canonical
- * records, each classifying `canonical`, and `remove_experiment`
- * (`apps/api/isaac_api/workspace.py:1220`) REFUSES to delete a canonical id — so wording
- * 2 denied, on every screen, the presence of five rows My Experiments was listing
- * directly beneath it. `DEFAULT_WORKSPACE` is `/tmp/isaac-ui-workspace`
- * (`workspace.py:96`), so any developer who ran an older build then this one reaches that
- * state by default; the `/krish` pod mounts `emptyDir` and does not.
- *
- * WHAT IS ACTUALLY TRUE OF EVERY DEPLOYMENT is the enforcement, so that is what is said.
- * `_materialise_seed`, `reset_to_canonical_seed` and `ensure_tutorial_seeded` each now
- * REFUSE a `None` session id at runtime with `InvalidTutorialSession` — not merely
- * "require" one, which was the over-reading: `scope_root(None)` returns
- * `workspace_root()` silently, and an explicit `session_id=None` was measured writing a
- * canonical record into the ordinary root before the refusal was added
- * (`apps/api/tests/test_tutorial_scope.py::test_the_seeding_functions_refuse_an_unscoped_call`).
- *
- * THERE IS NO OTHER PRODUCER OF A BUILT-IN EXAMPLE, and the reason given here has been
- * wrong TWICE. Both wrong versions are kept, because the second one was written by a
- * reader who had just corrected the first and still landed on a claim that expired.
- *
- *  1. "record creation mints a fresh ULID rather than a canonical id" — false as stated.
- *     `create_experiment` does `rid = id or new_record_id()`
- *     (`apps/api/isaac_api/workspace.py`), so it mints a fresh ULID only when no explicit
- *     id is given, and `create_experiment(..., id=SEED_READY_ID, session_id=None)` writes
- *     a canonical record into the ordinary root.
- *  2. "this build exposes no record-creation surface at all — there is no
- *     `POST /api/experiments`" — TRUE when written, and now FALSE. That route exists.
- *
- * WHAT CARRIES THE SENTENCE NOW. Note first what the sentence actually says: nothing adds
- * a **BUILT-IN EXAMPLE** record here. It has never been a claim that nothing adds a record
- * — a reader creating their own experiment does exactly that, and the chip is not about
- * them. Three properties, each checkable:
- *
- *   · `POST /api/uploads` is still an unconditional 403, so nothing is imported;
- *   · the create route passes no `id=` (so the ULID default applies) and its request model
- *     sets `extra="forbid"` (so a client that names one gets a 422, not silence) — the
- *     five fixed canonical ids are therefore unreachable from it;
- *   · `PostgresOrdinaryStore.refuse_if_not_persistable` raises on a canonical id in any
- *     scope, so one cannot be made durable either.
- *
- * `test_tutorial_scope.py::test_create_experiment_has_no_caller_in_the_api_package` still
- * guards this. It now pins that there is exactly ONE caller (the persistence seam) and
- * that it passes neither `id=` nor `session_id=`, rather than that there are none.
- *
- * DO NOT REPLACE THIS WITH AN ABSENCE CLAIM WITHOUT MEASURING ONE. The honest way to
- * assert absence would be to read the scope's count, which this chip deliberately does
- * not do.
- */
-const ORDINARY_ONLY =
-  'nothing in this build adds a built-in example record to this workspace — they are ' +
-  `created only inside a guided-walkthrough session; ${CHIP_CLAIMS_ALWAYS}`;
-
-/** Inside a worked-example session: the examples ARE rebuilt from committed
- *  reference files, and they are discarded with the session. */
-const EXAMPLE_SESSION_ONLY =
-  'the example records here belong to this walkthrough only, are rebuilt from ' +
-  'reference files committed to this build, and are discarded when the ' +
-  `walkthrough ends; ${CHIP_CLAIMS_ALWAYS}`;
-
-function baseAriaDetail(inExampleSession: boolean): string {
-  return inExampleSession ? EXAMPLE_SESSION_ONLY : ORDINARY_ONLY;
-}
-
-/**
- * The rest of the accessible name after the visible text.
- *
- * THIS IS WHERE THE DATABASE DISCLOSURE NOW LIVES ALONE (D3). It used to be a
- * visible `· test DB diagnostics` suffix as well; dropping that suffix without
- * keeping this would have deleted the only per-deployment, health-derived statement
- * of the diagnostic's state from the app — the four prose surfaces say a diagnostic
- * "may run", which is a policy statement, not this deployment's status. The two
- * branches below are the same two `health.database` states the suffix was derived
- * from, so nothing about WHAT is disclosed changed; only where it is read.
- */
-function chipAriaDetail(state: DbChipState, inExampleSession: boolean): string {
-  const base = baseAriaDetail(inExampleSession);
-  if (state === 'diagnostics') {
-    return (
-      `${base} This deployment is also configured to run a protected, ` +
-      'read-only diagnostic against an isolated test database; it returns ' +
-      'sanitized aggregate results only, and no database records are displayed.'
-    );
-  }
-  if (state === 'failed') {
-    return (
-      `${base} The most recent protected, read-only test-database ` +
-      'diagnostic recorded by this deployment did not complete; it returns ' +
-      'sanitized aggregate results only, and no database records are displayed.'
-    );
-  }
-  return base;
-}
-
-function chipAriaLabel(health: ApiHealth | undefined, inExampleSession: boolean): string {
-  return `${chipText(health, inExampleSession)} — ${chipAriaDetail(
-    databaseChipState(health?.database),
-    inExampleSession,
-  )}`;
-}
-
-// Driven by the backend health (via the shared, cached useHealth) rather than a
-// hardcoded label — `mode` for an anomaly, `database` for the accessible-name
-// disclosure. No extra fetch, no polling, no call to the reconnaissance endpoint
-// itself. On backend-down the chip still renders and still carries this
-// deployment's two unconditional claims — it never vanishes and never implies
-// non-synthetic.
+// Driven by the shared, cached health (`mode`) and the tutorial store (which scope
+// is open). No extra fetch and no polling. The visible text is the whole name: no
+// `aria-label`, so it cannot drift from what a sighted reader sees.
 function WorkspaceChip() {
   const health = useHealth();
-  // Which scope the chip is describing. Read from the tutorial store rather than
-  // from health: `/api/health`'s `mode` describes the DEPLOYMENT and is
-  // deliberately unchanged by this (it is still `synthetic-only` in both scopes),
-  // while the chip describes the workspace the reader is currently looking at.
+  // Read from the tutorial store rather than from health: `/api/health`'s `mode`
+  // describes the DEPLOYMENT and is unchanged by a session.
   const inExampleSession = useTutorialState().sessionId !== null;
-  /*
-   * B-22 — THE CLAIMS HAD NO VISIBLE CARRIER. They lived only in the `aria-label`, so the
-   * chip was invisible to a keyboard user (a `<span>` is not in the tab order) and to
-   * anyone with a pointer (nothing showed on hover). It is now focusable and shows the
-   * SAME claims — `chipAriaDetail`, not a paraphrase — in a popover on focus and on hover.
-   *
-   * WHY IT STAYS A `span role="note"` AND NOT A `<button>`. The chip is not a control: it
-   * does nothing when pressed, and a button that does nothing is a dead control. It is
-   * ancillary content that needs to be READABLE, which is what a focusable note with a
-   * revealing popover is. Staying a span also leaves every browser locator and every
-   * assertion about its accessible name untouched.
-   *
-   * THE POPOVER IS `aria-hidden`: the accessible name already speaks these ninety words, and
-   * a second, announced copy would read them twice. It dismisses on Escape without moving
-   * focus, stays open while the pointer is over it (a transparent bridge in `chrome.css` spans the 6px gap between chip and popover, so moving onto it never leaves the hover target), and
-   * persists while focus remains (WCAG 1.4.13 — dismissible, hoverable, persistent).
-   */
-  const [open, setOpen] = useState(false);
-  const popoverRef = useRef<HTMLSpanElement>(null);
-  // Named, not inline arrows: `casing-registers.test.tsx`'s label-slot scan reads JSX with a
-  // regex whose attribute match ends at the first `>`, and the `>` of `() =>` inside an
-  // attribute made it read the handler's source as the element's text.
-  const showClaims = () => setOpen(true);
-  const hideClaims = () => setOpen(false);
-  /*
-   * KEPT ON SCREEN. The popover hangs from the chip's RIGHT edge, which is right on a wide
-   * bar and wrong on a narrow one: measured in Chromium at 375px it painted from x = -30,
-   * with the first words of the disclosure off the left edge of the viewport. The bar
-   * wraps, so no fixed offset can be right at every width — it is measured once it is
-   * open, and shifted only as far as it must be. It only ever moves RIGHT (the wide-bar
-   * anchor already keeps the other edge on screen).
-   */
-  useLayoutEffect(() => {
-    const el = popoverRef.current;
-    if (!open || el === null) return;
-    el.style.transform = '';
-    const { left } = el.getBoundingClientRect();
-    if (left < 8) el.style.transform = `translateX(${8 - left}px)`;
-  }, [open]);
-  useEffect(() => {
-    if (!open) return;
-    const onKeyDown = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') setOpen(false);
-    };
-    document.addEventListener('keydown', onKeyDown);
-    return () => document.removeEventListener('keydown', onKeyDown);
-  }, [open]);
+  const text = chipText(health, inExampleSession);
+  if (text === null) return null;
   return (
-    /*
-     * `role="note"` — QA-023. THE `aria-label` BELOW WAS ON A BARE `<span>`, WHICH
-     * MAPS TO `role=generic`, AND ARIA **PROHIBITS** NAMING A GENERIC.
-     *
-     * Measured with axe 4.12.1 against this element's exact shipped markup:
-     *
-     *   bare span   violations=0  incomplete=[aria-prohibited-attr, color-contrast]
-     *   role=note   violations=0  incomplete=[color-contrast]
-     *
-     * WHAT THIS DOES AND DOES NOT CLAIM. It moves a ~90-word GOVERNANCE disclosure
-     * from an attribute ARIA says must not be there — where whether it is announced
-     * depends on user-agent leniency — onto a role that permits naming, so the name
-     * is conformant rather than tolerated. **It is NOT a claim that the disclosure
-     * was previously inaudible to every screen reader; that was not tested, and a
-     * real-AT check is a human gate this environment cannot perform.** The honest
-     * statement is that it was prohibited and is now permitted.
-     *
-     * WHY `note` AND NOT THE ALTERNATIVES, all four measured and all four clearing
-     * the prohibition equally — so the choice is made on SEMANTICS, not on axe:
-     *   · `status` makes it a LIVE REGION. The chip is driven by polled
-     *     `/api/health`, so every poll that changed a value would re-announce ninety
-     *     words of governance prose. Actively worse than the defect.
-     *   · `img` would treat the chip as a graphic and SUPPRESS its inner text.
-     *   · `group` asserts a set of related widgets; there are none.
-     *   · `note` is ARIA's "parenthetic or ancillary content", permits naming, is
-     *     not a live region, and leaves the visible word readable. That is what this
-     *     chip is.
-     *
-     * IT MOVES NO ACCESSIBILITY BASELINE CELL, which is why it can ship beside a
-     * Linux round-trip already in flight: `e2e/helpers/axe.ts` reads only
-     * `results.violations`, and violations go 0 -> 0. The `incomplete` bucket it
-     * clears is the one nothing reads — see `QA-023`.
-     */
-    <span className="mode-chip-wrap" onMouseEnter={showClaims} onMouseLeave={hideClaims}>
-      <span
-        className="mode-chip"
-        role="note"
-        tabIndex={0}
-        aria-label={chipAriaLabel(health, inExampleSession)}
-        onFocus={showClaims}
-        onBlur={hideClaims}
-      >
-        <Shield size={13} strokeWidth={2} aria-hidden="true" />
-        {chipText(health, inExampleSession)}
-      </span>
-      {open && (
-        <span className="mode-chip-popover" aria-hidden="true" ref={popoverRef}>
-          {chipAriaDetail(databaseChipState(health?.database), inExampleSession)}
-        </span>
-      )}
+    <span className="mode-chip">
+      <Shield size={13} strokeWidth={2} aria-hidden="true" />
+      {text}
     </span>
   );
 }
@@ -512,10 +198,10 @@ interface TopBarProps {
   surface?: string;
 }
 
-/** Identity, context/breadcrumb, the persistent Synthetic mode chip, Help, and
- * the ⌘K search command palette. The mode chip is always mounted — it is
- * load-bearing. Search is real (P26): the SearchDialog affordance is mounted on
- * every variant so ⌘K opens the API-backed palette from any surface. */
+/** Identity, context/breadcrumb, the mode chip (worked-example session or an
+ * anomalous mode only), Help, and the ⌘K search command palette. Search is real
+ * (P26): the SearchDialog affordance is mounted on every variant so ⌘K opens the
+ * API-backed palette from any surface. */
 export function TopBar({ variant, title, filename, stateChip, recordId, surface }: TopBarProps) {
   return (
     <header className="topbar">

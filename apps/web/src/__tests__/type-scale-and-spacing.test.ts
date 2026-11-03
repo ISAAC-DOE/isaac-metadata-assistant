@@ -328,8 +328,19 @@ const CEILING = {
    *
    * -> 2318, LOWERED 2026-10-12 for the same deletion as `fontSize` above (the
    * retired Settings and Policy layout rules), read from the counter.
+   *
+   * -> 2286, LOWERED 2026-11-02 (declutter, Home / Historical Import / Memory): the
+   * retired date badge, the graph toolbar row, the boxed import empty state and the
+   * dashed graph selection box went, and their replacements use `--space-*` rungs.
+   * Read from the counter.
+   *
+   * -> 2291, 2026-11-02, on current main: PR #306 (the shared `Select` /
+   * `SegmentedControl` and the one-page Schema Proposals) landed five spacing
+   * literals under main's then-ceiling of 2318. Combined with this branch's
+   * deletions the counter reads 2291 — still 27 below main's ceiling. Read from
+   * the counter.
    */
-  spacing: 2318,
+  spacing: 2291,
   /**
    * font-size declarations BELOW the 11px floor: 9.5px ×1, 10px ×14, 10.5px ×84.
    *

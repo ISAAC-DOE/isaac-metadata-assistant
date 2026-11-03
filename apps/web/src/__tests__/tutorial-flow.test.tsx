@@ -647,16 +647,17 @@ describe('R0 · replay from Settings & API → Help & Tutorial', () => {
    * test now pins strictly more than it did. It is checked in the OTHER direction
    * too: the bare absolute must not come back.
    */
-  it('says the completion flag is browser-local, and scopes what replay does not touch', async () => {
+  it('scopes what replay does not touch', async () => {
     stubFetchRoutes(readOnlyRoutes() as never);
     renderAt('/settings?tab=help');
     await screen.findByRole('button', { name: LABELS.actionStartTutorial });
     const panel = screen.getByRole('tabpanel');
     // The build has no identity it trusts, so the copy must not imply a profile
     // that follows the reader to another machine.
-    expect(panel.textContent).toMatch(/remembered by this browser only/i);
-    expect(panel.textContent).toMatch(/no account/i);
-    expect(panel.textContent).toMatch(/another browser, another device/i);
+    // ~~"remembered by this browser only … no account … another browser"~~ — that
+    // locality paragraph was retired 2026-11-02 (inventory row 105); the scope of what
+    // replay does not touch (row 36, KEEP) is still stated.
+    expect(panel.textContent).not.toMatch(/remembered by this browser only/i);
     // The promise the code does keep, in the reader's words: their OWN work is
     // untouched.
     expect(panel.textContent).toMatch(/no field of yours is answered/i);
@@ -671,51 +672,17 @@ describe('R0 · replay from Settings & API → Help & Tutorial', () => {
     expect(panel.textContent).toMatch(/discarded when the walkthrough ends/i);
     // Where the in-progress pointer lives, since "nothing else is stored" was false
     // while a session was open.
-    expect(panel.textContent).toMatch(/this tab also holds/i);
     /*
-     * THIS ASSERTION WAS RE-POINTED BECAUSE THE SENTENCE IT PINNED LOST ITS SCOPE.
-     *
-     * It required `no record content, no field value, and no identity`, which was
-     * written as "Nothing else ABOUT IT is stored: no record content, …" — a claim
-     * about the two walkthrough entries. This branch dropped "about it", turning it
-     * into a whole-app privacy claim that is FALSE: `lib/assistantSession.ts` writes
-     * transcripts to `sessionStorage` under `isaac.assistant.session.<id>`, keeping
-     * `text`, `field` and `value` (`SAFE_KEYS`), and `lib/settingsContent.ts` states
-     * that only credentials, absolute paths, long hex digests and record verdicts are
-     * stripped. The pin below is STRONGER than the one it replaces: it still requires
-     * the three "no …" clauses, it additionally requires the scoping words that make
-     * them true, and it forbids the unscoped form outright — a guard that accepted the
-     * bare list is exactly what let the scoping word be deleted silently.
+     * ~~The storage paragraph ("this tab also holds …", "nothing else about the
+     * walkthrough is stored", the `resume_failed` exception)~~ — retired 2026-11-02 with
+     * the other standing disclaimers (inventory row 105). The two false forms it was
+     * re-pointed away from must still never appear: a whole-app "nothing else is
+     * stored" (the assistant transcript IS stored, in sessionStorage), and the bare
+     * "both are forgotten when the walkthrough ends" absolute (a failed resume keeps the
+     * pointer).
      */
-    expect(panel.textContent).toMatch(/nothing else about the walkthrough is stored/i);
-    expect(panel.textContent).toMatch(/neither of those two entries holds/i);
-    expect(panel.textContent).toMatch(/record content, a field value, or an identity/i);
     expect(panel.textContent).not.toMatch(/nothing else is stored/i);
-    // The assistant transcript is not denied — the reader is sent to the surface that
-    // actually describes it, so the narrowing is not a silent omission.
-    expect(panel.textContent).toMatch(/assistant panel/i);
-    // Data & Privacy became Privacy & Governance (2026-10-12); the pointer follows it.
-    expect(panel.textContent).toMatch(/Privacy & Governance/i);
-    /*
-     * THE `resume_failed` EXCEPTION, WHICH WAS UNPINNED.
-     *
-     * "Both are forgotten when the walkthrough ends" was an unqualified absolute, and
-     * `tutorialController.resumeTutorialSession` makes it false in exactly one branch:
-     * on an unidentifiable probe failure it drops the scope but KEEPS the session
-     * pointer, so a reload is a real retry (`tutorial-session-lifecycle.test.tsx` · B4).
-     * The disclosure of that exception carried no test, so deleting it left the suite
-     * green while the copy went back to over-promising. Pinned in both directions: the
-     * exception must be stated, and the bare absolute must not return.
-     */
-    expect(panel.textContent).toMatch(
-      /forgotten when the walkthrough ends\s*—\s*with one deliberate exception/i,
-    );
-    expect(panel.textContent).toMatch(/fails for a reason it cannot identify/i);
-    expect(panel.textContent).toMatch(/that note is kept/i);
-    expect(panel.textContent).toMatch(
-      /only route back into a walkthrough that may still be open/i,
-    );
-    expect(panel.textContent).not.toMatch(/forgotten when the walkthrough ends[.,;]/i);
+    expect(panel.textContent).not.toMatch(/both are forgotten when the walkthrough ends(?!\s*—)/i);
   });
 
   /*
@@ -882,4 +849,42 @@ describe('R0 · the walkthrough changes nothing but its own scope', () => {
     });
     localSetItem.mockRestore();
   }, 30000);
+});
+
+// --- the walkthrough's copy makes no standing disclaimer and no false claim -----
+
+/*
+ * FINAL REVIEW I-2 (2026-11-02). The Settings step said Settings "is a readout, and it
+ * says so plainly" after the line that said so was retired — a claim about the screen
+ * that the screen no longer made. Inventory rows #118–#121 retired the standing
+ * disclaimers in the steps too. Pinned as "no false claim": no step says Settings
+ * states something it does not, and none carries the retired disclaimer phrasing.
+ * NEGATIVE CONTROL: every ban matches the exact retired sentence it replaced.
+ */
+describe('the walkthrough steps carry no retired disclaimer and no false claim about a screen', () => {
+  const BANS: Array<[string, RegExp, string]> = [
+    ['claims Settings says something', /says so plainly|it is a readout/i,
+      'Nothing on it is adjustable; it is a readout, and it says so plainly.'],
+    ['not-a-score disclaimer', /nothing here is a score|health rating/i,
+      'so nothing here is a score, a trend, or a health rating.'],
+    ['institutional-system disclaimer', /reaches an institutional system/i,
+      'nothing you do here reaches an institutional system.'],
+    ['build-provenance narration', /committed to this build|what this build actually is/i,
+      'reference files committed to this build'],
+    ['no-account narration', /no account behind it/i,
+      'there is no account behind it, so another browser or another device will be offered it again.'],
+  ];
+  it('no step body matches a ban', () => {
+    for (const step of TUTORIAL_STEPS) {
+      for (const [what, ban] of BANS) expect(step.body, `${step.id}: ${what}`).not.toMatch(ban);
+    }
+  });
+  it('NEGATIVE CONTROL — each ban matches the sentence it retired', () => {
+    for (const [what, ban, retired] of BANS) expect(retired, what).toMatch(ban);
+  });
+  it('the Settings step names only what Settings shows', () => {
+    const step = TUTORIAL_STEPS.find((s) => s.id === 'settings-and-api')!;
+    expect(step.body).toMatch(/where your work is kept/);
+    expect(step.body).toMatch(/Integrations/);
+  });
 });

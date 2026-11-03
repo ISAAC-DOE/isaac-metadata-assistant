@@ -571,7 +571,7 @@ describe('§1 · the file picker exists and cannot send a byte', () => {
      */
     const claim = document.querySelector('.ifs-claim');
     expect(claim).not.toBeNull();
-    expect(claim!.textContent).toMatch(/not sent to ISAAC/i);
+    expect(claim!.textContent).toMatch(/the\s+file itself stays on this computer/i);
     expect(claim!.closest('details')).toBeNull();
     // Nor behind the shared `Disclosure`: it sits in the Source Bundle stage itself,
     // beside the picker, and is on screen whenever that stage is.
@@ -1205,12 +1205,12 @@ describe('§6 · UX-016 · a scientist with zero experiments can find this desti
     expect(link.getAttribute('href')).toContain(ROUTES.imports);
   });
 
-  it('the empty state’s lead sentence no longer omits it', async () => {
+  it('the empty state still offers it, on its own card, with its own hint', async () => {
     /**
-     * MUTATION: restoring the previous body ('Create your first experiment,
-     * validate an existing record, or explore ISAAC with the guided demo.') makes
-     * this RED. The old sentence was TRUE when written and went stale by omission
-     * the moment an import path shipped, which is exactly `UX-016`'s finding.
+     * ~~The lede pinned here ('Start fresh, or bring in work you already have.')~~
+     * was cut 2026-11-02: the cards say it, each with its own verb. What the lede
+     * pin protected — that the empty state does not omit Historical Import — is
+     * pinned on the card itself.
      */
     stubEmptyWorkspace();
     render(
@@ -1221,8 +1221,11 @@ describe('§6 · UX-016 · a scientist with zero experiments can find this desti
         <ExperimentsHome />
       </MemoryRouter>,
     );
-    const body = await screen.findByText(LABELS.emptyExperimentsBody);
-    expect(body.textContent).toMatch(/bring in work you already have/i);
+    await screen.findByText(LABELS.emptyExperimentsTitle);
+    const link = screen.getByRole('link', { name: LABELS.actionOpenHistoricalImport });
+    const card = link.closest('.queue-empty-action') as HTMLElement;
+    expect(card).not.toBeNull();
+    expect(card.textContent).toContain(LABELS.historicalImportHint);
   });
 
   it('and it still promises no upload', () => {
@@ -1232,7 +1235,7 @@ describe('§6 · UX-016 · a scientist with zero experiments can find this desti
      * "bring in work you already have" — never "import your files", which would
      * imply the one thing the destination does not do.
      */
-    const copy = `${LABELS.emptyExperimentsBody} ${LABELS.historicalImportHint}`;
+    const copy = `${LABELS.historicalImportHint} ${LABELS.historicalImportHintMore}`;
     expect(copy).not.toMatch(/\bupload/i);
     expect(copy).not.toMatch(/drag|drop/i);
   });
@@ -1255,7 +1258,7 @@ describe('§7 · the authored copy states the blocked work rather than implying 
 
   it('says no beamline convention is applied, and that a profile is not a validator', () => {
     expect(IMPORT_COPY.profileNote).toMatch(/no beamline conventions are applied/i);
-    expect(IMPORT_COPY.profileNote).toMatch(/official ISAAC schema does that/i);
+    expect(IMPORT_COPY.profileNote).toMatch(/decided by the official ISAAC schema/i);
   });
 
   it('scopes the file claim to THIS WORKFLOW and never to the application', () => {
@@ -1274,9 +1277,19 @@ describe('§7 · the authored copy states the blocked work rather than implying 
     expect(IMPORT_COPY.reviewLead).toMatch(/only when someone accepts it/i);
   });
 
-  it('says the reconstruction involves no language model', () => {
-    expect(IMPORT_COPY.reconstructLead).toMatch(/no language model is involved/i);
-    expect(IMPORT_COPY.reconstructLead).toMatch(/no request leaves this deployment/i);
+  /*
+   * ~~"says the reconstruction involves no language model"~~ — the standing sentence
+   * ("It is deterministic and offline: no language model is involved, and no request
+   * leaves this deployment.") was retired 2026-11-02 at the owner's direction. What
+   * survives is the claim it protected against: the lead must never IMPLY a model or
+   * provider is involved. The negative control proves the ban reads model vocabulary.
+   */
+  const MODEL_IMPLIED = /\b(language model|LLM|AI|GPT|Claude|provider|machine learning)\b/i;
+  it('the reconstruction lead implies no model or provider, and still says how a key is placed', () => {
+    expect(IMPORT_COPY.reconstructLead).not.toMatch(MODEL_IMPLIED);
+    expect(IMPORT_COPY.reconstructLead).toMatch(/only when the key is that field’s path, exactly/i);
+    // NEGATIVE CONTROL: the ban matches model vocabulary when it is present.
+    expect('An AI model proposes what the sources add up to.').toMatch(MODEL_IMPLIED);
   });
 });
 

@@ -427,6 +427,10 @@ describe('the coercion ANNOUNCES itself, and does not leave a stale line describ
     const view = renderGraphTab();
     await view.findByText('Graph', { selector: 'h2' });
 
+    // The command bar is behind the graph's "Query" disclosure (2026-11-02).
+    if (!view.queryByRole('combobox', { name: 'Graph command' })) {
+      fireEvent.click(view.getByRole('button', { name: 'Query' }));
+    }
     const input = view.getByRole('combobox', { name: 'Graph command' });
     // A REAL verb, so this exercises the `commandOutcome` slot rather than the
     // `commandError` one. `find` is one of the seven verbs whose only

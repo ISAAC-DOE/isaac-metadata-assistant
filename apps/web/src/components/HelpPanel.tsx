@@ -261,59 +261,15 @@ export function HelpPanel() {
               </p>
             </section>
 
-            <section className="help-section">
-              {/* Was "This prototype runs on synthetic demo data only — no real
-                  experiment data." — a flat guarantee the app cannot make: it
-                  enforces the runtime MODE, and there is no real-vs-synthetic
-                  detector anywhere in the backend (`isaac_api/runtime_mode.py`).
-                  That correction stands: the first paragraph still says the app
-                  gates on mode, not on contents.
-
-                  Slice 2A (I5) added the second paragraph and retitled the
-                  section "Synthetic mode" → "Synthetic workspace". The mode
-                  claim was true but was being read as a claim about the whole
-                  deployment, which stopped being accurate once a protected,
-                  read-only diagnostic could run against an isolated test
-                  database of production-derived records. The heading now names
-                  what is actually synthetic — the workspace — matching the top-
-                  bar chip and components/GovernanceBanner.tsx, and the two
-                  paragraphs keep the claims apart.
-
-                  Same load-bearing wording constraints as GovernanceBanner.tsx
-                  and screens/GovernancePage.tsx: "may run", never "is running"
-                  (configuration is not reachability); an isolated SLAC test
-                  database, never the production database; and no claim that the
-                  app verified that isolation — the guarantee is an external
-                  pg_hba grant, not something this app can check. */}
-              <h3>Synthetic workspace</h3>
-              <p>Records shown here are synthetic; uploads are disabled.</p>
-              {/*
-                COMPACT, AND THE PAIRING IS THE POINT (2026-10-12). The mode token
-                ("configured for synthetic-only operation") and every bound of the
-                diagnostic sit in ONE disclosure, together — never the token visible
-                with its qualifier hidden, which is the unqualified whole-deployment
-                claim `db-recon-truthfulness.test.tsx` exists to stop. What stays
-                visible is scoped to the workspace a reader sees. The wording inside
-                is unchanged, so every guard that reads it reads the same sentences.
-              */}
-              <details className="help-inline-more">
-                <summary>About this deployment</summary>
-                <p>
-                  This deployment is configured for synthetic-only operation, and real mode
-                  intentionally refuses to start because the required ingestion and governance
-                  guardrails do not exist yet. What the app enforces is that mode, not the
-                  contents of what it is handed.
-                </p>
-                <p>
-                  Separately, this deployment may run a protected, read-only diagnostic against an
-                  isolated SLAC test database containing production-derived records: those records
-                  are processed transiently in pod memory, only sanitized aggregate results are
-                  returned, no record is modified, no per-record content is displayed, and nothing
-                  is sent to any model. Database-backed record display remains disabled pending an
-                  explicit visibility decision.
-                </p>
-              </details>
-            </section>
+            {/*
+              ~~"Synthetic workspace" section, with an "About this deployment"
+              disclosure (mode token + the read-only diagnostic and its bounds)~~ —
+              RETIRED 2026-11-02 at the owner's direction (standing disclaimers
+              removed). What still guards that subject is the sweep in
+              `db-recon-truthfulness.test.tsx` §13–14: no frontend source may make an
+              unqualified whole-application data claim, and every retired string is
+              still rejected there.
+            */}
 
             {/* ── UX-021b — SEVEN TOP-LEVEL SECTIONS BECOME FOUR, BY DISCLOSURE
                 AND NOT BY DELETION ──────────────────────────────────────────
@@ -462,19 +418,16 @@ export function HelpPanel() {
                     this section names BOTH readers and never states the refusal
                     unscoped. That is the same remedy §5 of that file already applies to
                     the capture site: a fifth site with a DIFFERENT claim shape gets its
-                    own narrow ban, not forced membership of §§2-4. */}
+                    own narrow ban, not forced membership of §§2-4.
+
+                    2026-11-02: the file-reader and upload-route sentences were retired at
+                    the owner's direction (standing disclaimers removed); the provenance
+                    sentence stays. `upload-claim-parity` §1/§3–§5 still forbid, over all of
+                    `src`, any "no file is read" or "no upload route" claim. */}
                 <h3>Where values come from</h3>
                 <p>
                   A value gets into a record because a person put it there — typed into a
                   record or run field, or given as an answer to a question above.
-                  No control here reads one of your files and fills a field from it. The
-                  upload route refuses every request. Four controls read a file you pick:
-                  the Validator and the campaign-sheet CSV comparison, which report what
-                  they found and apply nothing to a record; Historical Import&rsquo;s
-                  file staging, which opens one only to work out a checksum you asked for
-                  and sends no part of the file anywhere; and Schema Proposals&rsquo; local-import
-                  drafts loader, which lists the terms in a drafts file in your browser and
-                  sends only a proposal you write and save, never the file.
                 </p>
                 <p style={{ marginTop: 8 }}>
                   Dictating into Capture does not write a field either. It stores every

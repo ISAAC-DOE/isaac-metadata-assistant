@@ -662,7 +662,7 @@ describe('Assistant graph intents — the bounded catalog', () => {
     expect(p?.status).toBe('unresolved');
     expect(p?.actions).toEqual([]);
     expect(p?.explanation).toMatch(/No node in this projection matches/);
-    expect(p?.explanation).toMatch(/no approximate match was substituted/);
+    expect(p?.explanation).toMatch(/so nothing was changed/);
   });
 
   it('returns null for anything outside the catalog — the normal path is not hijacked', () => {

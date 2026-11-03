@@ -93,7 +93,8 @@ describe('the file staging panel sends nothing', () => {
      the open, so this asserts placement and not merely presence. */
   it('states that the file is not sent, in the open', () => {
     const { container } = render(<ImportFileStaging onRecord={async () => {}} />);
-    const claim = screen.getByText(/The file itself\s+is not sent to ISAAC/);
+    // 2026-11-02: one plain sentence ("…the file itself stays on this computer").
+    const claim = screen.getByText(/the\s+file itself stays on this computer/);
     expect(claim).toBeInTheDocument();
     expect(claim.closest('details')).toBeNull();
     expect(claim.closest('[hidden]')).toBeNull();
@@ -103,7 +104,7 @@ describe('the file staging panel sends nothing', () => {
   it('marks every freshly chosen row local-only', () => {
     render(<ImportFileStaging onRecord={async () => {}} />);
     choose([file('a.mac'), file('b.mac')]);
-    expect(screen.getAllByText('Local only — not sent to ISAAC')).toHaveLength(2);
+    expect(screen.getAllByText('Local only')).toHaveLength(2);
   });
 });
 
@@ -234,7 +235,8 @@ describe('the checksum', () => {
 
     const digest = await screen.findByText(/^sha256 [0-9a-f]{16}…$/);
     expect(digest).toBeInTheDocument();
-    expect(screen.getByText(/checksum computed in your browser/)).toBeInTheDocument();
+    // ~~"· checksum computed in your browser"~~ — the row-meta caveat was retired
+    // 2026-11-02; the digest itself is the evidence that one was computed.
 
     // It is the REAL SHA-256 of those bytes, not a placeholder: compared
     // against an independently computed digest rather than against itself.

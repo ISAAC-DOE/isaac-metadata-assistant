@@ -240,9 +240,10 @@ test('@interaction the assistant drawer trap moves focus to the composer at 768p
  */
 test('@interaction the unavailable API-key action is a stated state, not a disabled button', async ({ page, app }) => {
   await app.goto('/settings?tab=api');
-  // The refusal is stated in prose — the heading is the state.
-  await expect(page.getByRole('heading', { name: /No API Keys in This Build/i })).toBeVisible();
-  await expect(page.getByText(/At most one credential exists/i)).toBeVisible();
+  // 2026-11-02: the state is one plain line (the heading and its caveat retired).
+  await expect(
+    page.getByText('API keys are not set up on this server. An administrator configures access in the deployment settings.').first(),
+  ).toBeVisible();
   // …and no control pretends otherwise: no Create button at all, disabled or not.
   await expect(page.getByRole('button', { name: /Create API Key/i })).toHaveCount(0);
 });

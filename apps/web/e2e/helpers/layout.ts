@@ -40,7 +40,7 @@
  */
 
 import type { Page } from '@playwright/test';
-import { HIDDEN_TEXT_ALLOWANCES } from '../layout-allowlist';
+import { HIDDEN_TEXT_ALLOWANCES, OVERFLOW_ALLOWANCES } from '../layout-allowlist';
 
 const TOL = 1;
 
@@ -828,12 +828,37 @@ export async function findClippedText(
  *     and then declare it fine — using one defect to excuse another. Vertical
  *     scrolling is how a page is read; horizontal scrolling of the main content
  *     region is the defect.
+ *   * ONE horizontal exception, added 2026-11-02 when the <=1024px LeftNav
+ *     became a single row that scrolls sideways: a control whose NEAREST
+ *     horizontally-scrolling ancestor is a DELIBERATE scroller — it matches an
+ *     `OVERFLOW_ALLOWANCES` class in `layout-allowlist.ts` (`.leftnav`,
+ *     `.settings-section-tabs`, `.scroll-x`, ...), its computed `overflow-x` is
+ *     `auto`/`scroll`, and it really overflows (`scrollWidth > clientWidth`) —
+ *     is also scrolled into view INSIDE THAT ONE BOX (`inline: 'nearest'`),
+ *     exactly as Tab focus or a swipe would. Every other ancestor's
+ *     `scrollLeft` is still restored, and so is the scroller's own once the
+ *     re-test is done, so the probe leaves the page as it found it. The
+ *     allowlist gate, and not geometry alone, is what keeps the E1 rule
+ *     intact: `main.screen-main` computes `overflow-x: auto` too (its
+ *     `overflow-y: auto` forces it), so "any real scroll container" would let
+ *     it excuse its own sliver again. A control genuinely covered inside a
+ *     deliberate scroller is still reported: it is re-tested after the scroll
+ *     with the same three tests (self-check: "...inside a deliberate
+ *     horizontal scroller").
  *   * Elements with no visible area at all are still skipped, so callers should
  *     invoke this at more than one scroll position.
+ *
+ * `deliberateScrollers` defaults to every `OVERFLOW_ALLOWANCES` class. Those
+ * entries are surface-scoped for the overflow probe, which still reports one of
+ * them overflowing on a surface it was not recorded for; here the class only
+ * decides which box may be scrolled sideways, so the surface scope adds nothing.
  */
-export async function findObscuredControls(page: Page): Promise<Offender[]> {
+export async function findObscuredControls(
+  page: Page,
+  deliberateScrollers: readonly string[] = OVERFLOW_ALLOWANCES.map((a) => a.match)
+): Promise<Offender[]> {
   return page.evaluate(
-    ({ selInteractive, selLabels, minUsable }) => {
+    ({ selInteractive, selLabels, minUsable, scrollerSels }) => {
       const out: { selector: string; detail: string; text: string; kind: string }[] = [];
       // Include the nearest classed ancestors: an unclassed `<span>` on its own
       // ("span: clipped horizontally") is unfindable in a 60-file codebase.
@@ -909,11 +934,29 @@ export async function findObscuredControls(page: Page): Promise<Offender[]> {
       };
 
       /**
-       * `scrollIntoView`, VERTICALLY ONLY. See the header: allowing the
-       * horizontal scroll would let the unintended inner scroller excuse the
-       * sliver it causes.
+       * The control's NEAREST horizontally-scrolling ancestor, if — and only if —
+       * it is a deliberate scroller (see the header). Anything else, including
+       * `main.screen-main`, returns null and gets no horizontal scroll at all.
        */
-      const scrollVerticallyIntoView = (el: HTMLElement) => {
+      const deliberateScrollerOf = (el: HTMLElement): HTMLElement | null => {
+        for (let a = el.parentElement; a && a !== document.body && a !== document.documentElement; a = a.parentElement) {
+          const ox = getComputedStyle(a).overflowX;
+          if (ox !== 'auto' && ox !== 'scroll') continue;
+          const overflows = a.scrollWidth > a.clientWidth + 1;
+          return overflows && scrollerSels.some((s) => a.matches(s)) ? a : null;
+        }
+        return null;
+      };
+
+      /**
+       * `scrollIntoView`, VERTICALLY — plus horizontally inside the control's own
+       * deliberate scroller, when it has one. See the header: allowing any other
+       * horizontal scroll would let an unintended inner scroller excuse the
+       * sliver it causes. Returns the function that puts the deliberate
+       * scroller back where it was.
+       */
+      const scrollIntoViewForRetest = (el: HTMLElement): { scroller: HTMLElement | null; restore: () => void } => {
+        const scroller = deliberateScrollerOf(el);
         const saved: [Element, number][] = [];
         for (let a: Element | null = el.parentElement; a; a = a.parentElement) {
           saved.push([a, a.scrollLeft]);
@@ -921,8 +964,15 @@ export async function findObscuredControls(page: Page): Promise<Offender[]> {
         }
         const pageX = window.scrollX;
         el.scrollIntoView({ block: 'center', inline: 'nearest' });
-        for (const [a, left] of saved) a.scrollLeft = left;
+        for (const [a, left] of saved) if (a !== scroller) a.scrollLeft = left;
         window.scrollTo(pageX, window.scrollY);
+        const scrollerLeft = scroller ? (saved.find(([a]) => a === scroller)?.[1] ?? 0) : 0;
+        return {
+          scroller,
+          restore: () => {
+            if (scroller) scroller.scrollLeft = scrollerLeft;
+          },
+        };
       };
 
       interface Assessment {
@@ -1015,24 +1065,34 @@ export async function findObscuredControls(page: Page): Promise<Offender[]> {
         const first = assess(el, interactive);
         if (first.verdict === null) continue;
 
-        // Second chance: scroll it into view VERTICALLY, exactly as a user (or
-        // Playwright's own auto-scroll before a click) would, and re-test.
-        scrollVerticallyIntoView(el);
+        // Second chance: scroll it into view VERTICALLY (and sideways inside its
+        // own deliberate scroller, if it sits in one), exactly as a user — or
+        // Playwright's own auto-scroll before a click — would, and re-test.
+        const retest = scrollIntoViewForRetest(el);
         const second = assess(el, interactive);
+        retest.restore();
         if (second.verdict === null) continue;
 
+        const how = retest.scroller
+          ? `scrollIntoView (vertical, and horizontal within ${describe(retest.scroller)})`
+          : 'vertical scrollIntoView';
         out.push({
           selector: describe(el),
           kind: second.verdict + (interactive ? '' : ':label'),
           detail: `${
             second.verdict === 'unusable-sliver' ? 'still an unusable sliver' : 'still occluded'
-          } after vertical scrollIntoView: ${second.detail}`,
+          } after ${how}: ${second.detail}`,
           text: (el.textContent ?? '').trim().slice(0, 60),
         });
       }
       return out;
     },
-    { selInteractive: SEL_INTERACTIVE, selLabels: SEL_CRITICAL_LABELS, minUsable: MIN_USABLE_TARGET_PX }
+    {
+      selInteractive: SEL_INTERACTIVE,
+      selLabels: SEL_CRITICAL_LABELS,
+      minUsable: MIN_USABLE_TARGET_PX,
+      scrollerSels: [...deliberateScrollers],
+    }
   );
 }
 

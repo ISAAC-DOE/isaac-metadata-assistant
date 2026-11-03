@@ -475,7 +475,9 @@ export function AssistantDrawer({
         onClick={() => setOpen((o) => !o)}
       >
         <MessageSquare size={16} strokeWidth={2} aria-hidden="true" />
-        {label}
+        {/* Visually hidden below 620px (`assistant-drawer.css`), never removed: the
+            text stays the button's accessible name at every width. */}
+        <span className="assistant-drawer-trigger-label">{label}</span>
       </button>
 
       <div

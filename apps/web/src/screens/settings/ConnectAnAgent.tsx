@@ -32,8 +32,9 @@
  * the one that is a PRECONDITION of the whole procedure: on a deployment that
  * answers only browser sessions, no agent can connect at all, and this guide is
  * a `<details>` a reader can open without ever seeing the sibling that said so.
- * See `API_ACCESS_COPY.connectPrerequisite` — still authored once, still counted
- * once, but rendered here rather than pointed at from here.
+ * ~~See `API_ACCESS_COPY.connectPrerequisite`~~ — that precondition, and the pointer
+ * to Connect Your Agent, were retired 2026-11-02 (owner's direction: no standing
+ * disclaimers). The guide is now the functional setup steps only.
  *
  * On hosted access: that boundary is stated provider-neutrally wherever it
  * appears. Naming the identity layer in front of a deployment would disclose
@@ -42,7 +43,6 @@
  * `GET /api/about`).
  */
 import { SAMPLE_BASE_ENV, SAMPLE_CREDENTIAL_ENV } from '../../lib/apiDocsModel';
-import { API_ACCESS_COPY } from '../../lib/settingsContent';
 
 export interface ConnectAnAgentFacts {
   /** Request media types the contract declares, from the document. */
@@ -112,7 +112,7 @@ export function ConnectAnAgent({
     },
     {
       heading: 'Configure Authentication',
-      body: `When a deployment enables authentication, every call carries an "Authorization: Bearer" header holding that deployment's credential; the liveness check is the one operation that stays reachable without it. Quick Start, the other view of this widget, reports how many operations document a 401; How Access Works Today says what that one credential is and is not; and the Endpoint Explorer marks each operation.`,
+      body: `When a deployment enables authentication, every call carries an "Authorization: Bearer" header holding that deployment's credential; the liveness check is the one operation that stays reachable without it. Quick Start reports how many operations document a 401, and the Endpoint Explorer marks each operation.`,
     },
     {
       heading: 'Send Structured Requests',
@@ -147,11 +147,7 @@ export function ConnectAnAgent({
       //
       // Pinned by `__tests__/upload-claim-parity.test.tsx` §8, and the row is
       // in that file's `ALL_BAN_SURFACES` so §3, §3b and §5 hold it too.
-      body: "Read operations are safe to repeat. Writes change a record and require explicit user intent — an agent should never write on someone's behalf unless that person asked for that specific change. Several writes also require the record's current ETag, so a blind overwrite is refused rather than applied, and the upload route refuses every request outright.",
-    },
-    {
-      heading: 'Validate Responses',
-      body: 'The official ISAAC schema and the deterministic validators are the only authority on whether a record is valid or exportable. Assistant operations are advisory: they answer from a fixed catalog and refuse what falls outside it. Project Memory returns leads to confirm against the cited files, and is not record truth. Treat both as input to a check, never as the check itself.',
+      body: "Read operations are safe to repeat. Writes change a record and require explicit user intent — an agent should never write on someone's behalf unless that person asked for that specific change. Several writes also require the record's current ETag, so a blind overwrite is refused rather than applied.",
     },
     {
       heading: 'Handle Errors',
@@ -159,28 +155,13 @@ export function ConnectAnAgent({
     },
     {
       heading: 'Protect Credentials',
-      body: `Keep the credential in the environment the agent runs in and read it from there — that is what the samples do with $${SAMPLE_CREDENTIAL_ENV}. Never place it in a prompt, in source control, in a log line, or in a screenshot, and never echo it back in output. This app never displays a credential, and this screen has none to give.`,
+      body: `Keep the credential in the environment the agent runs in and read it from there — that is what the samples do with $${SAMPLE_CREDENTIAL_ENV}. Never place it in a prompt, in source control, in a log line, or in a screenshot, and never echo it back in output.`,
     },
   ];
 
   const content = (
     <>
-      <p className="api-connect-lead">
-        What a program calling this API has to get right — short, and only what this build actually
-        supports.{' '}
-        {/* The cross-reference to the OTHER agent surface, appended to the lead
-            rather than given a paragraph of its own: this guide and the Connect
-            Your Agent widget describe different protocols and make auth claims
-            that do not reconcile unless a reader knows which path each is about.
-            Authored in `API_ACCESS_COPY` — see the note on `connectMcpPointer`. */}
-        {API_ACCESS_COPY.connectMcpPointer}
-      </p>
-      {/* FINDING B — the precondition, stated INSIDE the guide. A reader can open
-          this guide on its own and follow eight steps to an integration that
-          cannot be made on the deployment serving the page, so the disqualifying
-          fact has to sit with the procedure it disqualifies. Authored once, in
-          `API_ACCESS_COPY`. */}
-      <p className="api-connect-prerequisite">{API_ACCESS_COPY.connectPrerequisite}</p>
+      <p className="api-connect-lead">What a program calling this API has to get right.</p>
       <div className="api-connect-body">
         {sections.map((section) => (
           <section className="api-connect-section" key={section.heading}>

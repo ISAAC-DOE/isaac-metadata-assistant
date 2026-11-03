@@ -605,12 +605,15 @@ const EXEMPT_SITES: readonly ExemptSite[] = [
   },
   {
     file: 'styles/base.css',
-    selector: '.btn-secondary:disabled',
+    selector:
+      ".btn-secondary:disabled, .btn-secondary[aria-disabled='true'], " +
+      ".btn-secondary[aria-disabled='true']:hover, .btn-secondary[aria-disabled='true']:active",
     token: '--text-inactive',
     basis: 'inactive-control',
     why:
       'Disabled secondary button (PR #277 review — there was no disabled rule at all, so a ' +
-      'disabled secondary looked enabled). Same 1.4.3 inactive-component exemption as the rows above.',
+      'disabled secondary looked enabled), and since 2026-11-02 the refused (`aria-disabled`) ' +
+      'one at rest, on hover and on press. Same 1.4.3 inactive-component exemption as the rows above.',
   },
   /* ~~`screens/screens.css` · `.api-keys-create-btn` · `--text-disabled`~~ —
      RETIRED 2026-10-12 with the control. The permanently disabled "Create API Key"

@@ -1,3 +1,11 @@
+/*
+ * UNMOUNTED since 2026-11-02 (owner's direction: no standing disclaimers) — Load
+ * Materials no longer renders this banner, and nothing else imports it. The file is
+ * KEPT only because the committed Project Memory snapshot
+ * (`apps/api/isaac_api/data/memory-snapshot.json`) indexes it as a served source, and
+ * `test_committed_snapshot.py` refuses a snapshot that names a missing file. Delete it
+ * in the change that regenerates the snapshot.
+ */
 import './chrome.css';
 import { ShieldCheck } from './icons';
 import { LABELS } from '../lib/labels';

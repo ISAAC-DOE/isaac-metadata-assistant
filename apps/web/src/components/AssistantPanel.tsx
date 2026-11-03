@@ -32,11 +32,9 @@ import type { AssistantPrefill } from '../lib/assistantAsk';
 import {
   ASSISTANT_COMPOSER_HELPER,
   ASSISTANT_COMPOSER_HELPER_MEMORY,
-  ASSISTANT_NO_MODEL_CLAIM,
   ASSISTANT_UNAVAILABLE,
   MEMORY_UNAVAILABLE_CAVEAT,
   SOURCE_LABELS,
-  SUBORDINATE_CAPTION,
   hasVerdictLanguage,
 } from '../lib/assistant';
 import { classifyAnswer, type MessageKind } from '../lib/assistantConversation';
@@ -597,7 +595,6 @@ export function AssistantPanel({
    */
   const ids = useId();
   const composerHelperId = `${ids}-composer-helper`;
-  const noModelClaimId = `${ids}-no-model`;
 
   /*
    * UX-022 — THE HEADER'S TOGGLE SLOT. `AssistantDrawer` owns the collapse
@@ -1735,7 +1732,7 @@ export function AssistantPanel({
     ) : null;
 
   return (
-    <section className="assistant" aria-label="Assistant (advisory)">
+    <section className="assistant" aria-label="Assistant">
       <div className="assistant-head">
         <span className="assistant-icon" aria-hidden="true">
           <MessageSquare size={15} strokeWidth={2} />
@@ -2204,7 +2201,7 @@ export function AssistantPanel({
             type="text"
             className="assistant-composer-input"
             aria-label="Ask the assistant a question"
-            aria-describedby={`${composerHelperId} ${noModelClaimId}`}
+            aria-describedby={composerHelperId}
             placeholder="Ask a question"
             value={composerText}
             onChange={(e) => setComposerText(e.target.value)}
@@ -2411,54 +2408,20 @@ export function AssistantPanel({
             * The composer stays visible at all times, so asking is never
             * hidden behind the disclosure. */}
 
-        {/* ── ONE NOTE, NOT THREE STRIPS ──────────────────────────────────
-            *
-            * ~~`.assistant-composer-helper`, then `.assistant-no-model` 6px
-            * below it, then `.assistant-caption` behind a hair divider and in
-            * italics.~~ MEASURED (real Chromium, 1280x800, the 308px record
-            * rail): three separate 11px paragraphs of 33 + 33 + 59.5 = 125.5px,
-            * with an unlabelled 33x23 icon button parked between the second and
-            * the third. Two type registers, one divider and four gap values
-            * across three sentences that a reader meets as one thing: fine
-            * print under a text box.
-            *
-            * EVERY CLAIM SURVIVES VERBATIM, and that is a §5 requirement rather
-            * than a courtesy. All three strings are still the exported
-            * constants, rendered in full, in document order, visible with no
-            * disclosure and no viewport condition:
-            *
-            *   · `ASSISTANT_COMPOSER_HELPER` — what the assistant answers over.
-            *   · `ASSISTANT_NO_MODEL_CLAIM`  — there is no language model in
-            *     this build, and nothing typed here is sent to a model
-            *     provider. `docs/ai-integration-decision-packet.md` §3 names
-            *     this panel as the site of that claim and its absence was a
-            *     measured defect; `__tests__/assistant-model-claim-parity.test.tsx`
-            *     pins it here on all five mounts, including its POLARITY.
-            *   · `SUBORDINATE_CAPTION`      — the assistant is advisory, it
-            *     never validates, and deterministic validation remains
-            *     authoritative.
-            *
-            * THE SPANS ARE NOT COSMETIC. `.assistant-composer-helper` and
-            * `.assistant-no-model` carry the ids the composer input names in
-            * `aria-describedby`, so a reader who tabs into the field still
-            * hears both facts — and each span's own `textContent` is still
-            * exactly its own constant, which is what the parity guard reads.
-            * `.assistant-caption` stays a distinct element for the same reason.
-            *
-            * NOT ITALIC ANY MORE. The italic register existed to mark the
-            * caption as a standing disclaimer distinct from the two facts above
-            * it; in one merged note the distinction is carried by sentence
-            * order and there is nothing left to distinguish it FROM. A single
-            * register also removes the `overused-font` finding the in-browser
-            * detector reported on this dock. */}
+        {/* ── ONE NOTE ─────────────────────────────────────────────────────
+            * What the composer answers over, and nothing else. ~~It also carried
+            * `ASSISTANT_NO_MODEL_CLAIM` ("There is no language model in this
+            * build…") and `SUBORDINATE_CAPTION` ("The Assistant is advisory… It
+            * never validates…")~~ — both retired 2026-11-02 at the owner's
+            * direction (standing disclaimers removed). What still guards the
+            * subject is `__tests__/assistant-model-claim-parity.test.tsx`: no
+            * copy on any mount may imply a model or provider exists, and no
+            * product surface calls the assistant seam. The span keeps the id the
+            * composer input names in `aria-describedby`. */}
         <p className="assistant-dock-note">
           <span id={composerHelperId} className="assistant-composer-helper">
             {queryScope === 'memory' ? ASSISTANT_COMPOSER_HELPER_MEMORY : ASSISTANT_COMPOSER_HELPER}
-          </span>{' '}
-          <span id={noModelClaimId} className="assistant-no-model">
-            {ASSISTANT_NO_MODEL_CLAIM}
-          </span>{' '}
-          <span className="assistant-caption">{SUBORDINATE_CAPTION}</span>
+          </span>
         </p>
       </div>
     </section>
@@ -2936,7 +2899,7 @@ function ProposalCard({
         </button>
         <button
           type="button"
-          className="btn btn-secondary agent-proposal-cancel"
+          className="btn btn-quiet agent-proposal-cancel"
           onClick={onCancel}
           disabled={confirming}
         >

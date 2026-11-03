@@ -242,7 +242,8 @@ describe('scenario label — ExperimentRow rendering', () => {
     expect(container.textContent).not.toContain('at setup');
     // the rest of the row is untouched
     expect(container.querySelector('.exp-title')?.textContent).toBe(BASE_TITLE);
-    expect(container.querySelector('.exp-sub')?.textContent).toContain('Draft');
+    // A draft carries no lifecycle chip since 2026-11-02; its accessible name does.
+    expect(container.querySelector('a')?.getAttribute('aria-label')).toContain('Draft');
   });
 
   it.each(CANONICAL_ROWS.map((r, i) => [r.scenario as string, r, i] as const))(
@@ -266,9 +267,14 @@ describe('scenario label — ExperimentRow rendering', () => {
           word.toLowerCase(),
         );
       }
-      // The live lifecycle chip is still rendered, and says the OTHER thing.
-      const sub = container.querySelector('.exp-sub')?.textContent ?? '';
-      expect(sub).toContain(row.exported ? 'Exported' : 'Draft');
+      // The live lifecycle still reaches the row, and says the OTHER thing: as the
+      // Exported chip on an exported row (the only lifecycle chip since 2026-11-02),
+      // and in the accessible name on every row.
+      const trailing = container.querySelector('.exp-trailing')?.textContent ?? '';
+      expect(trailing.includes('Exported')).toBe(Boolean(row.exported));
+      expect(container.querySelector('a')?.getAttribute('aria-label')).toContain(
+        row.exported ? 'Exported' : 'Draft',
+      );
       // ...and the label never states a field count that the live chip could contradict.
       expect(scenario.replace(`Example ${index + 1}`, '')).not.toMatch(/\d/);
       // ...and it is explicitly scoped to setup, so advancing the record — which

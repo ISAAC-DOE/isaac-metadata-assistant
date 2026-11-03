@@ -240,11 +240,8 @@ export function RecordValidator() {
             </p>
           </>
         }
-        headline={
-          phase === 'idle' ? (
-            <span className="widget-state rec-val-empty">No Record Checked Yet</span>
-          ) : undefined
-        }
+        /* ~~headline "No Record Checked Yet" while idle~~ — cut 2026-11-02: an idle
+           form needs no state line. */
       >
       {/* Was "Synthetic/local validator", which asserted the reader's machine on
           a build that also runs hosted; then "Synthetic-mode validator", a claim
@@ -258,8 +255,7 @@ export function RecordValidator() {
           body is "never written anywhere and its content is never logged; only the
           outcome and error count are". It stays VISIBLE: it is a privacy state. */}
       <p className="rec-val-scope-note" id="rec-val-scope-note-id">
-        The record is checked in memory and discarded. Nothing here is uploaded to a model, indexed,
-        or stored.
+        The record is checked in memory and discarded.
       </p>
 
       <div className="rec-val-input-row">
@@ -282,8 +278,13 @@ export function RecordValidator() {
           placeholder='{ "isaac_record_version": "1.05", "record_id": "…", … }'
           spellCheck={false}
           rows={12}
-          aria-describedby="rec-val-scope-note-id"
+          aria-describedby="rec-val-scope-note-id rec-val-size-hint"
         />
+        {/* The size limit is the field's own description (2026-11-02), not a hint
+            under the buttons. */}
+        <p className="rec-val-hint" id="rec-val-size-hint">
+          Accepts JSON up to 512 KB.
+        </p>
         <div className="rec-val-actions">
           <button
             type="button"
@@ -311,7 +312,6 @@ export function RecordValidator() {
             Validate
           </button>
         </div>
-        <p className="rec-val-hint">Accepts JSON up to 512 KB.</p>
         {loadedFile !== null && (
           <p className="rec-val-file-line">
             Loaded file: <span className="mono rec-val-file-name">{loadedFile}</span>
@@ -403,7 +403,6 @@ export function RecordValidator() {
           </div>
         )}
 
-        {phase === 'idle' && <p className="rec-val-idle-hint">Paste or upload JSON, then Validate.</p>}
       </div>
       </Widget>
   );
@@ -454,9 +453,8 @@ function OffListTerms({ record, errors }: { record: unknown; errors: { path: str
       <p className="rec-val-propose-lead">
         {offered.length === 1 ? 'This value is' : 'These values are'} not in the list for{' '}
         {offered.length === 1 ? 'its field' : 'their fields'} in the ISAAC portal vocabulary snapshot
-        {vocabulary.sources.portal.snapshot_commit ? ` ${vocabulary.sources.portal.snapshot_commit}` : ''} (a copy
-        taken at one point in time, not the live portal). If the list is missing a term you need, you can draft a
-        proposal; nothing is sent.
+        {vocabulary.sources.portal.snapshot_commit ? ` ${vocabulary.sources.portal.snapshot_commit}` : ''}. If the
+        list is missing a term you need, you can draft a proposal.
       </p>
       <ul className="rec-val-propose-list">
         {offered.map((c) => (

@@ -107,16 +107,11 @@
  * (every hover-affected property reset to its own resting value) is the
  * same.
  */
-.runs-focus-nav .btn[aria-disabled='true'] {
-  color: var(--text-muted);
-  cursor: not-allowed;
-}
-
-.runs-focus-nav .btn[aria-disabled='true']:hover {
-  border-color: var(--border-strong);
-  background: var(--surface);
-  color: var(--text-muted);
-}
+/* ~~`.runs-focus-nav .btn[aria-disabled='true']` and its `:hover` reset~~ — REMOVED
+   2026-11-02 (final review I-1). The hover reset restored the OLD white/grey resting
+   look, so once `.btn-secondary` was re-tinted a refused Previous/Next changed on
+   hover — the I-7 defect again. `base.css` now gives `.btn-secondary[aria-disabled]`
+   the `:disabled` look at rest, on hover and on press, once, for every screen. */
 
 /*
  * THE LEAVE CONFIRMATION — review finding I-1. Amber/`needsyou`, never the

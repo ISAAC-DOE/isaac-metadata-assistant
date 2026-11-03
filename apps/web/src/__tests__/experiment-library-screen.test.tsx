@@ -142,7 +142,12 @@ describe('the Library renders every column from ONE request', () => {
     stub([row({ title: 'Bare row' })]);
     const { container } = renderLibrary();
     expect(await screen.findByText('Bare row')).toBeInTheDocument();
-    expect(container.querySelector('.exp-meta')).toBeNull();
+    // The meta line holds only the date (plain text at its end since 2026-11-02):
+    // no technique, beamline, run or folder item, and no placeholder for them.
+    const meta = container.querySelector('.exp-meta');
+    const items = meta ? Array.from(meta.children) : [];
+    expect(items.every((el) => el.tagName.toLowerCase() === 'time')).toBe(true);
+    expect(meta?.textContent ?? '').not.toMatch(/—|unknown|\b0\b/i);
   });
 });
 
@@ -344,6 +349,14 @@ describe('the two empty states are DIFFERENT, and this is the one that matters',
  * `facetCounts`) and the folder-scope gate.
  */
 describe('UX-017 — Workspace Statistics is merged into the Library', () => {
+  /*
+   * 2026-11-02: the "What Needs Me?" card became ONE row — the status chips, then
+   * search and sort — with no heading, no info tip and no card frame. The two SUMS
+   * stay, shown only when above zero. Every behavioural pin below survives: the sums
+   * are the right sums, the filter carries the counts, B-2 scopes a short read, the
+   * sums leave inside a folder, and nothing here claims the figures are personal.
+   */
+  const overview = (c: HTMLElement) => c.querySelector('.library-overview') as HTMLElement;
   it('shows workspace-wide totals at the root, including the two SUMS the facet chips do not state', async () => {
     stub([
       row({ id: '01A00000000000000000000001', status: 'needs_attention', run_count: 3, open_proposal_count: 2 }),
@@ -351,7 +364,11 @@ describe('UX-017 — Workspace Statistics is merged into the Library', () => {
       row({ id: '01A00000000000000000000003', status: 'done', run_count: 0, open_proposal_count: 0 }),
     ]);
     const { container } = renderLibrary();
-    await screen.findByRole('heading', { name: LABELS.libraryOverviewHeading });
+    await screen.findByRole('radiogroup', { name: 'Filter these experiments' });
+    // No heading, no info tip and no card frame any more.
+    expect(screen.queryByRole('heading', { name: 'What Needs Me?' })).toBeNull();
+    expect(overview(container).querySelector('.widget-info, .helptip')).toBeNull();
+    expect(overview(container).closest('.widget')).toBeNull();
     // In DOM order: Runs Recorded, Proposals Waiting — the two SUMS no facet states.
     // Runs Recorded: 3 + 5 + 0 = 8. Proposals Waiting: 2 + 1 + 0 = 3 (a SUM, not
     // the "2 records have at least one" the `proposals` facet would show).
@@ -405,14 +422,37 @@ describe('UX-017 — Workspace Statistics is merged into the Library', () => {
     /activity (?:by|per) (?:user|person|scientist|you)/i,
   ];
 
-  it('never claims the counts are personal, in any of the six phrasings, ANYWHERE in the strip', async () => {
-    stub([row({ title: 'Any' })]);
+  it('shows NEITHER sum when it is zero — "0 Runs Recorded" says nothing a reader can use', async () => {
+    stub([
+      row({ id: '01A00000000000000000000001', run_count: 2, open_proposal_count: 0 }),
+      row({ id: '01A00000000000000000000002', run_count: 0, open_proposal_count: 0 }),
+    ]);
     const { container } = renderLibrary();
-    await screen.findByText(LABELS.libraryOverviewNote);
+    await screen.findByRole('radiogroup', { name: 'Filter these experiments' });
+    const labels = Array.from(container.querySelectorAll('.library-overview-label')).map((el) => el.textContent);
+    expect(labels).toEqual([LABELS.libraryOverviewRuns]);
+    expect(overview(container).textContent).not.toContain(LABELS.libraryOverviewProposals);
+  });
+
+  it('offers no Draft chip on the default row: every unexported record is a draft, so it overlapped every other chip', async () => {
+    stub([
+      row({ id: '01A00000000000000000000001', status: 'needs_attention' }),
+      row({ id: '01A00000000000000000000002', status: 'ready_to_export' }),
+    ]);
+    renderLibrary();
+    const filter = await screen.findByRole('radiogroup', { name: 'Filter these experiments' });
+    expect(within(filter).queryByRole('radio', { name: /^Draft/ })).toBeNull();
+    expect(within(filter).getByRole('radio', { name: /All Experiments/ })).toBeInTheDocument();
+  });
+
+  it('never claims the counts are personal, in any of the six phrasings, ANYWHERE in the strip', async () => {
+    stub([row({ title: 'Any', run_count: 2, open_proposal_count: 1 })]);
+    const { container } = renderLibrary();
+    await screen.findByRole('radiogroup', { name: 'Filter these experiments' });
 
     const section = container.querySelector('.library-overview');
     expect(section, 'the strip did not render; this guard would pass over nothing').not.toBeNull();
-    // The WHOLE section: heading, the four labels, the four values, and the note.
+    // The WHOLE row: the chips, the two sums and the search box's description.
     const text = section!.textContent ?? '';
     expect(text.length, 'the strip rendered empty').toBeGreaterThan(20);
 
@@ -444,8 +484,9 @@ describe('UX-017 — Workspace Statistics is merged into the Library', () => {
     }
     // ...and the shipped copy is NOT caught, so the ban is not simply "match all".
     for (const pattern of PERSONAL_CLAIM_PHRASINGS) {
-      expect(pattern.test(LABELS.libraryOverviewNote), `${pattern}`).toBe(false);
-      expect(pattern.test(LABELS.libraryOverviewHeading), `${pattern}`).toBe(false);
+      expect(pattern.test(LABELS.libraryOverviewRuns), `${pattern}`).toBe(false);
+      expect(pattern.test(LABELS.libraryOverviewProposals), `${pattern}`).toBe(false);
+      expect(pattern.test(LABELS.libraryOverviewNotePartial), `${pattern}`).toBe(false);
     }
   });
 
@@ -469,30 +510,28 @@ describe('UX-017 — Workspace Statistics is merged into the Library', () => {
     message: 'the experiment database did not answer',
   };
 
-  it('B-2 — scopes BOTH the heading and the note when the server declares the read incomplete', async () => {
-    stub([row({ title: 'Any' })], SHORT_READ);
+  it('B-2 — scopes the figures with a VISIBLE note when the server declares the read incomplete', async () => {
+    stub([row({ title: 'Any', run_count: 2 })], SHORT_READ);
     const { container } = renderLibrary();
-    await screen.findByText(LABELS.libraryOverviewNotePartial);
+    const note = await screen.findByText(LABELS.libraryOverviewNotePartial);
 
     const section = container.querySelector('.library-overview')!;
-    const text = section.textContent ?? '';
-    expect(text).toContain(LABELS.libraryOverviewHeadingPartial);
-    expect(text).toContain(LABELS.libraryOverviewNotePartial);
-    // ...and the unconditional workspace claims are GONE, not merely joined.
-    expect(text).not.toContain(LABELS.libraryOverviewHeading);
-    expect(text).not.toContain(LABELS.libraryOverviewNote);
+    // Beside the figures it qualifies, and not tucked behind a disclosure.
+    expect(section.contains(note)).toBe(true);
+    expect(note.closest('[hidden], .widget-info, .helptip-panel')).toBeNull();
+    // ...and nothing on the row claims the figures are workspace totals.
+    expect(section.textContent ?? '').not.toMatch(/counts over the records in this workspace/i);
   });
 
-  it('B-2 CONTROL — a COMPLETE read still says "Workspace", so the scoping is conditional and not a blanket hedge', async () => {
+  it('B-2 CONTROL — a COMPLETE read shows the sums with no partial-read note, so the scoping is conditional and not a blanket hedge', async () => {
     // Without this arm the fix could be "always hedge", which would understate a
     // read that IS complete — the opposite defect, and just as false.
-    stub([row({ title: 'Any' })]);
+    stub([row({ title: 'Any', run_count: 2 })]);
     const { container } = renderLibrary();
-    await screen.findByText(LABELS.libraryOverviewNote);
+    await screen.findByRole('radiogroup', { name: 'Filter these experiments' });
 
     const text = container.querySelector('.library-overview')!.textContent ?? '';
-    expect(text).toContain(LABELS.libraryOverviewHeading);
-    expect(text).not.toContain(LABELS.libraryOverviewHeadingPartial);
+    expect(text).toContain(LABELS.libraryOverviewRuns);
     expect(text).not.toContain(LABELS.libraryOverviewNotePartial);
   });
 
@@ -500,37 +539,38 @@ describe('UX-017 — Workspace Statistics is merged into the Library', () => {
     // The scoped strings are new user-facing copy, so they are held to both
     // standards: they must not reintroduce the inventory claim, and they must not
     // reintroduce the per-person claim through the back door.
-    expect(LABELS.libraryOverviewHeadingPartial).not.toMatch(/workspace/i);
     expect(LABELS.libraryOverviewNotePartial).toMatch(/not a workspace total/i);
     for (const pattern of PERSONAL_CLAIM_PHRASINGS) {
-      expect(LABELS.libraryOverviewHeadingPartial, `${pattern}`).not.toMatch(pattern);
       expect(LABELS.libraryOverviewNotePartial, `${pattern}`).not.toMatch(pattern);
     }
   });
 
-  it('is hidden while browsing INSIDE a folder — these are workspace totals, not the folder’s', async () => {
+  it('the sums are hidden while browsing INSIDE a folder — these are workspace totals, not the folder’s', async () => {
     stub([
-      row({ id: '01A00000000000000000000001', title: 'Inside', folder: 'Campaign' }),
-      row({ id: '01A00000000000000000000002', title: 'Outside', folder: '' }),
+      row({ id: '01A00000000000000000000001', title: 'Inside', folder: 'Campaign', run_count: 3 }),
+      row({ id: '01A00000000000000000000002', title: 'Outside', folder: '', run_count: 1 }),
     ]);
-    renderLibrary();
+    const { container } = renderLibrary();
     await screen.findByText('Inside');
-    expect(screen.getByRole('heading', { name: LABELS.libraryOverviewHeading })).toBeInTheDocument();
+    const sums = () => container.querySelector('.library-overview-grid');
+    expect(sums()).not.toBeNull();
 
     fireEvent.click(screen.getByRole('button', { name: /Campaign/ }));
     expect(screen.getByText('Inside')).toBeInTheDocument();
-    expect(screen.queryByRole('heading', { name: LABELS.libraryOverviewHeading })).toBeNull();
+    expect(sums()).toBeNull();
+    // The filter and search stay available inside the folder.
+    expect(screen.getByRole('radiogroup', { name: 'Filter these experiments' })).toBeInTheDocument();
 
-    // And it reappears on the way back out.
+    // And the sums reappear on the way back out.
     const trail = screen.getByRole('navigation', { name: 'Folder path' });
     fireEvent.click(within(trail).getByRole('button', { name: LABELS.libraryRootFolder }));
-    expect(screen.getByRole('heading', { name: LABELS.libraryOverviewHeading })).toBeInTheDocument();
+    expect(sums()).not.toBeNull();
   });
 
   it('is absent from the first-run empty state — there is nothing to summarise yet', async () => {
     stub([]);
     renderLibrary();
     await screen.findByText(LABELS.emptyExperimentsTitle);
-    expect(screen.queryByRole('heading', { name: LABELS.libraryOverviewHeading })).toBeNull();
+    expect(document.querySelector('.library-overview')).toBeNull();
   });
 });

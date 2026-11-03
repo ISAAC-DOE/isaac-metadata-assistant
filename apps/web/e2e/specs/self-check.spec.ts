@@ -250,6 +250,90 @@ test('@interaction the occlusion probe detects a control covered by an overlay',
   ).toBe(true);
 });
 
+/**
+ * The horizontal second chance (2026-11-02, for the single-row <=1024px LeftNav)
+ * must not become a blind spot. Three identical fixtures — a 150px button that
+ * starts 10px before the right edge of a 200px row that scrolls sideways — differ
+ * in one thing each:
+ *
+ *   A. a DELIBERATE scroller (`.scroll-x`, an `OVERFLOW_ALLOWANCES` class), nothing
+ *      over it: reachable by scrolling the row, so NOT reported — the positive
+ *      control for the fix itself;
+ *   B. the same deliberate scroller with an overlay over the row: once the button
+ *      is scrolled into view the overlay is still on top of it, so it IS reported
+ *      as covered — the negative control this test exists for;
+ *   C. an UNDECLARED scroller (`overflow-x: auto`, no allowlisted class): it gets no
+ *      horizontal scroll at all, so its sliver IS reported — the E1 rule that an
+ *      unintended inner scroller may not excuse the sliver it causes.
+ *
+ * And the probe must leave every row where it found it.
+ */
+test('@interaction the occlusion probe still flags a control covered inside a deliberate horizontal scroller', async ({
+  page,
+  app,
+}) => {
+  await app.open(experiments);
+
+  await page.evaluate(() => {
+    const row = (id: string, cls: string, top: number) => {
+      const scroller = document.createElement('div');
+      scroller.id = `${id}-row`;
+      scroller.className = cls;
+      scroller.style.cssText =
+        `position: fixed; left: 16px; top: ${top}px; width: 200px; height: 40px; display: flex; ` +
+        'overflow-x: auto; overflow-y: hidden; background: #fff; z-index: 99990;';
+      const spacer = document.createElement('div');
+      spacer.style.cssText = 'flex: none; width: 190px; height: 30px;';
+      const btn = document.createElement('button');
+      btn.id = id;
+      btn.textContent = id;
+      btn.style.cssText = 'flex: none; width: 150px; height: 30px;';
+      scroller.append(spacer, btn);
+      document.body.appendChild(scroller);
+      return scroller;
+    };
+    row('e2e-hscroll-reachable', 'scroll-x', 260);
+    const covered = row('e2e-hscroll-covered', 'scroll-x', 320);
+    row('e2e-hscroll-undeclared', 'e2e-undeclared-scroller', 380);
+
+    const r = covered.getBoundingClientRect();
+    const veil = document.createElement('div');
+    veil.id = 'e2e-hscroll-veil';
+    veil.style.cssText = `position: fixed; left: ${r.left}px; top: ${r.top}px; width: ${r.width}px; height: ${r.height}px; background: rgba(255,0,0,.3); z-index: 99999;`;
+    document.body.appendChild(veil);
+  });
+
+  const obscured = await findObscuredControls(page);
+  const find = (id: string) => obscured.find((o) => o.selector.startsWith(`button#${id}`));
+  const report = JSON.stringify(obscured, null, 2);
+
+  expect(
+    find('e2e-hscroll-reachable'),
+    `a control reachable by scrolling its own deliberate scroller was reported as a sliver; it reported ${report}`
+  ).toBeUndefined();
+
+  const covered = find('e2e-hscroll-covered');
+  expect(
+    covered,
+    `the occlusion probe missed a control covered by an overlay inside a deliberate scroller; it reported ${report}`
+  ).toBeTruthy();
+  expect(covered!.kind).toBe('covered');
+  expect(covered!.detail).toContain('horizontal within div#e2e-hscroll-covered-row');
+
+  const undeclared = find('e2e-hscroll-undeclared');
+  expect(
+    undeclared,
+    `an UNDECLARED inner scroller was allowed to excuse its own sliver; it reported ${report}`
+  ).toBeTruthy();
+  expect(undeclared!.kind).toBe('unusable-sliver');
+  expect(undeclared!.detail).toContain('after vertical scrollIntoView');
+
+  const scrollLefts = await page.evaluate(() =>
+    ['reachable', 'covered', 'undeclared'].map((k) => document.getElementById(`e2e-hscroll-${k}-row`)!.scrollLeft)
+  );
+  expect(scrollLefts, 'the probe must restore every row it scrolled').toEqual([0, 0, 0]);
+});
+
 test('@interaction the focus-indicator probe reports a control with no ring', async ({ page, app }) => {
   await app.open(experiments);
 

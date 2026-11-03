@@ -272,10 +272,18 @@ describe('graph toolbar — progressive disclosure without deletion', () => {
     expect(view.getByRole('button', { name: 'About This Graph' })).toBeInTheDocument();
     expect(view.getByRole('button', { name: 'Fit to View' })).toBeInTheDocument();
     expect(view.getByRole('button', { name: 'Reset View' })).toBeInTheDocument();
-    expect(document.querySelector('.graph-cmd-input')).not.toBeNull();
+    // The viewport controls sit ON the canvas, as an icon cluster (2026-11-02).
+    const cluster = view.getByRole('group', { name: 'Canvas view' });
+    expect(cluster.closest('.graph-canvas')).not.toBeNull();
+    expect(cluster.contains(view.getByRole('button', { name: 'Fit to View' }))).toBe(true);
+    // No zoom readout on the screen; the scale is not printed beside the canvas.
+    expect(view.container.textContent ?? '').not.toMatch(/zoom \d+%/);
+    // The command bar is behind "Query", closed (2026-11-02).
+    expect(view.getByRole('button', { name: 'Query' })).toBeInTheDocument();
+    expect(document.querySelector('.graph-cmd-input')).toBeNull();
 
-    // …and both disclosures start CLOSED, so the row is not thirteen deep.
-    for (const name of [/^Filters/, /^Find a Path$/]) {
+    // …and all three disclosures start CLOSED, so the row is not thirteen deep.
+    for (const name of [/^Filters/, /^Find a Path$/, /^Query$/]) {
       expect(view.getByRole('button', { name })).toHaveAttribute('aria-expanded', 'false');
     }
     expect(view.queryByLabelText('Node Type')).toBeNull();
@@ -293,6 +301,7 @@ describe('graph toolbar — progressive disclosure without deletion', () => {
     toBrowse(view);
     openFilters(view);
     openPath(view);
+    fireEvent.click(view.getByRole('button', { name: 'Query' }));
 
     /*
      * BEFORE this slice the surface carried these thirteen controls, all mounted
@@ -476,6 +485,7 @@ describe('graph active-filter chips', () => {
     toBrowse(view);
     openFilters(view);
     openPath(view);
+    fireEvent.click(view.getByRole('button', { name: 'Query' }));
     const index = modelIndex();
 
     fireEvent.change(view.getByLabelText('Search graph nodes'), { target: { value: 'fake' } });
@@ -920,7 +930,7 @@ describe('graph data is never mutated by the redesign', () => {
     // degrade honestly instead of drawing anything in its place. Awaited so the
     // resulting state update is observed rather than left dangling.
     expect(
-      await view.findByText(/Symbol-level detail is unavailable in this deployment/),
+      await view.findByText(/Symbol-level detail is unavailable/),
     ).toBeInTheDocument();
 
     // No relabelling, no chip, no legend row wrote back into the payload.

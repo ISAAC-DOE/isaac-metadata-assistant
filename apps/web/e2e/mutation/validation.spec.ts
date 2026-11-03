@@ -96,9 +96,10 @@ test.describe('R4 · standalone validation', () => {
     const posts = countValidatorPosts(page);
     await openValidator(page);
 
-    // Nothing has been checked yet, and the screen says exactly that rather than
-    // showing a stale or default verdict.
-    await expect(page.locator('.rec-val-empty')).toBeVisible();
+    // Nothing has been checked yet, and the screen shows no stale or default verdict.
+    // An unchecked candidate shows no outcome: no verdict, no loading, no refusal.
+    // (The idle "No Record Checked Yet" line was retired in the declutter.)
+    await expect(page.locator('.rec-val-result')).toBeEmpty();
     await expect(verdict(page)).toHaveCount(0);
 
     await textarea(page).fill(json(BROKEN_ONE_ERROR));
@@ -226,7 +227,9 @@ test.describe('R4 · standalone validation', () => {
 
     await expect(verdict(page), 'a verdict must not outlive the document it judged').toHaveCount(0);
     await expect(errorRows(page)).toHaveCount(0);
-    await expect(page.locator('.rec-val-empty')).toBeVisible();
+    // An unchecked candidate shows no outcome: no verdict, no loading, no refusal.
+    // (The idle "No Record Checked Yet" line was retired in the declutter.)
+    await expect(page.locator('.rec-val-result')).toBeEmpty();
   });
 
   test('a re-run over a DIFFERENT candidate replaces every error row — no row survives from the last run', async ({

@@ -18,7 +18,7 @@ import { describe, expect, it } from 'vitest';
 import { render, screen } from '@testing-library/react';
 import { MemoryRouter, Route, Routes } from 'react-router-dom';
 import { AppRoutes } from '../App';
-import { NotFound } from '../screens/NotFound';
+import { NotFound, isRecordShapedPath } from '../screens/NotFound';
 import { LABELS } from '../lib/labels';
 import { ROUTES } from '../lib/routes';
 
@@ -239,14 +239,26 @@ describe('QA-020 · what the screen must NOT claim', () => {
     ).toBe(1);
   });
 
-  it('states the scope explicitly rather than leaving it to inference', () => {
-    const { container } = renderScreenAt('/nope');
+  it('states the scope explicitly on a RECORD-SHAPED address rather than leaving it to inference', () => {
+    const { container } = renderScreenAt('/record/01SYNTHXANESSEED0000000002/no-such-view');
     const text = container.textContent ?? '';
     expect(text).toContain(LABELS.notFoundRecordScope);
     // The two load-bearing halves of that sentence, asserted by meaning rather
     // than as one long literal so a rewording that KEEPS the meaning passes.
     expect(text.toLowerCase()).toContain('nothing has been deleted');
     expect(text.toLowerCase()).toContain('never reaches a record');
+  });
+
+  it('shows no scope tip on an address that is not shaped like a record (2026-11-02)', () => {
+    for (const path of ['/nope', '/no-such-place', '/experiment']) {
+      const { container, unmount } = renderScreenAt(path);
+      expect(container.querySelector('.notfound-scope'), path).toBeNull();
+      expect(container.textContent ?? '', path).not.toContain(LABELS.notFoundRecordScope);
+      unmount();
+    }
+    expect(isRecordShapedPath('/experiments/01ABC')).toBe(true);
+    expect(isRecordShapedPath('/records/01ABC/evidence')).toBe(true);
+    expect(isRecordShapedPath('/settingz')).toBe(false);
   });
 
   it('MUTATION-GUARDED — offers no guess at what the reader meant', () => {

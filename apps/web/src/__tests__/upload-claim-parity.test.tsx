@@ -138,8 +138,8 @@
 import { existsSync, readdirSync, readFileSync } from 'node:fs';
 import { join, relative, sep } from 'node:path';
 
-import { describe, it, expect, afterEach } from 'vitest';
-import { cleanup, render, screen, fireEvent } from '@testing-library/react';
+import { describe, it, expect, afterEach, vi } from 'vitest';
+import { act, cleanup, render, screen, fireEvent, waitFor } from '@testing-library/react';
 import { MemoryRouter } from 'react-router-dom';
 
 import { HelpPanel } from '../components/HelpPanel';
@@ -147,12 +147,18 @@ import { SettingsPage } from '../screens/SettingsPage';
 import { LoadMaterials } from '../screens/LoadMaterials';
 import { ConnectAnAgent, type ConnectAnAgentFacts } from '../screens/settings/ConnectAnAgent';
 import { ConnectYourAgentPanel } from '../screens/settings/ConnectYourAgent';
-import { settingsConcepts } from '../lib/settingsContent';
-import { MCP_CAPABILITIES_REFUSED } from '../lib/mcpConnectContent';
+import { dataRows } from '../lib/settingsContent';
+import { aboutResponse, assistantCompanionUnconfigured, healthSynthetic, stubFetchRoutes } from '../test/apiFixtures';
+import { __resetHealthCache } from '../lib/useHealth';
+import { MCP_CAPABILITIES_REFUSED, MCP_CONNECT_COPY } from '../lib/mcpConnectContent';
 import { CAPTURE_COPY } from '../lib/transcriptCaptureContent';
 import { IMPORT_COPY } from '../lib/historicalImportContent';
 
-afterEach(cleanup);
+afterEach(() => {
+  cleanup();
+  __resetHealthCache();
+  vi.unstubAllGlobals();
+});
 
 // --- locating and reading the real sources -----------------------------------
 
@@ -189,26 +195,20 @@ const SETTINGS_FACTS = {
   recordSchemaVersion: '1.05',
 };
 
+/*
+ * ~~`no-real-experiment-data` and `synthetic-data-only` concept cards~~ — retired
+ * 2026-11-02 with the Privacy & Governance tab. Their replacement, the Overview Data
+ * card, is the site now: every row on every persistence arm.
+ */
 function noRealDataDetail(): string {
-  const found = settingsConcepts(SETTINGS_FACTS).find((c) => c.id === 'no-real-experiment-data');
-  if (!found) throw new Error('no such concept: no-real-experiment-data');
-  return `${found.heading} ${found.summary} ${found.detail}`;
+  return ['ephemeral', 'durable', 'unavailable', 'not-a-known-state']
+    .flatMap((persistence) => dataRows({ ...SETTINGS_FACTS, persistence }))
+    .map((r) => `${r.label} ${r.text}`)
+    .join(' ');
 }
 
-/**
- * The Settings → Data & Privacy synthetic-only MODE card, heading + summary +
- * detail. Read off the content module exactly as `noRealDataDetail` is, and for
- * the same reason: the claim is authored there, and `settings-page.test.tsx`
- * already proves every concept `detail` is rendered on the tab under its own
- * heading, so re-mounting the page here would duplicate that proof rather than
- * add one. BOTH `summary` and `detail` are read, because both shipped the
- * unscoped claim and a guard over one of them would have missed the other.
- */
-function syntheticModeCard(): string {
-  const found = settingsConcepts(SETTINGS_FACTS).find((c) => c.id === 'synthetic-data-only');
-  if (!found) throw new Error('no such concept: synthetic-data-only');
-  return `${found.heading} ${found.summary} ${found.detail}`;
-}
+/* ~~`syntheticModeCard`~~ — removed 2026-11-02: it had become `noRealDataDetail()`
+   under a second name; the Data card is scanned once, as a `SITES` member. */
 
 /**
  * The four sites, as the text a reader actually meets.
@@ -235,8 +235,23 @@ function syntheticModeCard(): string {
  * policy's own paragraphs, not the whole tab, so a neighbouring concept card
  * cannot supply half the claim and count as parity.
  */
-function policyTabText(): string {
-  render(
+/** Let every stubbed read the render started land INSIDE `act`, so a site is read
+ *  in its settled state and no update escapes the test (final review I-4). */
+async function settle(): Promise<void> {
+  await act(async () => {
+    await new Promise((resolve) => setTimeout(resolve, 0));
+  });
+}
+
+async function policyTabText(): Promise<string> {
+  /* `?tab=privacy` lands on Overview since 2026-11-02 (the policy paragraphs were
+     retired with the tab). What a reader meets at that address is the site now. */
+  stubFetchRoutes({
+    'GET /api/about': { body: aboutResponse },
+    'GET /api/openapi': { status: 503, body: {} },
+    'GET /api/graph/status': { status: 503, body: {} },
+  } as never);
+  const { container } = render(
     <MemoryRouter
       initialEntries={['/settings?tab=privacy']}
       future={{ v7_startTransition: true, v7_relativeSplatPath: true }}
@@ -244,19 +259,16 @@ function policyTabText(): string {
       <SettingsPage />
     </MemoryRouter>,
   );
-  /* Since 2026-10-18 the tab shows two policy paragraphs as VISIBLE ONE-LINE rows
-     and keeps all three paragraphs, verbatim, in Details. Both layers are this
-     site's claim, so both are read: the three full paragraphs AND the two lines a
-     reader sees first — a one-line form that overstated the claim would be the
-     defect this file exists for, in the most-read place. */
-  const full = Array.from(document.querySelectorAll('.settings-definition.gov-policy-section'));
-  const lines = Array.from(document.querySelectorAll('.settings-point.gov-policy-section'));
-  if (full.length !== 3) throw new Error(`expected the three policy paragraphs, found ${full.length}`);
-  if (lines.length !== 2) throw new Error(`expected the two one-line policy rows, found ${lines.length}`);
-  return [...lines, ...full].map((el) => el.textContent ?? '').join(' ');
+  /* SETTLED, not "Loading app info…" (final review I-4 / Task 2 Minor 2): the Data
+     rows only exist once `/api/about` has answered, so the site is read after them. */
+  await waitFor(() => expect(container.querySelector('.settings-rows')).not.toBeNull());
+  await settle();
+  return container.querySelector('.settings-panel')?.textContent ?? '';
 }
 
-function loadMaterialsWarnText(): string {
+async function loadMaterialsWarnText(): Promise<string> {
+  /* ~~The "Can I Load My Own Files?" widget's `.onramp-warn`~~ — retired 2026-11-02.
+     The whole Load Materials page is the site now. */
   const { container } = render(
     <MemoryRouter
       initialEntries={['/load']}
@@ -265,9 +277,8 @@ function loadMaterialsWarnText(): string {
       <LoadMaterials />
     </MemoryRouter>,
   );
-  const warn = container.querySelector('.onramp-warn');
-  if (warn === null) throw new Error('the on-ramp governance warning is not rendered');
-  return warn.textContent ?? '';
+  await settle();
+  return container.querySelector('.load-page')?.textContent ?? '';
 }
 
 /**
@@ -284,10 +295,20 @@ function loadMaterialsWarnText(): string {
  * not shown. `getByText` throws when it is not found, so the render is a real
  * assertion rather than a decoration.
  */
-function mcpNoUploadRow(): string {
+async function mcpNoUploadRow(): Promise<string> {
   const row = MCP_CAPABILITIES_REFUSED.find((c) => c.id === 'no-upload');
   if (!row) throw new Error('no such refused capability: no-upload');
-  render(<ConnectYourAgentPanel onOpenExplorer={() => {}} />);
+  // A fresh health read for THIS render: a site read earlier in the same test may
+  // have cached a body with no `mcp` block.
+  __resetHealthCache();
+  stubFetchRoutes({
+    'GET /api/health': { body: { ...healthSynthetic, mcp: { posture: 'unmounted' } } },
+    'GET /api/runtime/assistant-companion': { body: assistantCompanionUnconfigured },
+  } as never);
+  render(<ConnectYourAgentPanel />);
+  // Settled: the posture line has arrived, so no update escapes the test.
+  await screen.findByText(MCP_CONNECT_COPY.stateLine);
+  await settle();
   screen.getByText(row.detail);
   return `${row.action} ${row.detail}`;
 }
@@ -339,10 +360,16 @@ function connectAnAgentGuide(): string {
   return connectAnAgentGuideEl().textContent ?? '';
 }
 
-const SITES: [string, () => string][] = [
-  ['Settings → Privacy & Governance → the governance policy', policyTabText],
-  ['the Load Materials on-ramp warning', loadMaterialsWarnText],
-  ['Settings → Data & Privacy → no-real-experiment-data', noRealDataDetail],
+type Site = [string, () => Promise<string>];
+/** A synchronous accessor (a module read, or a render that fetches nothing), lifted. */
+const lift = (fn: () => string) => async () => fn();
+
+const SITES: Site[] = [
+  /* Labels renamed 2026-11-02 (final review Minor 4) to the surfaces that exist now,
+     so a failure message sends the reader to a real screen. */
+  ['Settings → Overview (the ?tab=privacy address)', policyTabText],
+  ['the Load Materials page', loadMaterialsWarnText],
+  ['Settings → Overview → Data card', lift(noRealDataDetail)],
   ['Settings → Connect Your Agent → the no-upload capability row', mcpNoUploadRow],
 ];
 
@@ -387,12 +414,14 @@ function historicalImportCopy(): string {
     .join(' ');
 }
 
-const ALL_BAN_SURFACES: [string, () => string][] = [
+const ALL_BAN_SURFACES: Site[] = [
   ...SITES,
-  ['transcript capture: voiceAudioHandling', captureVoiceAudioHandling],
-  ['Settings → Data & Privacy → synthetic-data-only', syntheticModeCard],
-  ['Settings → API Access → Connect an Agent (the guide)', connectAnAgentGuide],
-  ['Historical Import: every authored string', historicalImportCopy],
+  ['transcript capture: voiceAudioHandling', lift(captureVoiceAudioHandling)],
+  /* ~~'Settings → Data & Privacy → synthetic-data-only'~~ — dropped 2026-11-02: since
+     the tab was retired it scanned the SAME Data-card text as the SITES member above,
+     under a second name. */
+  ['Settings → API Access → Connect an Agent (the guide)', lift(connectAnAgentGuide)],
+  ['Historical Import: every authored string', lift(historicalImportCopy)],
 ];
 
 // --- §1 the readers this ban is justified by ---------------------------------
@@ -471,8 +500,9 @@ describe('R1b §1 · the file-reading controls exist, so the absolute claim is f
     expect(src).not.toMatch(/\bfetch\s*\(/);
     expect(src).not.toMatch(/XMLHttpRequest/);
     expect(src).not.toMatch(/FormData/);
-    // ...and the reader is told so, in words, in the component itself.
-    expect(src).toMatch(/not sent to ISAAC/);
+    // ...and the reader is told so, in words, in the component itself (2026-11-02:
+    // one plain sentence, "the file itself stays on this computer").
+    expect(src).toMatch(/file itself stays on this computer/);
   });
 
   it('the Schema Proposals drafts loader reads the chosen file in the browser and parses it there', () => {
@@ -550,9 +580,8 @@ describe('R1b §1 · the file-reading controls exist, so the absolute claim is f
     expect(
       declaring,
       'the set of components that accept a user-chosen file has changed. ' +
-        'components/HelpPanel.tsx tells the reader there are exactly two and names ' +
-        'them, and __tests__/help-claim-parity.test.tsx requires that section to name ' +
-        'BOTH readers — so a third control means that copy is now a half-disclosure, ' +
+        'any copy that names the readers (help-claim-parity / §6a here, conditionally) must ' +
+        'name every one — so a new control means that copy may now be a half-disclosure, ' +
         'and a removed one means the §3 ban rests on nothing (see §1 above).',
     ).toEqual([
       'components/CsvReconcilePanel.tsx',
@@ -600,14 +629,46 @@ const SHARED_CLAIM: [string, RegExp][] = [
   ],
 ];
 
-describe('R1b §2 · all four sites state the same claim', () => {
+/*
+ * 2026-11-02 — PRESENCE NO LONGER REQUIRED. The owner directed that standing disclaimers
+ * go, so a site may now say nothing about uploads at all. What §2 still forbids is the
+ * defect it was written for: a HALF-disclosure. If a site states the upload refusal, it
+ * must state the whole claim — both readers named, both retention bounds — because a
+ * refusal stated alone reads as "no file is read", which §1 proves false.
+ */
+/* Widened 2026-11-02 (Task 2 review, Minor 3): "Uploading is turned off.", "Upload is
+   not available." and "We do not accept uploads." each slipped the earlier form. */
+const STATES_A_REFUSAL =
+  /\bupload(s|ing)?\b[^.]{0,40}\b(refus\w+|disabled|blocked|not accepted|turned off|unavailable|not available)\b|\b(refus\w+|disabled|blocked|do not accept|does not accept)\b[^.]{0,40}\buploads?\b/i;
+
+describe('R1b §2 · a site that states the refusal states all of it (no half-disclosure)', () => {
   for (const [site, text] of SITES) {
-    describe(site, () => {
-      it.each(SHARED_CLAIM)('states %s', (_what, pattern) => {
-        expect(text()).toMatch(pattern);
-      });
+    it(`${site}: all or nothing`, async () => {
+      const copy = await text();
+      if (!STATES_A_REFUSAL.test(copy)) return;
+      for (const [what, pattern] of SHARED_CLAIM) expect(copy, `${site} omits: ${what}`).toMatch(pattern);
     });
   }
+
+  it('the condition sees a bare refusal, so the all-or-nothing rule is not vacuous', () => {
+    // Singular and plural, including the exact retired Help and GovernanceBanner sentences.
+    for (const shipped of [
+      'File upload is refused outright.',
+      'The upload route refuses every request.',
+      'File uploads are refused.',
+      'Records shown here are synthetic; uploads are disabled.',
+      'The records shown here are synthetic and uploads are disabled.',
+      'Uploads are not accepted here.',
+      // The three near rephrasings the review probed, each a positive control.
+      'Uploading is turned off.',
+      'Upload is not available.',
+      'We do not accept uploads.',
+    ]) {
+      expect(shipped, shipped).toMatch(STATES_A_REFUSAL);
+    }
+    // ...and a bare refusal fails the full claim, which is the half-disclosure.
+    expect(SHARED_CLAIM.every(([, p]) => p.test('File upload is refused outright.'))).toBe(false);
+  });
 });
 
 // --- §3 the absolute form is banned -----------------------------------------
@@ -691,16 +752,16 @@ describe('R1b §3 · no site claims the absolute "no file is read"', () => {
   // capture disclosure and the Settings mode card were outside it for no reason
   // other than that nobody widened the loop when they were added.
   for (const [site, text] of ALL_BAN_SURFACES) {
-    it.each(ABSOLUTE_NO_READ)(`${site} never claims %s`, (_what, pattern) => {
-      expect(text()).not.toMatch(pattern);
+    it.each(ABSOLUTE_NO_READ)(`${site} never claims %s`, async (_what, pattern) => {
+      expect(await text()).not.toMatch(pattern);
     });
   }
 });
 
 describe('R1b §3b · no site denies that the two review tools read', () => {
   for (const [site, text] of ALL_BAN_SURFACES) {
-    it.each(NEGATED_READER)(`${site} never states %s`, (_what, pattern) => {
-      expect(text()).not.toMatch(pattern);
+    it.each(NEGATED_READER)(`${site} never states %s`, async (_what, pattern) => {
+      expect(await text()).not.toMatch(pattern);
     });
   }
 });
@@ -726,11 +787,11 @@ describe('R1b §4b · the polarity pattern is proven on the string that defeated
   // tabpanels. That is a harness artefact, not a copy defect, and it is easy to
   // misread as one.
   for (const [site, text] of ALL_BAN_SURFACES) {
-    it(`does NOT fire on the correct copy of ${site}`, () => {
+    it(`does NOT fire on the correct copy of ${site}`, async () => {
       // Hoisted: `text()` RENDERS, and `.filter` would call it once per pattern —
       // two renders in one test, which the by-role query reports as an ambiguous
       // match rather than as the copy defect it is not.
-      const rendered = text();
+      const rendered = await text();
       const fired = NEGATED_READER.filter(([, p]) => p.test(rendered)).map(([label]) => label);
       expect(
         fired,
@@ -967,14 +1028,14 @@ describe('R1b §5 · no upload-claim site, and no CAPTURE_COPY string, claims th
   // §5 and §7 at once rather than by whichever the author remembered.
   describe('applies to every upload-claim surface, not just the capture site', () => {
     for (const [site, text] of ALL_BAN_SURFACES) {
-      it(`${site} does not claim the route does not exist`, () => {
+      it(`${site} does not claim the route does not exist`, async () => {
         // Hoisted to ONE call: `text()` renders for three of the five sites,
         // and `cleanup` runs between TESTS, not between calls — a second call
         // in the same test (e.g. as a would-be assertion message) renders the
         // site twice with no cleanup in between, which trips `getByRole`/
         // `getByText`'s "multiple elements found" as a false failure. Same
         // harness artefact §4b already documents for `policyTabText`.
-        const rendered = text();
+        const rendered = await text();
         expect(noEndpointClaims(rendered), rendered).toEqual([]);
       });
     }
@@ -1176,9 +1237,31 @@ const RETIRED_HELP_VALUES_SENTENCE =
   'your files and fills a field from it: file upload is refused, and the campaign-sheet CSV ' +
   'comparison is read-only with no route that applies what it found.';
 
-describe('R1b §6a · the Help "Where values come from" section names BOTH readers', () => {
-  it.each(BOTH_READERS_NAMED)('names %s', (_what, pattern) => {
-    expect(helpValuesSection()).toMatch(pattern);
+/*
+ * 2026-11-02 — the section's file-reader sentence was retired (owner's direction), so
+ * "names every reader" is no longer required by PRESENCE. It is kept as a CONDITIONAL
+ * guard: if the section mentions reading a file again, it must name every reader —
+ * the half-disclosure the polarity fixture below records is still a failure.
+ */
+const MENTIONS_A_FILE_READ =
+  /\b(reads?|opens?)\b[^.]{0,40}\b(files?|json|csv|sheet)\b|\bfile you (pick|choose)\b/i;
+
+describe('R1b §6a · the Help "Where values come from" section never half-discloses the readers', () => {
+  it('if it mentions reading a file, it names every reader', () => {
+    const text = helpValuesSection();
+    if (!MENTIONS_A_FILE_READ.test(text)) return;
+    for (const [what, pattern] of BOTH_READERS_NAMED) expect(text, what).toMatch(pattern);
+  });
+
+  it('the condition sees the retired sentence (so the guard is not vacuous)', () => {
+    expect(RETIRED_HELP_VALUES_SENTENCE).toMatch(MENTIONS_A_FILE_READ);
+    for (const shipped of [
+      'The Validator reads the JSON you choose.',
+      'Four controls read a file you pick.',
+      'The comparison reads the campaign sheet you choose.',
+    ]) {
+      expect(shipped, shipped).toMatch(MENTIONS_A_FILE_READ);
+    }
   });
 
   it('POLARITY: the sentence that shipped names only one of the two', () => {
@@ -1395,10 +1478,10 @@ const RETIRED_SETTINGS_MODE_DETAIL_OPENING =
   'This deployment runs in synthetic-only mode: file upload is refused outright, and the ' +
   'records in this workspace are synthetic.';
 
-describe('R1b §7 · the Settings synthetic-only MODE card scopes its refusal', () => {
-  it('scopes every upload refusal to the route, in both summary and detail', () => {
+describe('R1b §7 · the Settings Data card (successor of the synthetic-only MODE card) scopes any refusal', () => {
+  it('scopes every upload refusal to the route, in every row', () => {
     expect(
-      unscopedUploadRefusals(syntheticModeCard()),
+      unscopedUploadRefusals(noRealDataDetail()),
       'the Settings → Data & Privacy synthetic-only card refuses an upload without ' +
         'scoping the refusal to the upload ROUTE. CLAUDE.md §11 records that claim as ' +
         'true of POST /api/uploads ONLY, and this build ships two controls that read a ' +
@@ -1421,26 +1504,13 @@ describe('R1b §7 · the Settings synthetic-only MODE card scopes its refusal', 
     ]);
   });
 
-  it('the card is inside ALL_BAN_SURFACES, so §3, §3b and §5 hold it too', () => {
-    // The gap that let this card ship unscoped was not a missing pattern — every
-    // pattern needed already existed — it was that no list named the card. This
-    // asserts the membership rather than the patterns, because membership is
-    // what was missing.
-    expect(ALL_BAN_SURFACES.map(([site]) => site)).toContain(
-      'Settings → Data & Privacy → synthetic-data-only',
-    );
-  });
-
-  it('and the sibling card on the same tab is the one that states the claim in full', () => {
-    // The de-duplication split this card sits on, asserted so that a future
-    // slice cannot "fix" §7 by copying the four-part claim onto this card —
-    // which `db-recon-truthfulness.test.tsx` §12 would then fail.
-    expect(SITES.map(([site]) => site)).toContain(
-      'Settings → Data & Privacy → no-real-experiment-data',
-    );
-    expect(SITES.map(([site]) => site)).not.toContain(
-      'Settings → Data & Privacy → synthetic-data-only',
-    );
+  it('the Data card is inside ALL_BAN_SURFACES exactly once, so §3, §3b and §5 hold it', () => {
+    // Membership is what was missing when the original card shipped unscoped. It is
+    // now a `SITES` member, so it is in ALL_BAN_SURFACES once — not twice under two
+    // names, which is what the retired synthetic-data-only entry had become.
+    const names = ALL_BAN_SURFACES.map(([site]) => site);
+    expect(names.filter((n) => n === 'Settings → Overview → Data card')).toHaveLength(1);
+    expect(names.some((n) => /Data & Privacy|Privacy & Governance|on-ramp warning/.test(n))).toBe(false);
   });
 });
 
@@ -1564,17 +1634,18 @@ describe('R1b §8 · the Connect an Agent guide scopes every upload refusal', ()
     );
   });
 
-  it('the scoped replacement is the in-repo form, not a newly coined one', () => {
-    // §3b's lesson: a guard that fires on true copy teaches the next reader to
-    // weaken it. The inverse also holds — a correction that coins its own
-    // phrasing is a seventh wording for one claim. This pins that the guide now
-    // uses the same words two other modules already use.
-    const shared = /the upload route refuses every request outright/;
-    expect(connectAnAgentGuide()).toMatch(shared);
+  it('if the guide mentions uploads at all, it uses the in-repo scoped form', () => {
+    // 2026-11-02: the guide's upload clause was retired (owner's direction), so it
+    // need not mention uploads. If one returns, it must be the scoped form.
+    const guide = connectAnAgentGuide();
+    if (!/\buploads?\b/i.test(guide)) return;
+    expect(guide).toMatch(/the upload route refuses every request outright/);
+  });
+
+  it('the scoped form still exists in-repo for any surface that needs it', () => {
     expect(rawSource('lib/transcriptCaptureContent.ts')).toMatch(
       /upload route refuses every request outright/,
     );
-    expect(rawSource('lib/settingsContent.ts')).toMatch(shared);
   });
 });
 
@@ -1587,7 +1658,7 @@ describe('R1b §8 · the Connect an Agent guide scopes every upload refusal', ()
 // So the table is a TEST rather than a comment: it fails if the split moves,
 // instead of quietly describing a tree that has changed.
 describe('R1b §8c · which surfaces the unscoped ban would fire on, measured', () => {
-  it('fires on exactly the four SITES members, and on none of the other three', () => {
+  it('fires on no surface: none states an unscoped refusal (2026-11-02: the SITES no longer state the claim at all)', async () => {
     // `cleanup()` BETWEEN accessors, not between tests. Four of the seven
     // render, and `afterEach` is too late: two mounted surfaces in one document
     // trip `screen.getByRole`/`getByText`'s "multiple elements found" as a
@@ -1595,7 +1666,7 @@ describe('R1b §8c · which surfaces the unscoped ban would fire on, measured', 
     // `policyTabText` and the reason it loops one-test-per-site.
     const firing: string[] = [];
     for (const [site, text] of ALL_BAN_SURFACES) {
-      const rendered = text();
+      const rendered = await text();
       cleanup();
       if (unscopedUploadRefusals(rendered).length > 0) firing.push(site);
     }
@@ -1606,6 +1677,6 @@ describe('R1b §8c · which surfaces the unscoped ban would fire on, measured', 
         'NON-SITES member entered it, that surface has shipped an unscoped refusal ' +
         'and needs scoping, not a narrower ban: §3b records that widening the loop ' +
         'to fire on the four correct-copy SITES is worse than the gap it closes.',
-    ).toEqual(SITES.map(([site]) => site));
+    ).toEqual([]);
   });
 });

@@ -6,10 +6,9 @@ import { AppShell } from '../components/AppShell';
 import { TopBar } from '../components/TopBar';
 import { LeftNav } from '../components/LeftNav';
 import { Widget } from '../components/Widget';
-import { GovernanceBanner } from '../components/GovernanceBanner';
 import { StagedRunner } from '../components/StagedRunner';
 import { BackendDown } from '../components/FetchStates';
-import { Play, ShieldCheck, Upload, TriangleAlert } from '../components/icons';
+import { Play, ShieldCheck } from '../components/icons';
 import { LABELS } from '../lib/labels';
 import { ROUTES } from '../lib/routes';
 import { api, ApiError } from '../lib/api';
@@ -30,31 +29,6 @@ type RunPhase =
   | { name: 'error'; error: ApiError }
   | { name: 'done'; result: ApiDemoRunResponse };
 
-type UploadPhase =
-  | { name: 'idle' }
-  | { name: 'blocked'; reason: string } // the server's 403 governance refusal, verbatim
-  | { name: 'down'; error: ApiError }; // backend unreachable — show BackendDown, never stand-in copy
-
-// Shown only when the server responded but its refusal body carried no reason.
-//
-// Slice 2A (I5): was "…not enabled in this synthetic prototype." The refusal
-// itself is true and unchanged, but "this synthetic prototype" labelled the
-// whole application as synthetic, which the deployment no longer is without
-// qualification — it may run a protected, read-only diagnostic over an isolated
-// test database of production-derived records. The upload gate is a property of
-// this workspace, so that is the scope stated. The SERVER's own reason
-// (`_UPLOAD_BLOCKED` in apps/api/isaac_api/routes.py) was corrected in the same
-// slice and now says "in this workspace" too, with `src/test/apiFixtures.ts`
-// pinning the corrected wording. The two are alternatives — this string renders
-// only when the server sends none — so they say the same thing on purpose.
-const UPLOADS_GATED_FALLBACK =
-  'Uploads are approval-gated and not enabled in this workspace.';
-
-/**
- * The two `error` discriminators the backend sends with its 409 demo-run refusals.
- * Both are values from `apps/api/isaac_api/routes.py` — read from there, never
- * guessed, because a code this screen invented would silently never match.
- */
 const DEMO_TARGET_DRIFTED = 'demo_target_drifted';
 const TUTORIAL_SCOPE_REQUIRED = 'tutorial_scope_required';
 
@@ -113,7 +87,6 @@ function scopeRefusal(error: ApiError): boolean {
 export function LoadMaterials() {
   const navigate = useNavigate();
   const [run, setRun] = useState<RunPhase>({ name: 'idle' });
-  const [upload, setUpload] = useState<UploadPhase>({ name: 'idle' });
 
   /*
    * B-05 — THE PRIMARY CONTROL USED TO BE A BUTTON THAT COULD NOT WORK. The built-in
@@ -160,21 +133,6 @@ export function LoadMaterials() {
       });
   };
 
-  const tryLocalFiles = () => {
-    // Governance seam: the backend always refuses (403); no file is ever sent.
-    api
-      .blockUpload()
-      .then((body) => setUpload({ name: 'blocked', reason: body.reason || UPLOADS_GATED_FALLBACK }))
-      .catch((error: unknown) => {
-        // Backend down is NOT a governance refusal — show the honest down state.
-        if (error instanceof ApiError && error.unreachable) {
-          setUpload({ name: 'down', error });
-        } else {
-          setUpload({ name: 'blocked', reason: UPLOADS_GATED_FALLBACK });
-        }
-      });
-  };
-
   return (
     <AppShell
       variant="full"
@@ -206,7 +164,6 @@ export function LoadMaterials() {
             <h1 className="page-title">{LABELS.screenLoad}</h1>
           </div>
         </div>
-        <GovernanceBanner onReadPolicy={() => navigate(ROUTES.governance)} />
 
         <div className="onramps">
           {/*
@@ -251,93 +208,37 @@ export function LoadMaterials() {
                 className="btn btn-primary load-widget-cta"
                 disabled={launchBusy}
                 aria-describedby="load-launch-hint"
+                /* The visible verb is the button's whole name on this card, whose
+                   title already says Guided Walkthrough; the full name keeps it
+                   distinct from every other Start in the app (WCAG 2.5.3: it opens
+                   with the visible word). */
+                aria-label={tutorial.completed ? LABELS.actionReplayTutorial : LABELS.actionStartTutorial}
                 onClick={() => startTutorial(launchRef.current)}
               >
-                {tutorial.completed ? LABELS.actionReplayTutorial : LABELS.actionStartTutorial}
+                {tutorial.completed ? LABELS.actionReplay : LABELS.actionStart}
               </button>
             )}
           </Widget>
 
-          {/*
-            WIDGET 2 — "Can I load my own files?" Answered as a STATE, never as a
-            disabled control: the headline says it is not in this build, and the
-            one sentence that must stay visible — that keeping real or private
-            artifacts out is the operator's responsibility and not a check this
-            software performs — sits beside it (`DEC-35`: a security/privacy state
-            is never disclosed away).
-
-            R1b. "no file is read, parsed, or inspected" was an ABSOLUTE and false:
-            `RecordValidator` and `CsvReconcilePanel` both read a file the reader
-            picks. The refusal claim holds for the UPLOAD path and is kept, scoped
-            to it; the two readers are named instead of denied. It is the info
-            panel's `.onramp-warn`, and `__tests__/upload-claim-parity.test.tsx`
-            reads it there — `Widget` keeps it in the DOM while closed. Pinned to
-            the other sites that make this claim by that test.
-          */}
-          <Widget
-            id="load-own-files-title"
-            className="load-widget"
-            title={LABELS.loadOwnFilesTitle}
-            icon={<Upload size={16} strokeWidth={2} />}
-            infoLabel={LABELS.loadOwnFilesInfoLabel}
-            headline={<span className="widget-state">{LABELS.loadOwnFilesState}</span>}
-            info={
-              <>
-                <p className="onramp-warn">
-                  Every file upload is refused outright, whatever it contains — the refused
-                  request is never read, parsed, or inspected. Two review tools elsewhere do
-                  read a file you paste or pick — the standalone Validator, and campaign-sheet
-                  CSV reconciliation — checking the text in memory, discarding it, and
-                  recording only the outcome, never the content.
-                </p>
-                <p id="load-ask-server-hint">{LABELS.loadAskServerHint}</p>
-                {/* Moved here from the page banner (2026-10-12), which is now one
-                    line scoped to the workspace; the requirement is unchanged. */}
-                <p>{LABELS.loadGovernanceApproval}</p>
-              </>
-            }
-          >
-            <p className="load-widget-caveat">
-              <TriangleAlert size={13} strokeWidth={2.2} aria-hidden="true" />
-              {LABELS.loadOperatorResponsibility}
-            </p>
-            {upload.name === 'idle' && (
-              <button
-                type="button"
-                className="btn btn-secondary load-widget-cta"
-                aria-describedby="load-ask-server-hint"
-                onClick={tryLocalFiles}
-              >
-                {LABELS.actionAskServer}
-              </button>
-            )}
-            {upload.name === 'blocked' && (
-              <div className="upload-blocked" role="note">
-                <ShieldCheck size={14} strokeWidth={2.1} aria-hidden="true" />
-                <span>
-                  <strong>Blocked by governance.</strong> {upload.reason}
-                </span>
-              </div>
-            )}
-            {upload.name === 'down' && (
-              <BackendDown error={upload.error} onRetry={tryLocalFiles} />
-            )}
-          </Widget>
+          {/* ~~WIDGET 2 — "Can I Load My Own Files?", the GovernanceBanner above it
+              and the "Try an Upload" button~~ — retired 2026-11-02 (owner's
+              direction: no standing disclaimers). The guided walkthrough is the
+              one thing this screen does. */}
         </div>
 
         {run.name === 'running' && (
           <div className="runner-status">
             <span className="dot dot-processing" aria-hidden="true" />
             <span className="runner-status-label">Example Run — Running</span>
-            <span className="runner-status-note">calling the deterministic pipeline…</span>
+            <span className="runner-status-note">running…</span>
           </div>
         )}
 
         {/*
          * The protective refusal. `role="alert"` matches how this screen (and
          * the export conflict on S6) announces a state that appears in answer to
-         * a click; the visual treatment is the same protective slate as the
-         * governance refusal above, never the red error treatment — the backend
+         * a click; the visual treatment is the protective slate, never the red
+         * error treatment — the backend
          * is healthy and has just done the right thing. Focus deliberately stays
          * on the example-run button: the alert announces itself, and the remedy
          * button follows in DOM order.
@@ -372,8 +273,8 @@ export function LoadMaterials() {
         )}
 
         {/*
-         * The scope refusal. Same protective treatment as the drift refusal above
-         * and the governance refusal at the top of the screen — never the red error
+         * The scope refusal. Same protective treatment as the drift refusal above —
+         * never the red error
          * treatment, because nothing failed: the server answered, correctly, that
          * the records this control acts on are not in the workspace this request
          * addressed. `role="alert"` because it appears in answer to a click.

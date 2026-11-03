@@ -904,7 +904,7 @@ function ExtendedContextReview({
           )}
           {unplaceable > 0 && (
             <li>
-              <h5>{unplaceable.toLocaleString('en-US')} this build could not record</h5>
+              <h5>{unplaceable.toLocaleString('en-US')} could not be recorded</h5>
               <p>
                 This build could not turn these into companion entries. That is a limit of the
                 software rather than of the archive, so re-importing would not change it. They
@@ -947,7 +947,7 @@ function Ceiling({ review }: { review: Bl15CorpusReview }) {
           </p>
         </li>
         <li>
-          <h5>A required checksum this build never computes</h5>
+          <h5>A required checksum that is not computed</h5>
           <p>{assets}</p>
         </li>
       </ol>

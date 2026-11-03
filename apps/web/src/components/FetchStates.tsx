@@ -607,10 +607,9 @@ export function downCopy(
          * untested code.
          */
         subResource !== undefined
-          ? `The ISAAC API answered HTTP 404 for a read of ${subResourceLabel(subResource)} under this experiment id, so this view has no server-derived data to show.`
-          : 'The ISAAC API answered HTTP 404 for a read of one part of this experiment, so this view has no server-derived data to show.',
+          ? `The ISAAC API answered HTTP 404 for a read of ${subResourceLabel(subResource)} under this experiment id.`
+          : 'The ISAAC API answered HTTP 404 for a read of one part of this experiment.',
         'The request read one part of an experiment rather than the experiment itself, so this 404 does not establish that the experiment is missing — and this page does not claim it is.',
-        'This prototype reads only server-derived truth — it will never show placeholder data.',
       ],
       showRunCommand: false,
       offerReload: false,
@@ -690,8 +689,7 @@ export function downCopy(
       kind: 'path_not_found',
       title: 'Not Found',
       lines: [
-        'The ISAAC API answered HTTP 404 for this request, so this view has no server-derived data to show.',
-        'This prototype reads only server-derived truth — it will never show placeholder data.',
+        'The ISAAC API answered HTTP 404 for this request.',
       ],
       showRunCommand: false,
       offerReload: false,
@@ -713,7 +711,6 @@ export function downCopy(
       lines: [
         cause,
         'Reload the page to sign in again.',
-        'This prototype reads only server-derived truth — it will never show placeholder data.',
       ],
       showRunCommand: false,
       offerReload: true,
@@ -726,7 +723,7 @@ export function downCopy(
       kind: 'local',
       title: 'Backend Not Running',
       lines: [
-        'The local ISAAC API is not responding. This prototype reads only server-derived truth — it will never show placeholder data. Start the backend, then retry:',
+        'The local ISAAC API is not responding. Start the backend, then retry:',
       ],
       showRunCommand: true,
       offerReload: false,
@@ -743,9 +740,8 @@ export function downCopy(
       kind: 'http_error',
       title: 'ISAAC Returned an Error',
       lines: [
-        `The ISAAC API was reached but answered with HTTP ${status}, so this view has no server-derived data to show.`,
+        `The ISAAC API was reached but answered with HTTP ${status}.`,
         ...(serverSaid !== undefined ? [serverSaid] : []),
-        'This prototype reads only server-derived truth — it will never show placeholder data.',
       ],
       showRunCommand: false,
       offerReload: false,
@@ -759,7 +755,6 @@ export function downCopy(
     lines: [
       'The ISAAC API could not be reached. This page cannot tell which of two causes applies: the sign-in session may have ended, or the service may be temporarily unavailable.',
       'Reload the page — that restores the session if it had ended, and is harmless if it had not.',
-      'This prototype reads only server-derived truth — it will never show placeholder data.',
     ],
     showRunCommand: false,
     offerReload: true,
@@ -911,7 +906,7 @@ function currentRoute(): string {
  *  the control in a compact footer can state it in that surface's own info panel
  *  instead (`showNote={false}`) without authoring it a second time. */
 export const COPY_DIAGNOSTICS_NOTE =
-  'Copies this build’s version, route, viewport and Project Memory provenance as text you can paste into a bug report. Nothing is uploaded.';
+  'Copies this build’s version, route, viewport and Project Memory provenance as text you can paste into a bug report.';
 
 export function CopyDiagnostics({
   build,

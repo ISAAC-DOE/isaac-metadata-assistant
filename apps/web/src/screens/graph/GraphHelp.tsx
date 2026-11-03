@@ -195,14 +195,12 @@ export function GraphHelp({
           </ul>
         </div>
 
-        {/* THE TWO BOUNDARY STATEMENTS. Visible, in the first viewport, never
-            inside a disclosure. See the file header. */}
+        {/* THE BOUNDARY STATEMENT. ~~"Project Memory is advisory: it returns leads to
+            verify, never a verdict. Nothing here validates a record…"~~ — REMOVED
+            2026-11-02 (owner direction: no standing "never" prose; the page lead says
+            "leads to verify, not truth" once). The structure/content axes stay: they
+            tell a reader how far to trust what the canvas draws. */}
         <div className="graph-help-note graph-help-boundary">
-          <p>
-            Project Memory is <strong>advisory</strong>: it returns leads to verify, never a verdict.
-            Nothing here validates a record, completes a field, or authorises an export — those
-            decisions belong to the official schema and the deterministic validators.
-          </p>
           <p>
             Structure and content are <strong>two separate axes</strong>. The structure — which
             files, symbols and references exist — is a point-in-time index of{' '}
@@ -382,8 +380,9 @@ export function GraphHelp({
         <div className="graph-help-section">
           <h4>Commands</h4>
           <p>
-            The command bar accepts a fixed list and nothing else. Each command does what a control
-            on this page does — it runs no code, reads no files, and changes no record.
+            Open <span className="graph-help-term">Query</span> to type a command. The command bar
+            accepts a fixed list and nothing else, and each command does what a control on this
+            page does.
           </p>
           <p className="graph-help-example">
             examples · <span className="mono">find export</span> ·{' '}
@@ -393,7 +392,7 @@ export function GraphHelp({
             <span className="mono">clear filters</span>
           </p>
           <p>
-            <span className="graph-help-term">Suggested Commands</span>, under the bar, fits a few
+            <span className="graph-help-term">Suggested Commands</span>, under the bar inside Query, fits a few
             to what you have selected. Clicking one puts that exact command in the bar and waits for
             you to press Run. The two exceptions act on the click itself and are labelled as such:{' '}
             <span className="graph-help-term">Fit to View</span> reframes the canvas, and{' '}
@@ -458,7 +457,7 @@ export function GraphHelp({
               {underlyingKnown
                 ? `${u.node_count} nodes / ${u.edge_count} edges / ${u.community_count} clusters`
                 : 'the full upstream graph'}
-              , built by Graphify. It is <strong>not embedded</strong> in this deployment.
+              , built by Graphify.
             </li>
             <li>
               <span className="graph-help-term">2 · Served-file projection</span> — the subset of

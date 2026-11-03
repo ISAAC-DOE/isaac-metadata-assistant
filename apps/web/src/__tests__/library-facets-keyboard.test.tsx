@@ -36,11 +36,13 @@ const COUNTS: Record<LibraryFacetId, number> = {
   done: 0,
 };
 
-function Harness({ variant = 'tiles' as 'tiles' | 'chips', initial = 'all' as LibraryFacetId }) {
+/* One variant since 2026-11-02: the figure-first tiles went with the "What Needs
+   Me?" card, and the chips are the library bar's filter. */
+function Harness({ initial = 'all' as LibraryFacetId }) {
   const [facet, setFacet] = useState<LibraryFacetId>(initial);
   return (
     <>
-      <LibraryFacets facet={facet} onFacet={setFacet} counts={COUNTS} variant={variant} />
+      <LibraryFacets facet={facet} onFacet={setFacet} counts={COUNTS} />
       <output data-testid="facet">{facet}</output>
     </>
   );
@@ -49,9 +51,9 @@ function Harness({ variant = 'tiles' as 'tiles' | 'chips', initial = 'all' as Li
 const radios = () => screen.getAllByRole('radio');
 const names = () => radios().map((r) => r.getAttribute('aria-label') ?? r.textContent);
 
-describe.each(['tiles', 'chips'] as const)('the %s status filter', (variant) => {
+describe('the status filter', () => {
   it('is ONE tab stop: only the checked radio is in the tab sequence', () => {
-    render(<Harness variant={variant} initial="ready" />);
+    render(<Harness initial="ready" />);
     const tabbable = radios().filter((r) => r.tabIndex === 0);
     expect(tabbable).toHaveLength(1);
     expect(tabbable[0]).toHaveAttribute('aria-checked', 'true');
@@ -59,7 +61,7 @@ describe.each(['tiles', 'chips'] as const)('the %s status filter', (variant) => 
   });
 
   it('MUTATION-GUARDED: the arrow keys move focus AND the selection, and wrap', () => {
-    render(<Harness variant={variant} />);
+    render(<Harness />);
     const group = screen.getByRole('radiogroup');
     const order = radios();
     order[0].focus();
@@ -86,8 +88,14 @@ describe.each(['tiles', 'chips'] as const)('the %s status filter', (variant) => 
     expect(group).toBeInTheDocument();
   });
 
+  it('offers no Draft radio, even when drafts exist (it overlapped every other facet)', () => {
+    render(<Harness />);
+    expect(COUNTS.draft).toBeGreaterThan(0);
+    expect(names().some((n) => /^Draft/.test(n ?? ''))).toBe(false);
+  });
+
   it('Home and End reach the first and last radio', () => {
-    render(<Harness variant={variant} />);
+    render(<Harness />);
     radios()[1].focus();
     fireEvent.keyDown(radios()[1], { key: 'End' });
     expect(document.activeElement).toBe(radios()[radios().length - 1]);
@@ -98,7 +106,7 @@ describe.each(['tiles', 'chips'] as const)('the %s status filter', (variant) => 
   });
 
   it('names each radio "<label>, <count> of all experiments", with no space before the comma', () => {
-    render(<Harness variant={variant} />);
+    render(<Harness />);
     expect(screen.getByRole('radio', { name: 'Needs Attention, 3 of all experiments' })).toBeInTheDocument();
     expect(screen.getByRole('radio', { name: 'Ready to Export, 1 of all experiments' })).toBeInTheDocument();
     for (const n of names()) expect(n).not.toMatch(/\s,/);

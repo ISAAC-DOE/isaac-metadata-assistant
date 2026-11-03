@@ -16,14 +16,17 @@ import { Disclosure } from './Disclosure';
 export function LazyDisclosure({
   summary,
   className,
+  defaultOpen = false,
   children,
 }: {
   summary: ReactNode;
   className?: string;
+  /** Open (and mounted) on first render — for a deep link that lands on it. */
+  defaultOpen?: boolean;
   children: () => ReactNode;
 }) {
-  const [open, setOpen] = useState(false);
-  const [mounted, setMounted] = useState(false);
+  const [open, setOpen] = useState(defaultOpen);
+  const [mounted, setMounted] = useState(defaultOpen);
   return (
     <Disclosure
       className={className}

@@ -65,13 +65,11 @@ describe('R1b · the validator scope note drops the mode jargon and keeps the tr
     expect(note!.textContent ?? '').not.toMatch(/synthetic/i);
   });
 
-  it('keeps both verified guarantees', () => {
+  it('keeps the verified guarantee, and no model/upload disclaimer (retired 2026-11-02)', () => {
     const { container } = render(<RecordValidator />);
     const note = container.querySelector('.rec-val-scope-note')!;
     expect(note.textContent ?? '').toMatch(/checked in memory and discarded/i);
-    expect(note.textContent ?? '').toMatch(
-      /nothing here is uploaded to a model, indexed, or stored/i,
-    );
+    expect(note.textContent ?? '').not.toMatch(/uploaded to a model/i);
   });
 });
 

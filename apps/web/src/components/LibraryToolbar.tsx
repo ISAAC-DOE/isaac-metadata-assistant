@@ -29,8 +29,7 @@ interface LibraryToolbarProps {
   hintId?: string;
   /**
    * `false` when the caller renders the status filter itself — `LibraryOverview`
-   * makes it the "What Needs Me?" widget's headline (2026-10-18 review: the spec's
-   * "switcher = status filter"), so the toolbar keeps only search and sort.
+   * puts it first on the library bar, so the toolbar keeps only search and sort.
    */
   showFacets?: boolean;
 }
@@ -120,8 +119,8 @@ export function LibraryToolbar({
           <label className="library-sort-label" htmlFor={sortId}>
             {LABELS.librarySortLabel}
           </label>
-          {/* `aria-label` repeats the visible label so the select keeps its name
-              at phone width, where the label leaves the row (`library.css`). */}
+          {/* `aria-label` repeats the label so the select keeps its name where the
+              label is not shown — on the library bar, at every width (`library.css`). */}
           <select
             id={sortId}
             aria-label={LABELS.librarySortLabel}
@@ -150,26 +149,28 @@ export function LibraryToolbar({
 }
 
 /** The facets in reading order for the status filter: the states that need a
- *  reader first, the whole list last. Same set and same counts as `LIBRARY_FACETS`. */
-const FACET_ORDER: LibraryFacetId[] = ['needsAttention', 'proposals', 'inReview', 'ready', 'draft', 'done', 'all'];
+ *  reader first, the whole list last.
+ *
+ *  `draft` IS NOT ON THE ROW (2026-11-02). Every record that is not exported is a
+ *  draft, so its chip overlapped every other chip and the row stopped adding up.
+ *  The facet still exists in `LIBRARY_FACETS` (and `facetCounts` still counts it);
+ *  it is simply not offered as a default filter. */
+const FACET_ORDER: LibraryFacetId[] = ['needsAttention', 'proposals', 'inReview', 'ready', 'done', 'all'];
 
 /**
  * THE STATUS FILTER — the library's radiogroup of facets, each carrying its count
  * over the WHOLE list (see the three load-bearing rules on `LibraryToolbar`).
- * Exported so `LibraryOverview` can make it the widget's headline: the counts a
+ * Exported so `LibraryOverview` can put it first on the library bar: the counts a
  * reader comes for ARE the filter, so they are stated once, as the control.
  */
 export function LibraryFacets({
   facet,
   onFacet,
   counts,
-  variant = 'chips',
 }: {
   facet: LibraryFacetId;
   onFacet: (next: LibraryFacetId) => void;
   counts: Record<LibraryFacetId, number>;
-  /** `tiles`: the figure-first headline treatment `LibraryOverview` uses. */
-  variant?: 'chips' | 'tiles';
 }) {
   const visibleFacets = FACET_ORDER.map((id) => LIBRARY_FACETS.find((f) => f.id === id)!).filter(
     (f) => counts[f.id] > 0 || f.id === facet,
@@ -220,19 +221,17 @@ export function LibraryFacets({
       */}
       <div
         ref={groupRef}
-        className={`library-facets${variant === 'tiles' ? ' library-facets-tiles' : ''}`}
+        className="library-facets"
         role="radiogroup"
         aria-label="Filter these experiments"
         onKeyDown={onKeyDown}
       >
-        {variant === 'chips' && (
-          <SlidersHorizontal
-            className="library-facets-icon"
-            size={14}
-            strokeWidth={2}
-            aria-hidden="true"
-          />
-        )}
+        <SlidersHorizontal
+          className="library-facets-icon"
+          size={14}
+          strokeWidth={2}
+          aria-hidden="true"
+        />
         {visibleFacets.map((f) => (
           <button
             key={f.id}

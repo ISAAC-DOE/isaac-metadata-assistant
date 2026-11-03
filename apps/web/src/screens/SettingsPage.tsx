@@ -2,7 +2,7 @@ import './screens.css';
 import './settings/settings-widgets.css';
 import {
   useEffect,
-  useMemo,
+  useRef,
   type KeyboardEvent as ReactKeyboardEvent,
   type ReactNode,
 } from 'react';
@@ -17,21 +17,9 @@ import {
   DiagnosticsPanel,
 } from '../components/FetchStates';
 import { Widget } from '../components/Widget';
-import {
-  ChevronRight,
-  CircleHelp,
-  Clock,
-  Download,
-  FileJson,
-  History,
-  LayoutList,
-  Network,
-  Settings,
-  Shield,
-  ShieldCheck,
-  Table2,
-  Upload,
-} from '../components/icons';
+import { Disclosure } from '../components/Disclosure';
+import { LazyDisclosure } from '../components/LazyDisclosure';
+import { ChevronRight, Clock, LayoutList, Network, Settings, Shield } from '../components/icons';
 import { LABELS } from '../lib/labels';
 import { api } from '../lib/api';
 import { useFetch } from '../lib/useFetch';
@@ -43,18 +31,13 @@ import {
 } from '../lib/routes';
 import {
   ABOUT_RESPONSE_FIELDS,
-  GOVERNANCE_POLICY,
-  OVERVIEW_SAFETY_ROWS,
-  PRIVACY_QUESTIONS,
+  NO_GUESSING,
   REPO_DOCS,
   REPO_DOCS_CAPTION,
   SETTINGS_SOURCE_ENDPOINTS,
   SETTINGS_WIDGET_COPY as COPY,
-  settingsAboutCopy,
-  settingsConcepts,
+  dataRows,
   settingsFactsFrom,
-  syntheticWorkspaceRow,
-  type SettingsConcept,
 } from '../lib/settingsContent';
 import { diagnosticsAppFrom, diagnosticsMemoryFrom } from '../lib/diagnostics';
 import type { ApiAboutResponse, ApiGraphStatus, ApiOpenApiResponse } from '../lib/types';
@@ -65,6 +48,19 @@ import { HelpAndTutorialPanel } from './settings/HelpAndTutorial';
 import { TUTORIAL_ANCHORS } from '../lib/tutorialSteps';
 
 /**
+ * Settings — THREE TABS since 2026-11-02: Overview · Integrations · Advanced.
+ *
+ * The owner retired standing disclaimers, so the Privacy & Governance tab, the
+ * Overview "Data Safety" card and the "About This Build" eyebrow went. What a
+ * reader needs about their data is ONE Data card on Overview (`dataRows`), plain
+ * rows written from what the running app reports. `?tab=privacy` is an alias that
+ * lands on that card. Integrations shows each connection as one state line plus
+ * one disclosure; Advanced is a Related Tools list, Technical Details as a bare
+ * `<details>`, and the Endpoint Explorer behind a closed disclosure that the
+ * `explorer` alias, a `#…` hash, and every "Endpoint Explorer" jump open.
+ *
+ * The history below describes the four-tab page this replaced.
+ *
  * Settings — FOUR TABS OF QUESTION WIDGETS (2026-10-12), `DEC-28`'s regroup
  * built: Overview · Privacy & Governance · Integrations · Advanced.
  *
@@ -93,7 +89,8 @@ import { TUTORIAL_ANCHORS } from '../lib/tutorialSteps';
  * EVERY RETIRED `?tab=` ID STILL RESOLVES (`lib/routes.ts`'s
  * `SETTINGS_TAB_ALIASES`): `about` and `help` land on Overview, `api` and `mcp`
  * on Integrations, `explorer` on Advanced — each scrolling the widget it pointed
- * at into view. `privacy` was renamed in place. An absent or unrecognised value
+ * at into view. `privacy` lands on Overview (the Data card holds what that tab
+ * said, 2026-11-02). An absent or unrecognised value
  * still falls back to Overview without throwing.
  *
  * ── THE TABLIST, AND THE ONE IT IS NOT ──────────────────────────────────────
@@ -129,18 +126,17 @@ import { TUTORIAL_ANCHORS } from '../lib/tutorialSteps';
  * module-cached `useHealthState`, which the top bar has already primed.
  *
  * There are NO user-adjustable settings in this build, and none were invented
- * to fill a page; This Build says so in its description.
+ * to fill a page.
  */
 
 /**
- * `short` is the label a NARROW tab row shows (2026-10-18): at 390px the four full
- * labels wrapped onto two rows. Only the visible text changes — the full label is
- * the tab's `sr-only` name at every width, so the accessible name never changes
- * with the viewport (`.section-tab-label-full` / `-short` in `settings-widgets.css`).
+ * `short` is an optional NARROW label (2026-10-18), unused since the fourth tab went
+ * (2026-11-02): no current tab sets it. If one does, only the visible text changes —
+ * the full label stays the tab's `sr-only` name at every width
+ * (`.section-tab-label-full` / `-short` in `settings-widgets.css`).
  */
 const SETTINGS_TABS: { id: SettingsTabId; label: string; short?: string }[] = [
   { id: 'overview', label: 'Overview' },
-  { id: 'privacy', label: 'Privacy & Governance', short: 'Privacy' },
   { id: 'integrations', label: 'Integrations' },
   { id: 'advanced', label: 'Advanced' },
 ];
@@ -177,12 +173,13 @@ export function SettingsPage() {
     setSearchParams(next);
   }
 
-  /** The same move as a real link: a query that keeps every other parameter. */
-  function tabSearch(tab: SettingsTabId): string {
+  /** Every "Endpoint Explorer" jump: Advanced, with the explorer's disclosure open. */
+  function openExplorer() {
     const next = new URLSearchParams(searchParams);
-    next.set(SETTINGS_TAB_PARAM, tab);
-    return `?${next.toString()}`;
+    next.set(SETTINGS_TAB_PARAM, 'explorer');
+    setSearchParams(next);
   }
+  const explorerOpen = aliasWidget === EXPLORER_HEADING_ID || location.hash !== '';
 
   /*
    * A RETIRED TAB ID LANDS ON ITS WIDGET. `/settings?tab=mcp` used to open a tab
@@ -213,9 +210,8 @@ export function SettingsPage() {
       width="wide"
     >
       <div className="placeholder">
-        {/* Slice C: was "Local Configuration", which promised settings to adjust
-            beside copy that says there are none. This names what the page is. */}
-        <span className="eyebrow">About This Build</span>
+        {/* ~~"About This Build" eyebrow~~ — cut 2026-11-02: it named one widget, not
+            the page. */}
         <h1>{LABELS.navSettings}</h1>
         {/* ~~"View this build's runtime status, data boundaries, provenance, and
             API access."~~ — dropped 2026-10-18 (re-review): the four tab labels
@@ -231,18 +227,13 @@ export function SettingsPage() {
         aria-labelledby={tabId(activeTab)}
         tabIndex={0}
       >
-        {activeTab === 'overview' && (
-          <OverviewTab
-            state={about}
-            graphStatus={graphStatus}
-            privacySearch={tabSearch('privacy')}
-          />
-        )}
-        {activeTab === 'privacy' && <PrivacyTab state={about} />}
+        {activeTab === 'overview' && <OverviewTab state={about} graphStatus={graphStatus} />}
         {activeTab === 'integrations' && (
-          <IntegrationsTab state={openapi} onOpenExplorer={() => setActiveTab('advanced')} />
+          <IntegrationsTab state={openapi} onOpenExplorer={openExplorer} />
         )}
-        {activeTab === 'advanced' && <AdvancedTab state={openapi} about={about} />}
+        {activeTab === 'advanced' && (
+          <AdvancedTab state={openapi} about={about} explorerOpen={explorerOpen} />
+        )}
       </div>
     </AppShell>
   );
@@ -257,10 +248,23 @@ function SettingsSectionTabs({
   active: SettingsTabId;
   onSelect: (tab: SettingsTabId) => void;
 }) {
-  /* ~~A measured `data-overflowing` fade and a `scrollIntoView` of the selected
-     tab~~ — both RETIRED 2026-10-18 with the sideways-scrolling row they served:
-     the row now always FITS (one row to 441px, two rows of two below — see
-     `settings-widgets.css`), so no tab, selected or not, can be off-screen. */
+  /* ONE ROW THAT SCROLLS SIDEWAYS WHEN IT OVERFLOWS (2026-11-02, Task 2 review
+     ruling): the row is not relied on to fit at 320px on CI's wider font. The
+     selected tab is kept in view by scrolling the ROW itself (not
+     `scrollIntoView`, which can also scroll the page), on mount and on every
+     change; arrow keys move focus along the row, and focus scrolls it too. */
+  const rowRef = useRef<HTMLDivElement | null>(null);
+  useEffect(() => {
+    const row = rowRef.current;
+    const tab = document.getElementById(tabId(active));
+    if (!row || !tab || row.scrollWidth <= row.clientWidth) return;
+    // The row is `position: relative`, so it is the tab's offset parent and
+    // `offsetLeft` is measured from the row's content start, unaffected by scroll.
+    const left = tab.offsetParent === row ? tab.offsetLeft : tab.offsetLeft - row.offsetLeft;
+    const right = left + tab.offsetWidth;
+    if (left < row.scrollLeft) row.scrollLeft = left;
+    else if (right > row.scrollLeft + row.clientWidth) row.scrollLeft = right - row.clientWidth;
+  }, [active]);
 
   function onKeyDown(e: ReactKeyboardEvent<HTMLButtonElement>, index: number) {
     let nextIndex: number | null = null;
@@ -282,6 +286,7 @@ function SettingsSectionTabs({
 
   return (
     <div
+      ref={rowRef}
       className="section-tabs settings-section-tabs"
       role="tablist"
       aria-label="Settings sections"
@@ -342,10 +347,6 @@ function AboutGate({
   return <>{children(state.data)}</>;
 }
 
-function conceptsById(data: ApiAboutResponse): Map<string, SettingsConcept> {
-  return new Map(settingsConcepts(settingsFactsFrom(data)).map((c) => [c.id, c]));
-}
-
 /** A launcher link. A real `<a href>`, because each opens another ROUTE — a
  *  button would be unopenable in a new tab and unlinkable. */
 function OpenLink({ to, children }: { to: string | { search: string }; children: ReactNode }) {
@@ -360,68 +361,29 @@ function OpenLink({ to, children }: { to: string | { search: string }; children:
 // --- Overview -----------------------------------------------------------------
 
 /**
- * Three widgets, and no definition. The Data Safety widget renders ONE-LINE
- * concept summaries — the vetted lines, not new sentences — grouped into the four
- * questions a scientist brings to a settings page, and links to the tab that
- * defines each in full. It renders no `detail` at all: that is what stops the old
- * two-and-three-times duplication from creeping back.
- *
- * Authentication deliberately has no status row: `ApiKeyAuthMiddleware` is only
- * active when the backend was started with a shared key configured, and the
- * browser cannot read that. So the boundary appears (on Privacy & Governance) as
- * a summary that states the uncertainty, never as an "active"/"inactive" claim.
+ * Three widgets: Data (where your records and exports live — four plain rows from
+ * `dataRows`), This Build, and the Guided Walkthrough.
  */
-function OverviewTab({
-  state,
-  graphStatus,
-  privacySearch,
-}: {
-  state: AboutState;
-  graphStatus: GraphStatusState;
-  privacySearch: string;
-}) {
+function OverviewTab({ state, graphStatus }: { state: AboutState; graphStatus: GraphStatusState }) {
   return (
     <div className="settings-grid settings-grid-overview">
       <Widget
-        id="settings-safety-heading"
-        className="settings-widget-safety"
-        title={COPY.safetyTitle}
+        id="settings-data-heading"
+        className="settings-widget-data"
+        title={COPY.dataTitle}
         icon={<Shield size={18} strokeWidth={2} />}
-        sub={COPY.safetySub}
-        info={<p>{COPY.safetyInfo}</p>}
-        headline={
-          state.status === 'data' ? (
-            <span className="widget-state">
-              {state.data.data_regime === 'synthetic-only'
-                ? COPY.safetyHeadline
-                : COPY.safetyHeadlineOther}
-            </span>
-          ) : undefined
-        }
-        footer={<OpenLink to={{ search: privacySearch }}>{COPY.safetyAll}</OpenLink>}
       >
         <AboutGate state={state}>
-          {(data) => {
-            const concepts = conceptsById(data);
-            return (
-              <dl className="settings-rows">
-                {OVERVIEW_SAFETY_ROWS.map((row) => (
-                  <div className="settings-row" key={row.label}>
-                    <dt className="settings-row-label">{row.label}</dt>
-                    <dd className="settings-row-text">
-                      {row.items
-                        .map((item) =>
-                          'concept' in item
-                            ? (concepts.get(item.concept)?.summary ?? '')
-                            : GOVERNANCE_POLICY[item.policy].summary,
-                        )
-                        .join(' ')}
-                    </dd>
-                  </div>
-                ))}
-              </dl>
-            );
-          }}
+          {(data) => (
+            <dl className="settings-rows">
+              {dataRows(settingsFactsFrom(data)).map((row) => (
+                <div className="settings-row" key={row.label}>
+                  <dt className="settings-row-label">{row.label}</dt>
+                  <dd className="settings-row-text">{row.text}</dd>
+                </div>
+              ))}
+            </dl>
+          )}
         </AboutGate>
       </Widget>
 
@@ -455,38 +417,20 @@ function OverviewTab({
  * consistency" would be a claim nobody has established.
  */
 function BuildWidget({ state, graphStatus }: { state: AboutState; graphStatus: GraphStatusState }) {
-  const copy = useMemo(
-    () => (state.status === 'data' ? settingsAboutCopy(settingsFactsFrom(state.data)) : null),
-    [state],
-  );
   return (
     <Widget
       id="settings-build-heading"
       className="settings-widget-build"
       title={COPY.buildTitle}
       icon={<Settings size={18} strokeWidth={2} />}
-      /* ~~sub={COPY.buildSub}~~ — moved into the info panel 2026-10-18 (re-review:
-         Overview trims). The claim is kept, first, where the widget explains itself. */
       info={
-        copy ? (
-          <>
-            <p>{COPY.buildNoSettings}</p>
-            <p>{COPY.provenanceLegend}</p>
-            <p>{copy.identityCaption}</p>
-            <p>
-              <strong>{copy.truthVsMemoryLabel}.</strong> {copy.truthVsMemory}
-            </p>
-            <p>
-              <strong>{copy.noGuessingLabel}.</strong> {copy.noGuessing}
-            </p>
-            <p>{COPY_DIAGNOSTICS_NOTE}</p>
-          </>
-        ) : (
-          <>
-            <p>{COPY.buildNoSettings}</p>
-            <p>{COPY.provenanceLegend}</p>
-          </>
-        )
+        <>
+          <p>{COPY.provenanceLegend}</p>
+          <p>
+            <strong>{NO_GUESSING.label}.</strong> {NO_GUESSING.text}
+          </p>
+          <p>{COPY_DIAGNOSTICS_NOTE}</p>
+        </>
       }
       headline={
         state.status === 'data' ? (
@@ -499,76 +443,66 @@ function BuildWidget({ state, graphStatus }: { state: AboutState; graphStatus: G
       footer={
         state.status === 'data' ? (
           /* THE NORMAL-STATE HOME OF COPY DIAGNOSTICS, beside the identity it
-             reports. It is the SAME control over the SAME generator the failure
-             state uses (`components/FetchStates.tsx`), so the two cannot drift. A
-             failing `GET /api/graph/status` is not an error here: the memory rows
-             report "not available", which is the honest outcome. */
+             reports — the same control over the same generator the failure state
+             uses (`components/FetchStates.tsx`). */
           <DiagnosticsPanel
             app={diagnosticsAppFrom(state.data)}
             memory={graphStatus.status === 'data' ? diagnosticsMemoryFrom(graphStatus.data) : null}
             tab="overview"
-            /* Its caption is this widget's info (below), not a second line here. */
             showNote={false}
           />
         ) : undefined
       }
-      viewSwitcher="buttons"
-      views={state.status === 'data' ? buildViews(state.data) : undefined}
     >
-      {state.status !== 'data' && <AboutGate state={state}>{() => null}</AboutGate>}
+      {state.status !== 'data' ? (
+        <AboutGate state={state}>{() => null}</AboutGate>
+      ) : (
+        <>
+          {/* The Build rows, then Runtime one press away (2026-11-02): the widget
+              used to switch between two views inside a tabbed page. */}
+          <dl className="settings-figures settings-facts">
+            <Figure
+              label="App Version"
+              value={<span className="mono">{state.data.app_version}</span>}
+              source="build"
+            />
+            <Figure
+              label="Build Commit"
+              value={<CommitShort commit={state.data.build_commit} />}
+              source="live"
+            />
+            <Figure
+              label="Record Schema"
+              value={<span className="mono">v{state.data.record_schema_version}</span>}
+              source="build"
+            />
+            <Figure label="Core" value={<span className="mono">{state.data.core}</span>} source="build" />
+          </dl>
+          {/* The app's chevron disclosure, not the browser's own `<details>` triangle
+              (2026-11-02): one "there's more here" affordance across the app. */}
+          <Disclosure className="settings-runtime" summary={COPY.buildRuntime}>
+            <dl className="settings-figures settings-facts">
+              <Figure
+                label="Runtime Mode"
+                value={<span className="mono">{state.data.runtime_mode}</span>}
+                source="live"
+              />
+              <Figure
+                label="Data Regime"
+                value={<span className="mono">{state.data.data_regime}</span>}
+                source="build"
+              />
+              <Figure
+                label="Persistence"
+                value={<span className="mono">{state.data.persistence}</span>}
+                source="live"
+              />
+            </dl>
+          </Disclosure>
+        </>
+      )}
     </Widget>
   );
-}
-
-/** The two views of This Build, over the seven facts `GET /api/about` reports. */
-function buildViews(data: ApiAboutResponse) {
-  return [
-    {
-      id: 'build',
-      label: COPY.buildViewBuild,
-      icon: <FileJson size={14} strokeWidth={2} />,
-      content: (
-        <dl className="settings-figures settings-facts">
-          <Figure
-            label="App Version"
-            value={<span className="mono">{data.app_version}</span>}
-            source="build"
-          />
-          <Figure label="Build Commit" value={<CommitShort commit={data.build_commit} />} source="live" />
-          <Figure
-            label="Record Schema"
-            value={<span className="mono">v{data.record_schema_version}</span>}
-            source="build"
-          />
-          <Figure label="Core" value={<span className="mono">{data.core}</span>} source="build" />
-        </dl>
-      ),
-    },
-    {
-      id: 'runtime',
-      label: COPY.buildViewRuntime,
-      icon: <Clock size={14} strokeWidth={2} />,
-      content: (
-        <dl className="settings-figures settings-facts">
-          <Figure
-            label="Runtime Mode"
-            value={<span className="mono">{data.runtime_mode}</span>}
-            source="live"
-          />
-          <Figure
-            label="Data Regime"
-            value={<span className="mono">{data.data_regime}</span>}
-            source="build"
-          />
-          <Figure
-            label="Persistence"
-            value={<span className="mono">{data.persistence}</span>}
-            source="live"
-          />
-        </dl>
-      ),
-    },
-  ];
 }
 
 /**
@@ -629,151 +563,9 @@ function shortCommit(commit: string): string {
  */
 function CommitShort({ commit }: { commit: string | null }) {
   if (!commit) {
-    return <span className="settings-commit-note">not set (no build identity injected)</span>;
+    return <span className="settings-commit-note">not set</span>;
   }
   return <span className="mono settings-commit-short">{shortCommit(commit)}</span>;
-}
-
-// --- Privacy & Governance -------------------------------------------------------
-
-/**
- * THE ONE CANONICAL HOME of the data-handling definitions, and since 2026-10-12
- * of the governance policy as well — four question widgets.
- *
- * ── TWO LAYERS, AND THE RULE THAT SEPARATES THEM ────────────────────────────
- *
- * Each concept is a VISIBLE ROW: its heading and its `summary`, the vetted
- * one-liner. A privacy or data-handling state is never something a reader has
- * to open something to find (`DEC-35`), and each summary carries its own
- * load-bearing caveat ("cannot tell real data from synthetic", "the upload block
- * never checks whether what it blocked was real", "this screen cannot report
- * whether access is restricted"), so no visible row overstates what the code does.
- *
- * Each concept's `detail` — the full definition, verbatim — sits in the widget's
- * Details, under its own heading, with the inner `concept.more` drawers inside
- * it. The Details trigger reads "Full Definitions": a TOPIC, never a claim, so no
- * summary is ever promoted into a disclosure label.
- *
- * The three governance-policy paragraphs (`GOVERNANCE_POLICY`) are the old
- * Governance & Safety → Policy tab, moved here. "What a Review Tool Reads" and
- * the diagnostic are visible rows in their ONE-LINE form (2026-10-18, review:
- * each paragraph ran 50–70 words in the first screenful) — the diagnostic's line
- * keeps every bound visible: read-only, aggregates only, no record displayed,
- * nothing sent to a model — with each full paragraph, verbatim, in Details beside
- * "Workspace Scope". The Synthetic-Only Mode and No Real Experiment Data rows,
- * which stated one boundary twice, are one visible row (`syntheticWorkspaceRow`);
- * both definitions stay, each under its own heading.
- */
-const PRIVACY_ICONS: Record<(typeof PRIVACY_QUESTIONS)[number]['id'], ReactNode> = {
-  enter: <Upload size={18} strokeWidth={2} />,
-  kept: <History size={18} strokeWidth={2} />,
-  leaves: <Download size={18} strokeWidth={2} />,
-  truth: <ShieldCheck size={18} strokeWidth={2} />,
-};
-
-function PrivacyTab({ state }: { state: AboutState }) {
-  /* The governance policy is static, so its rows render at once; only the
-     concept rows wait on `/api/about`, because the persistence-dependent ones
-     are written from what the running app reports. */
-  const facts = state.status === 'data' ? settingsFactsFrom(state.data) : null;
-  const concepts = state.status === 'data' ? conceptsById(state.data) : null;
-  return (
-    <div className="settings-grid settings-grid-privacy">
-      {PRIVACY_QUESTIONS.map((question, index) => {
-        const all = concepts
-          ? question.concepts
-              .map((id) => concepts.get(id))
-              .filter((c): c is SettingsConcept => c !== undefined)
-          : [];
-        const merged = question.merged ?? [];
-        const rows = all.filter((c) => !merged.includes(c.id));
-        const mergedRow = facts && merged.length > 0 ? syntheticWorkspaceRow(facts) : null;
-        const definitionCount =
-          question.concepts.length + question.policyRows.length + question.policyDetails.length;
-        return (
-          <Widget
-            key={question.id}
-            id={`settings-privacy-${question.id}-heading`}
-            title={question.title}
-            icon={PRIVACY_ICONS[question.id]}
-            details={{
-              summary: COPY.fullDefinitions,
-              meta: String(definitionCount),
-              content: (
-                <div className="settings-definitions">
-                  {all.map((concept) => (
-                    <section className="settings-definition" key={concept.id}>
-                      <h4 className="settings-definition-heading">{concept.heading}</h4>
-                      <p className="settings-definition-text">{concept.detail}</p>
-                      {concept.more && (
-                        <details className="settings-more">
-                          <summary>{concept.more.label}</summary>
-                          <p>{concept.more.text}</p>
-                        </details>
-                      )}
-                    </section>
-                  ))}
-                  {/* A policy ROW's full paragraph, then the Details-only ones.
-                      The visible row above states the paragraph's one-line form
-                      with every bound a reader needs at a glance. */}
-                  {[...question.policyRows, ...question.policyDetails].map((id) => (
-                    <section
-                      className="settings-definition gov-policy-section"
-                      data-policy={id}
-                      key={id}
-                    >
-                      <h4 className="settings-definition-heading">
-                        {GOVERNANCE_POLICY[id].heading}
-                      </h4>
-                      <p className="settings-definition-text">{GOVERNANCE_POLICY[id].text}</p>
-                    </section>
-                  ))}
-                </div>
-              ),
-            }}
-            footer={
-              question.id === 'enter' ? (
-                <OpenLink to={`${ROUTES.governance}?tab=validator`}>{COPY.validatorOpen}</OpenLink>
-              ) : undefined
-            }
-          >
-            <div className="settings-points">
-              {/* The read, stated in the FIRST widget only: one loading line or
-                  one failure for the tab, not four of each. */}
-              {!concepts && index === 0 && state.status === 'loading' && (
-                <LoadingPanel label="Loading app info…" />
-              )}
-              {!concepts && index === 0 && state.status === 'error' && (
-                <BackendDown error={state.error} onRetry={state.reload} />
-              )}
-              {mergedRow && (
-                <section
-                  className="settings-point"
-                  data-concepts={merged.join(' ')}
-                  key="merged"
-                >
-                  <h3 className="settings-point-heading">{mergedRow.heading}</h3>
-                  <p className="settings-point-text">{mergedRow.text}</p>
-                </section>
-              )}
-              {rows.map((concept) => (
-                <section className="settings-point" key={concept.id}>
-                  <h3 className="settings-point-heading">{concept.heading}</h3>
-                  <p className="settings-point-text">{concept.summary}</p>
-                </section>
-              ))}
-              {question.policyRows.map((id) => (
-                <section className="settings-point gov-policy-section" data-policy={id} key={id}>
-                  <h3 className="settings-point-heading">{GOVERNANCE_POLICY[id].heading}</h3>
-                  <p className="settings-point-text">{GOVERNANCE_POLICY[id].summary}</p>
-                </section>
-              ))}
-            </div>
-          </Widget>
-        );
-      })}
-    </div>
-  );
 }
 
 // --- Integrations -------------------------------------------------------------
@@ -793,7 +585,7 @@ function IntegrationsTab({
 }) {
   return (
     <div className="settings-grid settings-grid-integrations">
-      <ConnectYourAgentPanel onOpenExplorer={onOpenExplorer} />
+      <ConnectYourAgentPanel />
       <ApiKeysPanel state={state} onOpenExplorer={onOpenExplorer} />
     </div>
   );
@@ -801,69 +593,67 @@ function IntegrationsTab({
 
 // --- Advanced -------------------------------------------------------------------
 
+/** The Endpoint Explorer widget's heading id — the `explorer` alias's target. */
+const EXPLORER_HEADING_ID = 'settings-apidocs-heading';
+
 /**
- * The developer surfaces, and nothing a scientist recording an experiment has to
- * visit. Four launchers first — Project Memory (`DEC-19`/`DEC-26`: demoted from
- * primary navigation, provided here), the Validator, the Schema Reference, and
- * the raw values that used to sit in About's Technical Details — then the
- * Endpoint Explorer at full width, its list and detail panes scrolling
- * independently, each no taller than the viewport.
- *
- * ~~Explorer first, launchers below it~~ — reordered 2026-10-18 (review): the
- * Explorer is a viewport tall, so the four launchers sat below a whole screen of
- * it and read as an afterthought nobody would scroll to.
+ * The developer surfaces. ~~A lead note, three launcher cards and a Technical
+ * Details card, then the explorer open at full width~~ — 2026-11-02: one Related
+ * Tools link list, Technical Details as a bare `<details>`, and the Endpoint
+ * Explorer behind a closed disclosure. `explorerOpen` (the `explorer` alias, a
+ * `#…` hash, or an "Endpoint Explorer" jump from Integrations) opens it on arrival.
  */
-function AdvancedTab({ state, about }: { state: OpenApiState; about: AboutState }) {
+function AdvancedTab({
+  state,
+  about,
+  explorerOpen,
+}: {
+  state: OpenApiState;
+  about: AboutState;
+  explorerOpen: boolean;
+}) {
+  const tools: { to: string; title: string; sub: string }[] = [
+    { to: ROUTES.memory, title: COPY.memoryTitle, sub: COPY.memorySub },
+    { to: `${ROUTES.governance}?tab=validator`, title: COPY.validatorTitle, sub: COPY.validatorSub },
+    { to: `${ROUTES.governance}?tab=schema`, title: COPY.schemaTitle, sub: COPY.schemaSub },
+  ];
   return (
-    <>
-      <p className="settings-tab-note">{COPY.advancedNote}</p>
-      <div className="settings-grid settings-grid-advanced">
-        <Widget
-          id="settings-memory-heading"
-          title={COPY.memoryTitle}
-          icon={<Network size={18} strokeWidth={2} />}
-          sub={COPY.memorySub}
-          /* What Project Memory is NOT — it never rules on a record — is the
-             Project Memory Boundary row on Privacy & Governance; here it is the
-             launcher's explanation. */
-          info={<p>{COPY.memoryBody}</p>}
-          footer={<OpenLink to={ROUTES.memory}>{COPY.memoryOpen}</OpenLink>}
-        />
+    <div className="settings-grid settings-grid-advanced">
+      <Widget
+        id="settings-related-heading"
+        title={COPY.relatedTitle}
+        icon={<Network size={18} strokeWidth={2} />}
+      >
+        <ul className="settings-related">
+          {tools.map((tool) => (
+            <li key={tool.title} className="settings-related-item">
+              <OpenLink to={tool.to}>{tool.title}</OpenLink>
+              <span className="settings-related-sub">{tool.sub}</span>
+            </li>
+          ))}
+        </ul>
+        <TechnicalDetails state={about} />
+      </Widget>
 
-        <Widget
-          id="settings-validator-heading"
-          title={COPY.validatorTitle}
-          icon={<FileJson size={18} strokeWidth={2} />}
-          sub={COPY.validatorSub}
-          footer={
-            <OpenLink to={`${ROUTES.governance}?tab=validator`}>{COPY.validatorOpen}</OpenLink>
-          }
-        />
-
-        <Widget
-          id="settings-schema-heading"
-          title={COPY.schemaTitle}
-          icon={<Table2 size={18} strokeWidth={2} />}
-          sub={COPY.schemaSub}
-          footer={<OpenLink to={`${ROUTES.governance}?tab=schema`}>{COPY.schemaOpen}</OpenLink>}
-        />
-
-        <TechnicalDetailsWidget state={about} />
-
-        <Widget
-          id="settings-apidocs-heading"
-          className="settings-explorer"
-          span="full"
-          title={COPY.explorerTitle}
-          icon={<LayoutList size={18} strokeWidth={2} />}
-          sub={COPY.explorerSub}
-        >
-          {state.status === 'loading' && <LoadingPanel label="Loading the API contract…" />}
-          {state.status === 'error' && <BackendDown error={state.error} onRetry={state.reload} />}
-          {state.status === 'data' && <ApiExplorerPanel schema={state.data} />}
-        </Widget>
-      </div>
-    </>
+      <Widget
+        id={EXPLORER_HEADING_ID}
+        className="settings-explorer"
+        span="full"
+        title={COPY.explorerTitle}
+        icon={<LayoutList size={18} strokeWidth={2} />}
+        sub={COPY.explorerSub}
+      >
+        <LazyDisclosure summary="Browse Every Operation" defaultOpen={explorerOpen}>
+          {() => (
+            <>
+              {state.status === 'loading' && <LoadingPanel label="Loading the API contract…" />}
+              {state.status === 'error' && <BackendDown error={state.error} onRetry={state.reload} />}
+              {state.status === 'data' && <ApiExplorerPanel schema={state.data} />}
+            </>
+          )}
+        </LazyDisclosure>
+      </Widget>
+    </div>
   );
 }
 
@@ -873,63 +663,56 @@ function AdvancedTab({ state, about }: { state: OpenApiState; about: AboutState 
  * Technical Details, because a raw value is a developer's (`DEC-56`). The full
  * SHA is still rendered in exactly one place on the page, and it is this one.
  */
-function TechnicalDetailsWidget({ state }: { state: AboutState }) {
+function TechnicalDetails({ state }: { state: AboutState }) {
   return (
-    <Widget
-      id="settings-technical-heading"
-      title={COPY.technicalTitle}
-      icon={<CircleHelp size={18} strokeWidth={2} />}
-      sub={COPY.technicalSub}
-      details={{
-        summary: COPY.technicalShow,
-        content: (
-          <dl className="settings-technical-figures">
-            <div className="settings-technical-figure">
-              <dt>Build Commit (Full)</dt>
-              <dd className="mono settings-commit-full">
-                {state.status === 'data' ? (state.data.build_commit ?? 'not set') : '—'}
-              </dd>
-            </div>
-            <div className="settings-technical-figure">
-              <dt>Response Fields</dt>
-              <dd>
-                <ul className="settings-docs-list">
-                  {ABOUT_RESPONSE_FIELDS.map((field) => (
-                    <li key={field}>
-                      <code className="mono">{field}</code>
-                    </li>
-                  ))}
-                </ul>
-              </dd>
-            </div>
-            <div className="settings-technical-figure">
-              <dt>Source Endpoints</dt>
-              <dd>
-                <ul className="settings-docs-list">
-                  {SETTINGS_SOURCE_ENDPOINTS.map((endpoint) => (
-                    <li key={endpoint}>
-                      <code className="mono">{endpoint}</code>
-                    </li>
-                  ))}
-                </ul>
-              </dd>
-            </div>
-            <div className="settings-technical-figure">
-              <dt>Repository Documentation</dt>
-              <dd>
-                <ul className="settings-docs-list">
-                  {REPO_DOCS.map((doc) => (
-                    <li key={doc}>
-                      <code className="mono">{doc}</code>
-                    </li>
-                  ))}
-                </ul>
-                <p className="settings-docs-caption">{REPO_DOCS_CAPTION}</p>
-              </dd>
-            </div>
-          </dl>
-        ),
-      }}
-    />
+    /* The app's chevron `Disclosure` (2026-11-02, review Minor 4): one disclosure
+       idiom on the page, never the browser's own triangle. */
+    <Disclosure className="settings-technical" summary={COPY.technicalTitle}>
+      <dl className="settings-technical-figures">
+        <div className="settings-technical-figure">
+          <dt>Build Commit (Full)</dt>
+          <dd className="mono settings-commit-full">
+            {state.status === 'data' ? (state.data.build_commit ?? 'not set') : '—'}
+          </dd>
+        </div>
+        <div className="settings-technical-figure">
+          <dt>Response Fields</dt>
+          <dd>
+            <ul className="settings-docs-list">
+              {ABOUT_RESPONSE_FIELDS.map((field) => (
+                <li key={field}>
+                  <code className="mono">{field}</code>
+                </li>
+              ))}
+            </ul>
+          </dd>
+        </div>
+        <div className="settings-technical-figure">
+          <dt>Source Endpoints</dt>
+          <dd>
+            <ul className="settings-docs-list">
+              {SETTINGS_SOURCE_ENDPOINTS.map((endpoint) => (
+                <li key={endpoint}>
+                  <code className="mono">{endpoint}</code>
+                </li>
+              ))}
+            </ul>
+          </dd>
+        </div>
+        <div className="settings-technical-figure">
+          <dt>Repository Documentation</dt>
+          <dd>
+            <ul className="settings-docs-list">
+              {REPO_DOCS.map((doc) => (
+                <li key={doc}>
+                  <code className="mono">{doc}</code>
+                </li>
+              ))}
+            </ul>
+            <p className="settings-docs-caption">{REPO_DOCS_CAPTION}</p>
+          </dd>
+        </div>
+      </dl>
+    </Disclosure>
   );
 }

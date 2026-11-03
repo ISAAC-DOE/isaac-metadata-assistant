@@ -42,10 +42,12 @@ export const IMPORT_STAGE_PARAM = 'stage';
  * the tab that now holds the material AND names the widget to bring into view,
  * so an old link arrives at the thing it pointed at, not merely at its tab.
  *
- * `privacy` is both a canonical id and the old one — Data & Privacy became
- * Privacy & Governance in place, so its links needed no alias at all.
+ * ~~`privacy` is both a canonical id and the old one~~ — the Privacy & Governance
+ * tab was retired 2026-11-02 (owner's direction: no standing disclaimers). Its
+ * facts are the Data card on Overview, so `privacy` is now an ALIAS that lands
+ * there.
  */
-export const SETTINGS_TAB_IDS = ['overview', 'privacy', 'integrations', 'advanced'] as const;
+export const SETTINGS_TAB_IDS = ['overview', 'integrations', 'advanced'] as const;
 
 export type SettingsTabId = (typeof SETTINGS_TAB_IDS)[number];
 
@@ -61,6 +63,7 @@ export function isSettingsTab(value: string | null | undefined): value is Settin
  */
 export const SETTINGS_TAB_ALIASES = {
   about: { tab: 'overview', widget: 'settings-build-heading' },
+  privacy: { tab: 'overview', widget: 'settings-data-heading' },
   help: { tab: 'overview', widget: 'settings-help-heading' },
   api: { tab: 'integrations', widget: 'settings-apiaccess-heading' },
   mcp: { tab: 'integrations', widget: 'settings-agent-heading' },

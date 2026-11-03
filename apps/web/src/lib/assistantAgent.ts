@@ -434,8 +434,7 @@ const REGISTRY: Record<string, (ctx: AgentContext, opts: AgentOpts) => IntentRes
     if (!next) {
       return {
         text:
-          'There are no pending fields — none is currently blocking. The deterministic ' +
-          'audit remains the authority on completeness.',
+          'There are no pending fields — none is currently blocking.',
       };
     }
     if (next.unreadable) {
@@ -577,9 +576,8 @@ const REGISTRY: Record<string, (ctx: AgentContext, opts: AgentOpts) => IntentRes
     const note = step?.blocked ? ` This step is currently blocked: ${step.reason ?? ''}` : '';
     return {
       text:
-        `Export readiness ("${label}") is decided by the deterministic gate — schema ` +
-        `validation and the evidence audit — not by the assistant.${note} The assistant ` +
-        `explains the inputs and points you to the gate; it never authorizes export.`,
+        `Export readiness ("${label}") is decided by schema validation and the ` +
+        `evidence audit.${note}`,
     };
   },
 };

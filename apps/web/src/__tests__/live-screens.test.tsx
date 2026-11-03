@@ -124,39 +124,23 @@ describe('S1 · My Experiments renders live queue groups from injected data', ()
 });
 
 describe('S2 · Load Materials', () => {
-  it('local structured files are approval-gated: the 403 governance message shows verbatim', async () => {
-    stubFetchRoutes({ 'POST /api/uploads': { status: 403, body: uploadsBlocked } });
-    const { findByText, getByText, getByRole, container } = renderAt('/load');
-
-    // P36V.2 F1 — the control is a plain button and the panel has NO file input,
-    // so no picker can open and no file is ever chosen, sent or read. The copy
-    // now says exactly that, and is selected on here so it cannot drift back.
+  /* ~~"Try an Upload" and the 403 it showed~~ — retired 2026-11-02 with the "Can I Load
+     My Own Files?" widget and the GovernanceBanner (owner's direction). The screen
+     now asks the upload route nothing and offers no file control. */
+  it('offers no upload control and no file input, and asks the upload route nothing', async () => {
+    const hits = stubFetchRoutes({ 'POST /api/uploads': { status: 403, body: uploadsBlocked } });
+    const { container, queryByRole, getByRole } = renderAt('/load');
     expect(container.querySelector('input[type="file"]')).toBeNull();
-    // Since 2026-10-12 the control is a plain secondary "Try an Upload" button in the
-    // "Can I Load My Own Files?" widget, and "opens no file picker" is its DESCRIPTION
-    // (read on focus) rather than its visible text — asserted, so it cannot drift back.
-    const ask = getByRole('button', { name: 'Try an Upload' });
-    expect(ask).toHaveAccessibleDescription(/opens no file picker, takes no dropped file and sends no file/i);
-    fireEvent.click(ask);
-
-    expect(await findByText(/Blocked by governance\./)).toBeInTheDocument();
-    expect(getByText(new RegExp(uploadsBlocked.reason))).toBeInTheDocument();
-    // the governance banner stays mounted alongside the blocked state.
-    // Slice 2A (I5) requalified its headline "Synthetic mode." → "Synthetic
-    // workspace." (the deployment may run a read-only test-DB diagnostic, so an
-    // unqualified mode claim over-stated it). Same assertion, new anchor.
-    expect(getByText(/Synthetic workspace\./)).toBeInTheDocument();
+    expect(queryByRole('button', { name: 'Try an Upload' })).toBeNull();
+    expect(getByRole('heading', { name: 'Guided Walkthrough' })).toBeInTheDocument();
+    await new Promise((r) => setTimeout(r, 20));
+    expect(hits).not.toContain('POST /api/uploads');
   });
 
-  it('uploads with the backend down → Backend Not Running with the run command, never governance copy', async () => {
+  it('with the backend down, the screen still renders and shows no governance copy', () => {
     stubFetchDown();
-    const { findByText, getByText, getByRole, queryByText } = renderAt('/load');
-
-    fireEvent.click(getByRole('button', { name: 'Try an Upload' }));
-
-    expect(await findByText('Backend Not Running')).toBeInTheDocument();
-    expect(getByText(RUN_COMMAND)).toBeInTheDocument();
-    // an unreachable backend must never masquerade as a governance refusal
+    const { queryByText, getByRole } = renderAt('/load');
+    expect(getByRole('heading', { name: 'Guided Walkthrough' })).toBeInTheDocument();
     expect(queryByText(/Blocked by governance/)).toBeNull();
     expect(queryByText(new RegExp(uploadsBlocked.reason))).toBeNull();
   });

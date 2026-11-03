@@ -337,7 +337,8 @@ describe('P26.0b · Reset Worked Example — preview (non-mutating) & disclosure
     expect(text).toMatch(/progress/);
     expect(text).toMatch(/discards/);
     expect(text).toMatch(/restores all five/);
-    expect(text).toContain('real data is unaffected');
+    // ~~'real data is unaffected'~~ — the mode reassurance was retired 2026-11-02
+    // (owner's direction: no standing disclaimers); the scope facts above remain.
   });
 
   /*
@@ -359,18 +360,20 @@ describe('P26.0b · Reset Worked Example — preview (non-mutating) & disclosure
    * allowed to say is a MODE claim — which the control is already gated on, since
    * it renders only when health reports `synthetic-only`.
    */
-  it('makes a mode claim, never a whole-content claim about the workspace', async () => {
+  it('never makes a whole-content claim about the workspace', async () => {
     const view = await renderInSession(resetDemoRoutes().routes);
     await openReset(view);
     const text = (dialog(view).textContent ?? '').toLowerCase();
 
-    // the mode claim, and the two checkable facts that qualify it
-    expect(text).toContain('synthetic-only mode');
-    expect(text).toMatch(/come from committed files/);
-    expect(text).toMatch(/every upload is refused/);
-
-    // ...and NOT any claim about the whole of what the workspace contains
+    // 2026-11-02: the mode clause ("this workspace runs in synthetic-only mode: the
+    // examples come from committed files and every upload is refused") was retired
+    // with the other standing disclaimers. What this test exists for is unchanged:
+    // NOT any claim about the whole of what the workspace contains
     expect(text).not.toMatch(/built only from|contains only|holds no real/i);
+    // negative control: the ban sees both retired forms of the clause
+    for (const retired of ['this workspace is built only from committed example files', 'holds no real experiment data']) {
+      expect(retired).toMatch(/built only from|contains only|holds no real/i);
+    }
   });
 });
 
@@ -725,8 +728,14 @@ describe('P26.0b · Reset Worked Example — success refreshes the dashboard', (
     // row count + lifecycle badge distribution instead of by title text.
     await waitFor(() => expect(view.container.querySelectorAll('.exp-row')).toHaveLength(5));
     const queue = within(view.container.querySelector('.queue') as HTMLElement);
+    // Since 2026-11-02 only Exported wears a lifecycle chip; the four drafts carry
+    // theirs in the row's accessible name.
     expect(queue.getAllByText('Exported')).toHaveLength(1);
-    expect(queue.getAllByText('Draft')).toHaveLength(4);
+    expect(
+      [...view.container.querySelectorAll('.exp-row')].filter((r) =>
+        /(, |— )Draft,/.test(r.getAttribute('aria-label') ?? ''),
+      ),
+    ).toHaveLength(4);
     await waitFor(() => expect(view.queryAllByText(/Demo \(demo\/run\)/)).toHaveLength(0));
   });
 

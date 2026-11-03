@@ -181,7 +181,10 @@ describe('My Experiments · the empty state', () => {
     expect(
       within(section).getByRole('heading', { name: LABELS.emptyExperimentsTitle }),
     ).toBeInTheDocument();
-    expect(section.textContent).toContain(LABELS.emptyExperimentsBody);
+    // 2026-11-02: the lede is the heading alone — the cards each carry their own
+    // verb — and the page states no "0 experiments · 0 ready to export" above it.
+    expect(section.textContent).not.toMatch(/Start fresh, or bring in work/i);
+    expect(document.body.textContent).not.toMatch(/0 experiments/i);
   });
 
   it('leads with the four actions and no architecture paragraph', async () => {
@@ -242,13 +245,29 @@ describe('My Experiments · the empty state', () => {
      * rather than filled. Asserted in both directions: "is blue" and "is not the
      * solid primary" are different claims.
      */
+    /*
+     * 2026-11-02 (owner direction: one primary, themed blue secondaries, short
+     * buttons). The walkthrough and Historical Import buttons are the tinted
+     * `btn-secondary` and read "Start" / "Open" — the card title carries the noun —
+     * while their accessible names still open with the visible word and name the
+     * destination. The Schema Validator is a utility, not a way to begin, so it is a
+     * ghost text button under the cards rather than a card of equal weight.
+     */
     const demo = within(section).getByRole('button', { name: LABELS.actionStartTutorial });
-    expect(demo, 'Launch Guided Demo lost the action treatment').toHaveClass('btn-action');
-    expect(demo, 'Launch Guided Demo became a second primary').not.toHaveClass('btn-primary');
+    expect(demo, 'the walkthrough lost the secondary action treatment').toHaveClass('btn-secondary');
+    expect(demo, 'the walkthrough became a second primary').not.toHaveClass('btn-primary');
+    expect(demo.textContent).toBe(LABELS.actionStart);
+    expect(LABELS.actionStartTutorial.startsWith(LABELS.actionStart)).toBe(true);
+
+    const importLink = within(section).getByRole('link', { name: LABELS.actionOpenHistoricalImport });
+    expect(importLink).toHaveClass('btn-secondary');
+    expect(importLink.textContent).toBe(LABELS.actionOpen);
+    expect(LABELS.actionOpenHistoricalImport.startsWith(LABELS.actionOpen)).toBe(true);
 
     const validator = within(section).getByRole('button', { name: LABELS.actionOpenValidator });
     expect(validator, 'Open Validator became a second primary').not.toHaveClass('btn-primary');
-    expect(validator, 'Open Validator left the secondary treatment').toHaveClass('btn-secondary');
+    expect(validator, 'Open Validator is a text link, not a card button').toHaveClass('btn-ghost');
+    expect(validator.closest('.queue-empty-action')).toBeNull();
 
     /*
      * AND IT IS STILL A PEER, which is the property the promotion was really
@@ -266,8 +285,9 @@ describe('My Experiments · the empty state', () => {
      * the same description slot and a non-primary treatment, so the hierarchy the
      * assertion below protects is unchanged — one primary, three peers.
      */
+    // THREE since 2026-11-02: the Schema Validator left its card for a text link.
     const cards = section.querySelectorAll('.queue-empty-action');
-    expect(cards).toHaveLength(4);
+    expect(cards).toHaveLength(3);
     for (const card of cards) {
       expect(card.querySelector('.queue-empty-action-title')).not.toBeNull();
       expect(card.querySelector('.queue-empty-hint')).not.toBeNull();
@@ -305,52 +325,51 @@ describe('My Experiments · the empty state', () => {
 // =============================================================================
 
 describe('My Experiments · where a new experiment is stored', () => {
-  it('says experiments are kept until the server restarts when there is no database', async () => {
+  /*
+   * 2026-11-02 (owner direction: no standing reassurance or caveat prose). The
+   * `durable` line ("…saved in this deployment's database and stay here across
+   * restarts.") and the `ephemeral` line ("…live in this server's workspace and are
+   * cleared when the server restarts.") are RETIRED. Only the failure state speaks.
+   * What these tests now pin is the half that still matters: neither state renders a
+   * line, and nothing on the panel promises durability it has not established.
+   */
+  const RETIRED_STORAGE_LINES = [
+    'Experiments you create are saved in this deployment’s database and stay here across restarts.',
+    'Experiments you create live in this server’s workspace and are cleared when the server restarts.',
+  ];
+  const DURABILITY_PROMISE = /stay here across restarts|saved in this|\bpermanent(ly)?\b|\bforever\b|saved\s+for\s+good/i;
+
+  it('says nothing about storage when there is no database (the ephemeral line is retired)', async () => {
     await openEmptyState(EPHEMERAL);
-    const line = panel().querySelector<HTMLElement>('.queue-empty-storage');
-    expect(line).not.toBeNull();
-    expect(line!.dataset.durability).toBe('ephemeral');
-    expect(line!.textContent).toBe(LABELS.storageEphemeral);
-    /*
-     * PINNED ON THE RENDERED TEXT, not on the label constant — a matcher reading
-     * `LABELS.storageEphemeral` would pass no matter what that string said, which
-     * is exactly how a disclosure starts quietly implying durability. The two
-     * clauses that carry the meaning are asserted directly.
-     */
-    expect(line!.textContent).toMatch(/cleared when the server restarts/i);
-    expect(line!.textContent).not.toMatch(/\bdatabase\b/i);
-    expect(line!.textContent).not.toMatch(/\bpermanent(ly)?\b|\bforever\b|\bsaved\s+for\s+good\b/i);
+    const section = panel();
+    expect(section.querySelector('.queue-empty-storage')).toBeNull();
+    expect(section.textContent).not.toMatch(/cleared when the server restarts/i);
+    expect(section.textContent).not.toMatch(DURABILITY_PROMISE);
   });
 
-  it('promises durability only when the deployment actually has it', async () => {
+  it('says nothing about storage when the deployment is durable (the reassurance is retired)', async () => {
     await openEmptyState(DURABLE);
-    const line = panel().querySelector<HTMLElement>('.queue-empty-storage');
-    expect(line!.dataset.durability).toBe('durable');
-    expect(line!.textContent).toBe(LABELS.storageDurable);
-    expect(line!.textContent).toMatch(/database/i);
-    expect(line!.textContent).toMatch(/stay here across restarts/i);
-    // The ephemeral claim is GONE, not merely reworded — keeping a "cleared on
-    // restart" clause beside a durability promise would be a contradiction the
-    // reader has to resolve.
-    expect(line!.textContent).not.toMatch(/cleared|until the server restarts/i);
+    const section = panel();
+    expect(section.querySelector('.queue-empty-storage')).toBeNull();
+    expect(section.textContent).not.toMatch(DURABILITY_PROMISE);
+  });
+
+  it('NEGATIVE CONTROL — the durability ban matches the retired reassurance it replaced', () => {
+    expect(RETIRED_STORAGE_LINES[0]).toMatch(DURABILITY_PROMISE);
+    expect(RETIRED_STORAGE_LINES[1]).toMatch(/cleared when the server restarts/i);
+    expect(LABELS.storageUnavailable).not.toMatch(DURABILITY_PROMISE);
   });
 
   it('a configured-but-misconfigured database claims NO durability (legacy shape)', async () => {
     /*
-     * The state that makes the two booleans worth keeping apart, as served by a
-     * deployment predating the `state` field. A database is wired up, but the write
-     * path refused its name, so the app degraded to the workspace directory.
-     * Reporting `configured` as durability would promise exactly the thing that just
-     * failed.
-     *
-     * `ephemeral` is the RIGHT reading for this shape and only for this shape: with
-     * no `state`, `configured && !durable` could only be the PGDATABASE mismatch,
-     * after which the app really does fall back to the workspace directory.
+     * The legacy shape (no `state`) still reads as `ephemeral` — the right reading
+     * for it — and `ephemeral` now renders no line, so there is nothing that could
+     * promise the durability that just failed.
      */
     await openEmptyState(DEGRADED_LEGACY);
-    const line = panel().querySelector<HTMLElement>('.queue-empty-storage');
-    expect(line!.dataset.durability).toBe('ephemeral');
-    expect(line!.textContent).not.toMatch(/database/i);
+    const section = panel();
+    expect(section.querySelector('.queue-empty-storage')).toBeNull();
+    expect(section.textContent).not.toMatch(DURABILITY_PROMISE);
   });
 
   it('a configured database that records are NOT REACHING says so, and promises nothing', async () => {

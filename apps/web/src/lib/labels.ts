@@ -10,7 +10,6 @@
  * technical token (XANES, sha256, JSON paths, v1.05) is never Title-Cased.
  */
 
-import { VERSION_BADGE } from './runtimeContext';
 import { canonicalStepLabel } from './workflowSteps';
 
 // Technical identifiers that must render exactly as written (never re-cased).
@@ -183,9 +182,8 @@ const SETTINGS_WALKTHROUGH = 'Guided Walkthrough';
 export const LABELS = {
   // App / brand
   brand: 'ISAAC',
-  // Derived, never a literal: the old `isaac v0.1.0 · local` rendered on the
-  // hosted deployment too, where "local" is false. See `lib/runtimeContext.ts`.
-  version: VERSION_BADGE,
+  // ~~`version`~~ — the left-nav build badge (`isaac v0.1.0 · local dev`) was retired
+  // 2026-11-02 with the nav footer; the version is shown in Settings → This Build.
 
   // Nav destinations
   navExperiments: 'My Experiments',
@@ -418,19 +416,13 @@ export const LABELS = {
    * makes no per-person claim: "me" is the reader at the screen, and the six
    * phrasings `experiment-library-screen.test.tsx` bans still do not match it.
    */
-  libraryOverviewHeading: 'What Needs Me?',
-  libraryOverviewInfoLabel: 'About This Summary',
-  // Inside a folder the totals are withheld (they are the workspace's, not the
-  // folder's); the widget keeps the filter and search under this title.
-  libraryFindHeading: 'Find an Experiment',
-  libraryFindInfoLabel: 'About This Search',
-  libraryOverviewTotal: 'Experiments',
-  libraryOverviewNeedsAttention: 'Needs Attention',
+  /* ~~'What Needs Me?'~~ and its info tip, the in-folder ~~'Find an Experiment'~~
+     title, and ~~libraryOverviewNote~~ ("Counts over the records in this workspace.
+     Summary figures only; nothing here gates export or changes a record.") — RETIRED
+     2026-11-02: the card became one row of filter chips beside search and sort, with
+     no heading and no info tip. The two sums keep their labels. */
   libraryOverviewRuns: 'Runs Recorded',
   libraryOverviewProposals: 'Proposals Waiting',
-  libraryOverviewNote:
-    'Counts over the records in this workspace. Summary figures only; nothing here gates ' +
-    'export or changes a record.',
 
   /*
    * THE SAME FOUR FIGURES WHEN THE SERVER SAYS THE READ WAS SHORT.
@@ -451,11 +443,9 @@ export const LABELS = {
    * Found by independent review (B-2). The reviewer also measured that NO test
    * covered the interaction — the strip never consulted `incomplete` at all.
    */
-  libraryOverviewHeadingPartial: 'Statistics From This Read',
   libraryOverviewNotePartial:
-    'Counts over the records this read returned, which is fewer than the workspace holds — ' +
-    'the notice above says why. Not a workspace total. Summary figures only; nothing here ' +
-    'gates export or changes a record.',
+    'Counts over the records this read returned, which is fewer than the workspace holds. ' +
+    'Not a workspace total.',
 
   /*
    * RETIRED — a SECOND five-step workflow vocabulary, deleted rather than
@@ -772,73 +762,15 @@ export const LABELS = {
   chipMentorReview: 'Mentor Review',
   chipDraft: 'Draft',
   /*
-   * The mode chip's base label in the ORDINARY workspace.
+   * The mode chip, shown ONLY while a worked-example session is open (or, in place
+   * of this, an anomalous `health.mode` — see `WorkspaceChip` in TopBar.tsx).
    *
-   * DELIBERATELY NEUTRAL, and this replaces "Example workspace" — which was a
-   * FALSE label here, not merely a stale one. The five built-in examples used to
-   * be materialised into the ordinary workspace on every read; they are created
-   * only inside a worked-example session, so on every ordinary screen "Example
-   * workspace" named this scope after content this build never puts there.
-   *
-   * PHRASED AS WHAT THE BUILD DOES, never as what the directory holds. "The
-   * ordinary workspace contains no examples at all" is what this comment used to
-   * say, and it is a claim about CONTENTS that nothing measures:
-   * `list_experiments(None)` enumerates whatever is on disk and there is no startup
-   * migration, so a workspace that already held the five still lists them. See
-   * `ORDINARY_ONLY` in `components/TopBar.tsx`, where two successive versions of
-   * that contents claim had to be retired, and note that the second was written by
-   * a reader of the first correction.
-   *
-   * A chip is still rendered rather than nothing, for two reasons that are about
-   * truth rather than decoration: it is the ONLY surface that reports an
-   * UNEXPECTED `health.mode` (see `anomalousMode` in `components/TopBar.tsx` — this
-   * cited `modeLabel`, which that file no longer has), and its
-   * accessible name is where this deployment's two unconditional claims — file
-   * upload is refused, no official institutional record is shown — are carried on
-   * every screen. Neither has anywhere else to go on a record surface.
-   *
-   * "workspace" scopes the claim to what the reader is looking at: since Slice 2A
-   * the deployment may additionally run a protected read-only diagnostic over an
-   * isolated test database, so an unqualified whole-deployment claim would
-   * over-claim. That scoping is why the word "workspace" is load-bearing and must
-   * survive any rewording.
-   *
-   * The full governance disclosure still lives in the Governance banner, the
-   * Governance & Safety policy tab and the Help panel, whose exact technical
-   * wording is deliberately UNCHANGED — a chip is not the place to make a
-   * governance guarantee, but it must not be the place a guarantee quietly
-   * disappears either.
-   */
-  modeOrdinaryWorkspace: 'Workspace',
-  /*
-   * Shown INSTEAD of `modeOrdinaryWorkspace` while a worked-example session is
-   * open — the one scope in which example records really are present.
-   *
-   * The temporariness of the scope (these records are discarded when the
-   * walkthrough ends) is stated in the accessible name rather than crammed into
-   * the label, and the persistent worked-example bar states it in visible text
-   * beside the controls that act on the scope.
+   * ~~`modeOrdinaryWorkspace: 'Workspace'`, `modeTestDbDiagnostics`,
+   * `modeTestDbCheckFailed`~~ — retired 2026-11-02 with the ordinary-scope chip and
+   * its accessible-name disclosure (owner's direction: no standing disclaimers). The
+   * retired "Example workspace" label stays banned by `mode-chip.test.tsx`.
    */
   modeWorkedExample: 'Worked Example',
-  // Deliberate register exception (see the header: register 1 is Title Case).
-  // "DB" is a generic word, not a database name; neither string names a host,
-  // database, user, or secret.
-  //
-  // THESE ARE NO LONGER APPENDED TO THE CHIP'S VISIBLE TEXT. They were, as
-  // "Example workspace · test DB diagnostics", which put an infrastructure
-  // disclosure in the primary header of every product screen. The disclosure did
-  // not move OUT of the chip — it is still derived from `health.database` and
-  // still stated in the chip's accessible name, alongside four other surfaces
-  // that already carry it at length (the Governance banner, Governance & Safety →
-  // Policy, the Help panel, and Settings → Data & Privacy). Only the visible
-  // suffix is gone. Retained as labels because the accessible name and the
-  // technical surfaces still read them, and because `product-facing-language`
-  // pins their exact wording.
-  modeTestDbDiagnostics: 'test DB diagnostics',
-  // NOT "unavailable": /api/health does zero I/O, so this reflects the last
-  // diagnostic RUN recorded in the server process, which may be stale. See the
-  // reasoning comment in components/TopBar.tsx before changing this wording.
-  modeTestDbCheckFailed: 'test DB check failed',
 
   // Evidence-support classes (P28.5) — a separate axis from the status chips above.
   chipEvSupported: 'Supported',
@@ -1062,6 +994,7 @@ export const LABELS = {
   actionViewJson: 'View JSON',
   actionView: 'View',
   actionOpenSource: 'Open Source File',
+  // Kept only for the unmounted GovernanceBanner (see that file's header).
   actionReadPolicy: 'Read Policy',
   actionBackToComplete: 'Back to Complete',
   actionLoadLocal: 'Load Local Structured Files',
@@ -1070,28 +1003,16 @@ export const LABELS = {
    * one question a reader arrives with. The detail each card used to print in full
    * moved into its widget's info panel and is unchanged there.
    */
-  loadExampleTitle: 'Try a Worked Example',
-  loadExampleSub: 'A fictional year-2099 CuO / Cu K-edge XANES session — a complete example run, ~10s.',
+  // 2026-11-02: one name for one feature (was "Try a Worked Example").
+  loadExampleTitle: SETTINGS_WALKTHROUGH,
+  loadExampleSub: 'A worked example: a fictional year-2099 CuO / Cu K-edge XANES session.',
   loadExampleInfoLabel: 'About the Worked Example',
   loadExampleBody:
     "It assembles the evidenced draft, holds back the fields it won't guess, and — once you " +
     'confirm them — validates against ISAAC v1.05.',
-  loadOwnFilesTitle: 'Can I Load My Own Files?',
-  loadOwnFilesInfoLabel: 'About File Uploads',
-  loadOwnFilesState: 'Not in this build — uploads are refused',
-  // VISIBLE, always: a security/privacy state (`DEC-35`). It is the one caveat a
-  // reader must not have to open anything to meet.
-  loadOperatorResponsibility:
-    "Keeping real or private artifacts out is the operator's responsibility, not a check this " +
-    'software performs.',
-  // Says what it does: it TRIES an upload, and the server's refusal comes back.
-  actionAskServer: 'Try an Upload',
-  loadAskServerHint:
-    'It opens no file picker, takes no dropped file and sends no file — it asks the upload route, and ' +
-    'shows the refusal it gives.',
-  loadGovernanceApproval:
-    'Real SLAC/SSRL or private artifacts require written data-governance approval before they can be ' +
-    'read, indexed, or sent to any model.',
+  // ~~loadOwnFiles*, actionAskServer ("Try an Upload"), loadAskServerHint,
+  // loadGovernanceApproval, loadOperatorResponsibility~~ — retired
+  // 2026-11-02 with the Load Materials upload widget and the GovernanceBanner.
   actionDontKnow: "I don't know — leave honestly missing",
 
   // Evidence / preview
@@ -1154,6 +1075,11 @@ export const LABELS = {
   actionStartTutorial: `Start ${SETTINGS_WALKTHROUGH}`,
   // The strip's visible verb; its accessible name is `actionStartTutorial`.
   actionStart: 'Start',
+  // The Load Materials card's visible verb once this browser has finished it.
+  actionReplay: 'Replay',
+  // The My Experiments empty state's Historical Import card: the card title carries
+  // the noun, and the link's accessible name is `actionOpenHistoricalImport`.
+  actionOpen: 'Open',
   actionSkipForNow: 'Not Now',
   actionSkipTutorial: 'Skip Walkthrough',
   actionTutorialBack: 'Back',
@@ -1420,7 +1346,8 @@ export const LABELS = {
    * "bring in work you already have" is kept verbatim: it is the phrase
    * `historical-import.test.tsx` pins, for the reason given above.
    */
-  emptyExperimentsBody: 'Start fresh, or bring in work you already have.',
+  // ~~emptyExperimentsBody: 'Start fresh, or bring in work you already have.'~~ —
+  // cut 2026-11-02 (declutter): the cards under the title each carry their own verb.
   emptyExperimentsChoices: 'Ways to begin',
 
   /*
@@ -1441,19 +1368,14 @@ export const LABELS = {
    */
   historicalImportHint:
     'Rebuild a past experiment; nothing becomes a value unreviewed.',
-  // The empty state's validator card. "Never stored" stays VISIBLE: it is a
-  // privacy state (`DEC-35`), the route's documented contract for
-  // `POST /api/validate/record` — the body "is never written anywhere".
-  validatorCardTitle: 'Schema Validator',
-  validatorCardHint: 'Check a file against the official schema; it is never stored.',
-  validatorCardMore:
-    'It is the same deterministic check this app runs on an exported record, and it names every ' +
-    'failing path.',
+  /* The empty state's validator CARD is a text link now (2026-11-02): the button
+     reads `actionOpenValidator` and this hint follows it. ~~"Check a file against the
+     official schema; it is never stored."~~ and the info tip ~~"It is the same
+     deterministic check this app runs on an exported record…"~~ are retired. */
   actionOpenHistoricalImport: 'Open Historical Import',
 
   actionOpenValidator: 'Open Validator',
-  openValidatorHint:
-    'Check a record file you already have against the official ISAAC schema.',
+  openValidatorHint: 'Check a record file you already have against the official schema.',
 
   /*
    * WHERE A NEW EXPERIMENT GOES — one short line, and it is DERIVED, never assumed.
@@ -1475,12 +1397,8 @@ export const LABELS = {
    * `emptyDir`, pods and deployments are our vocabulary, not the reader's. The
    * consequence is the same and the consequence is the part they need.
    */
-  storageDurable:
-    'Experiments you create are saved in this deployment’s database and stay here across ' +
-    'restarts.',
-  storageEphemeral:
-    'Experiments you create live in this server’s workspace and are cleared when the server ' +
-    'restarts.',
+  /* ~~storageDurable~~ and ~~storageEphemeral~~ RETIRED 2026-11-02 (owner direction:
+     no standing reassurance or caveat prose). Only the failure state below speaks. */
   /*
    * THE THIRD SENTENCE, AND IT IS NOT A REASSURING ONE ON PURPOSE.
    *
@@ -1575,10 +1493,11 @@ export const LABELS = {
    * concatenation and no single-line grep reaches it. That is the second time
    * in this PR a text sweep has missed a site for a mechanical reason.
    */
+  // SHORTENED 2026-11-02: the failure reason only. It still names no location and
+  // no restart outcome, and states the failure as a recorded observation.
   storageUnavailable:
-    'A database is configured to hold experiments for this deployment, and the backend has ' +
-    'recorded that they were not reaching it. Creating one may fail outright, and nothing on ' +
-    'this screen establishes that a record created now is stored durably.',
+    'A database is configured to hold experiments, and the backend has recorded that they ' +
+    'were not reaching it. Creating one may fail.',
 
   // /load, outside a worked example (B-05). One sentence of cause, ahead of the audited
   // `launchGuidedDemoBody` it is always rendered with — so the screen says WHY the
@@ -1728,12 +1647,11 @@ export const LABELS = {
   helpOnPageEvidence: 'The evidence this record holds, and the source each entry cites.',
   helpOnPageExport: 'A dry run: what would still refuse the export. Nothing is written here.',
   helpOnPageImports: 'Rebuild a past experiment; nothing becomes a value until you review it.',
-  // Two tabs with two scopes: the workspace's records, and this build's own checks.
-  helpOnPageStatistics: "Workspace record counts and this build's own checks; nothing here gates export.",
-  helpOnPageSettings: "This deployment's privacy boundaries, integrations and developer tools.",
-  helpOnPageGovernance: 'Check a record file against the official schema, or browse it. Nothing is stored.',
-  helpOnPageMemory: "A developer map of this project's own files and docs: leads to verify, never truth.",
-  helpOnPageLoad: 'The worked example, and why your own files cannot be loaded in this build.',
+  helpOnPageStatistics: 'Workspace record counts and checks.',
+  helpOnPageSettings: "This deployment's integrations and developer tools.",
+  helpOnPageGovernance: 'Check a record file against the official schema, or browse it.',
+  helpOnPageMemory: "A developer map of this project's own files and docs.",
+  helpOnPageLoad: 'The guided walkthrough and its worked example.',
   helpOnPageUnknown: 'This address matches no screen in ISAAC.',
   helpWalkthroughOpen: 'The Guided Walkthrough is open in this tab.',
 
@@ -1743,35 +1661,18 @@ export const LABELS = {
    */
   // Keeps the claim P24.8 pins — it surfaces related FILES and concepts, never
   // "related records" (`memory-honesty.test.tsx`).
-  // One line; the paragraph it replaced is `memoryIntroFull`, verbatim, behind the
-  // info tip beside it — including "it never validates, completes, or supplies a value".
-  memoryIntro: 'Related files and concepts from this project — leads to verify, never truth.',
+  // One line, and the page's ONE "verify, not truth" statement (2026-11-02). The info
+  // tip that held ~~memoryIntroFull~~ ("…it never validates, completes, or supplies a
+  // value") and the trust card's ~~memoryTrustSub~~ ("Graphify is a memory plane, not a
+  // truth plane…") are retired at the owner's direction.
+  memoryIntro: 'Related files and concepts from this project — leads to verify, not truth.',
   memoryTrustTitle: 'Can I Trust the Snapshot?',
-  memoryTrustSub:
-    'Graphify is a memory plane, not a truth plane — every lead points back to a cited file to confirm.',
-  /*
-   * THE FULL INTRODUCTION, behind the page's info tip (2026-10-12). The visible
-   * intro is one sentence (`DEC-35`); this is the paragraph it replaced, verbatim,
-   * plus the orientation line that used to sit under the Overview card — nothing
-   * in it was dropped, an independent review checked.
-   */
-  memoryIntroFull:
-    "Project Memory is the assistant's memory and navigation surface — Graphify plus project docs. It " +
-    'is deliberately separate from the experiment queue and never appears inside it. It surfaces ' +
-    'related files and concepts, prior documents, and "how is this connected?" answers as leads to ' +
-    'verify — it never validates, completes, or supplies a value.',
-  memoryAllTabsRead: 'Sources, Concepts and Graph all read the memory graph summarised above.',
-  memoryIntroInfoLabel: 'About Project Memory',
   historicalImportInfoLabel: 'How Rebuilding a Past Experiment Works',
   historicalImportHintMore:
     'Record where each file lives, see what ISAAC can read out of it, and review every candidate ' +
     'before any of it becomes a value.',
   memoryTrustInfoLabel: 'What Each Check Means',
   memorySizeTitle: 'How Big Is It?',
-  memorySizeViews: 'Counts to Show',
-  memoryOpenSources: 'Browse the sources',
-  memoryOpenGraph: 'Open the graph',
-  memoryOpenConcepts: 'Browse the concepts',
   memoryOriginTitle: 'Where Did It Come From?',
   // The graph command bar's disclosure for the hint and the suggested commands.
   graphCommandsToggle: 'Suggestions',
@@ -1805,7 +1706,6 @@ export const LABELS = {
    * reader's records are untouched, which is a statement about this button's reach.
    */
   tutorialOfferTitle: 'Guided Walkthrough',
-  tutorialOfferLead: 'New here?',
   tutorialOfferLine: 'A short tour of the real screens, on its own examples.',
   tutorialOfferBody:
     'A short guided tour of this app, pointing at the real controls on the real screens: what this ' +

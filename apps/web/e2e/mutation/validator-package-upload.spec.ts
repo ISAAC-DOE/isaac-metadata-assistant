@@ -190,7 +190,9 @@ const advisory = (page: Page) => page.locator('.rec-val-advisory');
 async function openValidator(page: Page) {
   await page.goto('/governance?tab=validator');
   await expect(page.getByRole('heading', { name: 'Standalone Validator' })).toBeVisible();
-  await expect(page.locator('.rec-val-empty')).toBeVisible();
+  // An unchecked candidate shows no outcome: no verdict, no loading, no refusal.
+  // (The idle "No Record Checked Yet" line was retired in the declutter.)
+  await expect(page.locator('.rec-val-result')).toBeEmpty();
 }
 
 /** Choose a package file through the real file input and wait for it to load. */
@@ -413,7 +415,9 @@ test.describe('the committed validator QA package, through the upload control', 
       verdict(page),
       'a verdict from the previous run outlived a new file selection'
     ).toHaveCount(0);
-    await expect(page.locator('.rec-val-empty')).toBeVisible();
+    // An unchecked candidate shows no outcome: no verdict, no loading, no refusal.
+    // (The idle "No Record Checked Yet" line was retired in the declutter.)
+    await expect(page.locator('.rec-val-result')).toBeEmpty();
     await expect(textarea(page)).toHaveValue(fileText('repairable-record.json'));
 
     await validateButton(page).click();
