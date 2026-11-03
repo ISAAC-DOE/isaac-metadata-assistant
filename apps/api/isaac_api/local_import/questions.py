@@ -1458,6 +1458,10 @@ def consolidate(bundle: Mapping, *, compositions_out: dict | None = None, includ
             questions.append(beamtime_start)
         # the condition labels (labels.py): new questions, each with its own id; no other question changes
         questions += label_questions(bundle, decisions=decisions, groups=groups, include_answered=include_answered)
+        # r8 MED 5: a disagreement on a reading a label is proposed from points at that label's question (its why only)
+        from .labels import point_conflicts_at_labels
+
+        point_conflicts_at_labels(questions, bundle, group_of)
     questions.sort(key=order)
     _quote_passing_once(questions, passing_of)
     for q in questions:
@@ -3421,6 +3425,11 @@ def _for_group(q: Mapping, scope: str, report: Mapping | None) -> Mapping | None
     left as they are."""
     if q["scope"] == scope:
         return q
+    if q.get("kind") == "condition_label":
+        # r8: one group's row of an experiment-wide label question, with a pointer to the whole question
+        from .labels import for_group
+
+        return for_group(q, scope)
     if (q.get("kind") == "resolve_conflict" and not q.get("affects_record") and not q.get("blocking")
             and not int((q.get("applies_to") or {}).get("groups") or 0)):
         return None

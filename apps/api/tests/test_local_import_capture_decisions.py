@@ -98,6 +98,10 @@ def _unlock_allowed(answered: dict, field: str | None, new: dict) -> bool:
         return new["kind"] == "confirm_value" and new["target_field_path"] == B.XDC_START_PATH
     if B.CONTROL_MODE_PATH in (field, answered.get("target_field_path")):
         return new["kind"] == "missing_value" and new["target_field_path"] in SETPOINT_PATHS
+    if answered["kind"] == L.KIND and new["kind"] == L.KIND:
+        # r8 MED 4: once every proposed group holds an answer, the groups ISAAC proposed nothing for are asked by the
+        # label's RESIDUAL question, under its own new id (the label's own id never changes)
+        return new["question_id"] == L.question_id(answered["label"], L.RESIDUAL)
     return False
 
 
