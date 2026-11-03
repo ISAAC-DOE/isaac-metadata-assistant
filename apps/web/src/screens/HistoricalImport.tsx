@@ -1,6 +1,6 @@
 import './screens.css';
 import './historical-import.css';
-import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react';
+import { useCallback, useEffect, useId, useRef, useState, type ReactNode } from 'react';
 import { Link, useSearchParams } from 'react-router-dom';
 import { AppShell } from '../components/AppShell';
 import { TopBar } from '../components/TopBar';
@@ -63,6 +63,7 @@ import type {
   ApiImportSummary,
   ApiImportWorkflowStep,
 } from '../lib/types';
+import { Select } from '../components/Select';
 
 /**
  * HISTORICAL IMPORT — `HIST-004`'s review surface over `HIST-001`'s session and
@@ -1002,6 +1003,7 @@ function SourceBundleStage({
   const [reference, setReference] = useState('');
   const [sha256, setSha256] = useState('');
   const [fixture, setFixture] = useState(data.available_fixtures[0] ?? '');
+  const sourceId = useId();
   /* THE SERVER'S DEFAULT (2026-10-12): the archive the hosted image ships, so the picker
      never opens on one a scientist there could not have been offered. */
   const defaultArchive =
@@ -1087,19 +1089,24 @@ function SourceBundleStage({
             }}
           >
             <h4 className="hi-group-title">{IMPORT_COPY.actionAddArchive}</h4>
-            <label className="hi-field">
-              <span className="hi-field-label">Which archive</span>
-              <select className="hi-input" value={archive} onChange={(event) => setArchive(event.target.value)}>
-                {/* THE SERVER'S NAME for each committed archive (2026-10-12), never its id. */}
-                {data.available_archives.map((name) => (
-                  <option key={name} value={name}>
-                    {name.startsWith('staged:')
-                      ? `${archiveLabel(name, data.archive_display_names)} (staged on the server)`
-                      : archiveLabel(name, data.archive_display_names)}
-                  </option>
-                ))}
-              </select>
-            </label>
+            <div className="hi-field">
+              <label className="hi-field-label" htmlFor={`${sourceId}-archive`}>
+                Which archive
+              </label>
+              <Select
+                id={`${sourceId}-archive`}
+                density="compact"
+                value={archive}
+                onChange={setArchive}
+                /* THE SERVER'S NAME for each committed archive (2026-10-12), never its id. */
+                options={data.available_archives.map((name) => ({
+                  value: name,
+                  label: name.startsWith('staged:')
+                    ? `${archiveLabel(name, data.archive_display_names)} (staged on the server)`
+                    : archiveLabel(name, data.archive_display_names),
+                }))}
+              />
+            </div>
             <div className="hi-form-actions">
               <button type="submit" className="btn btn-secondary" disabled={busy !== null || !archive}>
                 {busy === 'add-archive' ? 'Adding and reading…' : IMPORT_COPY.actionAddArchive}
@@ -1125,16 +1132,18 @@ function SourceBundleStage({
             }}
           >
             <h4 className="hi-group-title">{IMPORT_COPY.actionAddFixture}</h4>
-            <label className="hi-field">
-              <span className="hi-field-label">Which example source</span>
-              <select className="hi-input" value={fixture} onChange={(event) => setFixture(event.target.value)}>
-                {data.available_fixtures.map((name) => (
-                  <option key={name} value={name}>
-                    {name}
-                  </option>
-                ))}
-              </select>
-            </label>
+            <div className="hi-field">
+              <label className="hi-field-label" htmlFor={`${sourceId}-fixture`}>
+                Which example source
+              </label>
+              <Select
+                id={`${sourceId}-fixture`}
+                density="compact"
+                value={fixture}
+                onChange={setFixture}
+                options={data.available_fixtures.map((name) => ({ value: name, label: name }))}
+              />
+            </div>
             <div className="hi-form-actions">
               <button type="submit" className="btn btn-secondary" disabled={busy !== null || !fixture}>
                 {busy === 'add-fixture' ? 'Adding and reading…' : IMPORT_COPY.actionAddFixture}
@@ -1941,13 +1950,17 @@ function RecordPicker({
   onChange: (id: string) => void;
   destinations: ProposalDestinations;
 }) {
+  const id = useId();
   return (
-    <label className="hi-field">
-      <span className="hi-field-label">{label}</span>
+    <div className="hi-field">
+      <label className="hi-field-label" htmlFor={id}>
+        {label}
+      </label>
       {destinations.failed ? (
         /* A FAILED READ IS NOT A BLOCKED WRITE: the id field stays, with the reason. */
         <>
           <input
+            id={id}
             className="hi-input"
             type="text"
             required
@@ -1964,16 +1977,17 @@ function RecordPicker({
           This workspace holds no records yet. Create one below and it becomes the destination.
         </span>
       ) : (
-        <select className="hi-input" required value={value} onChange={(event) => onChange(event.target.value)}>
-          <option value="">Choose a record…</option>
-          {destinations.rows.map((row) => (
-            <option key={row.id} value={row.id}>
-              {row.title}
-            </option>
-          ))}
-        </select>
+        <Select
+          id={id}
+          density="compact"
+          aria-required
+          value={value}
+          onChange={onChange}
+          placeholder="Choose a record…"
+          options={destinations.rows.map((row) => ({ value: row.id, label: row.title }))}
+        />
       )}
-    </label>
+    </div>
   );
 }
 
@@ -2046,25 +2060,34 @@ function RunPicker({
   /** The run the form chose for the reader because it was made from `measurement`. */
   preselected?: string | null;
 }) {
+  const id = useId();
   if (runs === null || runs.length === 0) return null;
   return (
-    <label className="hi-field">
-      <span className="hi-field-label">{label}</span>
-      <select className="hi-input" value={value} onChange={(event) => onChange(event.target.value)}>
-        <option value="">No run — a value the record owns</option>
-        {runs.map((run) => {
-          const another = measurement !== null && run.origin !== null && run.origin !== measurement;
-          return (
-            <option key={run.id} value={run.id} disabled={another}>
-              {another ? `${run.label}${STAGE.otherMeasurementRun}` : run.label}
-            </option>
-          );
-        })}
-      </select>
+    <div className="hi-field">
+      <label className="hi-field-label" htmlFor={id}>
+        {label}
+      </label>
+      <Select
+        id={id}
+        density="compact"
+        value={value}
+        onChange={onChange}
+        options={[
+          { value: '', label: 'No run — a value the record owns' },
+          ...runs.map((run) => {
+            const another = measurement !== null && run.origin !== null && run.origin !== measurement;
+            return {
+              value: run.id,
+              label: another ? `${run.label}${STAGE.otherMeasurementRun}` : run.label,
+              disabled: another,
+            };
+          }),
+        ]}
+      />
       {preselected !== null && value === preselected && (
         <span className="hi-note">{STAGE.ownRunPreselected}</span>
       )}
-    </label>
+    </div>
   );
 }
 

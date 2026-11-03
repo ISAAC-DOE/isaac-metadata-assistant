@@ -34,6 +34,7 @@ import {
   stubFetchRoutes,
   type RouteEntry,
 } from '../test/apiFixtures';
+import { selectValue } from '../test/controls';
 
 configure({ asyncUtilTimeout: 5_000 });
 vi.setConfig({ testTimeout: 30_000 });
@@ -335,9 +336,10 @@ function proposalsBody(list: ReturnType<typeof openProposal>[]) {
   return { ...proposalsEmpty, proposals: list, total: list.length, returned: list.length };
 }
 
+/** The run pickers in `root` (themed `Select`s): the transcript form's and the Record Map's. */
 const runSelects = (root: HTMLElement) =>
-  Array.from(root.querySelectorAll('select')).filter((el) =>
-    Array.from(el.options).some((o) => o.textContent === CAPTURE_COPY.runPlaceholder),
+  Array.from(
+    root.querySelectorAll<HTMLElement>('.capture-run-select [role="combobox"], .capture-map-run-select [role="combobox"]'),
   );
 
 describe('one run choice per view (review #277, I-3)', () => {
@@ -403,7 +405,7 @@ describe('the Proposals map is pointed at the proposals’ run only when unambig
       return el;
     });
   const mapSelect = (panel: HTMLElement) =>
-    panel.querySelector('.capture-map-run select') as HTMLSelectElement | null;
+    panel.querySelector('.capture-map-run [role="combobox"]') as HTMLElement | null;
 
   it('every open proposal names Run 1 → the map opens on Run 1', async () => {
     renderAt('?view=proposals', {
@@ -413,7 +415,7 @@ describe('the Proposals map is pointed at the proposals’ run only when unambig
       },
     });
     const panel = await proposalsPanel();
-    await waitFor(() => expect(mapSelect(panel)?.value).toBe('RUNAAA'));
+    await waitFor(() => expect(mapSelect(panel)?.getAttribute('data-value')).toBe('RUNAAA'));
   });
 
   it('proposals that name DIFFERENT runs → nothing is chosen ("Choose a run" stays)', async () => {
@@ -426,7 +428,7 @@ describe('the Proposals map is pointed at the proposals’ run only when unambig
     const panel = await proposalsPanel();
     await waitFor(() => expect(mapSelect(panel)).not.toBeNull());
     await within(panel).findAllByRole('article');
-    expect(mapSelect(panel)!.value).toBe('');
+    expect(selectValue(mapSelect(panel)!)).toBe('');
   });
 
   it('a record-scoped proposal among them → nothing is chosen either', async () => {
@@ -439,6 +441,6 @@ describe('the Proposals map is pointed at the proposals’ run only when unambig
     const panel = await proposalsPanel();
     await waitFor(() => expect(mapSelect(panel)).not.toBeNull());
     await within(panel).findAllByRole('article');
-    expect(mapSelect(panel)!.value).toBe('');
+    expect(selectValue(mapSelect(panel)!)).toBe('');
   });
 });

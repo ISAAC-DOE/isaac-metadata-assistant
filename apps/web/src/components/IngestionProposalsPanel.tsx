@@ -170,6 +170,7 @@ import { focusWhenPresent } from '../lib/focusHandoff';
 import type { ApiHealthProposalAcceptance } from '../lib/types';
 import './ingestionProposals.css';
 import { ProposeTermLink } from './ProposeTermLink';
+import { Select } from './Select';
 
 /** Same narrowing `UnmappedNotesPanel` uses — a non-`ApiError` throw still renders. */
 function asApiError(err: unknown): ApiError {
@@ -1966,11 +1967,12 @@ function ProposalsBrowser({
           <label className="proposals-control-label" htmlFor={filterId}>
             Show
           </label>
-          <select
+          <Select
             id={filterId}
             className="proposals-filter"
+            density="compact"
             value={filter}
-            onChange={(e) => {
+            onChange={(next) => {
               /* SILENT, so changing the filter does not blank the list and take an
                  open editor's text with it. The cost, stated because it is real: for
                  the duration of the read the counts still describe the previous
@@ -1979,18 +1981,17 @@ function ProposalsBrowser({
               silentRef.current = true;
               setCursor(null);
               setBack([]);
-              setFilter(e.target.value);
+              setFilter(next);
             }}
-          >
-            {filterOptions.map((f) => (
-              <option key={f.id} value={f.id}>
-                {f.label}
-                {loaded && f.id !== 'all'
+            options={filterOptions.map((f) => ({
+              value: f.id,
+              label: `${f.label}${
+                loaded && f.id !== 'all'
                   ? ` (${(loaded.by_state as Record<string, number>)[f.id] ?? 0})`
-                  : ''}
-              </option>
-            ))}
-          </select>
+                  : ''
+              }`,
+            }))}
+          />
         </div>
         {/*
           THE ORDER CONTROL — a visible, keyboard-reachable, labelled `select`, sitting
@@ -2007,15 +2008,17 @@ function ProposalsBrowser({
           <label className="proposals-control-label" htmlFor={orderId}>
             Order
           </label>
-          <select
+          <Select
             id={orderId}
             className="proposals-order"
+            density="compact"
             value={order}
-            onChange={(e) => changeOrder(e.target.value as ApiProposalOrder)}
-          >
-            <option value="oldest_first">{ORDER_LABELS.oldest_first}</option>
-            <option value="newest_first">{ORDER_LABELS.newest_first}</option>
-          </select>
+            onChange={(next) => changeOrder(next as ApiProposalOrder)}
+            options={[
+              { value: 'oldest_first', label: ORDER_LABELS.oldest_first },
+              { value: 'newest_first', label: ORDER_LABELS.newest_first },
+            ]}
+          />
         </div>
         {/* Mounted in every state and BLANKED rather than left stale while a reload is
             in flight: a live region remounted with its content is never announced, and
@@ -3150,9 +3153,9 @@ function ProposalCard({
                 error, so a refused correction is announced WITH the box it is about.
               */}
               {correction.kind === 'choice' ? (
-                <select
+                <Select
                   id={`${editorId}-edited-input`}
-                  className="proposal-form-input"
+                  density="compact"
                   value={editedText}
                   aria-invalid={editedError !== null || undefined}
                   aria-describedby={
@@ -3160,18 +3163,13 @@ function ProposalCard({
                       ? `${editorId}-edited-hint ${editorId}-edited-error`
                       : `${editorId}-edited-hint`
                   }
-                  onChange={(e) => {
-                    setEditedText(e.target.value);
+                  onChange={(next) => {
+                    setEditedText(next);
                     setEditedError(null);
                   }}
-                >
-                  <option value="">Choose a value…</option>
-                  {correction.options.map((option) => (
-                    <option key={option} value={option}>
-                      {enumOptionLabel(option)}
-                    </option>
-                  ))}
-                </select>
+                  placeholder="Choose a value…"
+                  options={correction.options.map((option) => ({ value: option, label: enumOptionLabel(option) }))}
+                />
               ) : correction.kind === 'json' ? (
                 <textarea
                   id={`${editorId}-edited-input`}

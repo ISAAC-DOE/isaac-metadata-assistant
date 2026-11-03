@@ -26,7 +26,7 @@
  * Every fixture is synthetic and no test here reaches a backend.
  */
 import { describe, it, expect, afterEach, vi, type Mock } from 'vitest';
-import { render, screen, fireEvent, within, waitFor } from '@testing-library/react';
+import { render, screen, fireEvent, waitFor } from '@testing-library/react';
 import { MemoryRouter } from 'react-router-dom';
 
 import { UnmappedNotesPanel } from '../components/UnmappedNotesPanel';
@@ -39,6 +39,7 @@ import {
   runsPage,
   stubFetchRoutes,
 } from '../test/apiFixtures';
+import { chooseValue, optionValues, selectValue } from '../test/controls';
 
 const EXP = 'demo';
 const NOTES = `GET /api/experiments/${EXP}/notes`;
@@ -177,7 +178,7 @@ describe('the empty state', () => {
     renderPanel();
     await screen.findByLabelText('Show');
 
-    fireEvent.change(screen.getByLabelText('Show'), { target: { value: 'dismissed' } });
+    chooseValue(screen.getByLabelText('Show'), 'dismissed');
 
     // The filtered empty state states the record's REAL size, so an empty page can
     // never be read as an empty record.
@@ -200,7 +201,7 @@ describe('dismissal is a state, not a deletion', () => {
     renderPanel();
 
     await screen.findByText('Dismissed — kept on the record');
-    expect((screen.getByLabelText('Show') as HTMLSelectElement).value).toBe('all');
+    expect(selectValue(screen.getByLabelText('Show'))).toBe('all');
     // The state label itself corrects the likeliest misreading of this panel.
     expect(screen.getByText('Dismissed — kept on the record')).toBeTruthy();
   });
@@ -218,7 +219,7 @@ describe('dismissal is a state, not a deletion', () => {
     renderPanel();
     await screen.findByLabelText('Show');
 
-    fireEvent.change(screen.getByLabelText('Show'), { target: { value: 'unreviewed' } });
+    chooseValue(screen.getByLabelText('Show'), 'unreviewed');
 
     // "Showing 1 of 4 notes on this record" — two numbers, never one.
     await screen.findByText(/Showing 1 of 4 notes on this record/);
@@ -290,15 +291,14 @@ describe('no guessed schema target', () => {
     fireEvent.click(await noteAct('Map to a field'));
     const select = (await screen.findByLabelText(
       'Field this note belongs to',
-    )) as HTMLSelectElement;
+    )) as HTMLElement;
 
-    // Nothing chosen for the scientist.
-    expect(select.value).toBe('');
-    // Exactly the server's list, plus the empty prompt — no path this client invented.
-    const options = within(select)
-      .getAllByRole('option')
-      .map((o) => (o as HTMLOptionElement).value);
-    expect(options).toEqual(['', 'context.environment', 'sample.material.name']);
+    // Nothing chosen for the scientist: the picker shows its prompt.
+    expect(selectValue(select)).toBe('');
+    expect(select).toHaveTextContent('Choose a field…');
+    // Exactly the server's list — no path this client invented. (The empty prompt is the picker's
+    // placeholder now, not an option.)
+    expect(optionValues(select)).toEqual(['context.environment', 'sample.material.name']);
     // And the action stays unavailable until a person chooses one.
     expect(
       (screen.getByRole('button', { name: 'Map This Note' }) as HTMLButtonElement).disabled,
@@ -349,9 +349,7 @@ describe('no guessed schema target', () => {
     fireEvent.click(await noteAct('Map to a field'));
     expect(screen.getByText(/It does not write a value/)).toBeTruthy();
 
-    fireEvent.change(screen.getByLabelText('Field this note belongs to'), {
-      target: { value: 'context.environment' },
-    });
+    chooseValue(screen.getByLabelText('Field this note belongs to'), 'context.environment');
     fireEvent.click(screen.getByRole('button', { name: 'Map This Note' }));
 
     await screen.findByRole('status');
@@ -631,7 +629,7 @@ describe('what this build could not read is disclosed, not hidden', () => {
     renderPanel();
     await screen.findByLabelText('Show');
 
-    fireEvent.change(screen.getByLabelText('Show'), { target: { value: 'dismissed' } });
+    chooseValue(screen.getByLabelText('Show'), 'dismissed');
 
     const empty = await screen.findByText(/No notes are in this state/);
     expect(empty.textContent).toContain('This record holds 3 notes in total');
@@ -707,14 +705,12 @@ describe('a review that was refused keeps the scientist’s input', () => {
     renderPanel();
 
     fireEvent.click(await noteAct('Map to a field'));
-    fireEvent.change(screen.getByLabelText('Field this note belongs to'), {
-      target: { value: 'context.environment' },
-    });
+    chooseValue(screen.getByLabelText('Field this note belongs to'), 'context.environment');
     fireEvent.click(screen.getByRole('button', { name: 'Map This Note' }));
 
     await screen.findByRole('alert');
     expect(
-      (screen.getByLabelText('Field this note belongs to') as HTMLSelectElement).value,
+      selectValue(screen.getByLabelText('Field this note belongs to')),
     ).toBe('context.environment');
   });
 
@@ -773,9 +769,7 @@ describe('focus returns to the control that opened the form', () => {
 
     const trigger = await noteAct('Map to a field');
     fireEvent.click(trigger);
-    fireEvent.change(screen.getByLabelText('Field this note belongs to'), {
-      target: { value: 'context.environment' },
-    });
+    chooseValue(screen.getByLabelText('Field this note belongs to'), 'context.environment');
     fireEvent.click(screen.getByRole('button', { name: 'Map This Note' }));
 
     await screen.findByRole('status');
@@ -1091,7 +1085,7 @@ describe('the value hint is per path, not on average', () => {
     stubFetchRoutes({ [NOTES]: { body: notesPage([noteFixture()], MIXED) } });
     renderPanel();
     fireEvent.click(await noteAct('Map to a field'));
-    return (await screen.findByLabelText('Field this note belongs to')) as HTMLSelectElement;
+    return (await screen.findByLabelText('Field this note belongs to')) as HTMLElement;
   }
 
   it('says nothing about entering a value until a field is chosen', async () => {
@@ -1106,7 +1100,7 @@ describe('the value hint is per path, not on average', () => {
 
   it('for a run-level path, names the RUN as where the value is entered', async () => {
     const select = await openMap();
-    fireEvent.change(select, { target: { value: 'sample.material.name' } });
+    chooseValue(select, 'sample.material.name');
 
     const hint = screen.getByText(/It does not write a value/);
     // "on a run of this record" — not "on the field itself", which named no screen.
@@ -1119,7 +1113,7 @@ describe('the value hint is per path, not on average', () => {
 
   it('for a path NO write route accepts, says so instead of sending them nowhere', async () => {
     const select = await openMap();
-    fireEvent.change(select, { target: { value: 'system.configuration.detector_model' } });
+    chooseValue(select, 'system.configuration.detector_model');
 
     const hint = screen.getByText(/It does not write a value/);
     expect(hint.textContent).toContain('this version has nowhere to enter one for this field');
@@ -1131,7 +1125,7 @@ describe('the value hint is per path, not on average', () => {
 
   it('mapping is still offered and still performed for a path with no write route', async () => {
     const select = await openMap();
-    fireEvent.change(select, { target: { value: 'system.configuration.detector_model' } });
+    chooseValue(select, 'system.configuration.detector_model');
 
     const map = screen.getByRole('button', { name: 'Map This Note' }) as HTMLButtonElement;
     // The honest sentence is a DISCLOSURE, not a new gate: refusing the mapping would
@@ -1162,12 +1156,12 @@ describe('the value hint is per path, not on average', () => {
     stubFetchRoutes({ [NOTES]: { body: notesPage([noteFixture()], over) } });
     renderPanel();
     fireEvent.click(await noteAct('Map to a field'));
-    return (await screen.findByLabelText('Field this note belongs to')) as HTMLSelectElement;
+    return (await screen.findByLabelText('Field this note belongs to')) as HTMLElement;
   }
 
   it('for a RECORD-level path, does not send the reader to a run they do not need', async () => {
     const select = await openMapWith(WITH_RECORD_LEVEL);
-    fireEvent.change(select, { target: { value: 'system.technique' } });
+    chooseValue(select, 'system.technique');
 
     const hint = screen.getByText(/It does not write a value/);
     expect(hint.textContent).toContain('entered and confirmed on this record');
@@ -1184,7 +1178,7 @@ describe('the value hint is per path, not on average', () => {
     // BOTH POLARITIES FROM ONE SERVER ANSWER, so the record sentence cannot have been
     // achieved by making every hint say it.
     const select = await openMapWith(WITH_RECORD_LEVEL);
-    fireEvent.change(select, { target: { value: 'sample.material.name' } });
+    chooseValue(select, 'sample.material.name');
 
     const hint = screen.getByText(/It does not write a value/);
     expect(hint.textContent).toContain('entered and confirmed on a run of this record');
@@ -1202,7 +1196,7 @@ describe('the value hint is per path, not on average', () => {
       value_writable_field_paths: [],
       record_writable_field_paths: ['system.configuration.detector_model'],
     });
-    fireEvent.change(select, { target: { value: 'system.configuration.detector_model' } });
+    chooseValue(select, 'system.configuration.detector_model');
 
     const hint = screen.getByText(/It does not write a value/);
     expect(hint.textContent).toContain('this version has nowhere to enter one for this field');
@@ -1226,8 +1220,8 @@ describe('the value hint is per path, not on average', () => {
     fireEvent.click(await noteAct('Map to a field'));
     const select = (await screen.findByLabelText(
       'Field this note belongs to',
-    )) as HTMLSelectElement;
-    fireEvent.change(select, { target: { value: 'system.configuration.detector_model' } });
+    )) as HTMLElement;
+    chooseValue(select, 'system.configuration.detector_model');
 
     expect(screen.getByText(/It does not write a value/).textContent).toContain(
       'entered and confirmed on a run of this record',
@@ -1257,14 +1251,11 @@ describe('propose a value from this note', () => {
     );
     const fieldSelect = (await screen.findByLabelText(
       'Field this value is for',
-    )) as HTMLSelectElement;
+    )) as HTMLElement;
     // The server's own list — the paths this build can target — never hardcoded.
-    expect(
-      within(fieldSelect)
-        .getAllByRole('option')
-        .map((o) => (o as HTMLOptionElement).value),
-    ).toEqual(['', 'context.environment', 'system.technique']);
-    fireEvent.change(fieldSelect, { target: { value: 'system.technique' } });
+    expect(optionValues(fieldSelect)).toEqual(['context.environment', 'system.technique']);
+    expect(fieldSelect).toHaveTextContent('Choose a field…');
+    chooseValue(fieldSelect, 'system.technique');
     // Record-scoped: no run selector is offered for it.
     expect(screen.queryByLabelText('Run this value is about')).toBeNull();
 
@@ -1302,26 +1293,22 @@ describe('propose a value from this note', () => {
     fireEvent.click(
       await screen.findByRole('button', { name: 'Propose a Value From This Note' }),
     );
-    fireEvent.change(await screen.findByLabelText('Field this value is for'), {
-      target: { value: 'context.environment' },
-    });
+    chooseValue(await screen.findByLabelText('Field this value is for'), 'context.environment');
     const runSelect = (await screen.findByLabelText(
       'Run this value is about',
-    )) as HTMLSelectElement;
-    expect(runSelect.value).toBe('');
+    )) as HTMLElement;
+    expect(selectValue(runSelect)).toBe('');
     // m13, independent review of PR-D: `context.environment` is a RUN_FIELDS
     // spec (an enum), so it now renders as the typed "Environment" select —
     // never the JSON textarea fallback, which is reserved for paths with no
     // spec at all.
-    fireEvent.change(screen.getByLabelText('Environment'), {
-      target: { value: 'in_situ' },
-    });
+    chooseValue(screen.getByLabelText('Environment'), 'in_situ');
     // Submit stays unavailable until a run is chosen — it is required, not optional.
     expect(
       (screen.getByRole('button', { name: 'Propose This Value' }) as HTMLButtonElement)
         .disabled,
     ).toBe(true);
-    fireEvent.change(runSelect, { target: { value: 'run-1' } });
+    chooseValue(runSelect, 'run-1');
     expect(
       (screen.getByRole('button', { name: 'Propose This Value' }) as HTMLButtonElement)
         .disabled,
@@ -1339,9 +1326,7 @@ describe('propose a value from this note', () => {
     fireEvent.click(
       await screen.findByRole('button', { name: 'Propose a Value From This Note' }),
     );
-    fireEvent.change(await screen.findByLabelText('Field this value is for'), {
-      target: { value: 'context.environment' },
-    });
+    chooseValue(await screen.findByLabelText('Field this value is for'), 'context.environment');
     await screen.findByLabelText('Run this value is about');
 
     const calls = (globalThis.fetch as Mock).mock.calls as [string, RequestInit?][];
@@ -1361,9 +1346,7 @@ describe('propose a value from this note', () => {
     fireEvent.click(
       await screen.findByRole('button', { name: 'Propose a Value From This Note' }),
     );
-    fireEvent.change(await screen.findByLabelText('Field this value is for'), {
-      target: { value: 'context.environment' },
-    });
+    chooseValue(await screen.findByLabelText('Field this value is for'), 'context.environment');
     await screen.findByText(/this record has no runs yet \(or they could not be read\)/);
     expect(screen.queryByLabelText('Run this value is about')).toBeNull();
   });
@@ -1436,9 +1419,7 @@ describe('propose a value from this note', () => {
     fireEvent.click(
       await screen.findByRole('button', { name: 'Propose a Value From This Note' }),
     );
-    fireEvent.change(await screen.findByLabelText('Field this value is for'), {
-      target: { value: 'system.technique' },
-    });
+    chooseValue(await screen.findByLabelText('Field this value is for'), 'system.technique');
     fireEvent.change(screen.getByLabelText('The value, as JSON'), {
       target: { value: '"XAS"' },
     });
@@ -1452,9 +1433,7 @@ describe('propose a value from this note', () => {
     fireEvent.click(
       await screen.findByRole('button', { name: 'Propose a Value From This Note' }),
     );
-    fireEvent.change(await screen.findByLabelText('Field this value is for'), {
-      target: { value: 'system.technique' },
-    });
+    chooseValue(await screen.findByLabelText('Field this value is for'), 'system.technique');
     fireEvent.change(screen.getByLabelText('The value, as JSON'), {
       target: { value: '"XAS"' },
     });
@@ -1476,9 +1455,7 @@ describe('propose a value from this note', () => {
     fireEvent.click(
       await screen.findByRole('button', { name: 'Propose a Value From This Note' }),
     );
-    fireEvent.change(await screen.findByLabelText('Field this value is for'), {
-      target: { value: 'system.technique' },
-    });
+    chooseValue(await screen.findByLabelText('Field this value is for'), 'system.technique');
     fireEvent.change(screen.getByLabelText('The value, as JSON'), {
       target: { value: '"XRD"' },
     });
@@ -1518,9 +1495,7 @@ describe('propose a value from this note', () => {
     fireEvent.click(
       await screen.findByRole('button', { name: 'Propose a Value From This Note' }),
     );
-    fireEvent.change(await screen.findByLabelText('Field this value is for'), {
-      target: { value: 'system.technique' },
-    });
+    chooseValue(await screen.findByLabelText('Field this value is for'), 'system.technique');
     fireEvent.change(screen.getByLabelText('The value, as JSON'), {
       target: { value: '"XAS"' },
     });
@@ -1543,9 +1518,7 @@ describe('propose a value from this note', () => {
     fireEvent.click(
       await screen.findByRole('button', { name: 'Propose a Value From This Note' }),
     );
-    fireEvent.change(await screen.findByLabelText('Field this value is for'), {
-      target: { value: 'system.technique' },
-    });
+    chooseValue(await screen.findByLabelText('Field this value is for'), 'system.technique');
     fireEvent.change(screen.getByLabelText('The value, as JSON'), {
       target: { value: 'null' },
     });
@@ -1574,9 +1547,7 @@ describe('propose a value from this note', () => {
       fireEvent.click(
         await screen.findByRole('button', { name: 'Propose a Value From This Note' }),
       );
-      fireEvent.change(await screen.findByLabelText('Field this value is for'), {
-        target: { value: 'context.environment' },
-      });
+      chooseValue(await screen.findByLabelText('Field this value is for'), 'context.environment');
       await screen.findByLabelText('Run this value is about');
       fireEvent.click(
         screen.getByRole('button', { name: 'Propose a Value From This Note' }),
@@ -1959,7 +1930,7 @@ describe('C1: a silent reload that fails before anything has ever loaded', () =>
 
       // The reader changes `Show` before that first load has resolved. This is a
       // SILENT reload (see the `onChange` comment) and it supersedes the first.
-      fireEvent.change(screen.getByLabelText('Show'), { target: { value: 'mapped' } });
+      chooseValue(screen.getByLabelText('Show'), 'mapped');
       await waitFor(() => expect(failed).toBe(1));
 
       // NOT a permanent spinner. The full `BackendDown` panel appears, because
@@ -2038,7 +2009,7 @@ describe('a Show-filter change that fails', () => {
     renderPanel(null);
     await screen.findByText(noteFixture().text);
 
-    fireEvent.change(screen.getByLabelText('Show'), { target: { value: 'mapped' } });
+    chooseValue(screen.getByLabelText('Show'), 'mapped');
     await waitFor(() => expect(mappedReads).toBe(1));
 
     // THE SENTENCE IS THE VIEW-CHANGE ONE, not the generic staleness one.
@@ -2054,7 +2025,7 @@ describe('a Show-filter change that fails', () => {
     // NOTHING WAS DESTROYED, and the control is deliberately NOT reverted — so
     // "Try Again" retries the view the reader actually asked for.
     expect(screen.getByText(noteFixture().text)).toBeTruthy();
-    expect((screen.getByLabelText('Show') as HTMLSelectElement).value).toBe('mapped');
+    expect(selectValue(screen.getByLabelText('Show'))).toBe('mapped');
     expect(screen.getByRole('button', { name: 'Try Again' })).toBeTruthy();
   });
 
@@ -2092,7 +2063,7 @@ describe('a Show-filter change that fails', () => {
     renderPanel(null);
     await screen.findByText(noteFixture().text);
 
-    fireEvent.change(screen.getByLabelText('Show'), { target: { value: 'mapped' } });
+    chooseValue(screen.getByLabelText('Show'), 'mapped');
     await screen.findByText(/Show filter could not be applied/, { selector: NOTICE });
 
     // Something typed, to prove the retry is silent and destroys nothing.
@@ -2135,7 +2106,7 @@ describe('a Show-filter change that fails', () => {
     const live = screen.getByRole('status');
     expect(live.textContent).toBe('');
 
-    fireEvent.change(screen.getByLabelText('Show'), { target: { value: 'mapped' } });
+    chooseValue(screen.getByLabelText('Show'), 'mapped');
     const notice = await screen.findByText(/Show filter could not be applied/, {
       selector: NOTICE,
     });
@@ -2174,7 +2145,7 @@ describe('a Show-filter change that fails', () => {
     renderPanel(null);
     await screen.findByText(noteFixture().text);
 
-    fireEvent.change(screen.getByLabelText('Show'), { target: { value: 'mapped' } });
+    chooseValue(screen.getByLabelText('Show'), 'mapped');
     await screen.findByText(/Show filter could not be applied/, { selector: NOTICE });
     const first = screen.getByRole('status').textContent;
 
@@ -2226,7 +2197,7 @@ describe('a Show-filter change that fails', () => {
     const view = renderPanel(null);
     await screen.findByText(noteFixture().text);
 
-    fireEvent.change(screen.getByLabelText('Show'), { target: { value: 'mapped' } });
+    chooseValue(screen.getByLabelText('Show'), 'mapped');
     const clear = await screen.findByRole('button', { name: 'Show All Notes' });
 
     // A background refresh now fails while that empty filtered view is on screen.

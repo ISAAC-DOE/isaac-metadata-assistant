@@ -2,6 +2,7 @@ import { createContext, useContext, useEffect, useId, type ReactNode } from 'rea
 import { HelpTip } from './HelpTip';
 import { IMPORT_COPY, IMPORT_STAGE_COPY } from '../lib/historicalImportContent';
 import type { ProposalDestinations } from '../lib/importDestinations';
+import { Select } from './Select';
 
 const COPY = IMPORT_STAGE_COPY;
 
@@ -142,12 +143,16 @@ export function ExperimentPicker({
   onChange: (id: string) => void;
   destinations: ProposalDestinations;
 }) {
+  const id = useId();
   return (
-    <label className="hi-field">
-      <span className="hi-field-label">{COPY.whichExperiment}</span>
+    <div className="hi-field">
+      <label className="hi-field-label" htmlFor={id}>
+        {COPY.whichExperiment}
+      </label>
       {destinations.failed ? (
         <>
           <input
+            id={id}
             className="hi-input"
             type="text"
             required
@@ -164,20 +169,16 @@ export function ExperimentPicker({
       ) : destinations.rows.length === 0 ? (
         <span className="hi-note">This workspace holds no records yet.</span>
       ) : (
-        <select
-          className="hi-input"
-          required
+        <Select
+          id={id}
+          density="compact"
+          aria-required
           value={value}
-          onChange={(event) => onChange(event.target.value)}
-        >
-          <option value="">Choose a record…</option>
-          {destinations.rows.map((row) => (
-            <option key={row.id} value={row.id}>
-              {row.title}
-            </option>
-          ))}
-        </select>
+          onChange={onChange}
+          placeholder="Choose a record…"
+          options={destinations.rows.map((row) => ({ value: row.id, label: row.title }))}
+        />
       )}
-    </label>
+    </div>
   );
 }

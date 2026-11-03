@@ -266,27 +266,11 @@
   gap: 8px;
 }
 
-/* Sized so the control clears the 24px minimum target height at every viewport. */
+/* The themed picker (`Select`, compact: 34px, clearing the 24px minimum target at every viewport) takes the
+   row's spare width up to the same 320px the native control was capped at. */
 .field-capture-select {
-  min-height: 32px;
+  flex: 1 1 12rem;
   max-width: 320px;
-  padding: 6px 10px;
-  font-family: var(--font-ui);
-  font-size: 13px;
-  color: var(--text-primary);
-  background: var(--surface);
-  border: 1px solid var(--border-input);
-  border-radius: var(--radius-control);
-}
-
-.field-capture-select:focus-visible {
-  outline: none;
-  border-color: var(--action);
-  box-shadow: var(--ring-active);
-}
-
-.field-capture-select[aria-invalid='true'] {
-  border-color: var(--fail-solid);
 }
 
 /*

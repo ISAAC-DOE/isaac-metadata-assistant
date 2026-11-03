@@ -116,6 +116,7 @@ import { HelpTip } from './HelpTip';
 import { Mic } from './icons';
 import { DISCARD_COPY } from '../lib/discardContent';
 import './transcriptCapture.css';
+import { Select } from './Select';
 
 /** The SEVEN voice states — the seven `VoiceState` rows of this panel's header
  *  table. The table's other three rows are derived, not members here; see the
@@ -473,7 +474,7 @@ export function TranscriptCapturePanel({
   const streamRef = useRef<MediaStream | null>(null);
   const chunksRef = useRef<Blob[]>([]);
   const transcriptRef = useRef<HTMLTextAreaElement | null>(null);
-  const runSelectRef = useRef<HTMLSelectElement | null>(null);
+  const runSelectRef = useRef<HTMLButtonElement | null>(null);
   const elapsedIntervalRef = useRef<number | null>(null);
   /** When the CURRENT RUNNING SEGMENT started, in wall-clock ms. `null` whenever
    *  the clock is not running — which is now two different situations, stopped
@@ -2395,24 +2396,20 @@ export function TranscriptCapturePanel({
                   </HelpTip>
                 )}
               </span>
-              <select
+              <Select
                 id={runId}
                 ref={runSelectRef}
-                className="capture-control"
+                className="capture-run-select"
+                density="compact"
                 value={selectedRun}
                 aria-describedby={
                   mode === undefined ? `${runId}-hint ${runId}-target` : undefined
                 }
                 disabled={formLocked}
-                onChange={(event) => setSelectedRun(event.target.value)}
-              >
-                <option value="">{CAPTURE_COPY.runPlaceholder}</option>
-                {runs.map((run) => (
-                  <option key={run.id} value={run.id}>
-                    {run.label}
-                  </option>
-                ))}
-              </select>
+                onChange={setSelectedRun}
+                placeholder={CAPTURE_COPY.runPlaceholder}
+                options={runs.map((run) => ({ value: run.id, label: run.label }))}
+              />
               {mode === undefined && (
                 <p className="capture-hint" id={`${runId}-hint`}>
                   {CAPTURE_COPY.runHint}

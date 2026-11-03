@@ -75,6 +75,7 @@ import {
   stableValueDigest,
 } from '../lib/proposalAuthoring';
 import type { ApiNote, ApiProposalCreated, ApiRunView } from '../lib/types';
+import { Select } from './Select';
 
 /**
  * WHAT STORING A PROPOSAL DOES AND DOES NOT DO — one string, rendered before the
@@ -483,22 +484,17 @@ export function NewProposalForm({
                 <label className="proposal-form-label" htmlFor={`${fieldId}-note`}>
                   {LABELS.newProposalPickNote}
                 </label>
-                <select
+                <Select
                   id={`${fieldId}-note`}
-                  className="proposal-form-input"
+                  density="compact"
                   value={noteId}
-                  onChange={(e) => {
-                    setNoteId(e.target.value);
+                  onChange={(next) => {
+                    setNoteId(next);
                     setError(null);
                   }}
-                >
-                  <option value="">Choose a note&hellip;</option>
-                  {notes.notes.map((note) => (
-                    <option key={note.id} value={note.id}>
-                      {noteOptionLabel(note)}
-                    </option>
-                  ))}
-                </select>
+                  placeholder="Choose a note…"
+                  options={notes.notes.map((note) => ({ value: note.id, label: noteOptionLabel(note) }))}
+                />
               </>
             )}
           </>
@@ -532,12 +528,12 @@ export function NewProposalForm({
         <label className="proposal-form-label" htmlFor={`${fieldId}-path`}>
           {LABELS.newProposalField}
         </label>
-        <select
+        <Select
           id={`${fieldId}-path`}
-          className="proposal-form-input"
+          density="compact"
           value={fieldPath}
-          onChange={(e) => {
-            setFieldPath(e.target.value);
+          onChange={(next) => {
+            setFieldPath(next);
             setRunId('');
             setError(null);
             // The value box's CONTROL TYPE can change with the field (a typed
@@ -546,19 +542,12 @@ export function NewProposalForm({
             // surviving into a control shaped for the other kind.
             setValueText('');
           }}
-        >
-          {/* No pre-selection. A person chooses; nothing is proposed for them. */}
-          <option value="">Choose a field&hellip;</option>
-          {groupPaths(targetFieldPaths).map(([group, paths]) => (
-            <optgroup key={group} label={group}>
-              {paths.map((path) => (
-                <option key={path} value={path}>
-                  {proposalFieldLabel(path)} &mdash; {path}
-                </option>
-              ))}
-            </optgroup>
-          ))}
-        </select>
+          /* No pre-selection. A person chooses; nothing is proposed for them. */
+          placeholder="Choose a field…"
+          options={groupPaths(targetFieldPaths).flatMap(([group, paths]) =>
+            paths.map((path) => ({ value: path, label: `${proposalFieldLabel(path)} — ${path}`, group })),
+          )}
+        />
         {fieldPath !== '' && (
           <p className="proposal-form-hint">
             <span className="new-proposal-target-label">{proposalFieldLabel(fieldPath)}</span>{' '}
@@ -588,22 +577,17 @@ export function NewProposalForm({
                 workspace before proposing a value here &mdash; it is never inferred.
               </p>
             ) : (
-              <select
+              <Select
                 id={`${fieldId}-run`}
-                className="proposal-form-input"
+                density="compact"
                 value={runId}
-                onChange={(e) => {
-                  setRunId(e.target.value);
+                onChange={(next) => {
+                  setRunId(next);
                   setError(null);
                 }}
-              >
-                <option value="">Choose a run&hellip;</option>
-                {runs.map((run) => (
-                  <option key={run.id} value={run.id}>
-                    {run.label}
-                  </option>
-                ))}
-              </select>
+                placeholder="Choose a run…"
+                options={runs.map((run) => ({ value: run.id, label: run.label }))}
+              />
             )}
           </>
         )}
@@ -616,22 +600,17 @@ export function NewProposalForm({
               {spec.unit ? ` (${spec.unit})` : ''}
             </label>
             {spec.kind === 'enum' ? (
-              <select
+              <Select
                 id={`${fieldId}-value`}
-                className="proposal-form-input"
+                density="compact"
                 value={valueText}
-                onChange={(e) => {
-                  setValueText(e.target.value);
+                onChange={(next) => {
+                  setValueText(next);
                   setError(null);
                 }}
-              >
-                <option value="">Choose a value&hellip;</option>
-                {spec.options?.map((option) => (
-                  <option key={option} value={option}>
-                    {enumOptionLabel(option)}
-                  </option>
-                ))}
-              </select>
+                placeholder="Choose a value…"
+                options={(spec.options ?? []).map((option) => ({ value: option, label: enumOptionLabel(option) }))}
+              />
             ) : (
               <input
                 id={`${fieldId}-value`}

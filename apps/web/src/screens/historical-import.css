@@ -1748,6 +1748,12 @@
   min-width: 5rem;
 }
 
+/* The edge picker (`Select`, compact) beside the short element box. */
+.select.hi-select-short {
+  width: auto;
+  min-width: 5rem;
+}
+
 .hi-signal-channel {
   padding-bottom: var(--space-xs);
   font-family: var(--font-mono);
@@ -1997,10 +2003,6 @@
 .hi-input {
   min-height: 2.1875rem; /* 35px — the height of the `.btn` beside it */
   line-height: var(--line-height-snug);
-}
-
-select.hi-input {
-  padding-right: var(--space-lg);
 }
 
 .hi-form-actions {

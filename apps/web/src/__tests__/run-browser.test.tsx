@@ -41,6 +41,7 @@ import {
   VERSION_FIELDS,
   type RouteEntry,
 } from '../test/apiFixtures';
+import { chooseValue } from '../test/controls';
 
 // A CEILING, NOT A DELAY. Several tests here render a hundred cards, and a shared
 // CI runner has been measured taking 25 s over a file of this kind while it took
@@ -936,7 +937,7 @@ describe('filters', () => {
     const before = calls.length;
 
     await act(async () => {
-      fireEvent.change(screen.getByLabelText('Overrides'), { target: { value: 'any' } });
+      chooseValue(screen.getByLabelText('Overrides'), 'any');
     });
     await waitFor(() => expect(calls.length).toBe(before + 1));
     expect(calls[before].query.overrides).toBe('any');
@@ -957,7 +958,7 @@ describe('filters', () => {
     const before = calls.length;
 
     await act(async () => {
-      fireEvent.change(screen.getByLabelText('Export'), { target: { value: 'true' } });
+      chooseValue(screen.getByLabelText('Export'), 'true');
     });
     await waitFor(() => expect(calls.length).toBe(before + 1));
     expect(calls[before].query.exported).toBe('true');
@@ -965,7 +966,7 @@ describe('filters', () => {
     await waitFor(() => expect(renderedIds()).toHaveLength(2));
 
     await act(async () => {
-      fireEvent.change(screen.getByLabelText('Export'), { target: { value: 'false' } });
+      chooseValue(screen.getByLabelText('Export'), 'false');
     });
     await waitFor(() => expect(renderedIds()).toHaveLength(38));
     expect(calls[calls.length - 1].query.exported).toBe('false');
@@ -978,7 +979,7 @@ describe('filters', () => {
     await waitForList();
 
     const controls = document.querySelector('.runs-controls')!;
-    const selects = controls.querySelectorAll('select');
+    const selects = controls.querySelectorAll('[role="combobox"]');
     expect(selects).toHaveLength(2);
     // "Needs review" does not exist anywhere in this product; a control for it
     // would be a state the app invents and cannot answer for.
@@ -1796,7 +1797,7 @@ describe('an edit in flight', () => {
     // Now filter the run off the compact list — a SEPARATE unmount, of a card
     // holding nothing. Nothing is sent a second time.
     await act(async () => {
-      fireEvent.change(screen.getByLabelText('Overrides'), { target: { value: 'any' } });
+      chooseValue(screen.getByLabelText('Overrides'), 'any');
     });
     await flush();
     expect(renderedIds()).toHaveLength(0);

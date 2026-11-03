@@ -35,6 +35,7 @@ import { PROPOSAL_RECORD_SCOPED_TARGET_PATHS, PROPOSAL_TARGET_PATHS, stubFetchRo
 import type { RecordChangeSummary } from '../lib/recordChanges';
 import type { ApiProposal, ApiProposalsResponse } from '../lib/types';
 import { fieldLabel } from '../lib/fieldLabels';
+import { chooseValue, selectValue } from '../test/controls';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
@@ -446,7 +447,7 @@ describe('an arrival is NOT announced', () => {
     renderPanel(null);
     await screen.findByText('Proposed value');
 
-    fireEvent.change(screen.getByLabelText('Show'), { target: { value: 'open' } });
+    chooseValue(screen.getByLabelText('Show'), 'open');
     await act(async () => {
       await new Promise((resolve) => setTimeout(resolve, 0));
     });
@@ -643,7 +644,7 @@ describe('I1b — the arrival flag does not leak onto a later, unrelated request
     });
     expect(arrivalNoteText()).toBeNull();
 
-    fireEvent.change(screen.getByLabelText('Show'), { target: { value: 'open' } });
+    chooseValue(screen.getByLabelText('Show'), 'open');
     await waitFor(() => expect(reads).toBe(3));
     await act(async () => {
       await new Promise((resolve) => setTimeout(resolve, 0));
@@ -1006,7 +1007,7 @@ describe('the arrival note leads somewhere', () => {
     expect(screen.queryByRole('button', { name: 'Show Open, Newest First' })).toBeNull();
     // The ORDER CONTROL is still there — it is not part of the note and a reader
     // may reach the other direction whenever they like.
-    expect((screen.getByLabelText('Order') as HTMLSelectElement).value).toBe('oldest_first');
+    expect(selectValue(screen.getByLabelText('Order'))).toBe('oldest_first');
   });
 });
 

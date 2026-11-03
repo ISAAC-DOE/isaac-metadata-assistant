@@ -99,6 +99,7 @@ import type { RecordChangeSummary } from '../lib/recordChanges';
 import type { ApiRunCheckResponse, ApiRunView } from '../lib/types';
 import { RUNS_PAGE_SIZE, RUN_LIST_LIMIT_MAX } from '../lib/runPaging';
 import { mutationFailureCopy } from '../lib/mutationErrors';
+import { Select } from './Select';
 
 /*
  * RE-EXPORTED, NOT DEFINED HERE. The scale benchmark needs this number too, and
@@ -2229,32 +2230,36 @@ function RunsBrowser({
             <label className="runs-control-label" htmlFor={overridesId}>
               Overrides
             </label>
-            <select
+            <Select
               id={overridesId}
-              className="run-input"
+              className="run-select"
+              density="compact"
               value={overridesFilter}
-              onChange={(e) => setOverridesFilter(e.target.value as OverridesFilter)}
-            >
-              <option value="">Any run</option>
-              <option value="any">Has an override</option>
-              <option value="none">Has no override</option>
-            </select>
+              onChange={(next) => setOverridesFilter(next as OverridesFilter)}
+              options={[
+                { value: '', label: 'Any run' },
+                { value: 'any', label: 'Has an override' },
+                { value: 'none', label: 'Has no override' },
+              ]}
+            />
           </div>
 
           <div className="runs-control">
             <label className="runs-control-label" htmlFor={exportedId}>
               Export
             </label>
-            <select
+            <Select
               id={exportedId}
-              className="run-input"
+              className="run-select"
+              density="compact"
               value={exportedFilter}
-              onChange={(e) => setExportedFilter(e.target.value as ExportedFilter)}
-            >
-              <option value="">Any run</option>
-              <option value="true">Exported</option>
-              <option value="false">Not exported</option>
-            </select>
+              onChange={(next) => setExportedFilter(next as ExportedFilter)}
+              options={[
+                { value: '', label: 'Any run' },
+                { value: 'true', label: 'Exported' },
+                { value: 'false', label: 'Not exported' },
+              ]}
+            />
           </div>
 
           {filtering && (

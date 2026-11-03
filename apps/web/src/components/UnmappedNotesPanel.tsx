@@ -92,6 +92,7 @@ import { findingFieldLabel } from './BlockerItems';
 import { DiscardStaged } from './DiscardStaged';
 import { DISCARD_COPY } from '../lib/discardContent';
 import './unmappedNotes.css';
+import { Select } from './Select';
 
 /** Same narrowing `RunsSection` uses — a non-`ApiError` throw still renders a panel. */
 function asApiError(err: unknown): ApiError {
@@ -870,11 +871,12 @@ function NotesBrowser({
           <label className="notes-control-label" htmlFor={filterId}>
             Show
           </label>
-          <select
+          <Select
             id={filterId}
             className="notes-filter"
+            density="compact"
             value={filter}
-            onChange={(e) => {
+            onChange={(next) => {
               /*
                * SILENT, so changing the filter does not unmount an open form and take
                * the rewrite with it. The effect below shows the loading state only when
@@ -895,16 +897,13 @@ function NotesBrowser({
                * `VIEW_CHANGE_REFRESH_ERROR` and `loadedFilterRef`.
                */
               silentRef.current = true;
-              setFilter(e.target.value as 'all' | ApiNoteState);
+              setFilter(next as 'all' | ApiNoteState);
             }}
-          >
-            {FILTERS.map((f) => (
-              <option key={f.id} value={f.id}>
-                {f.label}
-                {loaded && f.id !== 'all' ? ` (${loaded.by_state[f.id] ?? 0})` : ''}
-              </option>
-            ))}
-          </select>
+            options={FILTERS.map((f) => ({
+              value: f.id,
+              label: `${f.label}${loaded && f.id !== 'all' ? ` (${loaded.by_state[f.id] ?? 0})` : ''}`,
+            }))}
+          />
         </div>
         {/*
           MOUNTED IN EVERY STATE, and blanked rather than left stale while a reload is
@@ -1782,20 +1781,16 @@ function NoteCard({
           <label className="notes-control-label" htmlFor={`${pathId}-select`}>
             Field this note belongs to
           </label>
-          <select
+          <Select
             id={`${pathId}-select`}
             className="note-field-select"
+            density="compact"
             value={fieldPath}
-            onChange={(e) => setFieldPath(e.target.value)}
-          >
-            {/* No pre-selection. A person chooses; nothing is proposed for them. */}
-            <option value="">Choose a field…</option>
-            {mappablePaths.map((path) => (
-              <option key={path} value={path}>
-                {fieldLabel(path) ?? path}
-              </option>
-            ))}
-          </select>
+            onChange={setFieldPath}
+            /* No pre-selection. A person chooses; nothing is proposed for them. */
+            placeholder="Choose a field…"
+            options={mappablePaths.map((path) => ({ value: path, label: fieldLabel(path) ?? path }))}
+          />
           {/*
             THE LIST IS A SUBSET, AND SAYING SO IS NOT OPTIONAL. The server offers
             the paths THIS BUILD can map a note to, which is fewer than the official
@@ -1949,12 +1944,13 @@ function NoteCard({
           <label className="notes-control-label" htmlFor={`${proposeId}-path`}>
             Field this value is for
           </label>
-          <select
+          <Select
             id={`${proposeId}-path`}
             className="note-field-select"
+            density="compact"
             value={proposeFieldPath}
-            onChange={(e) => {
-              setProposeFieldPath(e.target.value);
+            onChange={(next) => {
+              setProposeFieldPath(next);
               setProposeRunId('');
               setProposeError(null);
               // The value box's CONTROL TYPE can change with the field (a typed
@@ -1963,17 +1959,15 @@ function NoteCard({
               // bare number surviving into a control shaped for the other kind.
               setProposeValueText('');
             }}
-          >
-            {/* No pre-selection, even when `note.candidate_field_path` names one —
-                the same rule the Map form follows: a person chooses. */}
-            <option value="">Choose a field…</option>
-            {/* The field in words (QA A-15); the official path is the value sent. */}
-            {proposalCapabilities.targetFieldPaths.map((path) => (
-              <option key={path} value={path}>
-                {fieldLabel(path) ?? path}
-              </option>
-            ))}
-          </select>
+            /* No pre-selection, even when `note.candidate_field_path` names one —
+               the same rule the Map form follows: a person chooses. */
+            placeholder="Choose a field…"
+            /* The field in words (QA A-15); the official path is the value sent. */
+            options={proposalCapabilities.targetFieldPaths.map((path) => ({
+              value: path,
+              label: fieldLabel(path) ?? path,
+            }))}
+          />
           <p className="note-form-hint">
             This is the server&rsquo;s own list of the paths a proposal can target — a
             subset of the official schema, not every field it defines.
@@ -1991,19 +1985,15 @@ function NoteCard({
                   Runs section before proposing a value here — it is never inferred.
                 </p>
               ) : (
-                <select
+                <Select
                   id={`${proposeId}-run`}
                   className="note-field-select"
+                  density="compact"
                   value={proposeRunId}
-                  onChange={(e) => setProposeRunId(e.target.value)}
-                >
-                  <option value="">Choose a run…</option>
-                  {runsForPropose.map((run) => (
-                    <option key={run.id} value={run.id}>
-                      {run.label}
-                    </option>
-                  ))}
-                </select>
+                  onChange={setProposeRunId}
+                  placeholder="Choose a run…"
+                  options={runsForPropose.map((run) => ({ value: run.id, label: run.label }))}
+                />
               )}
               <p className="note-form-hint">
                 Required: a value at this field path is applied through a run&rsquo;s
@@ -2026,22 +2016,21 @@ function NoteCard({
                 {proposeFieldSpec.unit ? ` (${proposeFieldSpec.unit})` : ''}
               </label>
               {proposeFieldSpec.kind === 'enum' ? (
-                <select
+                <Select
                   id={`${proposeId}-value`}
                   className="note-field-select"
+                  density="compact"
                   value={proposeValueText}
-                  onChange={(e) => {
-                    setProposeValueText(e.target.value);
+                  onChange={(next) => {
+                    setProposeValueText(next);
                     setProposeError(null);
                   }}
-                >
-                  <option value="">Choose a value…</option>
-                  {proposeFieldSpec.options?.map((option) => (
-                    <option key={option} value={option}>
-                      {enumOptionLabel(option)}
-                    </option>
-                  ))}
-                </select>
+                  placeholder="Choose a value…"
+                  options={(proposeFieldSpec.options ?? []).map((option) => ({
+                    value: option,
+                    label: enumOptionLabel(option),
+                  }))}
+                />
               ) : (
                 <input
                   id={`${proposeId}-value`}

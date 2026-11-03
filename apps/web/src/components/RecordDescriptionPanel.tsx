@@ -78,6 +78,7 @@ import type { ApiDraftResponse, ApiRunsResponse, JsonSchemaNode } from '../lib/t
 import { BackendDown, LoadingPanel } from './FetchStates';
 import { ChevronDown, ChevronRight } from './icons';
 import './record-description.css';
+import { Select } from './Select';
 
 /** Same narrowing `UnmappedNotesPanel` uses — a non-`ApiError` throw still renders. */
 function asApiError(err: unknown): ApiError {
@@ -639,24 +640,21 @@ function FieldRow({
         {label}
       </label>
       {facts.allowed ? (
-        <select
+        <Select
           id={id}
-          className="rdesc-input"
+          density="compact"
           value={value}
           disabled={disabled}
           aria-invalid={error ? true : undefined}
           aria-describedby={describedBy}
-          onChange={(e) => onChange(e.target.value)}
-        >
-          {/* NO DEFAULT IS SELECTED. An empty option means "not answered", and picking
-              it sends nothing — it is not a way to clear a stored value. */}
-          <option value="">— not set —</option>
-          {facts.allowed.map((option) => (
-            <option key={option} value={option}>
-              {enumOptionLabel(option)}
-            </option>
-          ))}
-        </select>
+          onChange={onChange}
+          options={[
+            /* NO DEFAULT IS SELECTED. An empty option means "not answered", and picking
+               it sends nothing — it is not a way to clear a stored value. */
+            { value: '', label: '— not set —' },
+            ...facts.allowed.map((option) => ({ value: option, label: enumOptionLabel(option) })),
+          ]}
+        />
       ) : (
         <input
           id={id}
@@ -748,27 +746,24 @@ function ContributorsEditor({
             <label className="rdesc-label" htmlFor={`${id}-role-${index}`}>
               Role
             </label>
-            <select
+            <Select
               id={`${id}-role-${index}`}
-              className="rdesc-input"
+              density="compact"
               value={row.role}
               disabled={disabled || readOnlyReason !== null}
-              onChange={(e) =>
-                onChange(rows.map((r, i) => (i === index ? { ...r, role: e.target.value } : r)))
+              onChange={(next) =>
+                onChange(rows.map((r, i) => (i === index ? { ...r, role: next } : r)))
               }
-            >
-              <option value="">— not set —</option>
-              {(roles ?? []).map((role) => (
-                <option key={role} value={role}>
-                  {enumOptionLabel(role)}
-                </option>
-              ))}
-              {/* A STORED ROLE THIS BUILD DOES NOT OFFER IS STILL SHOWN, so selecting a
-                  row does not silently change a value nobody edited. */}
-              {row.role !== '' && !(roles ?? []).includes(row.role) && (
-                <option value={row.role}>{row.role}</option>
-              )}
-            </select>
+              options={[
+                { value: '', label: '— not set —' },
+                ...(roles ?? []).map((role) => ({ value: role, label: enumOptionLabel(role) })),
+                /* A STORED ROLE THIS BUILD DOES NOT OFFER IS STILL SHOWN, so selecting a
+                   row does not silently change a value nobody edited. */
+                ...(row.role !== '' && !(roles ?? []).includes(row.role)
+                  ? [{ value: row.role, label: row.role }]
+                  : []),
+              ]}
+            />
             <button
               type="button"
               className="btn btn-secondary rdesc-remove"

@@ -42,6 +42,7 @@ import { FieldRow } from '../components/FieldRow';
 import { draftGroupsToFieldGroups } from '../lib/adapt';
 import { bundleRoutes, stubFetchRoutes, type RouteEntry } from '../test/apiFixtures';
 import type { DraftFieldCapture } from '../lib/types';
+import { chooseValue, optionValues, selectValue } from '../test/controls';
 
 configure({ asyncUtilTimeout: 5_000 });
 /* See `run-workspace.test.tsx:67-112` for the full argument: vitest's own per-test
@@ -176,9 +177,9 @@ describe('a control is offered only where a record-level route accepts a value',
     expect(system.querySelectorAll('.field-row')).toHaveLength(3);
 
     // And exactly ONE carries a control — the record-writable enum.
-    const controls = system.querySelectorAll('.field-capture select');
+    const controls = system.querySelectorAll('.field-capture [role="combobox"]');
     expect(controls).toHaveLength(1);
-    expect(rowFor(system, 'system.domain').querySelector('select')).not.toBeNull();
+    expect(rowFor(system, 'system.domain').querySelector('[role="combobox"]')).not.toBeNull();
   });
 
   it('offers NO input on a path no operation in this build accepts', async () => {
@@ -265,13 +266,13 @@ describe('the one control that exists', () => {
   it('offers the schema’s own values and nothing else, with no default choice', async () => {
     renderRecord();
     const system = await openBlock(/System & Instrument/);
-    const select = rowFor(system, 'system.domain').querySelector('select') as HTMLSelectElement;
+    const select = rowFor(system, 'system.domain').querySelector('[role="combobox"]') as HTMLElement;
 
-    const values = Array.from(select.options).map((o) => o.value);
+    const values = optionValues(select);
     // The empty option is the honest rendering of a value the record does not hold —
     // NOT a placeholder, and not a value that can be sent.
     expect(values).toEqual(['', 'experimental', 'computational']);
-    expect(select.value).toBe('');
+    expect(selectValue(select)).toBe('');
   });
 
   it('sends the record’s If-Match to POST /answers, and reports that it landed', async () => {
@@ -290,10 +291,10 @@ describe('the one control that exists', () => {
 
     const system = await openBlock(/System & Instrument/);
     const row = rowFor(system, 'system.domain');
-    const select = row.querySelector('select') as HTMLSelectElement;
+    const select = row.querySelector('[role="combobox"]') as HTMLElement;
 
     await act(async () => {
-      fireEvent.change(select, { target: { value: 'experimental' } });
+      chooseValue(select, 'experimental');
     });
     await act(async () => {
       fireEvent.click(within(row).getByRole('button', { name: /Save/ }));
@@ -334,10 +335,10 @@ describe('the one control that exists', () => {
     });
     const system = await openBlock(/System & Instrument/);
     const row = rowFor(system, 'system.domain');
-    const select = row.querySelector('select') as HTMLSelectElement;
+    const select = row.querySelector('[role="combobox"]') as HTMLElement;
 
     await act(async () => {
-      fireEvent.change(select, { target: { value: 'computational' } });
+      chooseValue(select, 'computational');
     });
     await act(async () => {
       fireEvent.click(within(row).getByRole('button', { name: /Save/ }));
@@ -349,7 +350,7 @@ describe('the one control that exists', () => {
     expect(row.querySelector('.field-capture-status')?.textContent ?? '').not.toContain('Saved');
     // The reader's choice is kept. A refusal that also discarded the input would make
     // the retry a re-entry.
-    expect(select.value).toBe('computational');
+    expect(selectValue(select)).toBe('computational');
   });
 });
 
@@ -563,10 +564,10 @@ describe('a refused write keeps what the reader chose', () => {
 
     const system = await openBlock(/System & Instrument/);
     const row = rowFor(system, 'system.domain');
-    const select = row.querySelector('select') as HTMLSelectElement;
+    const select = row.querySelector('[role="combobox"]') as HTMLElement;
 
     await act(async () => {
-      fireEvent.change(select, { target: { value: 'computational' } });
+      chooseValue(select, 'computational');
     });
     await act(async () => {
       fireEvent.click(within(row).getByRole('button', { name: /Save/ }));
@@ -581,7 +582,7 @@ describe('a refused write keeps what the reader chose', () => {
         document.querySelector('section[data-draft-block]') as HTMLElement,
         'system.domain',
       );
-      expect((live.querySelector('select') as HTMLSelectElement).value).toBe('computational');
+      expect(selectValue(live.querySelector('[role="combobox"]') as HTMLElement)).toBe('computational');
       // …and the record's own value is on the screen beside it, which is where the
       // message sends them to look.
       expect(live.textContent).toContain('experimental');
@@ -596,8 +597,8 @@ describe('a refused write keeps what the reader chose', () => {
     const capture = { experimentId: ID, version: 'v1', onSaved: () => {} };
     const before = skeleton('system.domain', 'Domain', RECORD_ENUM);
     const { rerender, container } = render(<FieldRow field={before as never} capture={capture} />);
-    const select = container.querySelector('select') as HTMLSelectElement;
-    expect(select.value).toBe('');
+    const select = container.querySelector('[role="combobox"]') as HTMLElement;
+    expect(selectValue(select)).toBe('');
 
     rerender(
       <FieldRow
@@ -605,7 +606,7 @@ describe('a refused write keeps what the reader chose', () => {
         capture={capture}
       />,
     );
-    expect((container.querySelector('select') as HTMLSelectElement).value).toBe('experimental');
+    expect(selectValue(container.querySelector('[role="combobox"]') as HTMLElement)).toBe('experimental');
   });
 });
 
@@ -655,10 +656,10 @@ describe('the three defect classes 935fca5 fixed that nothing pinned', () => {
       });
       const system = await openBlock(/System & Instrument/);
       const row = rowFor(system, 'system.domain');
-      const select = row.querySelector('select') as HTMLSelectElement;
+      const select = row.querySelector('[role="combobox"]') as HTMLElement;
 
       await act(async () => {
-        fireEvent.change(select, { target: { value: 'experimental' } });
+        chooseValue(select, 'experimental');
       });
       await act(async () => {
         fireEvent.click(within(row).getByRole('button', { name: /Save/ }));
@@ -667,7 +668,7 @@ describe('the three defect classes 935fca5 fixed that nothing pinned', () => {
       await waitFor(() => {
         expect(document.activeElement).not.toBe(document.body);
       });
-      expect((document.activeElement as HTMLElement)?.tagName).toBe('SELECT');
+      expect((document.activeElement as HTMLElement)?.getAttribute('role')).toBe('combobox');
     });
 
   it('describes the select with the note that carries its no-guessing claim', async () => {
@@ -680,7 +681,7 @@ describe('the three defect classes 935fca5 fixed that nothing pinned', () => {
     renderRecord();
     const system = await openBlock(/System & Instrument/);
     const row = rowFor(system, 'system.domain');
-    const select = row.querySelector('select') as HTMLSelectElement;
+    const select = row.querySelector('[role="combobox"]') as HTMLElement;
 
     const describedBy = select.getAttribute('aria-describedby');
     expect(describedBy).toBeTruthy();
@@ -809,6 +810,6 @@ describe('a link to ONE record field lands on its control (review minor)', () =>
         'system.domain',
       ),
     );
-    expect(document.activeElement?.tagName).toBe('SELECT');
+    expect(document.activeElement?.getAttribute('role')).toBe('combobox');
   });
 });

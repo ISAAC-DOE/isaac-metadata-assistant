@@ -259,7 +259,7 @@ describe('an unclassified field is never a Run control', () => {
      */
     const card = await showRun(RUN_WITH_UNCLASSIFIED);
     const boxes = Array.from(
-      card.querySelectorAll<HTMLElement>('.run-fields input, .run-fields select'),
+      card.querySelectorAll<HTMLElement>('.run-fields input, .run-fields [role="combobox"]'),
     );
     const addressed = boxes.map(
       (el) => el.dataset.runFieldPath ?? el.dataset.runFieldIsoPath ?? null,

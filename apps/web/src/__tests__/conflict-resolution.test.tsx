@@ -56,6 +56,7 @@ import {
   runFixture,
   stubFetchRoutes,
 } from '../test/apiFixtures';
+import { chooseValue } from '../test/controls';
 
 const EXP = 'demo';
 const CONFLICTS = `GET /api/experiments/${EXP}/conflicts`;
@@ -178,7 +179,7 @@ describe('rendering one conflict', () => {
     renderPanel();
     // The scope control appears once the runs read lands.
     const select = await screen.findByLabelText('Fields described');
-    fireEvent.change(select, { target: { value: 'RUN-1' } });
+    chooseValue(select, 'RUN-1');
     const article = await row();
     expect(within(article).getByText('Run · Scan 2')).toBeInTheDocument();
     expect(within(article).queryByText(/This record’s own fields/)).toBeNull();

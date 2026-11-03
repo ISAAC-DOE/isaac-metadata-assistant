@@ -40,6 +40,7 @@ import {
   type GraphViewState,
 } from '../../lib/graphModel';
 import type { BrowseGrouping } from './GraphBrowse';
+import { Select } from '../../components/Select';
 
 /**
  * The relationship-filter action for ticking/unticking ONE type.
@@ -333,19 +334,21 @@ export function GraphFiltersPanel({
   return (
     <div className="memory-graph-filters-panel" id={id}>
       <div className="memory-graph-filters-grid">
-        <label className="memory-graph-filter">
-          <span>Node Type</span>
-          <select
+        <div className="memory-graph-filter">
+          <label htmlFor={`${id}-type`}>Node Type</label>
+          <Select
+            id={`${id}-type`}
+            className="memory-graph-filter-select"
+            density="compact"
             value={state.typeFilter}
-            onChange={(e) =>
-              dispatch({ kind: 'filterType', value: e.target.value as GraphTypeFilter })
-            }
-          >
-            <option value="all">Files &amp; concepts</option>
-            <option value="file">Files only</option>
-            <option value="concept">Concepts only</option>
-          </select>
-        </label>
+            onChange={(next) => dispatch({ kind: 'filterType', value: next as GraphTypeFilter })}
+            options={[
+              { value: 'all', label: 'Files & concepts' },
+              { value: 'file', label: 'Files only' },
+              { value: 'concept', label: 'Concepts only' },
+            ]}
+          />
+        </div>
         <label className="memory-graph-filter">
           <span>Find a Cluster</span>
           <input
@@ -360,41 +363,47 @@ export function GraphFiltersPanel({
             `community_id` and the command keyword stays `community`. Option text
             is `communityOptionLabel`, i.e. the upstream name VERBATIM plus its
             own file count as a separate `·` segment. */}
-        <label className="memory-graph-filter">
-          <span>Cluster</span>
-          <select
+        <div className="memory-graph-filter">
+          <label htmlFor={`${id}-cluster`}>Cluster</label>
+          <Select
+            id={`${id}-cluster`}
+            className="memory-graph-filter-select memory-graph-cluster-select"
+            density="compact"
             value={state.communityFilter}
-            onChange={(e) => dispatch({ kind: 'filterCommunity', id: e.target.value })}
-          >
-            <option value="all">All clusters</option>
-            {multi.length > 0 && (
-              <optgroup label="Multi-file clusters">
-                {multi.map((c) => (
-                  <option key={c.id} value={c.id}>
-                    {communityOptionLabel(c)}
-                  </option>
-                ))}
-              </optgroup>
-            )}
-            {single.length > 0 && (
-              <optgroup label="Single-file clusters (label is one file's name)">
-                {single.map((c) => (
-                  <option key={c.id} value={c.id}>
-                    {communityOptionLabel(c)}
-                  </option>
-                ))}
-              </optgroup>
-            )}
-          </select>
-        </label>
+            onChange={(next) => dispatch({ kind: 'filterCommunity', id: next })}
+            /* The chosen cluster, when "narrow the list" has filtered it out of the options, is still the
+               filter in force: the trigger names it (in the placeholder's quieter ink) rather than reading
+               as if nothing were chosen. */
+            placeholder={(() => {
+              const chosen = index.communitiesBySize.find((c) => c.id === state.communityFilter);
+              return chosen ? communityOptionLabel(chosen) : undefined;
+            })()}
+            options={[
+              { value: 'all', label: 'All clusters' },
+              ...multi.map((c) => ({ value: c.id, label: communityOptionLabel(c), group: 'Multi-file clusters' })),
+              ...single.map((c) => ({
+                value: c.id,
+                label: communityOptionLabel(c),
+                group: "Single-file clusters (label is one file's name)",
+              })),
+            ]}
+          />
+        </div>
         {state.mode === 'browse' && (
-          <label className="memory-graph-filter">
-            <span>Group By</span>
-            <select value={grouping} onChange={(e) => onGrouping(e.target.value as BrowseGrouping)}>
-              <option value="type">File type</option>
-              <option value="community">Cluster</option>
-            </select>
-          </label>
+          <div className="memory-graph-filter">
+            <label htmlFor={`${id}-grouping`}>Group By</label>
+            <Select
+              id={`${id}-grouping`}
+              className="memory-graph-filter-select"
+              density="compact"
+              value={grouping}
+              onChange={(next) => onGrouping(next as BrowseGrouping)}
+              options={[
+                { value: 'type', label: 'File type' },
+                { value: 'community', label: 'Cluster' },
+              ]}
+            />
+          </div>
         )}
       </div>
 

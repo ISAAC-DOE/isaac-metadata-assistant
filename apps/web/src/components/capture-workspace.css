@@ -231,9 +231,10 @@
 .capture-map-run .capture-label {
   margin-top: 0;
 }
-.capture-map-run .capture-control {
+.capture-map-run .capture-map-run-select {
   flex: 1 1 auto;
-  min-width: 0;
+  width: auto;
+  min-width: 12rem;
 }
 
 /* The task surfaces sit on one card each, matching the rest of the record page. */

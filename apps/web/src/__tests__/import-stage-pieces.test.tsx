@@ -59,6 +59,7 @@ import type {
   ApiImportSignalSelection,
   ApiImportUnitRow,
 } from '../lib/types';
+import { chooseValue, selectValue } from '../test/controls';
 
 const DEST = {
   rows: [{ id: '01RECORDZZ000000000000001', title: 'A fictional ZZ campaign' }],
@@ -245,7 +246,7 @@ describe('§2 · recording a resolution chooses between readings, at a scope the
     openReview(container);
     fireEvent.click(screen.getByRole('radio', { name: /after1400Cycling/ }));
     fireEvent.click(screen.getByRole('radio', { name: C.scopeOptions.experiment }));
-    fireEvent.change(screen.getByRole('combobox'), { target: { value: DEST.rows[0].id } });
+    chooseValue(screen.getByRole('combobox'), DEST.rows[0].id);
     fireEvent.click(screen.getByRole('button', { name: C.resolve.submit }));
     await waitFor(() => expect(record).toHaveBeenCalledTimes(1));
     expect(record.mock.calls[0][1]).toMatchObject({
@@ -405,7 +406,7 @@ describe('§2c · a whole sample group is resolved at the kind, by the kind of s
     const record = vi.spyOn(api, 'recordImportRule').mockResolvedValue({} as never);
     renderConflicts(many(3));
     fireEvent.click(screen.getByRole('button', { name: C.resolve.groupTitle }));
-    expect(screen.getByRole('combobox', { name: C.resolve.groupWhich })).toHaveValue('03');
+    expect(selectValue(screen.getByRole('combobox', { name: C.resolve.groupWhich }))).toBe('03');
     fireEvent.click(screen.getByRole('radio', { name: 'Header' }));
     fireEvent.click(screen.getByRole('button', { name: C.resolve.groupSubmit }));
     await waitFor(() => expect(record).toHaveBeenCalledTimes(1));

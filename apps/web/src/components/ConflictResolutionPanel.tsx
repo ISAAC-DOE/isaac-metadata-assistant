@@ -88,6 +88,7 @@ import type {
   SourceType,
 } from '../lib/types';
 import './conflicts.css';
+import { Select } from './Select';
 
 /** Same narrowing `UnmappedNotesPanel` uses — a non-`ApiError` throw still renders. */
 function asApiError(err: unknown): ApiError {
@@ -460,19 +461,17 @@ function ConflictBrowser({ experimentId }: { experimentId: string }) {
             <label className="conflicts-control-label" htmlFor={scopeSelectId}>
               Fields described
             </label>
-            <select
+            <Select
               id={scopeSelectId}
               className="conflicts-scope"
+              density="compact"
               value={scope ?? ''}
-              onChange={(e) => setScope(e.target.value === '' ? null : e.target.value)}
-            >
-              <option value="">This record’s own fields</option>
-              {runs.map((run) => (
-                <option key={run.id} value={run.id}>
-                  {run.label}
-                </option>
-              ))}
-            </select>
+              onChange={(next) => setScope(next === '' ? null : next)}
+              options={[
+                { value: '', label: 'This record’s own fields' },
+                ...runs.map((run) => ({ value: run.id, label: run.label })),
+              ]}
+            />
           </div>
         )}
         {/*

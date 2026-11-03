@@ -154,19 +154,11 @@
   white-space: nowrap;
 }
 
-.library-sort-select {
-  padding: var(--space-sm) var(--space-sm);
-  font: inherit;
-  font-size: var(--font-size-body);
-  color: var(--text-primary);
-  background: var(--surface);
-  border: 1px solid var(--border);
-  border-radius: 7px;
-}
-
-.library-sort-select:focus-visible {
-  outline: 2px solid var(--action);
-  outline-offset: 1px;
+/* The themed `Select` (compact) keeps its own content width, as the native control did: it neither stretches
+   across the row nor gives way to the search box. */
+.select.library-sort-select {
+  flex: none;
+  width: auto;
 }
 
 /* --- facet chips ----------------------------------------------------------- */

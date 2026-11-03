@@ -82,14 +82,9 @@
   font-weight: 600;
   color: var(--text-slate);
 }
-.conflicts-scope {
-  font: inherit;
-  font-size: 12px;
-  padding: 5px 8px;
-  border: 1px solid var(--border);
-  border-radius: var(--radius-control);
-  background: var(--surface);
-  color: var(--text-primary);
+/* The themed `Select` (compact), sized to its content in the toolbar row. */
+.select.conflicts-scope {
+  width: auto;
   max-width: 100%;
 }
 .conflicts-count {

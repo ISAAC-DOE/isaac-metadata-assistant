@@ -14,6 +14,7 @@ import {
   memoryConceptsAvailable,
   memoryConceptDetailWithLeads,
 } from '../test/apiFixtures';
+import { chooseValue, selectGroups, selectOptions } from '../test/controls';
 
 /** The canvas scale, as the retired visible readout read ("zoom N%"). The readout
  *  was dropped from the screen 2026-11-02; `.graph-explore` carries the scale as
@@ -346,11 +347,11 @@ describe('Graph tab — filters', () => {
     openFilters(view);
     const { getByLabelText, queryByText, getByText } = view;
 
-    fireEvent.change(getByLabelText('Node Type'), { target: { value: 'concept' } });
+    chooseValue(getByLabelText('Node Type'), 'concept');
     expect(queryByText('src/fake_mod.py')).toBeNull();
     expect(getByText('Provenance')).toBeInTheDocument();
 
-    fireEvent.change(getByLabelText('Node Type'), { target: { value: 'file' } });
+    chooseValue(getByLabelText('Node Type'), 'file');
     expect(getByText('src/fake_mod.py')).toBeInTheDocument();
     expect(queryByText('Provenance')).toBeNull();
   });
@@ -362,7 +363,7 @@ describe('Graph tab — filters', () => {
     toBrowse(view);
     openFilters(view);
 
-    fireEvent.change(view.getByLabelText('Cluster'), { target: { value: '131' } });
+    chooseValue(view.getByLabelText('Cluster'), '131');
 
     const list = within(document.querySelector('.memory-graph-list') as HTMLElement);
     expect(list.getByText('src/fake_mod.py')).toBeInTheDocument(); // community 131
@@ -377,9 +378,9 @@ describe('Graph tab — filters', () => {
     await view.findByText('Graph', { selector: 'h2' });
 
     openFilters(view);
-    const select = view.getByLabelText('Cluster') as HTMLSelectElement;
+    const select = view.getByLabelText('Cluster') as HTMLElement;
     // Both fixture clusters hold one file, so both land in the honest group.
-    expect(select.querySelector('optgroup[label*="Single-file"]')).not.toBeNull();
+    expect(selectGroups(select).some((g) => (g.group ?? '').includes('Single-file'))).toBe(true);
     // The caveat stays where the filtering happens; its FULL form (how many
     // clusters hold a single file, and why they are not schema categories)
     // moved into About This Graph -> Cluster Colors, checked in section 12.
@@ -390,7 +391,7 @@ describe('Graph tab — filters', () => {
 
     // The cluster list itself is filterable rather than a flat wall of options.
     fireEvent.change(view.getByLabelText('Find a Cluster'), { target: { value: 'export' } });
-    const options = [...select.querySelectorAll('option')].map((o) => o.textContent ?? '');
+    const options = selectOptions(select);
     expect(options.some((o) => o.includes('Export Pipeline'))).toBe(true);
     expect(options.some((o) => o.includes('unnamed cluster'))).toBe(false);
   });
@@ -1064,7 +1065,7 @@ describe('Graph tab — Browse mode', () => {
     expect(headings().some((h) => h.startsWith('Code'))).toBe(true);
 
     openFilters(view);
-    fireEvent.change(view.getByLabelText('Group By'), { target: { value: 'community' } });
+    chooseValue(view.getByLabelText('Group By'), 'community');
     expect(headings().some((h) => h.startsWith('Export Pipeline'))).toBe(true);
     expect(headings().some((h) => h.startsWith('No cluster'))).toBe(true);
   });

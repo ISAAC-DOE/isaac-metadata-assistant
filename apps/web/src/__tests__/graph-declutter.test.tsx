@@ -19,6 +19,7 @@ import {
 } from '../screens/graph/GraphFilters';
 import type { ApiMemoryGraphResponse } from '../lib/types';
 import { stubFetchRoutes, graphStatusUnavailable, memoryGraphAvailable } from '../test/apiFixtures';
+import { chooseValue, selectValue } from '../test/controls';
 
 /*
  * P36V PR2 slice B — graph decluttering: progressive disclosure, active-filter
@@ -189,20 +190,20 @@ describe('graph filters — same inputs, same visible sets', () => {
     expect(browseLabels().sort()).toEqual(modelVisibleLabels(index, {}).sort());
 
     // node type
-    fireEvent.change(view.getByLabelText('Node Type'), { target: { value: 'concept' } });
+    chooseValue(view.getByLabelText('Node Type'), 'concept');
     expect(browseLabels().sort()).toEqual(
       modelVisibleLabels(index, { typeFilter: 'concept' }).sort(),
     );
-    fireEvent.change(view.getByLabelText('Node Type'), { target: { value: 'all' } });
+    chooseValue(view.getByLabelText('Node Type'), 'all');
 
     // cluster
-    fireEvent.change(view.getByLabelText('Cluster'), { target: { value: '131' } });
+    chooseValue(view.getByLabelText('Cluster'), '131');
     expect(browseLabels().sort()).toEqual(
       modelVisibleLabels(index, { communityFilter: '131' }).sort(),
     );
 
     // cluster AND node type together — they combine, they do not replace
-    fireEvent.change(view.getByLabelText('Node Type'), { target: { value: 'file' } });
+    chooseValue(view.getByLabelText('Node Type'), 'file');
     expect(browseLabels().sort()).toEqual(
       modelVisibleLabels(index, { communityFilter: '131', typeFilter: 'file' }).sort(),
     );
@@ -244,14 +245,14 @@ describe('graph filters — same inputs, same visible sets', () => {
     await view.findByText('Graph', { selector: 'h2' });
     toBrowse(view);
     openFilters(view);
-    fireEvent.change(view.getByLabelText('Node Type'), { target: { value: 'concept' } });
+    chooseValue(view.getByLabelText('Node Type'), 'concept');
     const filtered = browseLabels();
 
     openFilters(view); // collapse
     expect(view.queryByLabelText('Node Type')).toBeNull();
     expect(browseLabels()).toEqual(filtered);
     openFilters(view); // re-open: the control still shows the active value
-    expect((view.getByLabelText('Node Type') as HTMLSelectElement).value).toBe('concept');
+    expect(selectValue(view.getByLabelText('Node Type'))).toBe('concept');
   });
 });
 
@@ -328,7 +329,7 @@ describe('graph toolbar — progressive disclosure without deletion', () => {
     expect(document.querySelector('.graph-cmd-input')).not.toBeNull();
 
     // Clear All Filters: present as soon as anything is filtering.
-    fireEvent.change(view.getByLabelText('Node Type'), { target: { value: 'file' } });
+    chooseValue(view.getByLabelText('Node Type'), 'file');
     expect(view.getByRole('button', { name: 'Clear All Filters' })).toBeInTheDocument();
   });
 
@@ -340,9 +341,9 @@ describe('graph toolbar — progressive disclosure without deletion', () => {
     expect(trigger().textContent).toBe('Filters');
 
     openFilters(view);
-    fireEvent.change(view.getByLabelText('Node Type'), { target: { value: 'file' } });
+    chooseValue(view.getByLabelText('Node Type'), 'file');
     expect(trigger().textContent).toContain('1');
-    fireEvent.change(view.getByLabelText('Cluster'), { target: { value: '131' } });
+    chooseValue(view.getByLabelText('Cluster'), '131');
     expect(trigger().textContent).toContain('2');
     fireEvent.click(view.getByRole('checkbox', { name: 'Imports' }));
     expect(trigger().textContent).toContain('3');
@@ -375,8 +376,8 @@ describe('graph active-filter chips', () => {
     openFilters(view);
 
     fireEvent.change(view.getByLabelText('Search graph nodes'), { target: { value: 'fake' } });
-    fireEvent.change(view.getByLabelText('Node Type'), { target: { value: 'file' } });
-    fireEvent.change(view.getByLabelText('Cluster'), { target: { value: '131' } });
+    chooseValue(view.getByLabelText('Node Type'), 'file');
+    chooseValue(view.getByLabelText('Cluster'), '131');
     fireEvent.click(view.getByRole('checkbox', { name: 'References' }));
 
     expect(chipLabels()).toEqual([
@@ -443,8 +444,8 @@ describe('graph active-filter chips', () => {
     openFilters(view);
     const index = modelIndex();
 
-    fireEvent.change(view.getByLabelText('Node Type'), { target: { value: 'file' } });
-    fireEvent.change(view.getByLabelText('Cluster'), { target: { value: '131' } });
+    chooseValue(view.getByLabelText('Node Type'), 'file');
+    chooseValue(view.getByLabelText('Cluster'), '131');
     expect(browseLabels().sort()).toEqual(
       modelVisibleLabels(index, { typeFilter: 'file', communityFilter: '131' }).sort(),
     );
@@ -453,8 +454,8 @@ describe('graph active-filter chips', () => {
     // The cluster filter is gone; the node-type filter is untouched.
     expect(chipLabels()).toEqual(['Files Only']);
     expect(browseLabels().sort()).toEqual(modelVisibleLabels(index, { typeFilter: 'file' }).sort());
-    expect((view.getByLabelText('Cluster') as HTMLSelectElement).value).toBe('all');
-    expect((view.getByLabelText('Node Type') as HTMLSelectElement).value).toBe('file');
+    expect(selectValue(view.getByLabelText('Cluster'))).toBe('all');
+    expect(selectValue(view.getByLabelText('Node Type'))).toBe('file');
 
     fireEvent.click(view.getByRole('button', { name: 'Clear the node type filter' }));
     expect(document.querySelector('.memory-graph-chips')).toBeNull();
@@ -489,8 +490,8 @@ describe('graph active-filter chips', () => {
     const index = modelIndex();
 
     fireEvent.change(view.getByLabelText('Search graph nodes'), { target: { value: 'fake' } });
-    fireEvent.change(view.getByLabelText('Node Type'), { target: { value: 'file' } });
-    fireEvent.change(view.getByLabelText('Cluster'), { target: { value: '131' } });
+    chooseValue(view.getByLabelText('Node Type'), 'file');
+    chooseValue(view.getByLabelText('Cluster'), '131');
     fireEvent.change(view.getByLabelText('Find a Cluster'), { target: { value: 'export' } });
     fireEvent.change(view.getByLabelText('From'), { target: { value: 'src/fake_mod.py' } });
 
@@ -498,8 +499,8 @@ describe('graph active-filter chips', () => {
 
     expect(document.querySelector('.memory-graph-chips')).toBeNull();
     expect((view.getByLabelText('Search graph nodes') as HTMLInputElement).value).toBe('');
-    expect((view.getByLabelText('Node Type') as HTMLSelectElement).value).toBe('all');
-    expect((view.getByLabelText('Cluster') as HTMLSelectElement).value).toBe('all');
+    expect(selectValue(view.getByLabelText('Node Type'))).toBe('all');
+    expect(selectValue(view.getByLabelText('Cluster'))).toBe('all');
     expect((view.getByLabelText('Find a Cluster') as HTMLInputElement).value).toBe('');
     expect((view.getByLabelText('From') as HTMLInputElement).value).toBe('');
     expect(browseLabels().sort()).toEqual(modelVisibleLabels(index, {}).sort());
@@ -561,8 +562,8 @@ describe('graph chip row — the five-relation payload', () => {
 
     // Everything on at once: search, node type, cluster, two hidden relations.
     fireEvent.change(view.getByLabelText('Search graph nodes'), { target: { value: 'mod' } });
-    fireEvent.change(view.getByLabelText('Node Type'), { target: { value: 'file' } });
-    fireEvent.change(view.getByLabelText('Cluster'), { target: { value: '131' } });
+    chooseValue(view.getByLabelText('Node Type'), 'file');
+    chooseValue(view.getByLabelText('Cluster'), '131');
     fireEvent.click(view.getByRole('checkbox', { name: 'Calls' }));
     fireEvent.click(view.getByRole('checkbox', { name: 'References' }));
 
@@ -659,7 +660,7 @@ describe('graph chip row — focus is moved deliberately', () => {
     const view = renderGraphTab(fiveRelationGraph);
     await view.findByText('Graph', { selector: 'h2' });
     openFilters(view);
-    fireEvent.change(view.getByLabelText('Node Type'), { target: { value: 'file' } });
+    chooseValue(view.getByLabelText('Node Type'), 'file');
 
     const clear = view.getByRole('button', { name: 'Clear All Filters' });
     clear.focus();
@@ -678,7 +679,7 @@ describe('graph chip row — focus is moved deliberately', () => {
     const view = renderGraphTab(fiveRelationGraph);
     await view.findByText('Graph', { selector: 'h2' });
     openFilters(view);
-    fireEvent.change(view.getByLabelText('Node Type'), { target: { value: 'file' } });
+    chooseValue(view.getByLabelText('Node Type'), 'file');
     fireEvent.click(view.getByRole('checkbox', { name: 'Calls' }));
 
     // Two chips: "Files Only", then "Hiding: Calls".
@@ -849,7 +850,7 @@ describe('graph humanisation boundary', () => {
     const view = renderGraphTab(payload);
     await view.findByText('Graph', { selector: 'h2' });
     openFilters(view);
-    fireEvent.change(view.getByLabelText('Cluster'), { target: { value: '131' } });
+    chooseValue(view.getByLabelText('Cluster'), '131');
 
     expect(chipLabels()).toEqual([`Cluster: ${longest} · 1 file`]);
     // jsdom applies no layout, so overflow is pinned STRUCTURALLY: the long
@@ -913,8 +914,8 @@ describe('graph data is never mutated by the redesign', () => {
     await view.findByText('Graph', { selector: 'h2' });
 
     openFilters(view);
-    fireEvent.change(view.getByLabelText('Node Type'), { target: { value: 'file' } });
-    fireEvent.change(view.getByLabelText('Cluster'), { target: { value: '131' } });
+    chooseValue(view.getByLabelText('Node Type'), 'file');
+    chooseValue(view.getByLabelText('Cluster'), '131');
     fireEvent.click(view.getByRole('checkbox', { name: 'Imports' }));
     fireEvent.click(view.getByRole('checkbox', { name: 'Imports' }));
     openPath(view);

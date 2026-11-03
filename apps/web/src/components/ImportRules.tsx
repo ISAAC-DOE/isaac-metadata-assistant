@@ -1,4 +1,4 @@
-import { useRef, useState } from 'react';
+import { useId, useRef, useState } from 'react';
 import { HelpTip } from './HelpTip';
 import { SemanticStatus } from './SemanticStatus';
 import { ExperimentPicker, RuleScopeFields, type RuleScope } from './ImportScope';
@@ -18,6 +18,7 @@ import type {
   ApiImportSignalSelection,
   ApiImportUnitRow,
 } from '../lib/types';
+import { Select } from './Select';
 
 /* An act resolves `true` when it succeeded (2026-10-18), so a form can say so in place. */
 type ActFn = (name: string, run: () => Promise<unknown>) => Promise<unknown>;
@@ -232,6 +233,7 @@ function BindingForm({
   destinations: ProposalDestinations;
 }) {
   const [profileId, setProfileId] = useState(profiles.find((p) => !p.is_default)?.profile_id ?? '');
+  const conventionId = useId();
   const [from, setFrom] = useState('');
   const [to, setTo] = useState('');
   const [scope, setScope] = useState<Scope>('import');
@@ -263,16 +265,18 @@ function BindingForm({
       }}
     >
       <h5 className="hi-block-subtitle">{COPY.bindingTitle}</h5>
-      <label className="hi-field">
-        <span className="hi-field-label">{COPY.fields.convention}</span>
-        <select className="hi-input" value={profileId} onChange={(e) => setProfileId(e.target.value)}>
-          {profiles.map((p) => (
-            <option key={p.profile_id} value={p.profile_id}>
-              {shortConventionName(p.display_name)}
-            </option>
-          ))}
-        </select>
-      </label>
+      <div className="hi-field">
+        <label className="hi-field-label" htmlFor={conventionId}>
+          {COPY.fields.convention}
+        </label>
+        <Select
+          id={conventionId}
+          density="compact"
+          value={profileId}
+          onChange={setProfileId}
+          options={profiles.map((p) => ({ value: p.profile_id, label: shortConventionName(p.display_name) }))}
+        />
+      </div>
       <div className="hi-inline-fields">
         <label className="hi-field">
           <span className="hi-field-label">{COPY.fields.fromRun}</span>
@@ -339,6 +343,7 @@ export function SignalSelection({
   );
   const [scope, setScope] = useState<Scope>('import');
   const [experimentId, setExperimentId] = useState('');
+  const edgeId = useId();
   /* SAID WHERE IT WAS PRESSED (2026-10-18, QA `C-26`). Confirming used to move focus to
      the stage heading — the top of a long table — so the reader saw nothing change where
      they had pressed. The result is now stated here, and focus lands on it. */
@@ -395,7 +400,7 @@ export function SignalSelection({
             });
           }}
         >
-          {channels.map((channel) => (
+          {channels.map((channel, channelIndex) => (
             <div className="hi-inline-fields" key={channel}>
               <span className="hi-signal-channel">{channel}</span>
               <label className="hi-field">
@@ -409,22 +414,21 @@ export function SignalSelection({
                   }
                 />
               </label>
-              <label className="hi-field">
-                <span className="hi-field-label">{COPY.fields.edge}</span>
-                <select
-                  className="hi-input hi-input-short"
+              <div className="hi-field">
+                <label className="hi-field-label" htmlFor={`${edgeId}-${channelIndex}`}>
+                  {COPY.fields.edge}
+                </label>
+                <Select
+                  id={`${edgeId}-${channelIndex}`}
+                  className="hi-select-short"
+                  density="compact"
                   value={assign[channel]?.edge ?? ''}
-                  onChange={(e) =>
-                    setAssign((prev) => ({ ...prev, [channel]: { element: prev[channel]?.element ?? '', edge: e.target.value } }))
+                  onChange={(next) =>
+                    setAssign((prev) => ({ ...prev, [channel]: { element: prev[channel]?.element ?? '', edge: next } }))
                   }
-                >
-                  {EDGES.map((edge) => (
-                    <option key={edge} value={edge}>
-                      {edge || '—'}
-                    </option>
-                  ))}
-                </select>
-              </label>
+                  options={EDGES.map((edge) => ({ value: edge, label: edge || '—' }))}
+                />
+              </div>
             </div>
           ))}
           <RuleScopeFields

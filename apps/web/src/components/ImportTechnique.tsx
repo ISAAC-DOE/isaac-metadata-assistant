@@ -4,6 +4,7 @@ import { api, ApiError } from '../lib/api';
 import { IMPORT_STAGE_COPY } from '../lib/historicalImportContent';
 import { recordFieldFacts } from '../lib/recordFields';
 import { enumOptionLabel } from '../lib/runFields';
+import { Select } from './Select';
 
 const COPY = IMPORT_STAGE_COPY;
 const TECHNIQUE = 'system.technique';
@@ -165,33 +166,23 @@ export function TechniqueChooser({
         </p>
       ) : (
         <div className="hi-technique-row">
-          <label className="hi-field">
-            <span className="hi-field-label">{COPY.techniqueLabel}</span>
-            <select
-              className="hi-input"
+          <div className="hi-field">
+            <label className="hi-field-label" htmlFor={`${id}-technique`}>
+              {COPY.techniqueLabel}
+            </label>
+            <Select
+              id={`${id}-technique`}
+              density="compact"
               value={choice}
               disabled={allowed === null}
-              onChange={(event) => setChoice(event.target.value)}
-            >
-              <option value="">{allowed === null ? 'Reading the schema…' : COPY.techniqueChoose}</option>
-              {short.length > 0 && (
-                <optgroup label={COPY.techniqueShortList}>
-                  {short.map((t) => (
-                    <option key={t} value={t}>
-                      {enumOptionLabel(t)}
-                    </option>
-                  ))}
-                </optgroup>
-              )}
-              <optgroup label={COPY.techniqueAll}>
-                {rest.map((t) => (
-                  <option key={t} value={t}>
-                    {enumOptionLabel(t)}
-                  </option>
-                ))}
-              </optgroup>
-            </select>
-          </label>
+              onChange={setChoice}
+              placeholder={allowed === null ? 'Reading the schema…' : COPY.techniqueChoose}
+              options={[
+                ...short.map((t) => ({ value: t, label: enumOptionLabel(t), group: COPY.techniqueShortList })),
+                ...rest.map((t) => ({ value: t, label: enumOptionLabel(t), group: COPY.techniqueAll })),
+              ]}
+            />
+          </div>
           <button
             type="button"
             className="btn btn-secondary"
