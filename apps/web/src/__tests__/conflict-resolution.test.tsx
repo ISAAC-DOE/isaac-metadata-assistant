@@ -116,11 +116,16 @@ async function row(): Promise<HTMLElement> {
 // --- 1. the honest empty state ------------------------------------------------
 
 describe('the empty state', () => {
-  it('says no address disagrees AND that this is not a validity verdict', async () => {
+  it('is one line when nothing disagrees, and claims no verdict', async () => {
+    // Declutter (2026-11-02): zero conflicts is one line, with no lead or counts.
     stub(conflictsEmpty);
-    renderPanel();
-    const note = await screen.findByText(/No address in this view records two different answers/);
-    expect(note.textContent).toMatch(/not a validity, completeness or export verdict/);
+    const { container } = renderPanel();
+    const note = await screen.findByText(/^No conflicting evidence( in this view)?\.$/);
+    expect(note).toBeInTheDocument();
+    expect(container.querySelector('.conflicts-count')).toBeNull();
+    const VERDICT = /\b(valid|complete|ready to export|passes|verified)\b/i;
+    expect(VERDICT.test('This record is valid.')).toBe(true);
+    expect(container.textContent ?? '').not.toMatch(VERDICT);
   });
 });
 
@@ -815,7 +820,7 @@ describe('what the panel refuses to leave out', () => {
     expect(
       await screen.findByText(/could not be read, so this section is not describing this record/),
     ).toBeInTheDocument();
-    expect(screen.queryByText(/No address in this view records two different answers/)).toBeNull();
+    expect(screen.queryByText(/No conflicting evidence/)).toBeNull();
   });
 });
 

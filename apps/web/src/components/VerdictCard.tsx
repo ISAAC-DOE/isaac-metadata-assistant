@@ -24,10 +24,9 @@ interface VerdictCardProps {
  * observation — on the one surface that gates export, which is the worst place
  * for one. It is gone, along with the whole `exitCode` field.
  *
- * The PARITY claim is different and is kept: the `verdict-hint` says this is the
- * same gate that backs export, which is true by construction — the export path
- * and this verdict call the one `validate_official` over the one vendored schema.
- * Pinned by `__tests__/verdict-no-fabricated-cli.test.tsx`.
+ * The standing PASS hint ("the same gate that backs export") was retired by the
+ * declutter (2026-11-02); `__tests__/verdict-no-fabricated-cli.test.tsx` now pins
+ * that no hint and no portal sign-off claim is shown.
  *
  * WHICH GATE REFUSED — the second thing this card must not get wrong, and it did.
  * The headline claim used to be a straight `pass ? valid : invalid-against-the-
@@ -114,12 +113,13 @@ export function VerdictCard({ result, onRevalidate, onBackToComplete }: VerdictC
               </p>
             </div>
             {pass && onRevalidate && (
-              <button type="button" className="btn btn-secondary" onClick={onRevalidate}>
+              /* TERTIARY (declutter, 2026-11-02): the written record is fixed, so a
+                 re-check is a quiet link-style action, not a peer of Download. */
+              <button type="button" className="btn btn-ghost verdict-revalidate" onClick={onRevalidate}>
                 {LABELS.actionRevalidate}
               </button>
             )}
           </div>
-          {pass && <p className="verdict-hint">This is the same gate that backs export.</p>}
         </div>
       </section>
 

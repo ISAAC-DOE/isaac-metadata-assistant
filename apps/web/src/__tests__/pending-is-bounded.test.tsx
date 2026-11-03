@@ -274,7 +274,7 @@ describe('the completion screen bounds what it asks for', () => {
       target: { value: '[{"series_id":"s"}]' },
     });
     fireEvent.click(screen.getByText('Confirm'));
-    await screen.findByText('1 / 120');
+    await screen.findByRole('img', { name: '1 of 120 answered' });
     await waitFor(() => expect(bounded()).toBe(3));
 
     // THE INVERSION. It was 1 on mount and 2 after one answer; it is now 0 and 0 — the
@@ -307,7 +307,7 @@ describe('the completion screen bounds what it asks for', () => {
     // read 50, and a scientist would have been told they were 70 questions further on
     // than they were.
     expect(screen.getByText('Answer 120 Questions to Finish This Record')).toBeInTheDocument();
-    expect(screen.getByText('0 / 120')).toBeInTheDocument();
+    expect(screen.getByRole('img', { name: '0 of 120 answered' })).toBeInTheDocument();
     expect(screen.getByText('120 of 120 fields still to confirm')).toBeInTheDocument();
   });
 
@@ -396,7 +396,7 @@ describe('the completion screen bounds what it asks for', () => {
 
     // 1 answered + 119 still open = 120. Reading `resp.pending.length` instead would
     // have reported 51 and told the scientist 69 questions had vanished.
-    expect(await screen.findByText('1 / 120')).toBeInTheDocument();
+    expect(await screen.findByRole('img', { name: '1 of 120 answered' })).toBeInTheDocument();
     expect(screen.getByText('119 of 120 fields still to confirm')).toBeInTheDocument();
   });
 
@@ -462,7 +462,7 @@ describe('the completion screen bounds what it asks for', () => {
     // The write is reported as applied: the counter moves and the answered row exists.
     // `119` is `resp.pending.length`, which is the CONTRACT's reading of an absent page
     // block ("the list is the set") rather than a number invented to fill the gap.
-    expect(await screen.findByText('1 / 120')).toBeInTheDocument();
+    expect(await screen.findByRole('img', { name: '1 of 120 answered' })).toBeInTheDocument();
     // AND NO FAILURE IS CLAIMED. This is the assertion that fails without the guard.
     expect(screen.queryByText(/That answer could not be applied/)).toBeNull();
   });
@@ -525,7 +525,7 @@ describe('the completion screen bounds what it asks for', () => {
       target: { value: '[{"series_id":"s"}]' },
     });
     fireEvent.click(screen.getByText('Confirm'));
-    await screen.findByText('1 / 120');
+    await screen.findByRole('img', { name: '1 of 120 answered' });
 
     fireEvent.click(screen.getByRole('button', { name: 'Show more questions' }));
     // `offset=50`, the contiguous head — NOT `offset=60`, the length of what is held.

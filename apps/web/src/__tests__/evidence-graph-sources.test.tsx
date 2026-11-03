@@ -1467,16 +1467,14 @@ describe('evidence graph panel · the extra sources on screen', () => {
       />,
     );
 
-  it('renders the disclosure VERBATIM from the constant, in both places', () => {
+  it('renders the disclosure VERBATIM from the constant', () => {
     const { container, getByTestId, getByText } = renderPanel(everySource());
     expect(getByTestId('evgraph-disclosure').textContent).toBe(EVIDENCE_GRAPH_DISCLOSURE);
-    // The second rendering lives in the "what this graph will not draw" details.
-    const legend = container.querySelector('.evgraph-legend');
-    expect(legend?.textContent).toContain(EVIDENCE_GRAPH_DISCLOSURE);
-    // …and the expansion now covers the relationships the new vocabulary adds.
-    expect(legend?.textContent).toContain('no line marks one as the one a decision picked');
-    expect(legend?.textContent).toContain('no earlier revision is drawn at all');
     expect(getByText(EVIDENCE_GRAPH_DISCLOSURE, { selector: '.evgraph-disclosure' })).toBeTruthy();
+    // The "What this graph will not draw" disclosure was retired (declutter,
+    // 2026-11-02); its standing caveat paragraphs must not come back.
+    expect(container.querySelector('.evgraph-legend')).toBeNull();
+    expect(container.textContent).not.toContain('What this graph will not draw');
   });
 
   it('says conflicts were read for the record, not per run', () => {

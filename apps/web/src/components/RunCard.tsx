@@ -1474,7 +1474,7 @@ export function RunCard({
                 </button>
                 <button
                   type="button"
-                  className="btn btn-secondary"
+                  className="btn btn-quiet"
                   disabled={removing}
                   onClick={closeRemove}
                 >
@@ -1749,8 +1749,7 @@ function CheckResult({
           <StatusChip kind="fail" label="Check Failed" />
         )}
         <span className="run-check-scope">
-          Read-only check of run version {data.checked_run_version}. Nothing was written,
-          submitted or exported.
+          Checked run version {data.checked_run_version}.
         </span>
       </div>
 

@@ -1020,7 +1020,7 @@ describe('a discarded answer does not come back on the completion screen', () =>
     const box = (await screen.findByLabelText('Asset Hash')) as HTMLInputElement;
     fireEvent.change(box, { target: { value: 'c'.repeat(64) } });
     fireEvent.click(screen.getByText('Confirm'));
-    await screen.findByText('1 / 5');
+    await screen.findByRole('img', { name: '1 of 5 answered' });
 
     // The answered row's Edit opens the same prompt with `Cancel` as its secondary act.
     fireEvent.click(document.querySelector('.answered-edit') as HTMLElement);

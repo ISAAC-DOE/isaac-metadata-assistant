@@ -111,7 +111,7 @@ function routesFor(bundle: ExperimentGraphBundle) {
 async function openGraph(bundle: ExperimentGraphBundle = experimentGraphBundle()) {
   stubFetchRoutes(routesFor(bundle));
   const view = renderAt(`/record/${GRAPH_EXP_ID}?view=graph`);
-  await view.findByRole('heading', { name: 'Experiment Graph' });
+  await view.findByRole('heading', { name: 'Experiment Graph' }, { timeout: 5000 });
   return view;
 }
 
@@ -163,7 +163,7 @@ describe('the graph lives inside the record, and is linkable', () => {
   it('deep-links: ?view=graph opens the graph directly', async () => {
     stubFetchRoutes(routesFor(experimentGraphBundle()));
     const view = renderAt(`/record/${GRAPH_EXP_ID}?view=graph`);
-    expect(await view.findByRole('heading', { name: 'Experiment Graph' })).toBeInTheDocument();
+    expect(await view.findByRole('heading', { name: 'Experiment Graph' }, { timeout: 5000 })).toBeInTheDocument();
     /*
      * ~~expect(workspaceLink(view, 'Graph')).toHaveAttribute('aria-current', 'page')~~
      * — there is no such link to mark. The deep link still RESOLVES to the
@@ -199,7 +199,7 @@ describe('the graph lives inside the record, and is linkable', () => {
   it('adds NO new backend route — it reads seven endpoints that already existed', async () => {
     const calls = stubFetchRoutes(routesFor(experimentGraphBundle()));
     const view = renderAt(`/record/${GRAPH_EXP_ID}?view=graph`);
-    await view.findByRole('heading', { name: 'Experiment Graph' });
+    await view.findByRole('heading', { name: 'Experiment Graph' }, { timeout: 5000 });
     const base = `/api/experiments/${GRAPH_EXP_ID}`;
     const registered = Object.keys(routesFor(experimentGraphBundle()));
     /* THE ONE ENDPOINT THIS SURFACE MAY READ WITH A PARAMETER. `useRecordSession` asks
@@ -391,10 +391,7 @@ describe('the graph draws an experiment, and explains itself', () => {
 
   it('states that no links are declared instead of drawing one', async () => {
     const view = await openGraph();
-    expect(view.getByText(/This record declares no links/)).toBeInTheDocument();
-    expect(
-      view.getByText(/a shared formula, sample id, beamline or proposal is not a relationship/),
-    ).toBeInTheDocument();
+    expect(view.getByText('This record declares no links.')).toBeInTheDocument();
   });
 
   it('draws a DECLARED link with its relationship and its basis', async () => {

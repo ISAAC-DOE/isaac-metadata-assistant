@@ -513,10 +513,8 @@ function RecordDescriptionEditor({ experimentId }: { experimentId: string }) {
       */}
       {loaded !== null && loaded.fieldsServed && offered.length === 0 && (
         <p className="rdesc-lead">
-          This build reports no record-level field it will accept a value at, so no boxes
-          are offered here. Nothing is hidden from you: a box whose only outcome would be
-          a refusal is worse than none. The contributor and tag editors below are separate
-          and are unaffected.
+          No record-level field accepts a value here. The contributor and tag editors
+          below are unaffected.
         </p>
       )}
       {loaded !== null && !loaded.fieldsServed && (
@@ -721,9 +719,7 @@ function ContributorsEditor({
     <fieldset className="rdesc-group" id={id}>
       <legend className="rdesc-legend">Contributors</legend>
       <p className="rdesc-hint">
-        Who contributed to this record, and in what role. WHO recorded it is not stored:
-        this application receives no verified user identity, so no name is attached to
-        the confirmation rather than an unverified one being attached.
+        Who contributed to this record, and in what role.
       </p>
       {readOnlyReason && (
         <p className="rdesc-readonly" role="note">

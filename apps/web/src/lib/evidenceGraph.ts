@@ -1838,8 +1838,8 @@ function assetDetailLines(
   lines.push({
     term: 'Digest as supplied',
     value: asset.sha256
-      ? `${asset.sha256} — ${asset.sha256_wellformed ? 'this is 64 lowercase hexadecimal characters' : 'this is NOT 64 lowercase hexadecimal characters'}. Nothing here has opened the file, so this says nothing about what the file contains.`
-      : 'no digest was supplied, and none is computed or repaired here',
+      ? `${asset.sha256} — ${asset.sha256_wellformed ? 'this is 64 lowercase hexadecimal characters' : 'this is NOT 64 lowercase hexadecimal characters'}. Not checked against the file.`
+      : 'no digest was supplied',
   });
   lines.push({ term: 'Citations recorded on it', value: String(asset.evidence_count) });
   lines.push({
@@ -2871,9 +2871,8 @@ export function buildEvidenceGraph(
 
 // ---------------------------------------------------------------- findings
 
-/** What a finding the server sent but this build cannot describe is called. */
-export const UNDESCRIBABLE_FINDING =
-  'The server reported a finding this build cannot describe.';
+/** What a finding the server sent with no known description is called. */
+export const UNDESCRIBABLE_FINDING = 'The server reported an unrecognised finding.';
 
 /**
  * The three finding channels of `POST …/runs/{id}/check`, in render order.

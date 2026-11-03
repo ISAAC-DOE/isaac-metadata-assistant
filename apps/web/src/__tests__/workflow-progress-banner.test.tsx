@@ -31,29 +31,24 @@ afterEach(() => {
 });
 
 describe('WorkflowProgressBanner · content per current_step', () => {
-  it('complete_metadata, N=1: singular heading/body + "Review Items" action', () => {
+  it('complete_metadata, N=1: the needs-you heading and action, no body', () => {
     const wf = fixtureWorkflow({ pending_count: 1, draft_ok: false, ready: false, exported: false, rev: 1 });
-    const { getByText, getByRole } = renderAt(
+    const { getByText, getByRole, container } = renderAt(
       '/record/rec1',
       <WorkflowProgressBanner workflow={wf} recordId="rec1" pendingCount={1} />,
     );
-    expect(getByText('1 item needs your attention')).toBeInTheDocument();
-    expect(
-      getByText('Confirm or complete the remaining item before this record can be exported.'),
-    ).toBeInTheDocument();
-    expect(getByRole('button', { name: /Review Items/ })).toBeInTheDocument();
+    expect(getByText('1 Field Needs Your Confirmation')).toBeInTheDocument();
+    expect(container.querySelector('.wf-progress-text')).toBeNull();
+    expect(getByRole('button', { name: /Review & Answer/ })).toBeInTheDocument();
   });
 
-  it('complete_metadata, N=3: plural heading/body', () => {
+  it('complete_metadata, N=3: plural heading', () => {
     const wf = fixtureWorkflow({ pending_count: 3, draft_ok: false, ready: false, exported: false, rev: 1 });
     const { getByText } = renderAt(
       '/record/rec1',
       <WorkflowProgressBanner workflow={wf} recordId="rec1" pendingCount={3} />,
     );
-    expect(getByText('3 items need your attention')).toBeInTheDocument();
-    expect(
-      getByText('Confirm or complete the remaining items before this record can be exported.'),
-    ).toBeInTheDocument();
+    expect(getByText('3 Fields Need Your Confirmation')).toBeInTheDocument();
   });
 
   it('review_evidence: "Evidence review needed" + Review Evidence action', () => {

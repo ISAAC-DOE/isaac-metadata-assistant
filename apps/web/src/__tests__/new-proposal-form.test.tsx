@@ -45,12 +45,11 @@
 import { describe, it, expect, afterEach, vi, type Mock } from 'vitest';
 import { render, screen, fireEvent, waitFor } from '@testing-library/react';
 import { MemoryRouter } from 'react-router-dom';
+import { LABELS } from '../lib/labels';
 
 import { IngestionProposalsPanel } from '../components/IngestionProposalsPanel';
 import {
-  NEW_PROPOSAL_ACCEPTANCE_DISCLOSURE,
   NEW_PROPOSAL_EFFECT_CLAIM,
-  NEW_PROPOSAL_UNAVAILABLE_REASON,
 } from '../components/NewProposalForm';
 import {
   HUMAN_PROPOSED_RULE,
@@ -205,7 +204,7 @@ describe('New Proposal · the creation door exists and is real', () => {
     // NOT disabled, and NOT wearing an unavailability label. The measured fact is
     // that creation works; a placeholder here would assert a blocker that is not real.
     expect((trigger as HTMLButtonElement).disabled).toBe(false);
-    expect(screen.queryByText(/Unavailable on this deployment/)).toBeNull();
+    expect(screen.queryByText(/No fields can be proposed/)).toBeNull();
 
     fireEvent.click(trigger);
     await screen.findByText('Source Note');
@@ -220,9 +219,9 @@ describe('New Proposal · the creation door exists and is real', () => {
     // The defect the owner reported was that the proposals surface offered no way in
     // at all. The trigger must be present on first paint of a loaded panel.
     await screen.findByRole('button', { name: 'New Proposal' });
-    expect(
-      screen.getByText(/Suggest a value for one field, citing the note it was read from/),
-    ).toBeTruthy();
+    // The lede under it was retired (declutter, 2026-11-02): the button and the
+    // form say what it does.
+    expect(document.querySelector('.new-proposal-lede')).toBeNull();
   });
 });
 
@@ -446,7 +445,7 @@ describe('New Proposal · it never claims a write it did not make', () => {
     expect(screen.queryByText(/field updated/i)).toBeNull();
   });
 
-  it('discloses that acceptance is blocked by configuration, without faking or hiding it', async () => {
+  it('makes no standing claim about acceptance', async () => {
     stubFetchRoutes({
       [LIST]: { body: page() },
       [NOTES]: { body: notesPage([noteFixture()]) },
@@ -455,14 +454,13 @@ describe('New Proposal · it never claims a write it did not make', () => {
     renderPanel();
     await openForm();
 
-    // Behind a NATIVE disclosure — keyboard operable, screen-reader announced, and
-    // queryable whether open or closed — never hover-only.
-    expect(screen.getByText(NEW_PROPOSAL_ACCEPTANCE_DISCLOSURE)).toBeTruthy();
-    expect(
-      screen.getByText(/What happens after you store it\?/).tagName.toLowerCase(),
-    ).toBe('summary');
-    // And it must not read as "creation is blocked", which is the false half.
-    expect(NEW_PROPOSAL_ACCEPTANCE_DISCLOSURE).toContain('Creating a proposal works.');
+    // The standing acceptance explainer was retired (declutter, 2026-11-02): the
+    // form never claims acceptance works, and never claims it is blocked here — the
+    // review card's own notice says that, only when it is true.
+    expect(screen.queryByText(/What happens after you store it\?/)).toBeNull();
+    const ACCEPT_CLAIM = /accepting one (works|does not)/i;
+    expect(ACCEPT_CLAIM.test('Creating a proposal works. Accepting one does not, in this deployment')).toBe(true);
+    expect(screen.queryByText(ACCEPT_CLAIM)).toBeNull();
   });
 
   it('shows the exact provenance sentence that will be stored, rather than hiding it', async () => {
@@ -621,10 +619,11 @@ describe('New Proposal · the unavailable case is real, not invented', () => {
 
     // In its REAL location, with the reason one keystroke away — never a button that
     // fails after being clicked.
-    expect(await screen.findByText(/New Proposal · Unavailable on this deployment/)).toBeTruthy();
+    expect(await screen.findByText(LABELS.newProposalUnavailable)).toBeTruthy();
     expect(screen.queryByRole('button', { name: 'New Proposal' })).toBeNull();
-    expect(screen.getByText(NEW_PROPOSAL_UNAVAILABLE_REASON)).toBeTruthy();
-    expect(screen.getByText('Why?').tagName.toLowerCase()).toBe('summary');
+    // The label is the whole reason; the "Why?" explainer was retired (declutter,
+    // 2026-11-02).
+    expect(screen.queryByText('Why?')).toBeNull();
   });
 
   it('a FAILED read is not reported as unavailable — that is a different fact', async () => {
@@ -636,7 +635,7 @@ describe('New Proposal · the unavailable case is real, not invented', () => {
     // is not "this deployment cannot do it", and collapsing the two would be the
     // same over-claim `target_stale: null` already has a rule against on this panel.
     expect(screen.queryByRole('button', { name: 'New Proposal' })).toBeNull();
-    expect(screen.queryByText(/Unavailable on this deployment/)).toBeNull();
+    expect(screen.queryByText(/No fields can be proposed/)).toBeNull();
   });
 });
 

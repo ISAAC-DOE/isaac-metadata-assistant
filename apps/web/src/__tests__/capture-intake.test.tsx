@@ -24,7 +24,7 @@
  */
 
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { render, waitFor, within } from '@testing-library/react';
+import { render, screen, waitFor, within } from '@testing-library/react';
 import { MemoryRouter } from 'react-router-dom';
 import { CaptureIntake } from '../components/CaptureIntake';
 import { CAPTURE_COPY } from '../lib/transcriptCaptureContent';
@@ -117,11 +117,11 @@ describe('the one-line summary of what the record holds', () => {
     expect(document.querySelector('.capture-home-summary')).toBeNull();
   });
 
-  it('offers no Review link when there is nothing to review', () => {
+  it('renders no summary, and no Review link, when the record holds nothing', () => {
     renderHome({ notes_total: 0, proposals_open: 0, unreadable_entries: 0 });
-    const summary = document.querySelector('.capture-home-summary')!;
-    expect(summary.textContent).toContain(CAPTURE_COPY.homeSummaryLabel);
-    expect(within(summary as HTMLElement).queryByRole('link')).toBeNull();
+    // Declutter (2026-11-02): an empty fact is not a card of its own.
+    expect(document.querySelector('.capture-home-summary')).toBeNull();
+    expect(screen.queryByRole('link', { name: /^Review/ })).toBeNull();
   });
 });
 

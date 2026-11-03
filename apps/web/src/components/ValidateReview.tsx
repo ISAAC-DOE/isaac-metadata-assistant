@@ -1,4 +1,5 @@
 import './validate-review.css';
+import { LABELS } from '../lib/labels';
 import { useId, useRef, useState } from 'react';
 import { BlockerItems } from './BlockerItems';
 import { Disclosure } from './Disclosure';
@@ -277,9 +278,9 @@ type Detail =
   | { status: 'error'; message: string }
   | { status: 'data'; data: ApiRunCheckResponse };
 
-const IDLE_TEXT =
-  'No check has been run here yet, so nothing on this record has been checked on this screen. ' +
-  'That is not the same as “no findings”.';
+/* Short, and still a statement about COVERAGE rather than findings: "not checked"
+   is not "no findings" (declutter, 2026-11-02). */
+const IDLE_TEXT = 'Not checked yet.';
 
 export function ValidateReview({ experimentId }: { experimentId: string }) {
   const headingId = useId();
@@ -350,8 +351,10 @@ export function ValidateReview({ experimentId }: { experimentId: string }) {
 
   return (
     <section className="validate-review card" aria-labelledby={headingId}>
+      {/* Named for what it is rather than repeating the button below it
+          (declutter, 2026-11-02). */}
       <h2 id={headingId} className="vr-title">
-        Validate &amp; Review
+        {LABELS.validationHeading}
       </h2>
       {/*
         THE SUB-LINE SAYS "EVERY RUN" ONLY WHERE THERE ARE RUNS. A record with no
@@ -383,15 +386,15 @@ export function ValidateReview({ experimentId }: { experimentId: string }) {
           ? 'Checks this record against the same deterministic validators the export gate uses — each run separately if it has runs — and lists what was found, so you can decide what to fix. '
           : hasRuns
             ? 'Checks every run against the same deterministic validators the export gate uses, and lists what each one found, so you can decide what to fix. '
-            : 'Checks this record against the same deterministic validators the export gate uses, and lists what they found, so you can decide what to fix. '}
-        Read-only: nothing here is written, exported, submitted, or repaired for you.
+            : 'Checks this record against the same deterministic validators the export gate uses, and lists what they found, so you can decide what to fix.'}
       </p>
       </Disclosure>
 
       <div className="vr-actions">
+        {/* SECONDARY: the Runs workspace's one primary is Add Run. */}
         <button
           type="button"
-          className="btn btn-primary"
+          className="btn btn-secondary"
           onClick={runReview}
           disabled={review.status === 'checking'}
         >
@@ -896,8 +899,7 @@ function UnitDetail({
   return (
     <div className="vr-detail">
       <p className="vr-detail-scope">
-        Read-only detail for run version {data.checked_run_version}. Nothing was written,
-        submitted or exported.
+        Detail for run version {data.checked_run_version}.
       </p>
 
       {disagrees && (

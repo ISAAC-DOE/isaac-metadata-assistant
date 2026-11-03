@@ -1192,7 +1192,7 @@ export function categoryWord(category: CompareCategory): string {
  * build cannot read says exactly that.
  */
 export function supportWord(entry: CompareSupport): string {
-  if (entry.undescribable) return 'an entry this build could not read';
+  if (entry.undescribable) return 'an entry that could not be read';
   const head = entry.confirmation
     ? 'answered in this application'
     : entry.sourceType !== null

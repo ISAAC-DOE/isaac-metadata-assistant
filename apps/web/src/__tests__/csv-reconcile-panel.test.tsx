@@ -77,9 +77,13 @@ function previewFixture(overrides: Record<string, unknown> = {}) {
 }
 
 function renderPanel(props: Partial<{ version: string; onGoToComplete: () => void }> = {}) {
-  return render(
+  const view = render(
     <CsvReconcilePanel experimentId={EXP} version={props.version ?? VERSION} onGoToComplete={props.onGoToComplete} />,
   );
+  // Behind one "Reconcile a Campaign Sheet" disclosure since the declutter
+  // (2026-11-02), closed on arrival; every test below works on the opened panel.
+  fireEvent.click(view.getByRole('button', { name: 'Reconcile a Campaign Sheet' }));
+  return view;
 }
 
 function fileInput(): HTMLInputElement {
@@ -106,10 +110,15 @@ describe('CsvReconcilePanel — pre-upload', () => {
   // public data only" told the reader nothing they could check, and the product
   // never defines the word for them. What must survive is the INSTRUCTION plus the
   // honest admission that the app performs no such check.
-  it('shows the do-not-upload-real-data warning, and admits it is not a check', () => {
-    renderPanel();
-    expect(screen.getByText(/do not upload real or private data/i)).toBeInTheDocument();
-    expect(screen.getByText(/nothing here checks the file/i)).toBeInTheDocument();
+  it('carries no standing data-governance warning, and never claims to check the file', () => {
+    // The warning banner was retired (declutter, 2026-11-02). What must not appear
+    // in its place is a claim the app cannot back: that it screens the file for
+    // real or private data.
+    const { container } = renderPanel();
+    expect(container.querySelector('.csv-recon-banner-warn')).toBeNull();
+    const SCREENING_CLAIM = /\b(checks|screens|detects|verifies)\b[^.]{0,40}\b(real|private|synthetic)\b/i;
+    expect(SCREENING_CLAIM.test('ISAAC checks the file for real or private data.')).toBe(true);
+    expect(container.textContent ?? '').not.toMatch(SCREENING_CLAIM);
   });
 
   it('states this is review evidence, not a write to the record', () => {

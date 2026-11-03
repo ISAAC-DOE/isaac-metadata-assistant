@@ -2,7 +2,7 @@ import './rename-experiment.css';
 import '../screens/screens.css';
 import { useEffect, useId, useRef, useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
-import { ChevronDown, ChevronRight, TriangleAlert } from './icons';
+import { Ellipsis, TriangleAlert } from './icons';
 import { api, ApiError } from '../lib/api';
 import { clearSession } from '../lib/assistantSession';
 import { isExampleRecordId } from '../lib/exampleRecords';
@@ -78,6 +78,8 @@ export function DiscardExperimentPanel({
 
   const firedRef = useRef(false); // synchronous single-submit guard (survives a double-click)
   const openRef = useRef<HTMLButtonElement>(null);
+  const moreRef = useRef<HTMLButtonElement>(null);
+  const menuRef = useRef<HTMLDivElement>(null);
   const keepRef = useRef<HTMLButtonElement>(null);
   const dialogRef = useRef<HTMLDivElement>(null);
   const wasOpen = useRef(false);
@@ -206,30 +208,56 @@ export function DiscardExperimentPanel({
     }
   };
 
+  /* THE MORE MENU CLOSES ON Escape (focus back to its button) AND ON A CLICK
+     OUTSIDE IT. It is a disclosure with one item, not a menu framework. */
+  useEffect(() => {
+    if (!expanded || open) return;
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (e.key !== 'Escape') return;
+      /* Only an Escape meant for THIS menu: focus on its button or inside it. An
+         Escape closing a tip or the Assistant elsewhere leaves the menu alone. */
+      const active = document.activeElement;
+      if (active !== moreRef.current && !menuRef.current?.contains(active)) return;
+      e.preventDefault();
+      setExpanded(false);
+      moreRef.current?.focus();
+    };
+    const onPointerDown = (e: MouseEvent) => {
+      const target = e.target as Node;
+      if (menuRef.current?.contains(target) || moreRef.current?.contains(target)) return;
+      setExpanded(false);
+    };
+    document.addEventListener('keydown', onKeyDown);
+    document.addEventListener('mousedown', onPointerDown);
+    return () => {
+      document.removeEventListener('keydown', onKeyDown);
+      document.removeEventListener('mousedown', onPointerDown);
+    };
+  }, [expanded, open]);
+
   const shownError = error ?? (drifted ? LABELS.discardStale : null);
-  const Chevron = expanded ? ChevronDown : ChevronRight;
   const runs = detail.run_count;
 
   return (
-    <section className="field-group" aria-label={LABELS.discardSectionLabel}>
-      <h2 className="fg-heading">
-        <button
-          type="button"
-          className="fg-header"
-          aria-expanded={expanded}
-          aria-controls={expanded ? bodyId : undefined}
-          onClick={() => setExpanded((isOpen) => !isOpen)}
-        >
-          <Chevron className="fg-chevron" size={16} strokeWidth={2} aria-hidden="true" />
-          <span className="fg-block">{LABELS.discardSectionLabel}</span>
-          <span className="record-section-summary record-section-value">
-            {LABELS.discardSectionSummary}
-          </span>
-        </button>
-      </h2>
+    <div className="record-more">
+      {/* THE ONE REMOVAL (B-08), MOVED OFF THE IDENTITY LIST (declutter,
+          2026-11-02): the only control on the record with no undo is not a peer of
+          Folder. It sits behind a small "More" button beside the page title, and the
+          confirmation dialog below is unchanged. */}
+      <button
+        ref={moreRef}
+        type="button"
+        className="record-more-trigger"
+        aria-label={LABELS.recordMoreActions}
+        title={LABELS.recordMoreActions}
+        aria-expanded={expanded}
+        aria-controls={expanded ? bodyId : undefined}
+        onClick={() => setExpanded((isOpen) => !isOpen)}
+      >
+        <Ellipsis size={18} strokeWidth={2} aria-hidden="true" />
+      </button>
       {expanded && (
-        <div className="fg-body" id={bodyId}>
-          <p className="rename-hint">{LABELS.discardIntro}</p>
+        <div className="record-more-menu" id={bodyId} ref={menuRef}>
           {blockedReason !== null ? (
             <p className="discard-blocked" role="note">
               {blockedReason}
@@ -304,7 +332,7 @@ export function DiscardExperimentPanel({
               <button
                 ref={keepRef}
                 type="button"
-                className="btn btn-secondary"
+                className="btn btn-quiet"
                 onClick={close}
                 disabled={busy}
               >
@@ -322,6 +350,6 @@ export function DiscardExperimentPanel({
           </div>
         </div>
       )}
-    </section>
+    </div>
   );
 }

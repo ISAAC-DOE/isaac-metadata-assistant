@@ -30,6 +30,7 @@ import {
 } from '../../lib/experimentGraph';
 import { pointerHitRadius, screenBoundedUnits, type GraphPoint } from '../../lib/graphModel';
 import type { ExperimentGraphBundle } from '../../lib/types';
+import { Maximize2, RotateCcw, ZoomIn, ZoomOut } from '../../components/icons';
 
 /**
  * The EXPERIMENT-SCOPED graph — a picture of ONE experiment's science, not of
@@ -491,16 +492,20 @@ function LoadedExperimentGraph({ graph }: { graph: ExperimentGraph }) {
         <h2 id="expgraph-heading" className="expgraph-title">
           Experiment Graph
         </h2>
-        <p className="expgraph-intro">
-          Everything this experiment is made of and where each part came from — sections,
-          fields, the evidence under them, the files that evidence cites, and the workflow
-          it sits in. Every line is drawn from a recorded fact; nothing is inferred from
-          resemblance.
-        </p>
+        {/* ONE COUNT LINE STAYS IN VIEW; the rest of what sat above the canvas —
+            the drawn, undrawn and label lines, the notes and the kinds hint — is one
+            "About This Graph" disclosure, still in the DOM with its testids
+            (declutter, 2026-11-02). */}
         <div className="expgraph-counts" data-testid="expgraph-counts">
           <p className="expgraph-count-line" data-testid="expgraph-count-total">
             {lineTotal}
           </p>
+        </div>
+      </header>
+
+      <details className="expgraph-about">
+        <summary>About This Graph</summary>
+        <div className="expgraph-counts">
           <p className="expgraph-count-line" data-testid="expgraph-count-drawn">
             {lineDrawn}
           </p>
@@ -511,8 +516,9 @@ function LoadedExperimentGraph({ graph }: { graph: ExperimentGraph }) {
             {lineLabels}
           </p>
         </div>
-      </header>
-
+        <p className="expgraph-kinds-hint" data-testid="expgraph-kinds-hint">
+          {kindScopeSentence(chipTotal, tally.total)}
+        </p>
       {graph.notes.length > 0 && (
         <ul className="expgraph-notes">
           {graph.notes.map((note) => (
@@ -546,6 +552,10 @@ function LoadedExperimentGraph({ graph }: { graph: ExperimentGraph }) {
           ))}
         </ul>
       )}
+        <p className="expgraph-legend-kinds">
+          {EXPERIMENT_NODE_KINDS.map((k) => NODE_KIND_LABELS[k]).join(' · ')}
+        </p>
+      </details>
       {truncated && (
         <p className="expgraph-note" role="note" data-note="visible_cap">
           More than {MAX_VISIBLE_NODES} nodes would be drawn at once, so the view is bounded.
@@ -593,34 +603,49 @@ function LoadedExperimentGraph({ graph }: { graph: ExperimentGraph }) {
           )}
         </div>
 
+        {/* COMPACT ICON BUTTONS with the same accessible names (declutter,
+            2026-11-02). `title` gives a pointer reader the name too. */}
         <div className="expgraph-buttons" role="group" aria-label="Graph view controls">
-          <button type="button" className="expgraph-btn" onClick={() => dispatch({ kind: 'zoom', factor: 1.25 })}>
-            Zoom In
-          </button>
-          <button type="button" className="expgraph-btn" onClick={() => dispatch({ kind: 'zoom', factor: 1 / 1.25 })}>
-            Zoom Out
+          <button
+            type="button"
+            className="expgraph-btn expgraph-icon-btn"
+            aria-label="Zoom In"
+            title="Zoom In"
+            onClick={() => dispatch({ kind: 'zoom', factor: 1.25 })}
+          >
+            <ZoomIn size={16} strokeWidth={2} aria-hidden="true" />
           </button>
           <button
             type="button"
-            className="expgraph-btn"
+            className="expgraph-btn expgraph-icon-btn"
+            aria-label="Zoom Out"
+            title="Zoom Out"
+            onClick={() => dispatch({ kind: 'zoom', factor: 1 / 1.25 })}
+          >
+            <ZoomOut size={16} strokeWidth={2} aria-hidden="true" />
+          </button>
+          <button
+            type="button"
+            className="expgraph-btn expgraph-icon-btn"
+            aria-label="Fit View"
+            title="Fit View"
             onClick={() => dispatch({ kind: 'fit', box })}
           >
-            Fit View
+            <Maximize2 size={16} strokeWidth={2} aria-hidden="true" />
           </button>
           <button
             type="button"
-            className="expgraph-btn"
+            className="expgraph-btn expgraph-icon-btn"
+            aria-label="Reset View"
+            title="Reset View"
             onClick={() => dispatch({ kind: 'reset', box })}
           >
-            Reset View
+            <RotateCcw size={16} strokeWidth={2} aria-hidden="true" />
           </button>
         </div>
 
         <fieldset className="expgraph-kinds">
           <legend className="expgraph-kinds-legend">Show</legend>
-          <p className="expgraph-kinds-hint" data-testid="expgraph-kinds-hint">
-            {kindScopeSentence(chipTotal, tally.total)}
-          </p>
           <div className="expgraph-kinds-row">
             {FILTERABLE_KINDS.filter((k) => counts[k] > 0).map((k) => {
               const on = !state.hiddenKinds.includes(k);
@@ -914,10 +939,12 @@ function NodeDetail({
         </p>
       )}
 
-      <p className="expgraph-detail-producer">
-        <span className="expgraph-detail-producer-term">Where this came from</span>
+      {/* The technical source (an API route, a module) is for a curator, so it is
+          behind its own disclosure rather than printed to every reader. */}
+      <details className="expgraph-detail-producer">
+        <summary className="expgraph-detail-producer-term">Where this came from</summary>
         <span className="expgraph-detail-producer-value">{node.producer}</span>
-      </p>
+      </details>
 
       {node.detail.length > 0 && (
         <dl className="expgraph-detail-list">
@@ -931,15 +958,14 @@ function NodeDetail({
       )}
 
       <div className="expgraph-detail-actions">
+        {/* The anchor cannot collapse, and says nothing rather than wearing a
+            disabled button that states a fact (declutter, 2026-11-02). */}
         {expanded ? (
-          <button
-            type="button"
-            className="expgraph-btn"
-            disabled={isAnchor}
-            onClick={() => onCollapse(node.id)}
-          >
-            {isAnchor ? 'Anchor — always open' : 'Collapse'}
-          </button>
+          isAnchor ? null : (
+            <button type="button" className="expgraph-btn" onClick={() => onCollapse(node.id)}>
+              Collapse
+            </button>
+          )
         ) : (
           <button type="button" className="expgraph-btn" onClick={() => onExpand(node.id)}>
             Expand
@@ -985,27 +1011,17 @@ function NodeDetail({
                   {other.label}
                   <span className="expgraph-conn-kind">{NODE_KIND_LABELS[other.kind]}</span>
                 </button>
-                <p className="expgraph-conn-why">{adj.edge.why}</p>
+                {/* Folded behind the row, still in the DOM (declutter, 2026-11-02). */}
+                <details className="expgraph-conn-more">
+                  <summary>Why</summary>
+                  <p className="expgraph-conn-why">{adj.edge.why}</p>
+                </details>
               </li>
             );
           })}
         </ul>
       )}
 
-      <details className="expgraph-legend">
-        <summary>What this graph will not draw</summary>
-        <p>
-          No relationship is inferred from resemblance. Two records that share a formula, a
-          sample id, a beamline, a proposal or a contributor name are <strong>not</strong>{' '}
-          joined here — a matching string is not an entity, and a link is an author’s
-          assertion, read only from the record’s own <code>links[]</code>. No similarity, no
-          timestamp-derived causality, and no scientific interpretation is drawn: nothing in
-          this application computes any of them.
-        </p>
-        <p className="expgraph-legend-kinds">
-          {EXPERIMENT_NODE_KINDS.map((k) => NODE_KIND_LABELS[k]).join(' · ')}
-        </p>
-      </details>
     </div>
   );
 }

@@ -19,6 +19,7 @@ import { RecordActivityNote } from '../components/RecordActivityNote';
 import { needsCanonicalRefetch } from '../lib/recordChanges';
 import { WorkflowProgressBanner } from '../components/WorkflowProgressBanner';
 import { RevisionHistoryPanel } from '../components/RevisionHistoryPanel';
+import { HelpTip } from '../components/HelpTip';
 import { RunArtifactsPanel } from '../components/RunArtifactsPanel';
 import { LoadingPanel, BackendDown } from '../components/FetchStates';
 import { Shield, TriangleAlert, Lock, Play } from '../components/icons';
@@ -39,7 +40,12 @@ import { api, ApiError } from '../lib/api';
 import { useRecordSession } from '../lib/useRecordSession';
 import { useWorkspaceScopeChanged } from '../lib/workspaceScope';
 import { useSettledErrorTitle } from '../lib/useSettledErrorTitle';
-import { toAdvisoryResult, toAuditResult, toValidationResult } from '../lib/adapt';
+import {
+  stripLifecycleSuffix,
+  toAdvisoryResult,
+  toAuditResult,
+  toValidationResult,
+} from '../lib/adapt';
 import { TUTORIAL_ANCHORS } from '../lib/tutorialSteps';
 import type {
   ApiExportResponse,
@@ -632,7 +638,7 @@ function LoadedExport({
       topBar={
         <TopBar
           variant="record"
-          title={detail.title}
+          title={stripLifecycleSuffix(detail.title)}
           filename={exported ? recordFilename : `draft · ${detail.id}`}
           stateChip={exported ? 'exported' : undefined}
           recordId={id}
@@ -764,22 +770,17 @@ function LoadedExport({
                 ) : (
                   <div className="coverage-loading card">Coverage loading…</div>
                 )}
-                {/* Was "A clean local run": on the hosted deployment the run
-                    happens on the server, not the reader's machine. The claim
-                    that matters is "here, not upstream" — which is what it now
-                    says. */}
-                <AdvisoryChip
-                  advisory={advisory}
-                  explain="A clean run here is not portal sign-off — the upstream validator isn't vendored here."
-                />
+                {/* No standing "not portal sign-off" caveat (declutter, 2026-11-02):
+                    the card names the advisories and nothing on it claims a sign-off. */}
+                <AdvisoryChip advisory={advisory} />
               </div>
 
+              {/* THE DONE STATE SAYS WHAT HAPPENED (declutter, 2026-11-02): the record
+                  is written, so the heading reads "Exported" rather than repeating
+                  the pre-export gate. */}
               <div className="ready-heading">
                 <span className="dot dot-ready" aria-hidden="true" />
-                <span className="ready-label">{LABELS.groupReady}</span>
-                <span className="ready-note">
-                  — doubly gated: no-guessing checks passed, then official schema.
-                </span>
+                <span className="ready-label">{LABELS.chipExported}</span>
               </div>
 
               {/* No singular pair to card. The reason is authored server-side
@@ -835,19 +836,13 @@ function LoadedExport({
                   style={{ flex: 'none', color: 'var(--text-slate)' }}
                 />
                 <span>
-                  <strong>Review the sidecar before sharing.</strong> It is an assistant
-                  convention — not an official ISAAC standard — and can carry source paths, URIs and
-                  hashes. Records are written once, immutable via the CLI: no hand-edit, no
-                  overwrite, no portal submission from here.
+                  <strong>Review the sidecar before sharing.</strong>{' '}
+                  <HelpTip subject="the evidence sidecar" label="Why Review the Sidecar">
+                    <span>It can carry source paths, URIs and hashes.</span>
+                  </HelpTip>
                 </span>
               </div>
 
-              {!inSession && viewArtifacts && (
-                <p className="artifact-hint">
-                  Loaded from the immutable record + sidecar on disk (read-only) — View and
-                  Download show the exact written content.
-                </p>
-              )}
               {/* `!fanOut` — there are no "paths above" for a fan-out, and nothing
                   failed to read. `viewArtifacts` is null there simply because the
                   singular pair does not exist, so this sentence was a second false
@@ -940,8 +935,8 @@ function LoadedExport({
                   officialFindingSource(validate),
                   officialCheckedDocument(validate),
                 )}{' '}
-                Exporting runs the real, gated validation and writes the official record +
-                evidence sidecar. There is no override and no portal submission.
+                Exporting runs the gated validation and writes the official record +
+                evidence sidecar.
               </p>
               <button
                 type="button"
@@ -1028,17 +1023,11 @@ function LoadedExport({
           {/* BLOCKERS BEFORE ADVISORIES (review #277, I-7). */}
           {runFindingsNode}
 
-          <div className="signal-row" style={{ marginTop: 16 }}>
-            <div className="preexport-coverage card" role="note">
-              <div className="preexport-coverage-title">{LABELS.evidenceAudit}</div>
-              <p className="preexport-text">
-                Evidence coverage is counted from the written record — it runs after export.
-              </p>
-            </div>
-            <AdvisoryChip
-              advisory={advisory}
-              explain="Advisory is non-gating — it never changes the verdict or blocks export."
-            />
+          {/* The empty Evidence Audit card is gone (the status bar already says
+              coverage runs after export), so the advisory card has the row; its own
+              "non-gating" tag says the rest (declutter, 2026-11-02). */}
+          <div className="signal-row signal-row-single" style={{ marginTop: 16 }}>
+            <AdvisoryChip advisory={advisory} />
           </div>
         </>
       )}
@@ -1173,11 +1162,8 @@ function LoadedExport({
                 {viewing.runLabel !== undefined && (
                   <span className="artifact-modal-sub"> · {viewing.runLabel}</span>
                 )}
-                {viewing.kind === 'sidecar' && (
-                  <span className="artifact-modal-sub"> · {LABELS.sidecarNotOfficial}</span>
-                )}
               </span>
-              <button type="button" className="btn btn-secondary" onClick={closeViewer}>
+              <button type="button" className="btn btn-quiet" onClick={closeViewer}>
                 Close
               </button>
             </div>

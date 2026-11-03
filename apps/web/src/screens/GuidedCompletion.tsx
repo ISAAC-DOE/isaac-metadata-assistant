@@ -33,6 +33,7 @@ import {
   isAnswerablePendingItem,
   pendingItemToBlocker,
   pendingSummary,
+  stripLifecycleSuffix,
 } from '../lib/adapt';
 import type {
   ApiAnswerablePendingItem,
@@ -912,7 +913,7 @@ function LoadedCompletion({
            draft wrapped at the 640px/200%-zoom layout viewport and pushed the
            status bar 1px past the screen card (zoom-200 layout baseline). This is
            shorter than the false sentence it replaces. */
-        note="Export unlocks once every field is confirmed — saying you don't know leaves it open."
+        note="Export unlocks once every field is confirmed."
       />
     );
 
@@ -986,7 +987,7 @@ function LoadedCompletion({
       topBar={
         <TopBar
           variant="record"
-          title={detail.title}
+          title={stripLifecycleSuffix(detail.title)}
           filename={`draft · ${detail.id}`}
           recordId={id}
           surface={LABELS.screenComplete}
@@ -1194,7 +1195,6 @@ function LoadedCompletion({
           initialStaged={ans.blocker.inputType === 'structured'}
           confirmLabel={LABELS.actionSave}
           dontKnowLabel={LABELS.actionCancel}
-          hideBlankHint
           onConfirm={(value) => saveEdit(ans.blocker, value)}
           onDontKnow={cancelEdit}
         />
@@ -1307,9 +1307,9 @@ function LoadedCompletion({
         {liveNotes}
         <div className="completion-header">
           <h1 className="completion-title">All Fields Resolved</h1>
-          <span className={`completion-counter${total === 0 ? ' completion-counter-prose' : ''}`}>
-            {total === 0 ? 'No open questions.' : `${answered.length} / ${total}`}
-          </span>
+          {total === 0 && (
+            <span className="completion-counter completion-counter-prose">No open questions.</span>
+          )}
         </div>
         {answeredRows}
         {editImpactNote}
@@ -1436,9 +1436,8 @@ function LoadedCompletion({
         <h1 className="completion-title">
           Answer {total} {total === 1 ? 'Question' : 'Questions'} to Finish This Record
         </h1>
-        <span className="completion-counter">
-          {answered.length} / {total}
-        </span>
+        {/* No `0 / 2` counter: the bar below and "Question 1 of 2" say it
+            (declutter, 2026-11-02). */}
       </div>
 
       {/* CAPPED AT `PROGRESS_SEGMENTS_MAX`, and the `aria-label` is untouched. This

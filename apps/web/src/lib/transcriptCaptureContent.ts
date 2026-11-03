@@ -113,13 +113,11 @@ export const CAPTURE_COPY = {
    * claim. This sentence now makes the claim the code can actually keep.
    */
   guidanceMechanism:
-    'Recording keeps audio in this tab only — it is never uploaded. Turning a ' +
-    'recording into text needs a transcription provider; this deployment reports ' +
-    'whether one is configured next to the recording controls, before you rely on ' +
-    'it. Typing or pasting always works, with no provider needed. Finalizing reads ' +
-    'the text once and stores a proposal for each value it can store; values it ' +
-    'cannot store are listed with the reason — never a value written directly to ' +
-    'the record.',
+    'Recording keeps audio in this tab. Turning a recording into text needs a ' +
+    'transcription provider; whether one is configured is shown next to the ' +
+    'recording controls. Typing or pasting always works. Finalizing reads the ' +
+    'text once and stores a proposal for each value it can store; values it ' +
+    'cannot store are listed with the reason.',
 
   voiceHeading: 'Voice Capture',
   /*
@@ -219,11 +217,8 @@ export const CAPTURE_COPY = {
     'Playback happens entirely in this tab: no request is made to play it, and ' +
     'this player is configured to offer no download and no casting to another device.',
   voiceSeamUnreported:
-    'Transcription: not reported. This deployment has not told the page whether a ' +
-    'transcription provider is configured — the capability report has not been read, ' +
-    'or does not mention this seam — so treat turning a recording into text as ' +
-    'unavailable until it does. Recording still keeps the audio in this tab, and ' +
-    'nothing is sent anywhere.',
+    'Transcription: not reported. Treat turning a recording into text as ' +
+    'unavailable; recording still keeps the audio in this tab.',
   voiceUnsupported:
     'This browser does not offer audio recording, so the voice controls are not ' +
     'shown. Typing or pasting a transcript below does the same work.',
@@ -480,8 +475,8 @@ export const CAPTURE_COPY = {
     'Recording could not be started, so nothing was recorded. Typing or pasting ' +
     'a transcript below does the same work.',
   voiceAfterRefusal:
-    'The audio is still held in this tab and was not sent anywhere. Type or ' +
-    'paste what was said, and finalize that instead.',
+    'The audio is still held in this tab. Type or paste what was said, and ' +
+    'finalize that instead.',
 
   /*
    * THE TRANSCRIPTION REFUSAL, LED IN THE SCIENTIST'S REGISTER — 2026-09-10.
@@ -554,9 +549,8 @@ export const CAPTURE_COPY = {
     'Speech becomes text in your Claude app, not here — so the words never ' +
     'reach this deployment as audio, only as text you have seen.',
   mcpRoutePrecondition:
-    'This needs an agent endpoint, and this deployment publishes none yet. ' +
-    'Whether it does is an organization decision — Settings → Connect Your ' +
-    'Agent reports the current state and the full setup steps.',
+    'No agent endpoint is published. Settings → Connect Your Agent shows the ' +
+    'setup steps.',
   mcpRouteSayLabel: 'What to say, once it is connected',
   /*
    * A WORKED SENTENCE rather than a description of one. The owner asked for
@@ -704,7 +698,7 @@ export const CAPTURE_COPY = {
    * and typed from — every transcription provider answers 501. Neither line claims
    * a connection exists; the voice view reads the deployment's own posture.
    */
-  homeIntro: 'Choose a way in. You can use more than one on the same record.',
+  homeIntro: 'You can use more than one on the same record.',
   homeWriteLine: 'Type or paste your notes. ISAAC proposes values for you to review.',
   /*
    * WHAT IS TRUE TODAY (review #277, I-4; decision packet §9 — "build nothing that
@@ -760,12 +754,12 @@ export const CAPTURE_COPY = {
   claudeHeading: 'Use Claude for Voice Capture',
   claudeChecking: 'Checking how this deployment accepts Claude…',
   /* No future promise ("…yet"): what is true today, and nothing implied beyond it. */
-  claudeUnmounted: 'This ISAAC deployment does not accept a remote Claude connection.',
+  claudeUnmounted: 'Remote Claude connections are not accepted.',
   claudeLocalOnly:
-    'This ISAAC deployment accepts agent connections only from its own machine, so a Claude app elsewhere cannot reach it.',
+    'Agent connections are accepted only from this server’s own machine, so a Claude app elsewhere cannot reach it.',
   claudeNoAddress:
-    'This deployment has switched its agent interface on but has not published an address to add in Claude.',
-  claudeUnreported: 'This deployment has not reported whether it accepts a Claude connector.',
+    'The agent interface is on, but no address is published to add in Claude.',
+  claudeUnreported: 'Whether a Claude connector is accepted is not reported.',
   claudeConnectAction: 'Connect Your Agent',
   claudeReadyHeading: 'ISAAC is ready for a Claude connector.',
   claudeStepAdd: 'In your Claude app, add a custom connector with this address:',
@@ -775,8 +769,7 @@ export const CAPTURE_COPY = {
   claudeCopy: 'Copy',
   claudeCopied: 'Copied to the clipboard.',
   claudeCopyFailed: 'Copying was refused by this browser. Select the text and copy it instead.',
-  claudeNotObservable:
-    'ISAAC cannot observe your Claude app, so this page shows no connection state. New notes and proposals appear on this record when they arrive.',
+  claudeNotObservable: 'New notes and proposals appear on this record when they arrive.',
   claudeHowHeading: 'How Voice Capture With Claude Works',
   claudeStarter: (title: string, id: string, runLabel: string | null) =>
     `Add these notes to my ISAAC experiment "${title}" (${id})` +

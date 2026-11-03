@@ -198,7 +198,8 @@
 
 /* ---- the full-schema disclosure ----------------------------------------- */
 
-.rsm-more {
+.rsm-more,
+.rsm-inherited {
   margin-top: var(--space-md);
 }
 

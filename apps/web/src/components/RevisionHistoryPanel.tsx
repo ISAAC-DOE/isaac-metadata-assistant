@@ -45,9 +45,7 @@ import {
   LIFECYCLE_UNKNOWN_NOTE,
   SIDE_NOW,
   SIDE_REVISION,
-  SUBMITTED_IMMUTABLE_NOTE,
   SUBMITTED_REVISION_HEADING,
-  HISTORY_NOT_KEPT_LINE,
   readRevisionHistory,
   submittedRevisionText,
   WORKING_CHANGES_HEADING,
@@ -101,9 +99,17 @@ type SelectionState =
     };
 
 export function RevisionHistoryPanel({ experimentId }: { experimentId: string }) {
+  /* HIDDEN WHEN THE DEPLOYMENT KEEPS NO HISTORY (declutter, 2026-11-02): a heading,
+     a `?` and a paragraph saying there is nothing to show was an empty section.
+     The section appears wherever a history is kept. Reset when the record changes. */
+  const [notKept, setNotKept] = useState<string | null>(null);
+  /* The heading waits for the read: it never paints and then vanishes on a
+     deployment that keeps no history (final review, Minor 10). */
+  const [known, setKnown] = useState<string | null>(null);
+  if (notKept === experimentId) return null;
   return (
     <section className="revhist-section" aria-labelledby="revision-history-heading">
-      <div className="revhist-head">
+      <div className="revhist-head" hidden={known !== experimentId}>
         <h2 className="revhist-title" id="revision-history-heading">
           Submission History
         </h2>
@@ -119,12 +125,25 @@ export function RevisionHistoryPanel({ experimentId }: { experimentId: string })
       </div>
       {/* Keyed on the record so switching records rebuilds this panel's state rather
           than showing one record's history under another's heading. */}
-      <RevisionHistoryBrowser key={experimentId} experimentId={experimentId} />
+      <RevisionHistoryBrowser
+        key={experimentId}
+        experimentId={experimentId}
+        onNotKept={() => setNotKept(experimentId)}
+        onKnown={() => setKnown(experimentId)}
+      />
     </section>
   );
 }
 
-function RevisionHistoryBrowser({ experimentId }: { experimentId: string }) {
+function RevisionHistoryBrowser({
+  experimentId,
+  onNotKept,
+  onKnown,
+}: {
+  experimentId: string;
+  onNotKept: () => void;
+  onKnown: () => void;
+}) {
   const [list, setList] = useState<ListState>({ status: 'loading' });
   const [selection, setSelection] = useState<SelectionState>({ status: 'idle' });
 
@@ -143,6 +162,10 @@ function RevisionHistoryBrowser({ experimentId }: { experimentId: string }) {
   }, [experimentId]);
 
   useEffect(load, [load]);
+  useEffect(() => {
+    if (list.status === 'not_kept') onNotKept();
+    else if (list.status !== 'loading') onKnown();
+  }, [list.status, onNotKept, onKnown]);
 
   // The last revision clicked is the one shown: an earlier click's answer arriving later is dropped.
   const selectSeq = useRef(0);
@@ -167,13 +190,7 @@ function RevisionHistoryBrowser({ experimentId }: { experimentId: string }) {
   if (list.status === 'error') {
     return <BackendDown error={list.error} onRetry={load} />;
   }
-  if (list.status === 'not_kept') {
-    return (
-      <p className="revhist-status" role="note">
-        <span className="revhist-status-text">{HISTORY_NOT_KEPT_LINE}</span>
-      </p>
-    );
-  }
+  if (list.status === 'not_kept') return null;
 
   const { history } = list;
   return (
@@ -257,7 +274,7 @@ function historyStatusText(history: ApiRevisionHistory): string {
     );
   }
   if (history.lifecycle.submission_blocked_by_deployment.blocked) {
-    clauses.push('Submitting is unavailable in this deployment');
+    clauses.push('Submitting is unavailable');
   }
   return clauses.join(' · ');
 }
@@ -315,7 +332,6 @@ function SubmittedVersusWorking({ history }: { history: ApiRevisionHistory }) {
               the reasoning; `None` survives for the one state where it is a fact.
             */}
             {submittedRevisionText(state)}
-            <span className="revhist-working-note">{SUBMITTED_IMMUTABLE_NOTE}</span>
           </dd>
         </div>
         <div className="revhist-working-row">
@@ -427,7 +443,7 @@ function DeploymentBlockNote({ lifecycle }: { lifecycle: ApiLifecycle }) {
   return (
     <section className="revhist-deployment" role="note" aria-labelledby="revhist-deployment-heading">
       <h3 className="revhist-card-title" id="revhist-deployment-heading">
-        Submitting is unavailable in this deployment
+        Submitting is unavailable
       </h3>
       <p className="revhist-deployment-text">{blocked.message}</p>
       <ul className="revhist-blockers">
@@ -450,7 +466,7 @@ const DEPLOYMENT_BLOCKER_TEXT: Readonly<Record<string, string>> = {
     'No attributable person can be established for a request here, and a submission ' +
     'is a declaration by a person. This is a server configuration matter.',
   no_durable_storage:
-    'This deployment has no application database to record a durable submission in.',
+    'No application database is configured to record a durable submission in.',
 };
 
 /* ── availability ──────────────────────────────────────────────────────────── */

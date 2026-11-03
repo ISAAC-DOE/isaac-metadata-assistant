@@ -85,6 +85,18 @@ const CLASS_GUIDANCE: Record<EvidenceClass, { meaning: string; next: string }> =
   },
 };
 
+/*
+ * THE EXPLANATION A CLASS ALREADY IMPLIES (declutter, 2026-11-02). The server's
+ * `evidence_classify._explanation_for_readable` returns this sentence for every
+ * supported field backed by observed evidence — 26 identical lines on a seeded
+ * record. A row prints its explanation only when it says something the chip does
+ * not; any other wording (a derivation, a user confirmation, a partial read) is
+ * printed exactly as the server sent it.
+ */
+export const CLASS_DEFAULT_EXPLANATION: Partial<Record<string, string>> = {
+  supported: 'Backed by observed evidence.',
+};
+
 interface EvidenceClassificationPanelProps {
   classification: ApiEvidenceClassification;
   /** The loaded record's rev disagrees with the classification's — show a refresh hint. */
@@ -98,15 +110,18 @@ export function EvidenceClassificationPanel({
   onRefresh,
 }: EvidenceClassificationPanelProps) {
   const { field_results, counts } = classification;
+  /* THE ROWS THAT NEED A LOOK BY DEFAULT: everything not "Supported". The full list
+     is one click away ("Show All N"), so nothing is withheld. */
+  const [showAll, setShowAll] = useState(false);
+  const flagged = field_results.filter((r) => r.classification !== 'supported');
+  const rows = showAll ? field_results : flagged;
 
   return (
     <section className="evclass" aria-label="Evidence support">
       <header className="evclass-head">
         <h2 className="evclass-title">Evidence Support</h2>
         <p className="evclass-note">
-          How well each value is backed by evidence — a separate axis from schema
-          validity, completion, and advisory review. It never decides whether this
-          record can be exported.
+          How well each value is backed by evidence. It does not affect export.
         </p>
       </header>
 
@@ -140,11 +155,23 @@ export function EvidenceClassificationPanel({
             ))}
           </div>
 
-          <ul className="evclass-list">
-            {field_results.map((result) => (
-              <ClassificationRow key={result.field} result={result} />
-            ))}
-          </ul>
+          {rows.length > 0 && (
+            <ul className="evclass-list">
+              {rows.map((result) => (
+                <ClassificationRow key={result.field} result={result} />
+              ))}
+            </ul>
+          )}
+          {flagged.length < field_results.length && (
+            <button
+              type="button"
+              className="btn btn-ghost evclass-show-all"
+              aria-expanded={showAll}
+              onClick={() => setShowAll((v) => !v)}
+            >
+              {showAll ? 'Show Fewer' : `Show All ${field_results.length}`}
+            </button>
+          )}
         </>
       )}
     </section>
@@ -175,7 +202,9 @@ function ClassificationRow({ result }: { result: ApiFieldClassification }) {
         </button>
       </div>
 
-      <p className="evclass-explanation">{result.explanation}</p>
+      {result.explanation !== CLASS_DEFAULT_EXPLANATION[cls] && (
+        <p className="evclass-explanation">{result.explanation}</p>
+      )}
 
       {/* `role="group"` below: a bare `<div>` is `generic`, and ARIA prohibits
           naming a `generic`, so that `aria-label` reached nobody. 31 instances —

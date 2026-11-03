@@ -1,0 +1,50 @@
+/*
+ * Record workbench layout added by the record-side declutter (2026-11-02).
+ * Existing tokens only; no new hue, radius or custom property.
+ */
+
+/* The page title and the small "More" button beside it. The title keeps its own
+   type; the bottom margin moves to the row so the button aligns with the name. */
+.record-page-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: var(--space-md);
+  margin-bottom: var(--space-lg);
+}
+.record-page-head > .record-page-title {
+  margin-bottom: 0;
+  min-width: 0;
+}
+
+/*
+ * ONE "RECORD DETAILS" GROUP. The list is the one card; each section inside it is
+ * a flat row (label, summary, its own edit affordance) separated by a hairline,
+ * so seven separate cards become one list and nothing is nested.
+ */
+.record-details-title {
+  font-size: var(--font-size-meta);
+  font-weight: var(--font-weight-semibold);
+  color: var(--text-secondary);
+}
+.record-details-list {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-card);
+  box-shadow: var(--shadow-card);
+  overflow: hidden;
+}
+.record-details-list > .field-group {
+  border: 0;
+  border-radius: 0;
+  box-shadow: none;
+  background: transparent;
+}
+.record-details-list > .field-group + .field-group {
+  margin-top: 0;
+  border-top: 1px solid var(--border-faint);
+}
+.record-details-list .fg-header {
+  padding-top: 10px;
+  padding-bottom: 10px;
+}

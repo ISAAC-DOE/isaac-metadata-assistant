@@ -2,7 +2,7 @@ import { describe, it, expect, afterEach, vi } from 'vitest';
 import { render, fireEvent } from '@testing-library/react';
 import { MemoryRouter } from 'react-router-dom';
 import { AppRoutes } from '../App';
-import { EvidenceClassificationPanel } from '../components/EvidenceClassificationPanel';
+import { CLASS_DEFAULT_EXPLANATION, EvidenceClassificationPanel } from '../components/EvidenceClassificationPanel';
 import {
   evidenceBundleRoutes,
   evidenceClassificationResponse,
@@ -43,9 +43,37 @@ describe('P28.5 · EvidenceClassificationPanel (evidence-support axis)', () => {
         onRefresh={() => {}}
       />,
     );
+  /** The full list, behind "Show All N" since the declutter (2026-11-02). */
+  const panelAll = (overrides: Partial<ApiEvidenceClassification> = {}) => {
+    const view = panel(overrides);
+    const all = view.queryByRole('button', { name: /^Show All \d+$/ });
+    if (all) fireEvent.click(all);
+    return view;
+  };
+
+  it('the suppressed class default is the server’s own supported-by-observation sentence', () => {
+    // Mirrors `evidence_classify._explanation_for_readable`; if the backend wording
+    // drifts, the fixture (which mirrors the backend) and this constant part ways here.
+    const supported = evidenceClassificationResponse.field_results.find(
+      (r) => r.classification === 'supported',
+    )!;
+    expect(CLASS_DEFAULT_EXPLANATION.supported).toBe(supported.explanation);
+  });
+
+  it('shows the summary and only the rows that are not Supported, with the rest one click away', () => {
+    const { container, getByRole } = panel();
+    expect(container.querySelector('.evclass-summary')).not.toBeNull();
+    expect(container.querySelector('.evclass-row[data-class="supported"]')).toBeNull();
+    expect(container.querySelectorAll('.evclass-row')).toHaveLength(4);
+    const all = getByRole('button', { name: 'Show All 5' });
+    expect(all).toHaveAttribute('aria-expanded', 'false');
+    fireEvent.click(all);
+    expect(container.querySelectorAll('.evclass-row')).toHaveLength(5);
+    expect(getByRole('button', { name: 'Show Fewer' })).toHaveAttribute('aria-expanded', 'true');
+  });
 
   it('renders all five classes with a non-color signal (icon + text label + explanation)', () => {
-    const { container, getAllByText } = panel();
+    const { container, getAllByText } = panelAll();
 
     // each class label appears (in the summary chip AND its field row chip)
     for (const label of CLASS_LABELS) {
@@ -60,12 +88,16 @@ describe('P28.5 · EvidenceClassificationPanel (evidence-support axis)', () => {
       expect((chip.textContent ?? '').trim().length).toBeGreaterThan(0); // text present
     });
 
-    // the deterministic explanation is shown per field
-    expect(container.querySelectorAll('.evclass-explanation').length).toBe(5);
+    // the deterministic explanation is shown per field WHEN it says something the
+    // chip does not: the supported row's class-default sentence is not repeated.
+    expect(container.querySelectorAll('.evclass-explanation').length).toBe(4);
+    expect(
+      container.querySelector('.evclass-row[data-class="supported"] .evclass-explanation'),
+    ).toBeNull();
   });
 
   it('an inferred_candidate is visually distinct from a supported/confirmed value', () => {
-    const { container } = panel();
+    const { container } = panelAll();
 
     const supportedRow = container.querySelector('.evclass-row[data-class="supported"]')!;
     const candidateRow = container.querySelector('.evclass-row[data-class="inferred_candidate"]')!;
@@ -90,7 +122,7 @@ describe('P28.5 · EvidenceClassificationPanel (evidence-support axis)', () => {
   });
 
   it('the per-field info affordance is a keyboard-operable button that toggles guidance', () => {
-    const { container, getByText, queryByText } = panel();
+    const { container, getByText, queryByText } = panelAll();
 
     const infoButtons = container.querySelectorAll<HTMLButtonElement>('.evclass-info-btn');
     expect(infoButtons.length).toBe(5);

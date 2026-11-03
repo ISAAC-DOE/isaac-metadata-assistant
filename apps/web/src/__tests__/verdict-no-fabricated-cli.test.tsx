@@ -88,9 +88,12 @@ describe('R1b · VerdictCard renders no fabricated CLI transcript', () => {
     expect(text).toMatch(/official ISAAC schema v1\.05/i);
   });
 
-  it('may still say it is the same gate that backs export — that claim is true', () => {
+  it('carries no standing gate hint since the declutter, and claims no portal sign-off', () => {
     const { container } = render(<VerdictCard result={PASS} />);
-    expect(container.textContent ?? '').toMatch(/same gate that backs export/i);
+    expect(container.querySelector('.verdict-hint')).toBeNull();
+    const SIGN_OFF = /portal (sign-off|accept|submi)|submitted to the portal/i;
+    expect(SIGN_OFF.test('Accepted by the portal: submitted to the portal.')).toBe(true);
+    expect(container.textContent ?? '').not.toMatch(SIGN_OFF);
   });
 });
 

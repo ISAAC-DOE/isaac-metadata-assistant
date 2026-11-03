@@ -200,7 +200,7 @@ export const HIDDEN_TEXT_ALLOWANCES: readonly OverflowAllowance[] = [
     match: '.csv-recon-visually-hidden',
     surfaces: ['evidence'],
     reason: 'Visually-hidden label for the CSV reconciliation file input.',
-    evidence: 'apps/web/src/components/csv-reconcile.css:74',
+    evidence: 'apps/web/src/components/csv-reconcile.css:45',
   },
   {
     // I-2 (independent review, 2026-09-03) — the compact `<=1024px` workflow

@@ -42,7 +42,7 @@ export function ArtifactCard({ artifact, onView, onDownload, staleNote }: Artifa
             {isRecord ? LABELS.officialRecord : LABELS.evidenceTrail}
           </div>
           <div className="artifact-sub">
-            {isRecord ? 'schema-clean · ISAAC v1.05' : LABELS.sidecarNotOfficial}
+            {isRecord ? 'schema-clean · ISAAC v1.05' : LABELS.sidecarConvention}
           </div>
         </div>
         {isRecord && artifact.verdict === 'pass' ? (
