@@ -85,6 +85,7 @@ import {
 } from './fixtures';
 import { FIXTURE_ACTOR_SUBJECT, FIXTURE_TRUST_BASIS, TRUSTED_API_BASE } from './env';
 import { RUNS_PAGE_SIZE } from '../../src/lib/runPaging';
+import { chooseValue } from '../helpers/select';
 
 /**
  * The RECORD-level field A fills in and B then proposes a change to.
@@ -307,9 +308,9 @@ test.describe('two scientists, one record, end to end', () => {
       exact: true,
     });
     await recordPanel.getByRole('button', { name: /^Record Description/ }).click();
-    // A closed enum renders a `<select>`, and that is a schema fact rather than a
+    // A closed enum renders a picker, and that is a schema fact rather than a
     // styling choice: a text box at this path could produce a value that cannot export.
-    await recordPanel.getByLabel('Technique').selectOption(recordTarget.chosen);
+    await chooseValue(recordPanel.getByLabel('Technique'), recordTarget.chosen);
     await recordPanel.getByRole('button', { name: 'Save record description' }).click();
     await expect
       .poll(
@@ -352,9 +353,10 @@ test.describe('two scientists, one record, end to end', () => {
      * only that typing works.
      */
     const runOneCard = await openRun(page, 0);
-    await runOneCard
-      .locator(`select[data-run-field-path="${runTarget.path}"]`)
-      .selectOption(runTarget.runOne);
+    await chooseValue(
+      runOneCard.locator(`[role="combobox"][data-run-field-path="${runTarget.path}"]`),
+      runTarget.runOne,
+    );
     await expect
       .poll(async () => {
         const body = (await server.runBody(id, runOne.id)) as {

@@ -99,6 +99,7 @@ import { mutationSessionId } from './fixtures';
 import { MUT_API_BASE, MUT_WORKSPACE, SEED } from './env';
 import { TUTORIAL_SESSION_HEADER } from '../worked-example';
 import { fieldLabel } from '../../src/lib/fieldLabels';
+import { chooseValue, expectValue } from '../helpers/select';
 
 // ---------------------------------------------------------------------------
 // Reaching the server directly — SETUP and INDEPENDENT VERIFICATION only.
@@ -966,9 +967,10 @@ test('an unsaved correction survives a background change-feed refresh', async ({
   // preselected value; the reader then chooses a different member.
   const editor = card.getByLabel('The corrected value', { exact: true });
   await expect(editor).toBeVisible();
-  expect(await editor.evaluate((el) => el.tagName)).toBe('SELECT');
+  // A choice (the themed picker, a `combobox`), not a text box.
+  await expect(editor).toHaveAttribute('role', 'combobox');
   // Prefilled once, from the proposed value, exactly as stored.
-  await expect(editor).toHaveValue('STM');
+  await expectValue(editor, 'STM');
 
   const typed = 'AFM';
   // A member of the schema's own enum, read from the served schema rather than
@@ -980,8 +982,8 @@ test('an unsaved correction survives a background change-feed refresh', async ({
   }).schema.properties.system.properties.technique.enum;
   expect(techniques, 'AFM must be a schema member for this choice to be offered').toContain(typed);
   expect(typed).not.toBe('STM');
-  await editor.selectOption(typed);
-  await expect(editor).toHaveValue(typed);
+  await chooseValue(editor, typed);
+  await expectValue(editor, typed);
   const readsBeforeTheSecondClient = listReads.length;
 
   // A SECOND CLIENT changes this record. This is what puts a `proposal` entry in the
@@ -1013,12 +1015,11 @@ test('an unsaved correction survives a background change-feed refresh', async ({
    * that promised "your input is kept" beside a refresh that destroyed it; the panel's
    * silent reload exists so this cannot recur.
    */
-  await expect(editor, 'the silent refresh destroyed an unsaved correction').toHaveValue(typed);
+  await expect(editor, 'the silent refresh destroyed an unsaved correction').toHaveAttribute('data-value', typed);
   await expect(editor).toBeVisible();
   // The CHOSEN OPTION is still the selected one — not merely a value attribute.
-  expect(
-    await editor.evaluate((el) => (el as HTMLSelectElement).selectedOptions[0]?.value),
-  ).toBe(typed);
+  const listbox = page.locator(`[id="${await editor.getAttribute('aria-controls')}"]`);
+  await expect(listbox.locator('[role="option"][aria-selected="true"]')).toHaveAttribute('data-value', typed);
 });
 
 // ---------------------------------------------------------------------------

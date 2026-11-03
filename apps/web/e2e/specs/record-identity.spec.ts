@@ -122,5 +122,5 @@ test('@interaction Relationships states what it can see, and offers no authoring
 
   // No dead authoring control: the header is the only button in the card.
   await expect(card.getByRole('button')).toHaveCount(1);
-  await expect(card.locator('input, textarea, select')).toHaveCount(0);
+  await expect(card.locator('input, textarea, select, [role="combobox"]')).toHaveCount(0);
 });

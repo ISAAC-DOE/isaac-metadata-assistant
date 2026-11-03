@@ -50,6 +50,7 @@ import { type Locator, type Page } from '@playwright/test';
 import { MUT_API_BASE, SEED } from './env';
 import { TUTORIAL_SESSION_HEADER } from '../worked-example';
 import { expect, openRecord, test } from './own-session-fixtures';
+import { chooseValue, expectValue } from '../helpers/select';
 
 /** The debounce the hook actually uses, plus room for a round trip. */
 const SETTLE_MS = 3_000;
@@ -484,9 +485,9 @@ test.describe('R5 · the Run workspace', () => {
     // AND CHOOSING AN OPTIONAL FIELD DOES NOT MOVE THE COUNT (2026-10-12): the reaction
     // is saved like any run field, and the progress reads exactly what it read before.
     const before = ((await progress(reloaded).textContent()) ?? '').replace(/\s+/g, ' ').trim();
-    await fieldControl(reloaded, 'context.electrochemistry.reaction').selectOption('OER');
+    await chooseValue(fieldControl(reloaded, 'context.electrochemistry.reaction'), 'OER');
     await expect(saveStatus(reloaded)).toHaveText('Saved', { timeout: 10_000 });
-    await expect(fieldControl(reloaded, 'context.electrochemistry.reaction')).toHaveValue('OER');
+    await expectValue(fieldControl(reloaded, 'context.electrochemistry.reaction'), 'OER');
     const after = ((await progress(reloaded).textContent()) ?? '').replace(/\s+/g, ' ').trim();
     expect(after).toBe(before);
     expect(after).toContain(`of ${denominator}`);

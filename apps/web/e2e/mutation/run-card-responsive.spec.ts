@@ -102,6 +102,7 @@ import {
 import { MUT_API_BASE, MUT_API_ROUTE_GLOB, MUT_BASE_URL, SEED } from './env';
 import { applyWorkedExampleScope, disposeWorkedExampleSession } from '../worked-example';
 import { activeElementFocusInfo } from '../helpers/focus';
+import { chooseValue } from '../helpers/select';
 import {
   findClippedText,
   findObscuredControls,
@@ -610,8 +611,8 @@ test.describe('run card — narrow widths', () => {
     const type = async (path: string, value: string) => {
       const box = first.locator(`[data-run-field-path="${path}"]`);
       await pwExpect(box).toBeVisible();
-      const tag = await box.evaluate((el) => el.tagName);
-      if (tag === 'SELECT') await box.selectOption(value);
+      // An enum path is the themed picker (`role="combobox"`); every other path is a text box.
+      if ((await box.getAttribute('role')) === 'combobox') await chooseValue(box, value);
       else await box.fill(value);
     };
 

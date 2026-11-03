@@ -42,6 +42,7 @@
 import type { Page } from '@playwright/test';
 import { formatViolation, scan } from '../helpers/axe';
 import { expect, test } from './own-session-fixtures';
+import { chooseValue, expectValue } from '../helpers/select';
 
 /**
  * Scan `main` and require it CLEAN, naming the step in the failure.
@@ -165,7 +166,7 @@ async function openEverything(page: Page): Promise<number> {
  * hosted default gets its own lighter scan with every stage collapsed (the last test here).
  */
 async function chooseArchive(page: Page, key: string) {
-  await page.getByRole('combobox', { name: /which archive/i }).selectOption(key);
+  await chooseValue(page.getByRole('combobox', { name: /which archive/i }), key);
 }
 
 const MINI = 'bl15_synthetic_mini_corpus';
@@ -543,7 +544,7 @@ test.describe('the import session state, which the read-only sweep cannot reach'
     await expect(page.getByRole('button', { name: 'Back to imports' })).toBeVisible();
 
     // NOT CHOSEN — the picker's own default, which is the point of this test.
-    await expect(page.getByRole('combobox', { name: /which archive/i })).toHaveValue(HOSTED_DEFAULT);
+    await expectValue(page.getByRole('combobox', { name: /which archive/i }), HOSTED_DEFAULT);
     /* ONE PRESS (QA `C-21`, 2026-10-18): adding the archive reads and reconstructs it and
        lands the reader on Runs & Candidates — the separate Read and Reconstruct presses
        this test was written with no longer exist. */

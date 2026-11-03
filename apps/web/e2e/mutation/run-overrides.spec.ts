@@ -666,7 +666,7 @@ test.describe('per-run overrides of inherited record values', () => {
     const select = target.getByRole('combobox');
     await expect(select).toBeVisible();
     await expect(select).toBeFocused();
-    expect(await page.evaluate(() => document.activeElement?.tagName)).toBe('SELECT');
+    expect(await page.evaluate(() => document.activeElement?.getAttribute('role'))).toBe('combobox');
   });
 
   test('every control that unmounts itself hands focus on, and none of them drops it on the body', async ({
