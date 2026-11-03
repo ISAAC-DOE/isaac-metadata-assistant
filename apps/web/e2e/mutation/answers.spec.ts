@@ -39,8 +39,9 @@ test.describe('R3 · answers', () => {
       })
       .toBeGreaterThan(0);
 
-    // The screen reflects the server's shrunken list.
-    await expect(page.getByText('1 / 5')).toBeVisible();
+    // The screen reflects the server's shrunken list. The visible "N / M" counter was
+    // retired in the declutter; the progress bar carries the same count as its name.
+    await expect(page.getByRole('img', { name: '1 of 5 answered' })).toBeVisible();
 
     // INDEPENDENT server check: the revision moved and the answer log grew.
     const after = await server.read(SEED.fresh);
