@@ -36,7 +36,8 @@ written without a scientist decision. No schema changes:
   follows "after 1200", for one sample under otherwise equal conditions. The sample is the one the scientist
   confirmed (its ``sample.sample_id`` answer), else the electrode ISAAC proposes an id for. A stage is the
   scientist's own history answer where there is one, else the file-name token. The order comes from the run
-  numbers, or, where those overlap or are missing, the file-creation instants the files state (SPEC ``#E``). A
+  numbers, or, where those overlap or are missing, the file-creation instants the files state (SPEC ``#E``), or the
+  start time a scientist gave where the file's own readings disagree or are missing (r9). A
   link needs its target's record id, which the export mints. So a decision records which RUN a group follows, and
   the export resolves it to that run's record id, exporting the earlier record first (:func:`order_by_follows`).
   The id is part of the later record's body: when the earlier record gets a new id, the later one does too. A link
@@ -121,6 +122,9 @@ FEED_KEYS = {"filter": "filter", "cycling_state": "history", "sample_or_electrod
 #: The readings whose disagreement questions point at a label question (``before_after_state`` is the same token).
 POINT_KEYS = {**FEED_KEYS, "before_after_state": "history"}
 ELECTRODE_KEY = "sample_or_electrode_number"
+#: r9 MED: the reading the follows order falls back to (SPEC ``#E``, the file-creation instant), and the record field a
+#: scientist's answer about it lands in
+START_KEY, START_PATH = "acquisition_epoch", "timestamps.acquired_start_utc"
 
 SLOT_LEAD = "A condition label ISAAC proposed from the files and a scientist answered (question "
 SLOT_REASON = SLOT_LEAD + "{question}, rule " + RULE_ID + "): {what}."
@@ -377,11 +381,19 @@ class _Ctx:
         #: ``(position or None for "no number is the electrode", decision)`` or ``None`` while unanswered
         self.position = ((None if d.get("decision") == "reject" else _as_position(d.get("value"))), d) if d else None
         self.conflicts: dict[tuple[str, str], list[Mapping]] = {}
+        #: r9 MED: the disagreements on a run's file-creation instant (#E), by the candidate they are about
+        self.start_conflicts: dict[str, list[Mapping]] = {}
         for cf in bundle.get("conflicts") or ():
             key = str(cf.get("engine_conflict_id") or "").rsplit("::", 1)[-1]
             if key in POINT_KEYS:
                 for rid in cf.get("run_ids") or ():
                     self.conflicts.setdefault((rid, key), []).append(cf)
+            elif key == START_KEY and cf.get("candidate_id"):
+                self.start_conflicts.setdefault(str(cf["candidate_id"]), []).append(cf)
+        #: r9 MED: a run's own start-time slot (no file states one), where a scientist may give it
+        self.start_slots = {m.get("run_id"): m for m in bundle.get("missing_values") or ()
+                            if m.get("target_field_path") == START_PATH and m.get("run_id") and not is_label_slot(m)}
+        self.bundle = bundle
 
     def answer(self, path: str, rid: Any) -> Mapping | None:
         return _answered(self.slots.get((path, rid)), self.decisions)
@@ -437,7 +449,7 @@ class _Facts:
     __slots__ = ("gid", "runs", "keys", "electrode", "position", "sample", "names", "names_said", "filter", "filter_said",
                  "filter_from", "history", "history_canon", "why_not", "readings", "decided", "run_interval",
                  "time_interval", "loose_key", "full_key", "stems", "sid", "ident", "stage", "stage_from",
-                 "position_unsettled", "set_aside_at")
+                 "position_unsettled", "set_aside_at", "role", "time_why", "time_questions", "time_answers")
 
     def __init__(self, gid: str):
         self.gid = gid
@@ -456,6 +468,12 @@ class _Facts:
         self.filter_from: set[str] = set()
         self.position_unsettled = False
         self.set_aside_at: tuple[int, str] | None = None  # the position and token the grouping set aside
+        self.role: str | None = None
+        #: r9 MED: why the group has no one start instant (a sentence per run), the start-time questions that would
+        #: settle it, and the scientist's start-time answers its instants come from
+        self.time_why: list[str] = []
+        self.time_questions: list[str] = []
+        self.time_answers: list[str] = []
 
 
 def _token_at(stem: str, char_start: int | None, char_end: int | None) -> str | None:
@@ -487,9 +505,16 @@ def _facts(bundle: Mapping, groups: Sequence[Mapping], ctx: _Ctx | None = None) 
     runs_by_key = {r["run_key"]: r for r in bundle.get("runs") or ()}
     cands = {c["candidate_id"]: c for c in bundle.get("candidates") or ()}
     context = B.context_run_ids(bundle)
+    # the group each run is in, as the questions scope a disagreement (its stored first run's group: the id never moves)
+    group_of: dict[str, str] = {}
+    for g in groups:
+        for k in g.get("member_run_keys") or ():
+            if (run := runs_by_key.get(k)) is not None:
+                group_of.setdefault(run["run_id"], g["group_id"])
     out: list[_Facts] = []
     for g in groups:
         f = _Facts(g["group_id"])
+        f.role = g.get("role")
         own: dict[str, dict[str, list]] = {}
         for k in g.get("member_run_keys") or ():
             run = runs_by_key.get(k)
@@ -534,11 +559,7 @@ def _facts(bundle: Mapping, groups: Sequence[Mapping], ctx: _Ctx | None = None) 
         nums = [runs_by_key[k].get("legacy_number") for k in f.keys]
         if all(isinstance(n, int) and not isinstance(n, bool) for n in nums):
             f.run_interval = (min(nums), max(nums))
-        epochs = []
-        for rid in f.runs:
-            lits = [str(c["observed_literals"][0]) for c in own.get(rid, {}).get("acquisition_epoch", ())
-                    if c.get("observed_literals") and c.get("extracted_state") != B.STATE_CONFLICTING]
-            epochs.append(int(lits[0]) if len(lits) == 1 and lits[0].isdigit() else None)
+        epochs = [_start_of(ctx, f, rid, stem_of[rid], own.get(rid, {}).get(START_KEY, ()), group_of) for rid in f.runs]
         if epochs and None not in epochs:
             f.time_interval = (min(epochs), max(epochs))
         # THE KEYS conditions are compared by (normalised, r review M3): without the history and the electrode
@@ -561,6 +582,102 @@ def _facts(bundle: Mapping, groups: Sequence[Mapping], ctx: _Ctx | None = None) 
             ids = given.get(f.electrode.casefold()) or set()
             f.ident = ("sid", next(iter(ids))) if len(ids) == 1 else ("electrode", f.sample.casefold(), f.electrode.casefold())
     return out
+
+
+def _instant(value: Any) -> int | float | None:
+    """The Unix instant a start-time value states: an ISO-8601 instant WITH its zone (as the export writes it), or the
+    epoch seconds ``#E`` states. A time with no zone is no instant (§5: never assumed UTC): ``None``."""
+    import datetime as dt
+
+    if isinstance(value, bool):
+        return None
+    if isinstance(value, int):
+        return value
+    if not isinstance(value, str) or not value.strip():
+        return None
+    v = value.strip()
+    if v.isdigit():
+        return int(v)
+    try:
+        t = dt.datetime.fromisoformat(v[:-1] + "+00:00" if v.endswith(("Z", "z")) else v)
+    except ValueError:
+        return None
+    if t.tzinfo is None or t.utcoffset() is None:
+        return None
+    s = t.timestamp()
+    return int(s) if float(s).is_integer() else s
+
+
+def _start_of(ctx: _Ctx, f: _Facts, rid: str, stem: str, cands: Sequence[Mapping], group_of: Mapping[str, str]
+              ) -> int | float | None:
+    """r9 MED: the instant run ``rid`` started, for the follows order. A scientist's answer about it (a decision on
+    its ``#E`` candidate, on the disagreement between its ``#E`` readings, or on its own start-time slot) is the
+    instant where there is one; else the one ``#E`` its file states, not in disagreement. ``None`` otherwise, with
+    why in ``f.time_why`` and the question that settles it in ``f.time_questions``."""
+    from . import questions as Q
+
+    lits = [str(c["observed_literals"][0]) for c in cands
+            if c.get("observed_literals") and c.get("extracted_state") != B.STATE_CONFLICTING]
+    own = int(lits[0]) if len(lits) == 1 and lits[0].isdigit() else None  # the one #E the file states
+    answers: list[tuple[Any, Mapping]] = []  # (value, decision); value None: rejected
+    for c in cands:
+        cfs = ctx.start_conflicts.get(str(c.get("candidate_id")), ())
+        if ("candidate", str(c.get("candidate_id"))) not in ctx.decisions and \
+                not any(("conflict", str(cf.get("conflict_id"))) in ctx.decisions for cf in cfs):
+            continue
+        d = B.candidate_decision(ctx.bundle, c, ctx.decisions, {c["candidate_id"]: [cf["conflict_id"] for cf in cfs]})
+        if d is None or d.get("decision") in B.NEUTRAL_DECISIONS:
+            continue
+        if d.get("decision") == "reject":
+            answers.append((None, d))
+            continue
+        target = d.get("target") or {}
+        if target.get("kind") == "conflict":
+            cf = next((x for x in cfs if x.get("conflict_id") == target.get("id")), None)
+            ch = ctx.choice(cf) if cf is not None else None
+            answers.append((ch[0] if ch else None, d))
+        else:
+            answers.append((B.final_value(c.get("value") if c.get("extracted_state") != B.STATE_CONFLICTING else None, d,
+                                          c.get("readings")), d))
+    slot = ctx.start_slots.get(rid)
+    if slot is not None and (d := ctx.decisions.get(("missing_value", slot["value_id"]))) is not None \
+            and d.get("decision") not in B.NEUTRAL_DECISIONS:
+        answers.append((None if d.get("decision") == "reject" else d.get("value"), d))
+    if answers:
+        ids = [str(d.get("decision_id")) for _, d in answers]
+        if any(d.get("decision") == "reject" for _, d in answers):
+            f.time_why.append(f"a scientist rejected the start time of {stem} ({', '.join(ids)})")
+            return None
+        if any(v is None for v, _ in answers):
+            f.time_why.append(f"a scientist's answer about the start time of {stem} ({', '.join(ids)}) gives no time")
+            return None
+        got = {_instant(v) for v, _ in answers}
+        if None in got:
+            f.time_why.append(f"the start time a scientist gave {stem} ({', '.join(ids)}) names no instant with its zone")
+            return None
+        if len(got) > 1:
+            f.time_why.append(f"the scientist's answers give {stem} {len(got)} different start times ({', '.join(ids)})")
+            return None
+        if next(iter(got)) != own:
+            # said beside a link only where the answer, not the file alone, gives the instant
+            f.time_answers += [i for i in ids if i not in f.time_answers]
+        return next(iter(got))
+    if own is not None:
+        return own
+    open_q = []
+    for c in cands:
+        for cf in ctx.start_conflicts.get(str(c.get("candidate_id")), ()):
+            first = (cf.get("run_ids") or [None])[0]
+            scope = "experiment" if first is None else (f"group:{group_of[first]}" if first in group_of else f"run:{first}")
+            open_q.append(Q._qid(scope, "resolve_conflict", cf["conflict_id"]))
+    if open_q:
+        f.time_questions += [q for q in open_q if q not in f.time_questions]
+        f.time_why.append(f"{stem} states start times (#E) that disagree")
+    elif any(c.get("extracted_state") == B.STATE_CONFLICTING for c in cands) or len(lits) > 1:
+        f.time_why.append(f"the start times (#E) {stem} states disagree")
+    else:
+        f.time_why.append(f"{stem} states no file-creation instant (#E)")
+    return None
 
 
 def _electrode(ctx: _Ctx, f: _Facts, g: Mapping, own: Mapping, stem_of: Mapping, written, one_name: str | None) -> None:
@@ -806,6 +923,28 @@ def _shared_run_numbers(members: Sequence[_Facts]) -> list[int]:
     return sorted(out)
 
 
+def _unordered_reason(members: Sequence[_Facts], shared: Sequence[int]) -> str:
+    """r9 MED: why neither the run numbers nor the start instants order ``members``, naming the start-time question
+    that would settle it. Reached only past the DEC-46/Q16 hold, so a run number they share IS their electrode."""
+    if all(m.run_interval for m in members):
+        nums = (f"they share run number {', '.join(map(str, shared))}, which is their electrode number, so the run "
+                "numbers do not order their stages" if shared else "their run numbers do not order them")
+    else:
+        nums = ("the run numbers of " + ", ".join(m.stems[0] for m in members if not m.run_interval)
+                + " are missing")
+    no_time = [m for m in members if m.time_interval is None]
+    if no_time:
+        times = "; ".join(w for m in no_time for w in m.time_why) or "; ".join(
+            f"{m.stems[0]} states no one file-creation instant" for m in no_time)
+        qs = [q for m in no_time for q in m.time_questions]
+        tail = (f". Answer start-time question {', '.join(dict.fromkeys(qs))} (which start time is right) and the chain "
+                "is proposed here" if qs else "")
+        return f"{nums}, and {times}, so ISAAC cannot put them in one order{tail}"
+    starts = [m.time_interval[0] for m in members]
+    how = "two of them state the same start instant" if len(set(starts)) < len(starts) else "their start instants overlap"
+    return f"{nums}, and {how}, so ISAAC cannot put them in one order"
+
+
 def _interval(f: _Facts, basis: str | None) -> tuple | None:
     return f.run_interval if basis == "run_numbers" else f.time_interval if basis == "start_times" else None
 
@@ -858,12 +997,7 @@ def _chains(facts: Sequence[_Facts]) -> tuple[list[list[_Facts]], list[dict]]:
             continue
         ordered, basis = _order(members)
         if ordered is None:
-            no_time = [m.stems[0] for m in members if m.time_interval is None]
-            hold(members, ("their run numbers " + ("overlap" if all(m.run_interval for m in members) else "are missing")
-                           + (", and " + ", ".join(no_time) + " state(s) no one file-creation instant (#E missing, or "
-                              "its start-time readings disagree)" if no_time else
-                              ", and their file-creation instants overlap")
-                           + ", so ISAAC cannot put them in one order"))
+            hold(members, _unordered_reason(members, shared))
             continue
         # r8 review L2: the side of a stage is the file-name token's where there is one, never the typed sentence's
         sides = [(m.history_canon or m.stage).startswith("before") for m in ordered]
@@ -881,7 +1015,58 @@ def _chains(facts: Sequence[_Facts]) -> tuple[list[list[_Facts]], list[dict]]:
             continue
         chains.append((ordered, basis))
     chains.sort(key=lambda c: _interval(c[0][0], c[1]))
+    held += _off_condition(facts, [c for c, _ in chains], held)
     return [c for c, _ in chains], held
+
+
+#: r9 LOW 1: the kind of a follows ``not_proposed`` row for a group that matches a chain on its sample and stage, but
+#: not on its conditions (a held set of groups ISAAC could not order has no kind)
+OFF_CONDITION = "conditions_differ"
+
+
+def _shown(v: Any) -> str:
+    try:
+        r = json.loads(v) if isinstance(v, str) else v
+    except ValueError:
+        return str(v)
+    r = r.get("value") if isinstance(r, Mapping) and "value" in r else r
+    return ", ".join(map(str, r)) if isinstance(r, list) else str(r)
+
+
+def _off_condition(facts: Sequence[_Facts], chains: Sequence[Sequence[_Facts]], held: Sequence[Mapping]) -> list[dict]:
+    """r9 LOW 1: each group in no chain and no held set that is of the sample and at the stage of a group that is, and
+    whose conditions differ from that group's only by a reading one of them states and the other does not (an extra
+    file-name token): it is never linked, and that is said. A condition both state differently (another potential)
+    is another chain's, not this one's, and is not listed."""
+    listed = {m.gid for c in chains for m in c} | {g for h in held for g in h.get("group_ids") or ()}
+    by_gid = {f.gid: f for f in facts}
+    mates: dict[str, list[_Facts]] = {}
+    for g in listed:
+        m = by_gid.get(g)
+        if m is not None and m.ident is not None and m.stage is not None:
+            mates.setdefault(json.dumps([m.ident, m.stage]), []).append(m)
+    if not mates:
+        return []
+    out = []
+    for f in facts:
+        if f.gid in listed or f.ident is None or f.stage is None:
+            continue
+        for m in mates.get(json.dumps([f.ident, f.stage]), ()):
+            mine, theirs = json.loads(f.loose_key), json.loads(m.loose_key)
+            if any(mine[k] != theirs[k] for k in mine.keys() & theirs.keys()):
+                continue
+            diff = [f"{k} {_shown(mine[k])!r} here, not stated there" for k in sorted(mine.keys() - theirs.keys())] + \
+                   [f"{k} {_shown(theirs[k])!r} there, not stated here" for k in sorted(theirs.keys() - mine.keys())]
+            if not diff:
+                continue
+            what = f"sample id {f.ident[1]}" if f.ident[0] == "sid" else f"electrode {f.ident[2]} of sample {f.ident[1]}"
+            out.append({"group_ids": [f.gid], "first_files": [f.stems[0]], "run_ids": [], "kind": OFF_CONDITION,
+                        "matches_group_id": m.gid, "matches_file": m.stems[0],
+                        "reason": f"it matches {m.stems[0]} on its sample ({what}) and stage ({f.stage!r}), but not on "
+                                  f"its conditions ({'; '.join(diff)}), so it is in none of that sample's chains and "
+                                  "ISAAC links it to nothing. ISAAC does not guess whether it repeats that measurement"})
+            break
+    return out
 
 
 # --- proposals and questions --------------------------------------------------------------------
@@ -1039,7 +1224,10 @@ def proposals(bundle: Mapping, groups: Sequence[Mapping] | None = None) -> list[
                                                "before_group_id": before.gid, "order_basis": basis,
                                                "before_interval": list(_interval(before, basis)),
                                                "after_interval": list(_interval(after, basis)),
-                                               "stages_from": sorted({m.stage_from for m in (before, after)})},
+                                               "stages_from": sorted({m.stage_from for m in (before, after)}),
+                                               **({"start_time_answers": sorted({*before.time_answers, *after.time_answers})}
+                                                  if basis == "start_times" and (before.time_answers or after.time_answers)
+                                                  else {})},
                           "first_file": after.stems[0]})
     stale = _stale_follows(ctx, facts, items, held_c)
     if items or held_c or stale:
@@ -1212,7 +1400,9 @@ def _text(p: Mapping, n_groups: int, n_runs: int) -> str:
                 "under otherwise equal conditions, each later history stage follows the one before it, in the order of "
                 "the run numbers (or, where those do not order them, the file-creation instants the files state). A "
                 "stage is the scientist's own history answer where there is one, else the file-name token: "
-                + "; ".join(f"{i['said']['after']} follows {i['said']['before']}" for i in items) + "."
+                + "; ".join(f"{i['said']['after']} follows {i['said']['before']}"
+                            + (f" (ordered by the start time you gave: {', '.join(i['said']['start_time_answers'])})"
+                               if i["said"].get("start_time_answers") else "") for i in items) + "."
                 + " Each link goes into the later record (rel follows, basis same_sample_id), only when both records "
                 "carry the same sample id. Confirm to record them, or reject.")
     else:
@@ -1302,8 +1492,14 @@ def _stale_text(p: Mapping) -> str:
 def _held_chains_question(p: Mapping, include_answered: bool) -> dict:
     qid = p["question_id"]
     held = p["not_proposed"]
-    text = ((f"No follows link is proposed now: ISAAC could not order {len(held)} set(s) of groups of one sample under "
-             "otherwise equal conditions. " + _held_text(held, qid, every=True)
+    sets = [h for h in held if h.get("kind") != OFF_CONDITION]
+    off = len(held) - len(sets)
+    text = ((f"No follows link is proposed now: "
+             + (f"ISAAC could not order {len(sets)} set(s) of groups of one sample under otherwise equal conditions"
+                if sets else "")
+             + ("; " if sets and off else "")
+             + (f"{off} group(s) match a chain on sample id and stage but not on their conditions" if off else "")
+             + ". " + _held_text(held, qid, every=True)
              + ". Settle what each reason names and the links are proposed here." if held else
              "No follows link is proposed now.") + _stale_text(p))
     q = _base_question(qid, p, text=text, applies_to={"groups": len({g for h in held for g in h["group_ids"]}),
@@ -1383,6 +1579,9 @@ def label_questions(bundle: Mapping, *, decisions: Mapping | None = None, groups
         text += stale_text
         if held:
             text += (f" Not proposed for {len(held)} " + ("set(s) of groups" if p["label"] == "follows" else "group(s)")
+                     + (f" ({n_off} of them one group that matches a chain on sample id and stage but not on its "
+                        "conditions)" if p["label"] == "follows" and (n_off := sum(1 for h in held if h.get("kind")
+                                                                                     == OFF_CONDITION)) else "")
                      + ": " + _held_text(held, qid, every=p["label"] == "follows") + " (not_proposed)."
                      + (" Answer one with --only group:<id> --decision correct --value <value>, or leave it."
                         if p["label"] != "follows" else " Those are not linked."))
@@ -1552,14 +1751,36 @@ def _onlys(only: Any) -> list[str] | None:
     return [only] if isinstance(only, str) else list(dict.fromkeys(only))
 
 
+def _sample_tokens(f: _Facts) -> set[str]:
+    """r9 LOW 2: the file-name tokens that can name ``f``'s sample: its parsed sample names' tokens where the files
+    state one, else each token of its file names that starts with a letter and is no cycling-history or filter token
+    (a token starting with a digit is a number or a quantity: 060mV, 3hrs)."""
+    from . import grouping as G
+
+    if f.names:
+        return {t.casefold() for n in f.names for t in G._stem_tokens(n) if t}
+    return {t.casefold() for s in f.stems for t in G._stem_tokens(s)
+            if t[:1].isalpha() and not _HISTORY.search(t) and not re.fullmatch(r"(?:filter|f)\d+", t, re.IGNORECASE)}
+
+
 def _same_sample_problem(a: _Facts, b: _Facts, position: int | None) -> str | None:
-    """MED 3 (r8): why groups ``a`` and ``b`` cannot be one physical sample by their own file names, or ``None``: their
-    sample names differ, or the numbers at the electrode position (where it is known) differ."""
+    """MED 3 (r8): why groups ``a`` and ``b`` cannot be one physical sample by their own files, or ``None``: their
+    sample names differ, or the numbers at the electrode position (where it is known) differ. r9 LOW 2: or one is a
+    standard or reference measurement and the other is not, or their file names share no token that can name a sample
+    (a powder with no parsed sample name beside an electrode)."""
     from . import grouping as G
 
     if a.names and b.names and a.names != b.names:
         return (f"{a.stems[0]} is sample {'/'.join(a.names_said)} and {b.stems[0]} is sample "
                 f"{'/'.join(b.names_said)}")
+    if (a.role == G.ROLE_REFERENCE) != (b.role == G.ROLE_REFERENCE):
+        ref, other = (a, b) if a.role == G.ROLE_REFERENCE else (b, a)
+        return (f"{ref.stems[0]} is a standard or reference measurement and {other.stems[0]} is not "
+                f"(its role is {other.role or 'not stated'})")
+    ta, tb = _sample_tokens(a), _sample_tokens(b)
+    if ta and tb and not ta & tb:
+        return (f"{a.stems[0]} and {b.stems[0]} share no sample-name token ({', '.join(sorted(ta))} against "
+                f"{', '.join(sorted(tb))})")
     for p in sorted({x for x in (position, a.position, b.position) if x}):
         ta = [t[p - 1] for t in (G._stem_tokens(s) for s in a.stems) if len(t) >= p]
         tb = [t[p - 1] for t in (G._stem_tokens(s) for s in b.stems) if len(t) >= p]
@@ -1832,7 +2053,7 @@ def decide(bundle: dict, asked: Mapping, *, decision: str, value: Any, only: Any
                     problem = _same_sample_problem(a, b, pos) if a is not None and b is not None and a is not b else None
                     if problem:
                         raise LabelRefused(
-                            f"--same-sample refused: {problem}. Their own file names say they are not one physical "
+                            f"--same-sample refused: {problem}. Their own files say they are not one physical "
                             f"sample, so {v!r} cannot name both. Give {named(i['group_id'])} its own id; if the file "
                             "names are wrong, say so in the beamtime notes and ask the beamline. Nothing was recorded.")
                     joined.append({"group_id": i["group_id"], "with_run": rid, "with_file": file_of.get(rid, rid),
