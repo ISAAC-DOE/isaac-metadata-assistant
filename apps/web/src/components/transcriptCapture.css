@@ -222,8 +222,7 @@
 }
 
 .capture-guidance-keeps,
-.capture-guidance-mechanism,
-.capture-guidance-storage {
+.capture-guidance-mechanism {
   margin: 8px 0 0;
   font-size: 12px;
   line-height: 1.5;

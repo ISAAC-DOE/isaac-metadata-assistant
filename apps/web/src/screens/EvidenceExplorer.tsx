@@ -41,6 +41,7 @@ import {
   evidenceEntriesToTrail,
   primarySourceFile,
   provenanceFor,
+  stripLifecycleSuffix,
 } from '../lib/adapt';
 import type { ApiRevisionHistory, EvidenceBundle } from '../lib/types';
 import { readRevisionHistory } from '../lib/revisionHistory';
@@ -224,7 +225,7 @@ function LoadedEvidence({
         topBar={
           <TopBar
             variant="record"
-            title={detail.title}
+            title={stripLifecycleSuffix(detail.title)}
             recordId={id}
             surface={LABELS.screenEvidence}
           />
@@ -291,7 +292,7 @@ function LoadedEvidence({
         topBar={
           <TopBar
             variant="record"
-            title={detail.title}
+            title={stripLifecycleSuffix(detail.title)}
             recordId={id}
             surface={LABELS.screenEvidence}
           />
@@ -345,7 +346,7 @@ function LoadedEvidence({
       topBar={
         <TopBar
           variant="record"
-          title={detail.title}
+          title={stripLifecycleSuffix(detail.title)}
           /* Three states, not two. There IS a sidecar filename; there is an
              exported record with no singular sidecar (a fan-out), where the id is
              the only true thing to show; and there is a draft. Collapsing the
@@ -376,7 +377,7 @@ function LoadedEvidence({
         <StatusBar
           phase={LABELS.evidenceTrail}
           phaseDot="idle"
-          note={`sidecar · assistant convention, not an official ISAAC standard · ${directTotal} direct paths counted in coverage`}
+          note={`${directTotal} direct paths counted in coverage`}
           graph={<GraphStatusChip availability={graph.availability} note={graph.note} />}
         />
       }
@@ -415,6 +416,17 @@ function LoadedEvidence({
           pendingCount={detail.pending_count}
         />
       </div>
+      {/* THE SELECTED ITEM'S DETAIL, DIRECTLY UNDER THE TABS (declutter,
+          2026-11-02): the rail and this pane work as master and detail, so a
+          click on a rail row changes something the reader can see. */}
+      <SourcePreview
+        entry={selected}
+        provenance={provenance}
+        preview={preview}
+        citedLines={citedLines}
+        recordJson={recordJson}
+        sidecarJson={sidecarJson}
+      />
       <EvidenceClassificationPanel
         classification={classification}
         stale={classificationStale}
@@ -438,14 +450,6 @@ function LoadedEvidence({
         experimentId={id}
         version={detail.version}
         onGoToComplete={() => navigate(ROUTES.complete(id))}
-      />
-      <SourcePreview
-        entry={selected}
-        provenance={provenance}
-        preview={preview}
-        citedLines={citedLines}
-        recordJson={recordJson}
-        sidecarJson={sidecarJson}
       />
     </AppShell>
   );

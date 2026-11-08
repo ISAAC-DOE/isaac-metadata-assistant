@@ -12,7 +12,8 @@
   color: var(--text-heading);
   margin: 0;
 }
-.confirmed-answers-lead {
+.confirmed-answers-lead,
+.confirmed-answers-none {
   margin: var(--space-xs) 0 var(--space-md);
   font-size: var(--font-size-body);
   line-height: var(--line-height-normal);
@@ -88,6 +89,27 @@
 }
 .confirmed-stored {
   flex-basis: 100%;
+}
+/* BORDERLESS INLINE TOGGLE (declutter, 2026-11-02): the stored value is a detail
+   of the row, not a card inside it. */
+.disclosure.confirmed-stored {
+  border: 0;
+  background: transparent;
+}
+.confirmed-stored > .disclosure-trigger {
+  width: auto;
+  min-height: 32px;
+  padding: 0;
+  color: var(--action);
+  font-size: var(--font-size-meta);
+}
+.confirmed-stored > .disclosure-trigger:hover {
+  background: transparent;
+  text-decoration: underline;
+}
+.confirmed-stored > .disclosure-body {
+  padding: 0;
+  border-top: 0;
 }
 .confirmed-json {
   margin: var(--space-xs) 0 0;

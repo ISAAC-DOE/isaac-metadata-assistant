@@ -116,7 +116,9 @@ test('@interaction an unreadable evidence entry is shown as unavailable, and the
   const firstValid = trail.locator('.trail-entry:not(.unavailable)').first();
   const validKey = (await firstValid.locator('.trail-key').textContent())!.trim();
   await firstValid.click();
-  await expect(page.locator('.preview-prov-key')).toHaveText(validKey);
+  // The title is the label, plus the key only when they differ (declutter,
+  // 2026-11-02); for a dotted path the two are the same string.
+  await expect(page.locator('.preview-prov-title')).toContainText(validKey);
   await expect(page.locator('.preview-prov-text')).not.toContainText('unavailable');
 });
 

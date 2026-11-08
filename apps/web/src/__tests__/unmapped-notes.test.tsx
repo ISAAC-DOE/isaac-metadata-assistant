@@ -156,10 +156,9 @@ describe('the empty state', () => {
     renderPanel();
 
     await screen.findByText(/No unmapped notes on this record/);
-    // The claim that carries the meaning: this panel does not manufacture notes.
-    expect(
-      screen.getByText(/nothing is created\s+automatically, and nothing is inferred/),
-    ).toBeTruthy();
+    // One line (declutter, 2026-11-02), and no controls over an empty record.
+    expect(screen.queryByLabelText('Show')).toBeNull();
+    expect(document.querySelector('.notes-count')).toBeNull();
     // An empty record must NOT offer a "show all" escape hatch — there is nothing
     // being filtered out, and offering one would imply there is.
     expect(screen.queryByRole('button', { name: 'Show All Notes' })).toBeNull();
@@ -167,7 +166,7 @@ describe('the empty state', () => {
 
   it('distinguishes "no notes" from "none in this state", and never conflates them', async () => {
     stubFetchRoutes({
-      [NOTES]: { body: notesEmpty },
+      [NOTES]: { body: notesPage([noteFixture()], { total: 3 }) },
       [`${NOTES}?state=dismissed`]: {
         body: notesPage([], {
           total: 3,
@@ -176,7 +175,7 @@ describe('the empty state', () => {
       },
     });
     renderPanel();
-    await screen.findByText(/No unmapped notes on this record/);
+    await screen.findByLabelText('Show');
 
     fireEvent.change(screen.getByLabelText('Show'), { target: { value: 'dismissed' } });
 
@@ -208,7 +207,7 @@ describe('dismissal is a state, not a deletion', () => {
 
   it("a filtered page still states the record's true total, never the page size", async () => {
     stubFetchRoutes({
-      [NOTES]: { body: notesEmpty },
+      [NOTES]: { body: notesPage([noteFixture()], { total: 4 }) },
       [`${NOTES}?state=unreviewed`]: {
         body: notesPage([noteFixture()], {
           total: 4,
@@ -217,7 +216,7 @@ describe('dismissal is a state, not a deletion', () => {
       },
     });
     renderPanel();
-    await screen.findByText(/No unmapped notes/);
+    await screen.findByLabelText('Show');
 
     fireEvent.change(screen.getByLabelText('Show'), { target: { value: 'unreviewed' } });
 
@@ -573,7 +572,7 @@ describe('what this build could not read is disclosed, not hidden', () => {
     });
     renderPanel();
 
-    const count = await screen.findByText(/stored entries this version cannot show/);
+    const count = await screen.findByText(/stored entries that cannot be shown/);
     expect(count.textContent).toContain('2 stored entries');
     expect(count.textContent).toContain('kept unchanged on the record');
   });
@@ -591,7 +590,7 @@ describe('what this build could not read is disclosed, not hidden', () => {
     });
     renderPanel();
 
-    const count = await screen.findByText(/stored entries this version cannot show/);
+    const count = await screen.findByText(/stored entries that cannot be shown/);
     expect(count.textContent).toContain('either unreadable, or repeating an id');
     // The old wording asserted unreadability of every one of them.
     expect(count.textContent).not.toContain('cannot read');
@@ -618,26 +617,26 @@ describe('what this build could not read is disclosed, not hidden', () => {
     renderPanel();
 
     const empty = await screen.findByText(/No unmapped notes on this record/);
-    expect(empty.textContent).toContain('1 stored entry this version cannot show');
+    expect(empty.textContent).toContain('1 stored entry that cannot be shown');
     expect(empty.textContent).toContain('kept unchanged on the record');
   });
 
   it('the filtered empty state does not call a partial count the record’s total', async () => {
     stubFetchRoutes({
-      [NOTES]: { body: notesPage([], { total: 0 }) },
+      [NOTES]: { body: notesPage([noteFixture()], { total: 3 }) },
       [`${NOTES}?state=dismissed`]: {
         body: notesPage([], { total: 3, unreadable_entries: 2 }),
       },
     });
     renderPanel();
-    await screen.findByText(/No unmapped notes on this record/);
+    await screen.findByLabelText('Show');
 
     fireEvent.change(screen.getByLabelText('Show'), { target: { value: 'dismissed' } });
 
     const empty = await screen.findByText(/No notes are in this state/);
     expect(empty.textContent).toContain('This record holds 3 notes in total');
     // "in total" is only true if what sits outside that total is said in the same breath.
-    expect(empty.textContent).toContain('2 stored entries this version cannot show');
+    expect(empty.textContent).toContain('2 stored entries that cannot be shown');
   });
 });
 
@@ -1381,7 +1380,7 @@ describe('propose a value from this note', () => {
       screen.queryByRole('button', { name: 'Propose a Value From This Note' }),
     ).toBeNull();
     expect(
-      await screen.findByText(/this build accepts no proposal target yet/),
+      await screen.findByText(/no field accepts a proposal here/),
     ).toBeInTheDocument();
   });
 

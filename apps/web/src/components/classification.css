@@ -277,3 +277,12 @@
     transition: none;
   }
 }
+
+/* "Show All N" (declutter, 2026-11-02): a tertiary action under the flagged rows.
+   `.btn-ghost` is the shared tertiary-action rung; the colour is restated here so
+   the control reads as an action on its own. */
+.evclass-show-all {
+  margin-top: var(--space-sm);
+  padding-left: 0;
+  color: var(--action);
+}

@@ -3,6 +3,7 @@ import { openAssistantCatalogWhenReady } from '../test/openAssistantCatalog';
 import { render, fireEvent, within } from '@testing-library/react';
 import { MemoryRouter } from 'react-router-dom';
 import { AppRoutes } from '../App';
+import { LABELS } from '../lib/labels';
 import { GraphStatusChip } from '../components/GraphStatusChip';
 import { evidenceBundleRoutes, stubFetchDown, stubFetchRoutes } from '../test/apiFixtures';
 
@@ -40,12 +41,10 @@ describe('S5 · Evidence & File Preview (live)', () => {
       getByText('implicit:absorbing_element', { selector: '.trail-key' }),
     ).toBeInTheDocument();
 
-    // the sidecar is labeled an assistant convention, not an official standard
-    expect(
-      getByText('sidecar · assistant convention, not an official ISAAC standard', {
-        selector: '.trail-flag',
-      }),
-    ).toBeInTheDocument();
+    // the trail names the sidecar it reads from, with no standing disclaimer
+    // (declutter, 2026-11-02)
+    expect(getByText(LABELS.sidecarConvention, { selector: '.trail-flag' })).toBeInTheDocument();
+    expect(container.textContent).not.toContain('not an official ISAAC standard');
 
     // P25.5: the Evidence context now mounts the grounded assistant (Phase 25
     // plan §20). The panel is subordinate — truth (trail + preview) renders first.

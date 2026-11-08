@@ -82,7 +82,7 @@ export function actorText(actor: ApiRevisionActor | null | undefined): string {
 export function actorBasisNote(actor: ApiRevisionActor | null | undefined): string | null {
   if (!actor || !actor.attributed) return null;
   if (actor.trust_basis === 'test_fixture') {
-    return 'recorded on a test-fixture basis — not proof anyone authenticated';
+    return 'test fixture — not a verified sign-in';
   }
   return null;
 }
@@ -429,23 +429,6 @@ export const SUBMITTED_REVISION_HEADING = 'Last Submitted Revision';
 
 /** The heading for the mutable half. */
 export const WORKING_CHANGES_HEADING = 'Current Working Changes';
-
-/**
- * The immutability sentence — the one `DEC-21` requires and the one this
- * application can actually stand behind.
- *
- * It says what no route does, rather than asserting a database-level guarantee:
- * the five submission-history tables are append-only in
- * `db_write._APPEND_ONLY_TABLES`, but this sentence is read by a scientist about
- * the PRODUCT, and the product-level truth is that nothing here edits, reverts,
- * restores or republishes a submitted revision. The panel's own header already
- * commits to there being no "restore this revision" control until a route exists
- * that could honour it.
- */
-export const SUBMITTED_IMMUTABLE_NOTE =
-  'A submitted revision is a permanent snapshot of what was declared finished. ' +
-  'Nothing in this application edits, reverts, restores or republishes one — ' +
-  'further work becomes the next submission, not a change to this one.';
 
 /** What each working state says. One sentence, no verdict, no instruction to obey. */
 export function workingStateSentence(state: WorkingState): string {

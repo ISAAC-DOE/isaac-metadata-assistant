@@ -1920,7 +1920,6 @@ export function TranscriptCapturePanel({
               as a note. Nothing you say is discarded.
             </p>
             <p className="capture-guidance-mechanism">{CAPTURE_COPY.guidanceMechanism}</p>
-            <p className="capture-guidance-storage">{CAPTURE_COPY.guidanceStorageNote}</p>
             <button type="button" className="btn btn-secondary" onClick={dismissGuidance}>
               {CAPTURE_COPY.guidanceDismiss}
             </button>
@@ -1996,7 +1995,6 @@ export function TranscriptCapturePanel({
                 <summary className="capture-mcp-summary">
                   {CAPTURE_COPY.mcpRouteHeading}
                 </summary>
-                <p className="capture-note">{CAPTURE_COPY.mcpRouteLead}</p>
                 <p className="capture-mcp-precondition">{CAPTURE_COPY.mcpRoutePrecondition}</p>
                 <p className="capture-guidance-label">{CAPTURE_COPY.mcpRouteSayLabel}</p>
                 <p className="capture-mcp-say">{CAPTURE_COPY.mcpRouteSayExample}</p>
@@ -2085,7 +2083,6 @@ export function TranscriptCapturePanel({
                         aria-label={CAPTURE_COPY.voicePlaybackLabel}
                         ref={adoptPlayer}
                       />
-                      <p className="capture-note">{CAPTURE_COPY.voicePlaybackNote}</p>
                     </>
                   )}
                 </>
@@ -2310,7 +2307,6 @@ export function TranscriptCapturePanel({
                   <p className="capture-note">{CAPTURE_COPY.voiceAfterRefusal}</p>
                   <details className="capture-refusal-why">
                     <summary>{CAPTURE_COPY.voiceRefusalWhy}</summary>
-                    <p className="capture-note">{CAPTURE_COPY.voiceRefusalDetailIntro}</p>
                     <p className="capture-refusal-server">{refusal.message}</p>
                     <p className="capture-guidance-label">Missing:</p>
                     <ul className="capture-guidance-list">

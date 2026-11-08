@@ -1129,14 +1129,14 @@ test('accepting is refused truthfully, and nothing is written', async ({ page, r
    */
   const lockNotice = page.locator('.proposals-lock[role="note"]');
   await expect(lockNotice).toBeVisible();
-  await expect(lockNotice).toContainText('Acceptance unavailable on this deployment');
+  await expect(lockNotice).toContainText('Acceptance unavailable');
   const lockedAccept = card.getByRole('button', { name: 'Accept as Proposed', exact: true });
   await expect(lockedAccept).toBeDisabled();
   const describedBy = await lockedAccept.getAttribute('aria-describedby');
   expect(describedBy, 'a locked Accept must say why').toBeTruthy();
-  await expect(page.locator(`[id="${describedBy}"]`)).toContainText(
-    'Acceptance unavailable on this deployment'
-  );
+  await expect(page.locator(`[id="${describedBy}"]`)).toContainText('Acceptance unavailable');
+  // The one line still says what a scientist can do.
+  await expect(page.locator(`[id="${describedBy}"]`)).toContainText('you can still reject or withdraw');
   // Nothing was written by merely showing the lock.
   expect(await draftValue(request, id, 'system.technique')).toEqual(heldBefore);
   expect((await detail(request, id)).rev).toBe(revBefore);
@@ -1193,7 +1193,7 @@ test('accepting is refused truthfully, and nothing is written', async ({ page, r
   // `Why?` away — opened here, so what is asserted is what a reader can reach.
   const banner = page.locator('.proposals-lock[role="alert"]');
   await expect(banner).toBeVisible();
-  await expect(banner).toContainText('Acceptance refused on this deployment');
+  await expect(banner).toContainText('Acceptance refused');
   await expect(banner).toContainText('Nothing was written');
   // PR #277 REVIEW (pre-existing): the pressed Accept went disabled while the
   // request was in flight, so focus used to fall to <body> and stay there. It now
@@ -1204,11 +1204,9 @@ test('accepting is refused truthfully, and nothing is written', async ({ page, r
   await banner.getByRole('button', { name: 'Why?' }).click();
   const why = banner.locator('.proposals-lock-why-body');
   await expect(why).toBeVisible();
-  await expect(why).toContainText('NOTHING WAS WRITTEN');
+  await expect(why).toContainText('nothing was written');
   await expect(why).toContainText('retrying will not change it');
-  await expect(why).toContainText(
-    'Rejecting, superseding and withdrawing need no actor and still work.'
-  );
+  await expect(why).toContainText('Rejecting, superseding and withdrawing still work.');
 
   /*
    * NEGATIVE CONTROLS — THE REFUSAL IS TRUE. Four independent reads, because "nothing
@@ -1289,7 +1287,7 @@ test('the panel discloses stored entries it cannot show, and still shows the one
    * rather than asserting the one that is wrong half the time.
    */
   await expect(page.locator('.proposals-count')).toContainText(
-    '1 stored entry this version cannot show as a proposal'
+    '1 stored entry that cannot be shown as a proposal'
   );
   await expect(page.locator('.proposals-count')).toContainText(
     'either unreadable, or repeating an id another proposal already holds'

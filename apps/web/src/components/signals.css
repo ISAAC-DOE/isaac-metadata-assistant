@@ -311,3 +311,16 @@
 .prov-chip {
   display: inline-flex;
 }
+
+/* One card on the row (declutter, 2026-11-02): the review state's advisory card
+   takes the full width once the empty Evidence Audit card is gone. */
+.signal-row.signal-row-single {
+  grid-template-columns: minmax(0, 1fr);
+}
+
+/* Re-Validate on the PASS card is a tertiary, link-style action (declutter). */
+.verdict-revalidate {
+  color: var(--action);
+  padding-left: var(--space-sm);
+  padding-right: var(--space-sm);
+}

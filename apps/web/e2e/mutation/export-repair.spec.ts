@@ -146,14 +146,14 @@ test.describe('R4 · export, repaired and refused', () => {
      *
      * THIS version waits on two things that genuinely move, both proved to pass under
      * that same forced delay:
-     *   . `.completion-counter` — counts up as questions close, so it establishes that
+     *   . `.progress`'s label — counts up as questions close, so it establishes that
      *     the PREVIOUS answer landed and this iteration is acting on a new question.
      *     (The heading does not; the counter does.)
      *   . `.guided-staged` — the "Ready to confirm" status the prompt renders only once
      *     a value is staged. This is the staging observable attempt 2 claimed to use.
      */
     for (let i = 0; i < 2; i++) {
-      await expect(page.locator('.completion-counter')).toHaveText(`${i} / 2`);
+      await expect(page.locator('.progress')).toHaveAttribute('aria-label', `${i} of 2 answered`);
       await page.getByRole('button', { name: 'Use This Value' }).first().click();
       await expect(
         page.locator('.guided-staged'),

@@ -921,10 +921,9 @@ test.describe('R5 · the Run workspace', () => {
 
     const result = card.getByRole('region', { name: 'Check result' });
     await expect(result).toBeVisible({ timeout: 15_000 });
-    // The scope sentence is the honesty claim on this surface, so it is asserted
-    // rather than assumed: a check is not an export and not a submission.
-    await expect(result).toContainText('Nothing was written, submitted or exported');
-    await expect(result).toContainText(`run version ${before[0].version}`);
+    // A check is not an export and not a submission: it never claims either.
+    await expect(result).toContainText(`Checked run version ${before[0].version}`);
+    await expect(result).not.toContainText(/submitted successfully|exported successfully/i);
 
     const after = await readRuns(request, session, SEED.fresh);
     expect(after[0].rev, 'a check must not advance the run').toBe(before[0].rev);

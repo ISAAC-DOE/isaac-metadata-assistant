@@ -138,7 +138,6 @@ export function ClaudeVoicePath({
           primary path, once, here — and the recorder no longer repeats it. */}
       {state.kind !== 'ready' && (
         <Disclosure summary={CAPTURE_COPY.claudeHowHeading} className="claude-voice-how">
-          <p className="capture-note">{CAPTURE_COPY.mcpRouteLead}</p>
           <p className="capture-note">{CAPTURE_COPY.mcpRoutePrecondition}</p>
           <p className="capture-guidance-label">{CAPTURE_COPY.mcpRouteSayLabel}</p>
           <p className="capture-mcp-say">{starter}…</p>

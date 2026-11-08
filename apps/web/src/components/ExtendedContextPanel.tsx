@@ -271,9 +271,6 @@ function groupByConcept(
   return order.map((concept) => ({ concept, entries: byConcept.get(concept) ?? [] }));
 }
 
-/** The visible short intro. The server's full `not_official` sentence is its `?`. */
-const NOT_OFFICIAL_SHORT = 'Not an official ISAAC record, and nothing here is a field value.';
-
 /** `unknown` -> something renderable, without asserting a shape it may not have. */
 function renderScalar(value: unknown): string {
   if (typeof value === 'string') return value;
@@ -721,26 +718,19 @@ function Loaded({
 
   return (
     <>
-      {/* ONE VISIBLE LINE, THE SERVER'S OWN SENTENCE ONE `?` AWAY (final review of
-          #279, P1). The line states the two things a reader must not miss — this is
-          not an official record, and nothing in it is a field value — and stays
-          visible. The server's `not_official` sentence is still rendered VERBATIM,
-          never paraphrased or shortened, inside the tip: it is the artifact's
-          definition of itself, and six lines of it led every visit to this panel. */}
-      <p className="extctx-not-official">
-        {NOT_OFFICIAL_SHORT}{' '}
-        <HelpTip subject={LABELS.extendedContextHeading} label="About Extended Context">
-          <span className="extctx-not-official-full">{loaded.not_official}</span>
-        </HelpTip>
-      </p>
-
       <ul className="extctx-counts">
         {/* EVERY NUMBER DESCRIBING THE RECORD IS THE SERVER'S. `total` is what the
             record holds, and it is stated even when the page shows all of it, because
             a reader must be able to tell a complete list from a first page without
             counting rows. */}
         <li className="extctx-count">
-          {loaded.total} {loaded.total === 1 ? 'entry' : 'entries'} on this record
+          {loaded.total} {loaded.total === 1 ? 'entry' : 'entries'} on this record{' '}
+          {/* THE SERVER'S OWN `not_official` SENTENCE, ONE `?` AWAY, rendered
+              VERBATIM: it is the artifact's definition of itself. It sits on the
+              count line rather than in a paragraph of its own (declutter review). */}
+          <HelpTip subject={LABELS.extendedContextHeading} label="About Extended Context">
+            <span className="extctx-not-official-full">{loaded.not_official}</span>
+          </HelpTip>
         </li>
         {shownCount > 0 && shownCount < loaded.total && (
           <li className="extctx-count">Showing the first {shownCount}</li>
@@ -758,8 +748,8 @@ function Loaded({
         {loaded.unreadable_entries > 0 && (
           <li className="extctx-count">
             {loaded.unreadable_entries}{' '}
-            {loaded.unreadable_entries === 1 ? 'entry' : 'entries'} this build cannot
-            read &mdash; kept in the record, not shown here
+            {loaded.unreadable_entries === 1 ? 'entry' : 'entries'} could not be read
+            &mdash; kept in the record, not shown here
           </li>
         )}
       </ul>
@@ -772,24 +762,18 @@ function Loaded({
              present is a sentence that goes wrong when the neighbour's condition
              changes, which is exactly how case 3 came to cite an absent row. */
           <p className="extctx-empty">
-            This record holds an extended context companion, and this build cannot
-            read{' '}
             {loaded.unreadable_entries === 1
-              ? 'its one entry'
-              : `any of its ${loaded.unreadable_entries} entries`}
-            . They are kept in the record exactly as they were found. Nothing here is
-            reconstructed from them, because nothing can say what one contains without
-            inventing it.
+              ? 'This record’s one extended context entry could not be read.'
+              : `None of this record’s ${loaded.unreadable_entries} extended context entries could be read.`}{' '}
+            They are kept in the record exactly as they were found.
           </p>
         ) : (
           /* CASE 3 -- present, and accounting for nothing. See the block above for the
              two false claims this replaces. It asserts no loss and denies none. */
           <p className="extctx-empty">
             This record holds an extended context companion that lists no entries, and
-            records none as unreadable. This build cannot say what it held &mdash; an
-            empty list and a document whose entries could not be read at all look the
-            same from here &mdash; so nothing is reconstructed from it and nothing is
-            claimed about it. The document itself is kept exactly as it was found.
+            records none as unreadable, so nothing is claimed about what it held. The
+            document itself is kept exactly as it was found.
           </p>
         )
       ) : (

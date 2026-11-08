@@ -22,34 +22,12 @@
   color: var(--text-heading);
 }
 
-.activity-lead,
-.activity-actor-note {
+.activity-lead {
   margin: 0;
   font-size: var(--font-size-body);
   line-height: var(--line-height-normal);
   color: var(--text-secondary);
   max-width: 68ch;
-}
-
-/* The actor disclosure — the shared `Disclosure` since the final review of #279 (a
-   native `<details>` with an 11px triangle before). The SUMMARY carries the question,
-   so a closed disclosure still states what it is about rather than hiding it behind a
-   neutral label; the paragraph keeps its set-apart treatment — structural, not hue —
-   because it is the one paragraph here a reader must not skim once opened. The
-   trigger, focus ring and chevron are `Disclosure`'s own. */
-.activity-actor-details {
-  font-size: var(--font-size-body);
-  color: var(--text-secondary);
-}
-
-.activity-actor-note {
-  margin: 0;
-  padding: var(--space-sm);
-  /* `--space-2xs` as the stroke, the form `run-schema-mirror.css` already uses —
-     a rung rather than a hand-authored `2px`, which `type-scale-and-spacing`
-     refuses and was right to. */
-  border-left: var(--space-2xs) solid var(--border-strong);
-  background: var(--surface-subtle);
 }
 
 /* The paging control. `.btn .btn-secondary` (`styles/base.css:207`) already defines

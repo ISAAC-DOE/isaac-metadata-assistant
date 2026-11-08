@@ -82,17 +82,12 @@ describe('R1b · the CSV panel warning states the instruction, not a mode name',
     );
   }
 
-  it('drops the mode word from the warning banner', () => {
+  it('names no runtime mode anywhere on the panel', () => {
+    // The warning banner itself was retired (declutter, 2026-11-02); the mode word
+    // must not come back elsewhere.
     const { container } = renderPanel();
-    const warn = container.querySelector('.csv-recon-banner-warn');
-    expect(warn).not.toBeNull();
-    expect(warn!.textContent ?? '').not.toMatch(/synthetic/i);
-  });
-
-  it('still tells the reader the one thing they must not do', () => {
-    const { container } = renderPanel();
-    const warn = container.querySelector('.csv-recon-banner-warn')!;
-    expect(warn.textContent ?? '').toMatch(/do not upload real or private/i);
+    expect(container.querySelector('.csv-recon-banner-warn')).toBeNull();
+    expect(container.textContent ?? '').not.toMatch(/synthetic/i);
   });
 });
 

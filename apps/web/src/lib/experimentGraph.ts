@@ -1238,7 +1238,7 @@ export function buildExperimentGraph(
   if (linkCount === 0) {
     b.note(
       'no_declared_links',
-      'This record declares no links. Nothing is inferred to fill the gap: a shared formula, sample id, beamline or proposal is not a relationship, and this graph will not draw one.',
+      'This record declares no links.',
     );
   }
 

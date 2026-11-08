@@ -166,3 +166,62 @@
   line-height: var(--line-height-normal);
   color: var(--fail-text);
 }
+
+/* ── The record page's "More" button (declutter, 2026-11-02) ─────────────────
+   A disclosure with one item (Discard), beside the page title. Existing tokens
+   only. The trigger is a quiet square icon button; the menu is a small card that
+   opens below it, right-aligned to the title row. */
+.record-more {
+  position: relative;
+  flex: none;
+}
+.record-more-trigger {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 36px;
+  height: 36px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-control);
+  background: var(--surface);
+  color: var(--text-secondary);
+  cursor: pointer;
+  transition: background 0.12s ease, border-color 0.12s ease, color 0.12s ease;
+}
+.record-more-trigger:hover {
+  background: var(--border-faint);
+  color: var(--text-strong);
+}
+.record-more-trigger[aria-expanded='true'] {
+  border-color: var(--border-strong);
+  color: var(--text-strong);
+}
+.record-more-trigger:focus-visible {
+  outline: 2px solid var(--action);
+  outline-offset: 2px;
+}
+.record-more-menu {
+  position: absolute;
+  top: calc(100% + var(--space-xs));
+  right: 0;
+  z-index: 20;
+  width: max-content;
+  max-width: min(320px, calc(100vw - 32px));
+  padding: var(--space-sm);
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-card);
+  box-shadow: var(--shadow-screen);
+}
+.record-more-menu .rename-actions {
+  margin: 0;
+}
+.record-more-menu .discard-blocked {
+  margin: 0;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  font-size: var(--font-size-meta);
+  line-height: var(--line-height-normal);
+  color: var(--text-secondary);
+}

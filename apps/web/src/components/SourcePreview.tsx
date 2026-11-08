@@ -41,12 +41,16 @@ export function SourcePreview({
 }: SourcePreviewProps) {
   const [tab, setTab] = useState<Tab>('source');
   const cited = new Set(citedLines);
+  const keyNode =
+    entry.key !== entry.label ? <span className="preview-prov-key">{entry.key}</span> : null;
 
   return (
-    <section className="preview" aria-label="Source preview (read-only)">
+    <section className="preview" aria-label="Source preview">
+      {/* The title shows the key only when it adds something: with no human label
+          the two are the same string (declutter, 2026-11-02). */}
       <h2 className="preview-prov-title">
         {entry.label}
-        <span className="preview-prov-key">{entry.key}</span>
+        {keyNode}
       </h2>
       <p className="preview-prov-text">{provenance}</p>
 
@@ -169,8 +173,7 @@ function PreviewTab({
 /**
  * The raw sidecar entry for the selected field, rendered faithfully. Any sha256 /
  * long-hex value (the entry value, or a user_confirmation answer) gets a
- * horizontally-scrollable mono field + copy button. The sidecar is labeled an
- * assistant convention, never an official ISAAC standard.
+ * horizontally-scrollable mono field + copy button.
  */
 function SidecarEntryDetails({ entry }: { entry: EvidenceTrailEntry }) {
   return (
@@ -179,9 +182,6 @@ function SidecarEntryDetails({ entry }: { entry: EvidenceTrailEntry }) {
         Sidecar Entry
         <span className="sidecar-entry-tag mono">{entry.key}</span>
       </div>
-      <p className="sidecar-convention" role="note">
-        {LABELS.sidecarConvention}
-      </p>
 
       {isHash(entry.value) && <HashField k="value" value={entry.value} />}
 

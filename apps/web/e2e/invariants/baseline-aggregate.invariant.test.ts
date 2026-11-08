@@ -218,14 +218,13 @@ describe('the darwin column says how much of itself is measured', () => {
        all seven and a zeroed cell can only be deleted (the note at `counts` in
        `a11y-baseline.ts`). Seven `evidence` keys joined: linux 3 measured on this
        host, darwin 68 carried forward. 7 x 68 = 476 — the whole darwin column. */
+    /* ── 2026-11-02, record-side declutter ──────────────────────────────────
+       A darwin run measured the seven `evidence` cells at 3 each, so their keys
+       left the register and the cells are scalars again. The register is empty. */
     expect(provenance.unverifiedKeys.slice().sort()).toEqual([
-      'evidence@desktop-1280x800',
-      'evidence@laptop-1024x768',
-      'evidence@mobile-375x812',
-      'evidence@tablet-768x1024',
-      'evidence@width-320',
-      'evidence@width-390',
-      'evidence@zoom-200',
+      /* ~~evidence@desktop-1280x800 · @laptop-1024x768 · @mobile-375x812 ·
+         @tablet-768x1024 · @width-320 · @width-390 · @zoom-200~~ — darwin measured
+         2026-11-02. */
       /* ~~settings-explorer@desktop-1280x800 · @laptop-1024x768 · @mobile-375x812 ·
          @tablet-768x1024 · @width-320 · @width-390~~ — cells deleted 2026-10-18. */
       // ~~'settings-explorer@zoom-200',~~ — 2026-10-18, Settings widget redesign: its
@@ -239,8 +238,9 @@ describe('the darwin column says how much of itself is measured', () => {
     // cell fails here rather than being absorbed by a total that still happens to
     // add up — and the sum is a CHECK, not the source: the figure was read out of
     // this test's own failure (`expected 136 to be 74`).
-    expect(provenance.unverifiedNodes).toBe(476);
-    expect(provenance.unverifiedFraction).toBeGreaterThan(0);
+    // ~~476~~ -> 0, 2026-11-02: the seven darwin 68s were measured at 3.
+    expect(provenance.unverifiedNodes).toBe(0);
+    expect(provenance.unverifiedFraction).toBe(0);
     // DARWIN IS UNCHANGED at 822 and that is the point of this whole round: six
     // linux halves moved and not one darwin half was measured, so the darwin total
     // cannot have moved. If this figure ever changes in the same edit as a linux
@@ -252,7 +252,9 @@ describe('the darwin column says how much of itself is measured', () => {
     // (the note at `counts` in `a11y-baseline.ts`), because a measured linux 0
     // beside a darwin half is not writable. No darwin half that REMAINS was changed;
     // all 476 that remain are carried forward and registered.
-    expect(provenance.totalNodes).toBe(476);
+    // ~~476~~ -> 21, 2026-11-02 — A DARWIN RUN, not an edit beside a linux one: the
+    // seven `evidence` cells read 3 each on this host (7 x 3 = 21, equal to linux).
+    expect(provenance.totalNodes).toBe(21);
   });
 
   /*
@@ -601,14 +603,11 @@ describe('the darwin column says how much of itself is measured', () => {
       // `evidence` cells are splits: linux 3 MEASURED on this host, darwin 68 CARRIED
       // FORWARD and registered in `DARWIN_CARRIED_FORWARD`, exactly as the assertion
       // message below requires.
+      // ── 2026-11-02, record-side declutter: darwin MEASURED 3 on all seven
+      // `evidence` cells, equal to linux, so each is a scalar again and no split
+      // remains.
       [
-        'color-contrast @ evidence@desktop-1280x800',
-        'color-contrast @ evidence@laptop-1024x768',
-        'color-contrast @ evidence@mobile-375x812',
-        'color-contrast @ evidence@tablet-768x1024',
-        'color-contrast @ evidence@width-320',
-        'color-contrast @ evidence@width-390',
-        'color-contrast @ evidence@zoom-200',
+        // ~~the seven `color-contrast @ evidence@*` pairs~~ — 2026-11-02, see above.
         // ~~`settings-explorer@zoom-200` collapsed to a SCALAR 20~~ — superseded the
         // same day: every `settings-explorer` cell is deleted (linux 0).
       ] as string[]

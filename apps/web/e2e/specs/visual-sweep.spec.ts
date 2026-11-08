@@ -296,7 +296,6 @@ const EXPECTED_STATE_IDS = [
   'record-evidence',
   'record-evidence-graph',
   'record-validation',
-  'record-revision-history',
   'export-blocked',
   'export-success',
   'export-conflict',
@@ -909,10 +908,15 @@ const STATES: readonly VisualState[] = [
       await settled(page);
       const heading = page.getByRole('heading', { name: 'Comparing two runs' }).first();
       await expect(heading).toBeVisible({ timeout: 20_000 });
-      // The panel states that it neither writes nor judges. Asserted because it
-      // is the claim a screenshot of a table headed "Comparison" most invites a
-      // reviewer to doubt.
-      await expect(page.locator('.rc-scope').first()).toContainText(/nothing here changes either run/i);
+      // The panel says what it is and never claims to judge. Asserted because a
+      // table headed "Comparison" most invites the reading that the app decides
+      // which run is right. RE-POINTED 2026-11-02 (record-side declutter): the
+      // standing read-only caveat ("Nothing here changes either run …") was
+      // retired, so this pins the scope sentence that replaced it and the absence
+      // of the opposite claim, as `run-compare.test.tsx` → `scope` does.
+      const scope = page.locator('.rc-scope').first();
+      await expect(scope).toContainText(/side-by-side of what each run records/i);
+      await expect(scope).not.toContainText(/\b(correct|right|better) (value|run)\b|recommend/i);
       return heading;
     },
     // `RunCompare.tsx:276`. The panel is the state; the record page around it is
@@ -936,7 +940,7 @@ const STATES: readonly VisualState[] = [
       // It sits directly below the run list, on the Runs workspace.
       await app.gotoExample(`/record/${SEED.partial}?view=runs`);
       await settled(page);
-      const heading = page.getByRole('heading', { name: 'Validate & Review' }).first();
+      const heading = page.getByRole('heading', { name: 'Validation' }).first();
       await expect(heading).toBeVisible({ timeout: 20_000 });
       await expect(page.locator('.validate-review .vr-status').first()).toBeVisible();
       return heading;
@@ -1064,49 +1068,9 @@ const STATES: readonly VisualState[] = [
       return exportBtn;
     },
   },
-  {
-    /*
-     * ADDED THE MOMENT IT BECAME PHOTOGRAPHABLE, which is the whole discipline
-     * this file exists to enforce.
-     *
-     * `RevisionHistoryPanel` began mounting UNCONDITIONALLY on
-     * `/record/:id/export` when the revision-history slice merged — a route this
-     * sweep already visited three times without photographing the new markup.
-     * That is exactly the failure mode the header describes: new content on a
-     * measured route that the sweep walks past.
-     *
-     * On this deployment the panel renders its UNAVAILABLE state, because the
-     * `0003`/`0004` migrations are not applied here — the panel's own comment
-     * says so. That is deterministic and worth a picture: it is the state every
-     * reader of this build actually sees, and the one where a careless wording
-     * would read as "this record has never been submitted" rather than "this
-     * deployment cannot know".
-     *
-     * The heading is unconditional, so it is the primary; the availability copy
-     * below it varies with deployment and is not asserted here.
-     */
-    id: 'record-revision-history',
-    what: 'Submission History on Export Readiness — read-only, and honest about what it cannot read here',
-    async reach({ page, app }) {
-      await app.gotoExample(`/record/${SEED.ready}/export`);
-      await settled(page);
-      // `.first()`, because the role query matches TWICE on this screen and a
-      // multi-match locator makes `toBeVisible` a strict-mode violation rather
-      // than a visibility check — which reports as "expect(locator).toBeVisible()
-      // failed" and reads exactly like an unreachable state. Probed rather than
-      // assumed: `h2` text is `["Submission History"]` (one), while the heading
-      // ROLE resolves to 2. Same treatment `record-confirmation` already uses.
-      const heading = page
-        .getByRole('heading', { name: 'Submission History' })
-        .first();
-      await expect(heading).toBeVisible({ timeout: 20_000 });
-      return heading;
-    },
-    // `RevisionHistoryPanel.tsx:91`. This state shares `/record/:id/export` with
-    // `record-validation`, and before this frame existed the two attached the
-    // same image.
-    frame: ({ page }) => page.locator('section.revhist-section'),
-  },
+  /* `record-revision-history` was retired (declutter, 2026-11-02): on a deployment
+     that keeps no submission history — every deployment this sweep runs against —
+     the section is no longer rendered at all, so there is nothing to photograph. */
   {
     id: 'export-blocked',
     what: 'Export BLOCKED — the official dry run does not pass, so the gate stays closed',

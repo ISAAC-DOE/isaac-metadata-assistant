@@ -124,7 +124,7 @@ describe('R1b · the answered row does not claim the server stored a value', () 
 
     fireEvent.change(getByLabelText('Asset Hash'), { target: { value: 'c3b0c442…' } });
     fireEvent.click(screen.getByText('Confirm'));
-    await findByText('1 / 5');
+    await screen.findByRole('img', { name: '1 of 5 answered' });
 
     const row = container.querySelector('.answered-stored');
     expect(row, 'the answered row must still show the value').not.toBeNull();

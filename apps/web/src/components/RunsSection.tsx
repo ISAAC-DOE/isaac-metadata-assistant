@@ -2066,7 +2066,7 @@ function RunsBrowser({
                     <button
                       ref={stayButtonRef}
                       type="button"
-                      className="btn btn-secondary"
+                      className="btn btn-quiet"
                       onClick={() => {
                         setConfirmingLeave(false);
                         setPendingLeave(null);

@@ -328,7 +328,7 @@ describe('A-01 · nothing open is no longer a dead end', () => {
     expect(notice.textContent).toMatch(/the stored value is unchanged/);
   });
 
-  it('an OPEN question links to Complete instead of offering a correction that would refuse', async () => {
+  it('an OPEN question is counted in one line, never offered a correction that would refuse', async () => {
     const open = structuredAnswers();
     open.units[0].answers.series = { state: 'open', value: null, editable: false } as never;
     stubFetchRoutes({
@@ -337,11 +337,51 @@ describe('A-01 · nothing open is no longer a dead end', () => {
     });
     renderAt('/record/demo');
     const panel = await screen.findByRole('region', { name: 'Confirmed Answers' });
-    expect(within(panel).getByText('Not answered yet')).toBeInTheDocument();
+    // Declutter (2026-11-02): only confirmed rows render; the open question is not a
+    // row of its own (the needs-you banner above names it, with the same link).
+    expect(within(panel).queryByText('Not answered yet')).toBeNull();
     expect(within(panel).queryByRole('button', { name: 'Edit Reduced Spectrum' })).toBeNull();
+    expect(panel.querySelectorAll('.confirmed-row[data-state="open"]')).toHaveLength(0);
+  });
+
+  it('never says "you confirmed" over a value whose evidence is not a user confirmation', async () => {
+    // Final review, Important 2: the lead read "Values you confirmed." directly above a
+    // QC verdict whose only evidence is a spreadsheet row ("From Recorded Evidence").
+    const fromEvidence = structuredAnswers();
+    for (const key of ['series', 'qc', 'descriptor'] as const) {
+      fromEvidence.units[0].answers[key] = {
+        ...(fromEvidence.units[0].answers[key] as object),
+        confirmation: 'from_evidence',
+      } as never;
+    }
+    stubFetchRoutes({
+      ...bundleRoutes('demo'),
+      [`GET ${BASE}/structured-answers`]: { body: fromEvidence },
+    });
+    renderAt('/record/demo');
+    const panel = await screen.findByRole('region', { name: 'Confirmed Answers' });
+    await waitFor(() => expect(panel.querySelectorAll('.confirmed-row').length).toBeGreaterThan(0));
+    const USER_CLAIM = /\byou confirmed\b|confirmed by you/i;
+    expect(USER_CLAIM.test('Values you confirmed.')).toBe(true);
+    expect(panel.textContent ?? '').not.toMatch(USER_CLAIM);
+  });
+
+  it('with NOTHING confirmed, the panel is one line that counts what is still open', async () => {
+    const none = structuredAnswers();
+    for (const key of ['series', 'qc', 'descriptor'] as const) {
+      none.units[0].answers[key] = { state: 'open', value: null, editable: false } as never;
+    }
+    stubFetchRoutes({
+      ...bundleRoutes('demo'),
+      [`GET ${BASE}/structured-answers`]: { body: none },
+    });
+    renderAt('/record/demo');
+    const panel = await screen.findByRole('region', { name: 'Confirmed Answers' });
     expect(
-      within(panel).getByRole('link', { name: /Answer in/ }).getAttribute('href'),
-    ).toBe('/record/demo/complete');
+      await within(panel).findByText('Nothing confirmed yet. The 3 fields still open are listed above.'),
+    ).toBeInTheDocument();
+    expect(panel.querySelectorAll('.confirmed-row')).toHaveLength(0);
+    expect(panel.querySelector('.confirmed-answers-lead')).toBeNull();
   });
 });
 

@@ -294,6 +294,9 @@ type RunSchemaMirrorProps = {
   run: ApiRunView | null;
   headerControl?: ReactNode;
   check?: ApiRunCheckResponse | null;
+  /** Set by a caller that KNOWS the record has no runs: the pane is then this one
+   *  line rather than a map of every field marked Missing (declutter, 2026-11-02). */
+  emptyText?: string;
 };
 
 /*
@@ -321,7 +324,9 @@ function RunSchemaMirrorBody({
   check,
   headerControl,
   navigate,
+  emptyText,
 }: {
+  emptyText?: string;
   /** Opens this run's editor when no visible control for a field exists (QA A-11). */
   navigate: ((to: string) => void) | null;
   run: ApiRunView | null;
@@ -467,6 +472,19 @@ function RunSchemaMirrorBody({
   const editable = (row: RecordMapRow) =>
     row.editable ? () => focusField(row.path) : undefined;
 
+  if (run === null && emptyText !== undefined) {
+    return (
+      <aside className="rsm rsm-placeholder" aria-labelledby={`${uid}-heading`}>
+        <div className="rsm-head">
+          <h3 className="rsm-heading" id={`${uid}-heading`}>
+            Record Map
+          </h3>
+        </div>
+        <p className="rsm-note">{emptyText}</p>
+      </aside>
+    );
+  }
+
   return (
     <aside className="rsm" aria-labelledby={`${uid}-heading`}>
       <div className="rsm-head">
@@ -519,16 +537,19 @@ function RunSchemaMirrorBody({
         </ul>
       </section>
 
-      <section className="rsm-group" aria-labelledby={`${uid}-inherited`}>
-        <p className="rsm-group-title eyebrow" id={`${uid}-inherited`}>
-          {LABELS.recordMapInherited}
-        </p>
-        <ul className="rm-rows">
+      {/* SHARED BY THE RECORD, FOLDED TO ONE LINE (declutter, 2026-11-02): these
+          blocks are set on Record Fields, not on a run, so they are reference here.
+          Each row still says "Not Shown Here" or "Missing" inside the disclosure. */}
+      <Disclosure
+        summary={`${LABELS.recordMapInherited} · ${recordBlocks.length} blocks`}
+        className="rsm-inherited"
+      >
+        <ul className="rm-rows" aria-label={LABELS.recordMapInherited}>
           {recordBlocks.map((row) => (
             <Row key={row.path} row={row} facts={fieldFacts(schema, row)} />
           ))}
         </ul>
-      </section>
+      </Disclosure>
 
       {/*
         THE EXHAUSTIVE STRUCTURE, AND THE DISCLOSURE, BEHIND ONE DISCLOSURE

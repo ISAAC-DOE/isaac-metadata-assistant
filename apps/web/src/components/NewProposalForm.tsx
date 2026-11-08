@@ -88,34 +88,6 @@ export const NEW_PROPOSAL_EFFECT_CLAIM =
   'judgment, it is not a value, not evidence and not a confirmation, and it is ' +
   'inert to export.';
 
-/**
- * ACCEPTANCE IS A DIFFERENT ACT AND IT IS GENUINELY BLOCKED — disclosed here, at the
- * moment a reader is about to create something, rather than left to be discovered on
- * the review card. It is a CONFIGURATION fact, not a build defect and not a bug in
- * this form: no application change can close it.
- */
-export const NEW_PROPOSAL_ACCEPTANCE_DISCLOSURE =
-  'Creating a proposal works. Accepting one does not, in this deployment: the accept ' +
-  'operation answers "human_actor_required" because no trusted authentication ' +
-  'boundary is configured, so nothing here can establish who is accepting. That is a ' +
-  'fact about how this deployment is configured, not about this record — the ' +
-  'proposal is stored either way, and rejecting, superseding and withdrawing are ' +
-  'unaffected.';
-
-/**
- * THE UNAVAILABLE CASE, WORDED SO IT NAMES WHAT WOULD ENABLE IT. Reached only when
- * the server reported an EMPTY `target_field_paths` — a real answer, not a failed
- * read — which means this build has no write route for any proposable field. The
- * control is shown in its real place and says so, rather than being hidden (a reader
- * learns nothing from an absence) or offered and then failing (which is worse).
- */
-export const NEW_PROPOSAL_UNAVAILABLE_REASON =
-  'This deployment reported no proposable field paths at all, so there is nothing a ' +
-  'proposal could target. A proposal must name a field this build can eventually ' +
-  'write, and the server publishes that list itself — it is not decided here. ' +
-  'When a deployment serves a non-empty list, this control becomes a working form ' +
-  'with no further change.';
-
 type NotesState =
   | { status: 'idle' }
   | { status: 'loading' }
@@ -386,10 +358,6 @@ export function NewProposalForm({
             {LABELS.newProposalUnavailable}
           </span>
         </div>
-        <details className="new-proposal-why">
-          <summary>Why?</summary>
-          <p className="proposal-form-hint">{NEW_PROPOSAL_UNAVAILABLE_REASON}</p>
-        </details>
       </div>
     );
   }
@@ -411,10 +379,6 @@ export function NewProposalForm({
           >
             {LABELS.newProposalAction}
           </button>
-          <p className="new-proposal-lede">
-            Suggest a value for one field, citing the note it was read from. It is
-            stored for review and writes nothing.
-          </p>
         </div>
       </div>
     );
@@ -433,10 +397,6 @@ export function NewProposalForm({
         >
           {LABELS.newProposalAction}
         </button>
-        <p className="new-proposal-lede">
-          Suggest a value for one field, citing the note it was read from. It is
-          stored for review and writes nothing.
-        </p>
       </div>
 
       <div className="proposal-form new-proposal-form" id={fieldId}>
@@ -722,12 +682,8 @@ export function NewProposalForm({
           you to find on the review card.
         </p>
 
-        {/* --- 6. what this does, and what is genuinely blocked ---------------- */}
+        {/* --- 6. what this does ------------------------------------------------ */}
         <p className="proposal-form-hint">{NEW_PROPOSAL_EFFECT_CLAIM}</p>
-        <details className="new-proposal-why">
-          <summary>What happens after you store it?</summary>
-          <p className="proposal-form-hint">{NEW_PROPOSAL_ACCEPTANCE_DISCLOSURE}</p>
-        </details>
 
         {error !== null && (
           <p className="proposal-form-error" role="alert">
@@ -744,7 +700,7 @@ export function NewProposalForm({
           >
             {busy ? LABELS.newProposalSubmitBusy : LABELS.newProposalSubmit}
           </button>
-          <button type="button" className="btn btn-secondary" onClick={() => close(true)}>
+          <button type="button" className="btn btn-quiet" onClick={() => close(true)}>
             Cancel
           </button>
         </div>

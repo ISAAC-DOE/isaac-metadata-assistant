@@ -330,8 +330,8 @@ describe('the adapter does not manufacture values', () => {
         question: 'q',
         demo_answer: null,
       });
-      expect(withoutExample.context).not.toMatch(/Confirm the example value/);
-      expect(withoutExample.context).toMatch(/never generate/);
+      expect(withoutExample.context).not.toMatch(/Confirm the example/);
+      expect(withoutExample.context).toMatch(/No example is available/);
 
       const withExample = pendingItemToBlocker({
         id: kind,
@@ -339,7 +339,7 @@ describe('the adapter does not manufacture values', () => {
         question: 'q',
         demo_answer: { value: [{ series_id: 's' }], label: 'Example answer' },
       });
-      expect(withExample.context).toMatch(/Confirm the example value/);
+      expect(withExample.context).toBe('Confirm the example, or leave it missing.');
     }
   });
 
@@ -357,8 +357,12 @@ describe('the adapter does not manufacture values', () => {
     for (const kind of ['series', 'descriptor'] as const) {
       const b = pendingItemToBlocker({ id: kind, kind, question: 'q', demo_answer: null });
 
-      // The half that has NOT changed and must not: the app never generates either.
-      expect(b.context).toMatch(/never generate/);
+      // The copy asks the scientist for the value and never claims the app supplies
+      // one (the standing "never generate" clause was cut, declutter 2026-11-02).
+      const SUPPLIES = /\b(will|can) (fill|generate|supply|compute)\b|auto-?fill/i;
+      expect(SUPPLIES.test('ISAAC will fill this in for you')).toBe(true);
+      expect(b.context).not.toMatch(SUPPLIES);
+      expect(b.context).toMatch(/^No example is available for this record\. (Paste|Enter) /);
       // The dead-end claim is gone, because the dead end is gone.
       expect(b.context).not.toMatch(/no way to enter one/i);
 

@@ -172,7 +172,7 @@ describe('an absent companion', () => {
     expect(text).not.toMatch(/was discarded|were discarded|content was lost/i);
     // What it does say: the observable facts, and what it cannot determine.
     expect(screen.getByText(/records none as unreadable/i)).toBeTruthy();
-    expect(screen.getByText(/cannot say what it held/i)).toBeTruthy();
+    expect(screen.getByText(/nothing is claimed about what it held/i)).toBeTruthy();
     // It is distinct from the ABSENT state, which is the common case.
     expect(screen.queryByText(LABELS.extendedContextEmpty)).toBeNull();
   });
@@ -197,11 +197,11 @@ describe('an absent companion', () => {
         concept_count: 0,
       }),
     );
-    await screen.findByText(/cannot read any of its 2 entries/i);
+    await screen.findByText(/None of this record’s 2 extended context entries could be read/i);
     expect(screen.queryByText(LABELS.extendedContextEmpty)).toBeNull();
     // COUNTED AND NEVER RENDERED — the reader is told the record holds more than
     // the list shows, and nothing is invented about what it holds.
-    expect(screen.getByText(/2 entries this build cannot read/i)).toBeTruthy();
+    expect(screen.getByText(/2 entries could not be read/i)).toBeTruthy();
     /* THE NUMBER IS NAMED INLINE rather than by pointing at the neighbouring count
        row. That row IS rendered in this case — but a sentence that depends on a
        neighbour being present is a sentence that goes wrong when the neighbour's
@@ -694,10 +694,11 @@ describe('the default reading is the scientist’s words, and nothing is lost', 
     expect(rule).toBeVisible();
   });
 
-  it('the intro is ONE visible line that still says it is not official; the server’s sentence is its `?`', async () => {
+  it('the server’s not-official sentence is its `?`, with no standing caveat line', async () => {
     mount(body());
-    const line = await screen.findByText(/Not an official ISAAC record, and nothing here is a field value\./);
-    expect(line).toBeVisible();
+    await screen.findByRole('button', { name: 'About Extended Context' });
+    // The standing short caveat was retired (declutter, 2026-11-02).
+    expect(screen.queryByText(/Not an official ISAAC record, and nothing here is a field value/)).toBeNull();
     const full = screen.getByText(NOT_OFFICIAL);
     expect(full).not.toBeVisible();
     fireEvent.click(screen.getByRole('button', { name: 'About Extended Context' }));

@@ -285,9 +285,9 @@ function StateChip({ state }: { state: string }) {
  */
 function acceptanceLockLine(reason: string | null): string {
   if (reason === 'no_verifier_configured') {
-    return 'Trusted scientist identity has not been enabled yet.';
+    return 'Scientist sign-in is not enabled; you can still reject or withdraw a proposal.';
   }
-  return 'This deployment reports that no proposal can be accepted here.';
+  return 'No proposal can be accepted here; you can still reject or withdraw one.';
 }
 
 /**
@@ -320,7 +320,8 @@ function AcceptanceNotice({
   lineId?: string;
   title: string;
   line: string;
-  children: React.ReactNode;
+  /** The `Why?` body. Absent, there is no `Why?` toggle at all. */
+  children?: React.ReactNode;
   onReload: () => void;
   reloadLabel: string;
   role: 'note' | 'alert';
@@ -346,23 +347,27 @@ function AcceptanceNotice({
         <span className="proposals-lock-text">{line}</span>
       </p>
       <div className="proposals-lock-actions">
-        <button
-          type="button"
-          className="btn btn-secondary proposals-lock-why"
-          aria-expanded={whyOpen}
-          aria-controls={whyId}
-          onClick={() => setWhyOpen((open) => !open)}
-        >
-          <Chevron size={14} strokeWidth={2} aria-hidden="true" />
-          Why?
-        </button>
+        {children !== undefined && (
+          <button
+            type="button"
+            className="btn btn-secondary proposals-lock-why"
+            aria-expanded={whyOpen}
+            aria-controls={whyId}
+            onClick={() => setWhyOpen((open) => !open)}
+          >
+            <Chevron size={14} strokeWidth={2} aria-hidden="true" />
+            Why?
+          </button>
+        )}
         <button type="button" className="btn btn-secondary proposals-lock-reload" onClick={onReload}>
           {reloadLabel}
         </button>
       </div>
-      <div className="proposals-lock-why-body" id={whyId} hidden={!whyOpen}>
-        {children}
-      </div>
+      {children !== undefined && (
+        <div className="proposals-lock-why-body" id={whyId} hidden={!whyOpen}>
+          {children}
+        </div>
+      )}
     </div>
   );
 }
@@ -470,10 +475,8 @@ export function acceptUnavailableReason(
   if (!Array.isArray(targets) || targets.length === 0) return null;
   if (!targets.includes(proposal.target_field_path)) {
     return (
-      'No write operation in this build accepts a value at this field path, so accepting ' +
-      'could never write one. That is a limitation of this application and NOT a ' +
-      'statement about the official ISAAC schema, which defines this field. The note ' +
-      'behind this proposal is untouched.'
+      'Accepting cannot write a value at this field path here; the official ISAAC ' +
+      'schema still defines this field. The note behind this proposal is untouched.'
     );
   }
   if (!Array.isArray(recordScoped)) return null;
@@ -622,12 +625,9 @@ function reviewRefusalCopy(err: unknown, action: ApiProposalReviewAction): strin
   const code = refusalCode(err);
   if (code === 'human_actor_required') {
     return (
-      'Accepting writes a scientific value into this record, which is an attributable ' +
-      'act — and this deployment establishes no attributable human actor, so the ' +
-      'request was refused and NOTHING WAS WRITTEN. That is a fact about how this ' +
-      'deployment is configured, not a fault in this record or in what you did, and ' +
-      'retrying will not change it. Rejecting, superseding and withdrawing need no ' +
-      'actor and still work.'
+      'Accepting needs an attributable person, and none is established here, so ' +
+      'nothing was written and retrying will not change it. Rejecting, superseding ' +
+      'and withdrawing still work.'
     );
   }
   if (code === 'proposal_stale') {
@@ -671,8 +671,8 @@ function reviewRefusalCopy(err: unknown, action: ApiProposalReviewAction): strin
   if (code === 'no_write_path_for_field') {
     return (
       'The write route that owns this field path refused it, so nothing was written. ' +
-      'That is a limitation of this build and not a statement about the official ISAAC ' +
-      'schema.'
+      'That is a limitation of this application and not a statement about the official ' +
+      'ISAAC schema.'
     );
   }
   if (statusOf(err) === 428) {
@@ -894,7 +894,7 @@ function unreadableClause(count: number): string {
   const noun = count === 1 ? 'entry' : 'entries';
   const asOne = count === 1 ? 'as a proposal' : 'as proposals';
   return (
-    ` · ${count} stored ${noun} this version cannot show ${asOne}` +
+    ` · ${count} stored ${noun} that cannot be shown ${asOne}` +
     ' — either unreadable, or repeating an id another proposal already holds' +
     ' — kept unchanged on the record'
   );
@@ -962,15 +962,13 @@ export function IngestionProposalsPanel({
         </h2>
         {/* One line, and the full account one `?` away (DEC-35). */}
         <p className="proposals-sub">
-          Stored suggestions about one field each. None is a field value, and nothing here
-          is ever deleted.{' '}
+          Stored suggestions about one field each.{' '}
           <HelpTip subject="Ingestion Proposals">
             <span>
               Each proposal is a value, the field path it is for, and the rule that
-              produced it. Nothing here is a field value, evidence or a confirmation — not
-              even once it has been accepted — and nothing here is ever deleted.
-              Rejecting, superseding and withdrawing are states, and the note behind a
-              proposal survives all of them.
+              produced it. A proposal is not a field value or evidence, even once
+              accepted. Rejecting, superseding and withdrawing are states, and the note
+              behind a proposal survives all of them.
             </span>
           </HelpTip>
         </p>
@@ -1954,6 +1952,15 @@ function ProposalsBrowser({
           }}
         />
       )}
+      {/* AN EMPTY QUEUE SHOWS NO CONTROLS (declutter, 2026-11-02): with nothing on
+          the record and no filter applied there is nothing to filter, order or
+          count, so the toolbar and the count line wait for the first proposal. */}
+      {!(
+        loaded !== null &&
+        loaded.total === 0 &&
+        loaded.unreadable_entries === 0 &&
+        filter === 'all'
+      ) && (
       <div className="proposals-toolbar">
         <div className="proposals-control">
           <label className="proposals-control-label" htmlFor={filterId}>
@@ -2017,6 +2024,7 @@ function ProposalsBrowser({
           {list.status === 'loading' ? '' : countLine}
         </p>
       </div>
+      )}
 
       {/* The ACT announcement, separate from the counts. A screen-reader user who
           activates Withdraw needs to hear that the proposal was withdrawn AND KEPT;
@@ -2209,28 +2217,20 @@ function ProposalsBrowser({
             id={lockNoticeId}
             lineId={`${lockNoticeId}-line`}
             role="note"
-            title="Acceptance unavailable on this deployment"
+            title="Acceptance unavailable"
             line={acceptanceLockLine(acceptance?.reason ?? null)}
             reloadLabel="Reload"
             onReload={() => {
               void onReloadAcceptance?.();
             }}
           >
-            <p className="proposals-lock-why-text">
-              Accepting writes a scientific value into this record, which is an
-              attributable act. This deployment reports that it cannot currently
-              establish which scientist is acting, so an acceptance would be refused
-              and nothing would be written. That is how the deployment is configured —
-              not a fault in this record — and an operator resolves it. Rejecting,
-              superseding and withdrawing need no identity and still work.
-            </p>
             {acceptance?.reason !== null &&
-              acceptance?.reason !== undefined &&
-              acceptance.reason !== 'no_verifier_configured' && (
-                <p className="proposals-lock-why-text">
-                  The server reported: <code className="mono">{acceptance.reason}</code>
-                </p>
-              )}
+            acceptance?.reason !== undefined &&
+            acceptance.reason !== 'no_verifier_configured' ? (
+              <p className="proposals-lock-why-text">
+                The server reported: <code className="mono">{acceptance.reason}</code>
+              </p>
+            ) : undefined}
           </AcceptanceNotice>
         )}
 
@@ -2241,8 +2241,8 @@ function ProposalsBrowser({
         <AcceptanceNotice
           role="alert"
           containerRef={refusalRef}
-          title="Acceptance refused on this deployment"
-          line="Nothing was written — trusted scientist identity has not been enabled."
+          title="Acceptance refused"
+          line="Nothing was written — scientist sign-in is not enabled."
           /* ONE reload label for both notices (PR #277 review, minor) — this one
              said "Reload This Section" beside the preflight notice's "Reload". */
           reloadLabel="Reload"
@@ -2537,11 +2537,17 @@ function EmptyProposals({
           is explicitly agent documentation (Settings → Connect Your Agent); here the
           three ways in are said plainly, and the facts are unchanged.
         */}
-        No proposals yet. A proposal is a value suggested for a field, waiting for your
-        review. One is created three ways: finishing a transcript capture adds one for
-        each value it can store, proposing a value from a note in Unmapped Notes adds
-        one, and a connected AI agent can propose one from a note it cites. Nothing is
-        ever inferred from this record&rsquo;s contents on its own{disclosure}.
+        No proposals yet{disclosure}. They appear when you finish a capture or propose
+        from a note.{' '}
+        <HelpTip subject="Proposals" label="How Proposals Are Made">
+          <span>
+            A proposal is a value suggested for a field, waiting for your review. One is
+            created three ways: finishing a transcript capture adds one for each value it
+            can store, proposing a value from a note in Unmapped Notes adds one, and a
+            connected AI agent can propose one from a note it cites. Nothing is inferred
+            from this record&rsquo;s contents on its own.
+          </span>
+        </HelpTip>
       </p>
     </div>
   );
@@ -3252,7 +3258,7 @@ function ProposalCard({
                 </button>
                 <button
                   type="button"
-                  className="btn btn-secondary"
+                  className="btn btn-quiet"
                   disabled={busy}
                   onClick={() => setEditor(null)}
                 >
@@ -3307,7 +3313,7 @@ function ProposalCard({
                 </button>
                 <button
                   type="button"
-                  className="btn btn-secondary"
+                  className="btn btn-quiet"
                   disabled={busy}
                   onClick={() => setEditor(null)}
                 >

@@ -112,8 +112,9 @@ test.describe('R4 · answers that must be refused', () => {
 
     // The counter did not move and the question is still question 1 — a field may never
     // be answered and open at the same time.
-    await expect(page.locator('.completion-counter')).toHaveText(
-      `0 / ${before.pendingIds.length}`
+    await expect(page.locator('.progress')).toHaveAttribute(
+      'aria-label',
+      `0 of ${before.pendingIds.length} answered`
     );
     await expect(page.getByRole('heading', { name: /Answer \d+ Questions/ })).toBeVisible();
     await expect(
@@ -244,9 +245,9 @@ test.describe('R4 · answers that must be refused', () => {
     await expect(page.locator('.answered-row')).toHaveCount(0);
     await expect(page.getByText('Confirmed by You')).toHaveCount(0);
     await expect(
-      page.locator('.completion-counter'),
+      page.locator('.progress'),
       'a dropped answer must not inflate the counter'
-    ).toHaveText(`0 / ${before.pendingIds.length}`);
+    ).toHaveAttribute('aria-label', `0 of ${before.pendingIds.length} answered`);
     await expect(
       page.locator('.guided-index'),
       'the dropped question must still be the FIRST open one, not the second'

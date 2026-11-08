@@ -143,7 +143,7 @@ describe('a finding row says what it is about, and nothing more', () => {
     render(<FindingList title="Blocking" state="Missing" findings={[{ code: 'SOMETHING_NEW' }] as never} />);
     expect(screen.getByText('Blocking · 1')).toBeTruthy();
     expect(
-      screen.getByText('The server reported a finding this build cannot describe.'),
+      screen.getByText('The server reported an unrecognised finding.'),
     ).toBeTruthy();
   });
 });

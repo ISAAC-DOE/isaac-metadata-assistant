@@ -723,8 +723,35 @@ export const A11Y_BASELINE: readonly BaselineEntry[] = [
        * If CI disagrees, transcribe ITS numbers and correct the total; never loosen the
        * assertion.
        */
-      'evidence@desktop-1280x800': { darwin: 68, linux: 3 },
-      'evidence@laptop-1024x768': { darwin: 68, linux: 3 },
+      /*
+       * ── 2026-11-02, record-side declutter: DARWIN MEASURED, 68 -> 3 on all seven.
+       *    The pairs collapse to scalars and the seven keys leave
+       *    `DARWIN_CARRIED_FORWARD`. ──────────────────────────────────────────────
+       *
+       * The darwin halves had been carried forward since 2026-10-18 (see the block
+       * above). Measured on this host, three runs: on `feat/web-declutter-rec`, the
+       * seven cells (`a11y-axe.spec.ts` + `a11y-narrow.spec.ts -g Evidence`) with the
+       * new disclosures open, then the whole of both specs at these numbers (241
+       * passed); on the shell branch under it (`b0c526c8`), the same seven cells. All
+       * seven read 3 on darwin, every time.
+       *
+       * The three nodes are the SAME three on both branches, read out of an axe probe
+       * (`node.target`, `node.any[].data.fgColor`):
+       * `.sidecar-kv:nth-child(2|3|4) > .k`, foreground `#7a6bb0`. The probe ran with
+       * this branch's new Evidence disclosures OPEN (`EVIDENCE_DISCLOSURES` in
+       * `helpers/disclosures.ts`: Show All 31 rows, Reconcile a Campaign Sheet), and
+       * the scan matched the shell branch's, where both regions were always on the
+       * page: 31 classification rows, the CSV lead visible, 44 rules passing, 0
+       * incomplete. So the declutter moved no node into or out of the scan.
+       *
+       * LINUX STAYS 3, BY ARITHMETIC, AND THE ARGUMENT IS STATED SO CI CAN REJECT IT:
+       * linux 3 is the CI figure for these exact three `.k` nodes (PR #288). They
+       * fail on a COLOUR (4.25:1), which no font metric moves. The declutter did not
+       * remove or add a node in the scanned DOM (the counts above). If CI disagrees,
+       * transcribe ITS numbers; never loosen the assertion.
+       */
+      'evidence@desktop-1280x800': 3,
+      'evidence@laptop-1024x768': 3,
       // 70 -> 71 on 2026-08-01. NOT a new defect: `.record-file` (the mono
       // filename, 11px `--text-quaternary`) moved out of axe's `incomplete`
       // bucket and into `violations`. Before the C1/I4 fix it hung 105.3px
@@ -735,9 +762,9 @@ export const A11Y_BASELINE: readonly BaselineEntry[] = [
       // 10 -> 9, violations 70 -> 71, and the single set difference is exactly
       // `.record-file`. The element was always painted; only measurement
       // changed. Linux is the authority and may differ.
-      'evidence@tablet-768x1024': { darwin: 68, linux: 3 },
-      'evidence@mobile-375x812': { darwin: 68, linux: 3 },
-      'evidence@zoom-200': { darwin: 68, linux: 3 },
+      'evidence@tablet-768x1024': 3,
+      'evidence@mobile-375x812': 3,
+      'evidence@zoom-200': 3,
       /*
        * ── `evidence-graph`, MEASURED: 24 nodes at desktop, 2026-08-16 ────────────
        *
@@ -2187,8 +2214,9 @@ export const A11Y_BASELINE: readonly BaselineEntry[] = [
          Every number MEASURED on BOTH platforms on the same commit and merged by
          `scripts/ingest_a11y_baseline.py`, which REFUSES any pair present in only one
          run rather than guessing the other. Nobody retyped a count. */
-      'evidence@width-320': { darwin: 68, linux: 3 },
-      'evidence@width-390': { darwin: 68, linux: 3 },
+      // 2026-11-02: darwin MEASURED 3 (was 68 carried forward) — see `evidence@desktop-1280x800`.
+      'evidence@width-320': 3,
+      'evidence@width-390': 3,
       /* 3 -> 2 on BOTH platforms, 2026-09-13 — darwin measured locally by
          `a11y-narrow.spec.ts`, linux by Actions run 34762566061. See the dated
          block on the five viewport cells above for the divergence that caused the
@@ -4033,7 +4061,10 @@ export const A11Y_BASELINE_TOTAL_NODES: Readonly<Record<BaselinePlatform, number
   // arithmetic the note at `counts` sets out — the documented precedent, never a
   // reading. The 476 left are seven `evidence` cells whose darwin 68 is CARRIED
   // FORWARD and registered; the same arithmetic predicts 21.
-  darwin: 476,
+  // 2026-11-02, record-side declutter: 476 -> 21. A DARWIN RUN this time. The seven
+  // `evidence` cells were measured on this host at 3 each (-65 x 7 = -455), so the
+  // prediction above is now a reading. See the note at `evidence@desktop-1280x800`.
+  darwin: 21,
   // ── MERGED: PROPOSALS + CHANGE FEED, 2026-08-30: darwin 2282 -> 2289. ──
   //
   // TWO SLICES MOVED THE SAME SEVEN CELLS FROM THE SAME BASE, and this file now
@@ -4953,13 +4984,13 @@ export const DARWIN_CARRIED_FORWARD: readonly BaselineKey[] = [
      prediction that happens to be right is indistinguishable from a measurement
      and would remove the prompt to take one. Remove these keys when a darwin run
      measures the cells. ═══════════════════════════════════════════════════════ */
-  'evidence@desktop-1280x800',
-  'evidence@laptop-1024x768',
-  'evidence@tablet-768x1024',
-  'evidence@mobile-375x812',
-  'evidence@zoom-200',
-  'evidence@width-390',
-  'evidence@width-320',
+  /* ~~'evidence@desktop-1280x800', 'evidence@laptop-1024x768',
+     'evidence@tablet-768x1024', 'evidence@mobile-375x812', 'evidence@zoom-200',
+     'evidence@width-390', 'evidence@width-320'~~ — ══ 2026-11-02, record-side
+     declutter. A DARWIN RUN MEASURED THE CELLS, as the note above asked: 3 on all
+     seven, in three runs (see the note at `evidence@desktop-1280x800`). The cells are scalars again and the keys leave. The register is EMPTY
+     and `A11Y_BASELINE_DARWIN_UNVERIFIED_NODES` is 0: every darwin half in this file
+     is a reading again. ═══════════════════════════════════════════════════════ */
 ];
 
 /**
@@ -4999,7 +5030,11 @@ export const DARWIN_CARRIED_FORWARD: readonly BaselineKey[] = [
  * carried forward, and very probably overstated (the colour arithmetic predicts
  * 3 per cell, 21 in all). A darwin run is overdue.
  */
-export const A11Y_BASELINE_DARWIN_UNVERIFIED_NODES = 476;
+/*
+ * 2026-11-02, record-side declutter: 476 -> 0. The seven `evidence` keys left the
+ * register because a darwin run measured them (3 each). Nothing is carried forward.
+ */
+export const A11Y_BASELINE_DARWIN_UNVERIFIED_NODES = 0;
 
 /**
  * Exact tolerated node count for a (rule, surface, project) triple on one

@@ -128,34 +128,19 @@ describe('the activity history panel', () => {
     expect(screen.queryByRole('button', { name: LABELS.activityShowOlder })).toBeNull();
   });
 
-  it('keeps the actor disclosure in the DOM behind the shared Disclosure, not deleted', async () => {
+  it('renders no standing attribution disclosure, and claims no verified actor', async () => {
     /*
-     * `ACT-003` requires `unattributed` be rendered HONESTLY. Moving the explanation
-     * behind a disclosure must not weaken that: a closed disclosure's body is still
-     * in the DOM, which is exactly why the repo renders it hidden rather than
-     * conditionally. The SUMMARY also states the question, so nothing hides behind a
-     * neutral label.
-     *
-     * INVERTED FROM "a native details" (final review of #279): the shared
-     * `Disclosure` replaced the native 11px triangle. Same properties — closed by
-     * default, the question on its row, the sentence present while closed.
+     * The attribution explainer was retired (declutter, 2026-11-02): an unattributed
+     * history is told by the rows themselves. What must still hold is that nothing
+     * on the panel claims a person was verified, and that no explanatory sentence
+     * about the deployment's sign-in boundary comes back as standing prose.
      */
     const { container } = mount();
     await screen.findByText('Experiment Renamed');
-    const disclosure = container.querySelector('.activity-actor-details');
-    expect(disclosure).toBeTruthy();
+    expect(container.querySelector('.activity-actor-details')).toBeNull();
     expect(container.querySelector('details')).toBeNull();
-    const trigger = disclosure!.querySelector('.disclosure-trigger')!;
-    expect(trigger).toHaveAttribute('aria-expanded', 'false');
-    expect(container.querySelector('.activity-actor-summary')?.textContent).toBe(
-      LABELS.activityWhyUnattributed,
-    );
-    // The sentence itself is PRESENT while collapsed, in the hidden body.
-    const note = container.querySelector('.activity-actor-note');
-    expect(note?.textContent).toBe(LABELS.activityActorUnattributed);
-    expect(note?.closest('[hidden]')).not.toBeNull();
-    fireEvent.click(trigger);
-    expect(note).toBeVisible();
+    expect(container.textContent ?? '').not.toContain(LABELS.activityActorUnattributed);
+    expect(container.textContent ?? '').not.toMatch(/verified sign-in|authenticated/i);
   });
 
   it('a failed OLDER page leaves the list it already showed intact', async () => {
@@ -225,18 +210,17 @@ describe('the activity history panel', () => {
     expect(container.querySelectorAll('.activity-row')).toHaveLength(2);
   });
 
-  it('says in WORDS that entries are unattributed, and says why', async () => {
+  it('keeps unattributed entries, and never prints the bare token', async () => {
     /*
-     * `ACT-003`: render `unattributed` HONESTLY rather than hiding entries that lack
-     * an actor. Two failure modes are refused at once — dropping such rows, and
-     * printing the bare token `unattributed` beside every row, which reads as a
-     * fault rather than as a deliberate boundary. Confirmed against the hosted
-     * deployment 2026-09-17: `actor_trust_basis: null`, `verifier_id: unconfigured`.
+     * `ACT-003`: entries that lack an actor are not hidden, and the bare token
+     * `unattributed` is not printed beside every row, which reads as a fault.
+     * Confirmed against the hosted deployment 2026-09-17: `actor_trust_basis: null`,
+     * `verifier_id: unconfigured`.
      */
-    mount();
-    expect(await screen.findByText(LABELS.activityActorUnattributed)).toBeTruthy();
+    const { container } = mount();
     // The row itself is present — not filtered out for lacking an actor.
-    expect(screen.getByText('Experiment Renamed')).toBeTruthy();
+    expect(await screen.findByText('Experiment Renamed')).toBeTruthy();
+    expect(container.textContent ?? '').not.toMatch(/\bunattributed\b/);
   });
 
   it('humanizes the server vocabularies and renders no bare snake_case token', async () => {
@@ -319,10 +303,10 @@ describe('the activity history panel', () => {
     await screen.findByText('Experiment Renamed');
     const panel = screen.getByRole('region', { name: LABELS.activityTitle });
     expect(within(panel).queryAllByRole('textbox')).toHaveLength(0);
-    // The ONLY buttons are the two disclosure toggles, and never a form control:
-    // `input`, `textarea`, `select` and `form` are all absent.
+    // The ONLY button is the stored-values disclosure toggle, and never a form
+    // control: `input`, `textarea`, `select` and `form` are all absent.
     const buttons = [...container.querySelectorAll('button')];
-    expect(buttons).toHaveLength(2);
+    expect(buttons).toHaveLength(1);
     for (const button of buttons) {
       expect(button).toHaveAttribute('type', 'button');
       expect(button).toHaveClass('disclosure-trigger');
@@ -332,8 +316,9 @@ describe('the activity history panel', () => {
       expect(body).toHaveClass('disclosure-body');
     }
     expect(container.querySelectorAll('input, textarea, select, form')).toHaveLength(0);
-    // Two disclosures: the standing actor note, and this row's stored values.
-    expect(container.querySelectorAll('.disclosure')).toHaveLength(2);
+    // One disclosure: this row's stored values (the standing actor note was retired,
+    // declutter 2026-11-02).
+    expect(container.querySelectorAll('.disclosure')).toHaveLength(1);
     expect(container.querySelectorAll('details')).toHaveLength(0);
     expect('listActivity' in api).toBe(true);
     /*
@@ -761,15 +746,8 @@ describe('ACT-003b · B · the act reads louder than its own metadata', () => {
     });
     await screen.findAllByText('Experiment Renamed');
     expect(container.querySelectorAll('.activity-actor')).toHaveLength(0);
-    // Not dropped as a fact — said once, in words, with its reason. THIS branch is
-    // the one whose sentence asserts something about the deployment, and it is
-    // correct here precisely because nothing on screen contradicts it.
-    expect(container.querySelector('.activity-actor-summary')?.textContent).toBe(
-      LABELS.activityWhyUnattributed,
-    );
-    expect(container.querySelector('.activity-actor-note')?.textContent).toBe(
-      LABELS.activityActorUnattributed,
-    );
+    // No standing explainer replaces the per-row actor (declutter, 2026-11-02).
+    expect(container.querySelector('.activity-actor-details')).toBeNull();
     // And the rows themselves are present: nothing is filtered for lacking an actor.
     expect(container.querySelectorAll('.activity-row')).toHaveLength(2);
   });
@@ -855,15 +833,11 @@ describe('ACT-003b · B · the act reads louder than its own metadata', () => {
     expect(container.textContent ?? '').toContain('k_verma');
     // ...so the sentence denying that anyone can be named must NOT be.
     expect(container.textContent ?? '').not.toContain(LABELS.activityActorUnattributed);
-    expect(screen.queryByText(LABELS.activityWhyUnattributed)).toBeNull();
-    // Some entries ARE unattributed, so that narrower sentence is what appears — it
-    // describes those entries and asserts nothing about the deployment as a whole.
-    expect(container.querySelector('.activity-actor-summary')?.textContent).toBe(
-      LABELS.activityWhySomeUnattributed,
-    );
-    expect(container.querySelector('.activity-actor-note')?.textContent).toBe(
-      LABELS.activityActorSomeUnattributed,
-    );
+    expect(container.querySelector('.activity-actor-details')).toBeNull();
+    // The unattributed entry says so in words on its own row.
+    expect(
+      [...container.querySelectorAll('.activity-actor')].map((n) => n.textContent),
+    ).toContain(LABELS.activityActorSentinel);
   });
 
   it('drops the disclosure entirely when EVERY loaded entry is attributed', async () => {
@@ -887,7 +861,6 @@ describe('ACT-003b · B · the act reads louder than its own metadata', () => {
     await screen.findByText('Experiment Renamed');
     expect(container.querySelectorAll('.activity-actor-details')).toHaveLength(0);
     expect(container.textContent ?? '').not.toContain(LABELS.activityActorUnattributed);
-    expect(container.textContent ?? '').not.toContain(LABELS.activityActorSomeUnattributed);
     // The actor is still on the row: dropping the EXPLANATION is not dropping the FACT.
     expect(container.querySelector('.activity-actor')?.textContent).toBe('k_verma');
   });
@@ -1212,8 +1185,8 @@ describe('ACT-003b · C · a structured change is not a JSON dump', () => {
     expect(change?.querySelector('.sr-only')?.textContent).toBe(LABELS.activityChangedTo);
     expect(container.querySelectorAll('.activity-change-blocks')).toHaveLength(0);
     expect(container.querySelectorAll('.activity-diff')).toHaveLength(0);
-    // ONE disclosure on the page: the standing actor note, and no stored-values one.
-    expect(container.querySelectorAll('.disclosure')).toHaveLength(1);
+    // NO disclosure on the page: no stored-values one, and no standing actor note.
+    expect(container.querySelectorAll('.disclosure')).toHaveLength(0);
     expect(container.querySelectorAll('.activity-stored')).toHaveLength(0);
   });
 });

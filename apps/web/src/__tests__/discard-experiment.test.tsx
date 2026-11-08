@@ -74,7 +74,7 @@ function renderPanel(props: Partial<Parameters<typeof DiscardExperimentPanel>[0]
       <LocationProbe />
     </MemoryRouter>,
   );
-  fireEvent.click(screen.getByRole('button', { name: new RegExp(LABELS.discardSectionLabel) }));
+  fireEvent.click(screen.getByRole('button', { name: LABELS.recordMoreActions }));
   return { ...utils, onSaved };
 }
 
@@ -148,11 +148,40 @@ describe('the control is reachable', () => {
         <AppRoutes />
       </MemoryRouter>,
     );
-    const header = await screen.findByRole('button', { name: new RegExp(LABELS.discardSectionLabel) });
+    const header = await screen.findByRole('button', { name: LABELS.recordMoreActions });
     expect(header).toHaveAttribute('aria-expanded', 'false');
     expect(screen.queryByRole('button', { name: LABELS.discardAction })).not.toBeInTheDocument();
     fireEvent.click(header);
     expect(await screen.findByRole('button', { name: LABELS.discardAction })).toBeInTheDocument();
+  }, 20000);
+
+  it('sits behind a "More" button beside the page title, with a keyboard path out', async () => {
+    stubFetchRoutes({
+      ...bundleRoutes('demo'),
+      'GET /api/experiments/demo': { body: { ...experimentDetail, id: 'demo', title: TITLE } },
+    });
+    render(
+      <MemoryRouter initialEntries={['/record/demo']} future={FUTURE}>
+        <AppRoutes />
+      </MemoryRouter>,
+    );
+    const more = await screen.findByRole('button', { name: LABELS.recordMoreActions });
+    // Beside the title, not a peer of Folder in the Record Details list.
+    expect(more.closest('.record-page-head')).not.toBeNull();
+    expect(more.closest('.record-details-list')).toBeNull();
+    fireEvent.click(more);
+    expect(more).toHaveAttribute('aria-expanded', 'true');
+    expect(screen.getByRole('button', { name: LABELS.discardAction })).toBeInTheDocument();
+    // An Escape meant for something else (focus elsewhere) leaves the menu open…
+    (document.body as HTMLElement).focus();
+    fireEvent.keyDown(document, { key: 'Escape' });
+    expect(more).toHaveAttribute('aria-expanded', 'true');
+    // …and Escape from the menu closes it and returns focus to the button.
+    screen.getByRole('button', { name: LABELS.discardAction }).focus();
+    fireEvent.keyDown(document, { key: 'Escape' });
+    expect(more).toHaveAttribute('aria-expanded', 'false');
+    expect(screen.queryByRole('button', { name: LABELS.discardAction })).not.toBeInTheDocument();
+    expect(document.activeElement).toBe(more);
   }, 20000);
 });
 
@@ -263,7 +292,7 @@ describe('confirming', () => {
         <StateProbe />
       </MemoryRouter>,
     );
-    fireEvent.click(screen.getByRole('button', { name: new RegExp(LABELS.discardSectionLabel) }));
+    fireEvent.click(screen.getByRole('button', { name: LABELS.recordMoreActions }));
     fireEvent.click(screen.getByRole('button', { name: LABELS.discardAction }));
     fireEvent.click(screen.getByRole('button', { name: LABELS.discardConfirm }));
     await screen.findByText('My Experiments stub');

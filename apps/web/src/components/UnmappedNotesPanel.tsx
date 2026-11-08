@@ -146,7 +146,7 @@ function unreadableClause(count: number): string {
   const noun = count === 1 ? 'entry' : 'entries';
   const asNote = count === 1 ? 'as a note' : 'as notes';
   return (
-    ` · ${count} stored ${noun} this version cannot show ${asNote}` +
+    ` · ${count} stored ${noun} that cannot be shown ${asNote}` +
     ' — either unreadable, or repeating an id another note already holds' +
     ' — kept unchanged on the record'
   );
@@ -293,12 +293,12 @@ export function UnmappedNotesPanel({
         </h2>
         {/* One line, the full account one `?` away (DEC-35). */}
         <p className="notes-sub">
-          Captured content with no confident field yet. Nothing here is ever deleted.{' '}
+          Captured content with no confident field yet.{' '}
           <HelpTip subject="Unmapped Notes">
             <span>
-              Content captured against this record that has no confident schema home.
-              Nothing here is a field value or evidence, and nothing here is ever
-              deleted — dismissing a note sets it aside and keeps it on the record.
+              Content captured against this record that has no confident schema home. A
+              note is not a field value or evidence; dismissing a note sets it aside and
+              keeps it on the record.
             </span>
           </HelpTip>
         </p>
@@ -857,6 +857,14 @@ function NotesBrowser({
 
   return (
     <div className="notes-browser">
+      {/* AN EMPTY RECORD SHOWS NO CONTROLS (declutter, 2026-11-02): with no note and
+          no filter applied there is nothing to filter or count. */}
+      {!(
+        loaded !== null &&
+        loaded.total === 0 &&
+        loaded.unreadable_entries === 0 &&
+        filter === 'all'
+      ) && (
       <div className="notes-toolbar">
         <div className="notes-control">
           <label className="notes-control-label" htmlFor={filterId}>
@@ -908,6 +916,7 @@ function NotesBrowser({
           {list.status === 'loading' ? '' : countLine}
         </p>
       </div>
+      )}
 
       {/*
         THE ACT ANNOUNCEMENT, separate from the counts. A screen-reader user who
@@ -994,8 +1003,8 @@ function NotesBrowser({
           {proposalCapabilities === null
             ? 'Proposing a value from a note could not be offered: the set of ' +
               'proposable fields could not be read.'
-            : 'Proposing a value from a note is not offered: this build accepts ' +
-              'no proposal target yet.'}
+            : 'Proposing a value from a note is not offered: no field accepts a ' +
+              'proposal here.'}
         </p>
       )}
 
@@ -1095,9 +1104,8 @@ function EmptyNotes({
   return (
     <div className="notes-empty">
       <p>
-        No unmapped notes on this record{disclosure}. Notes appear here when
-        something is captured that cannot be placed in a schema field — nothing is
-        created automatically, and nothing is inferred from the record's contents.
+        No unmapped notes on this record{disclosure}. Notes appear here when a capture
+        holds something no schema field can take.
       </p>
     </div>
   );
@@ -1828,7 +1836,7 @@ function NoteCard({
             </button>
             <button
               type="button"
-              className="btn btn-secondary"
+              className="btn btn-quiet"
               onClick={() => closeForm('map', true)}
             >
               Cancel
@@ -1883,7 +1891,7 @@ function NoteCard({
             </button>
             <button
               type="button"
-              className="btn btn-secondary"
+              className="btn btn-quiet"
               onClick={() => closeForm('edit', true)}
             >
               Cancel
@@ -1927,7 +1935,7 @@ function NoteCard({
             </button>
             <button
               type="button"
-              className="btn btn-secondary"
+              className="btn btn-quiet"
               onClick={() => closeForm('dismiss', true)}
             >
               Cancel
@@ -1967,8 +1975,8 @@ function NoteCard({
             ))}
           </select>
           <p className="note-form-hint">
-            This is the server&rsquo;s own list of the paths this build can target with
-            a proposal — a subset of the official schema, not every field it defines.
+            This is the server&rsquo;s own list of the paths a proposal can target — a
+            subset of the official schema, not every field it defines.
           </p>
 
           {proposeFieldPath !== '' && proposeNeedsRun && (
@@ -2109,7 +2117,7 @@ function NoteCard({
             </button>
             <button
               type="button"
-              className="btn btn-secondary"
+              className="btn btn-quiet"
               onClick={() => closeForm('propose', true)}
             >
               Cancel

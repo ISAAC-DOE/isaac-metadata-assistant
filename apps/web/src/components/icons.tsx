@@ -109,6 +109,7 @@ import {
   Minus,
   ArrowLeft,
   Mic,
+  Ellipsis,
   type LucideIcon,
 } from 'lucide-react';
 import type { SourceType } from '../lib/types';
@@ -290,5 +291,7 @@ export {
   Minus,
   ArrowLeft,
   Mic,
+  // The record page's "More" disclosure (declutter, 2026-11-02).
+  Ellipsis,
 };
 export type { LucideIcon };
