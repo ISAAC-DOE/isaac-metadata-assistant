@@ -304,7 +304,10 @@ describe('the offered inventory is derived from the served contract', () => {
       // A BOX WITH NO NAME IS NOT AN INPUT A PERSON CAN USE. Asserted per path rather
       // than once, because the two enum paths render a different element from the twelve.
       expect(control).toHaveAccessibleName(expect.stringMatching(/\S/) as unknown as string);
-      expect((control as HTMLElement).tagName).toMatch(/^(INPUT|SELECT)$/);
+      // A text box, or the themed picker (`role="combobox"`) for a closed enum.
+      expect(
+        (control as HTMLElement).tagName === 'INPUT' || (control as HTMLElement).getAttribute('role') === 'combobox',
+      ).toBe(true);
     }
   });
 
@@ -319,7 +322,7 @@ describe('the offered inventory is derived from the served contract', () => {
       expect((control as HTMLElement).tagName).toBe('INPUT');
     }
     for (const path of RECORD_WRITABLE.filter((p) => schemaChoices(p) !== null)) {
-      expect((controlForPath(path) as HTMLElement).tagName).toBe('SELECT');
+      expect((controlForPath(path) as HTMLElement).getAttribute('role')).toBe('combobox');
     }
   });
 
@@ -474,7 +477,7 @@ describe('the offered inventory is derived from the served contract', () => {
     await open(draftWithCapture());
     const control = controlForPath('system.domain');
     expect(control).toBeTruthy();
-    expect((control as HTMLSelectElement).tagName).toBe('SELECT');
+    expect((control as HTMLElement).getAttribute('role')).toBe('combobox');
     expect(RECORD_WRITABLE).toContain('system.domain');
   });
 });

@@ -48,6 +48,7 @@ import {
   FAKE_SHA_B,
   stubFetchRoutes,
 } from '../test/apiFixtures';
+import { chooseValue, optionValues, selectValue } from '../test/controls';
 
 const EXP = 'demo';
 const ASSETS = `GET /api/experiments/${EXP}/assets`;
@@ -185,12 +186,14 @@ describe('the content_role control', () => {
     stubFetchRoutes({ [ASSETS]: { body: assetsEmpty } });
     renderPanel();
     await openCreateForm();
-    const select = screen.getByLabelText(/^Role/) as HTMLSelectElement;
-    const values = [...select.options].map((o) => o.value);
-    expect(values[0]).toBe('');
-    expect(values.slice(1)).toEqual(ASSET_CONTENT_ROLES);
-    expect(values.slice(1)).toHaveLength(12);
-    expect(select.value).toBe('');
+    const select = screen.getByLabelText(/^Role/) as HTMLElement;
+    // The server's twelve roles, and nothing else: the empty choice is the picker's prompt now, not an option.
+    const values = optionValues(select);
+    expect(values).toEqual(ASSET_CONTENT_ROLES);
+    expect(values).toHaveLength(12);
+    // Nothing pre-selected: no value, and the prompt shows.
+    expect(selectValue(select)).toBe('');
+    expect(select).toHaveTextContent('Choose a role…');
   });
 
   it('renders a role the client does not know about VERBATIM rather than dropping it', () => {
@@ -208,8 +211,8 @@ describe('the content_role control', () => {
     });
     renderPanel();
     await openCreateForm();
-    const select = screen.getByLabelText(/^Role/) as HTMLSelectElement;
-    expect([...select.options].map((o) => o.value)).toContain('future_role');
+    const select = screen.getByLabelText(/^Role/) as HTMLElement;
+    expect(optionValues(select)).toContain('future_role');
   });
 });
 
@@ -309,9 +312,7 @@ describe('the digest field', () => {
     renderPanel();
     await openCreateForm();
     typeInto(/^Name/, 'reduced_spectrum');
-    fireEvent.change(screen.getByLabelText(/^Role/), {
-      target: { value: 'reduction_product' },
-    });
+    chooseValue(screen.getByLabelText(/^Role/), 'reduction_product');
     typeInto(/^Location/, ' synthetic://example/reduced/CuO2_merged.xdi ');
     typeInto(/^sha256/, FAKE_SHA_A);
     fireEvent.click(screen.getByRole('button', { name: 'Record This Reference' }));
@@ -600,9 +601,7 @@ describe('when a write is refused', () => {
     renderPanel();
     await openCreateForm();
     typeInto(/^Name/, 'reduced_spectrum');
-    fireEvent.change(screen.getByLabelText(/^Role/), {
-      target: { value: 'reduction_product' },
-    });
+    chooseValue(screen.getByLabelText(/^Role/), 'reduction_product');
     typeInto(/^Location/, 'synthetic://example/x.xdi');
     typeInto(/^sha256/, FAKE_SHA_B);
     fireEvent.click(screen.getByRole('button', { name: 'Record This Reference' }));
@@ -665,9 +664,7 @@ describe('a refused write is recoverable, and no toggle destroys an open form', 
 
     await openCreateForm();
     typeInto(/^Name/, 'merged');
-    fireEvent.change(screen.getByLabelText(/^Role/), {
-      target: { value: 'reduction_product' },
-    });
+    chooseValue(screen.getByLabelText(/^Role/), 'reduction_product');
     typeInto(/^Location/, 'synthetic://example/merged.xdi');
     typeInto(/^sha256/, FAKE_SHA_B);
     fireEvent.click(screen.getByRole('button', { name: 'Record This Reference' }));
@@ -694,9 +691,7 @@ describe('a refused write is recoverable, and no toggle destroys an open form', 
 
     await openCreateForm();
     typeInto(/^Name/, 'merged');
-    fireEvent.change(screen.getByLabelText(/^Role/), {
-      target: { value: 'reduction_product' },
-    });
+    chooseValue(screen.getByLabelText(/^Role/), 'reduction_product');
     typeInto(/^Location/, 'synthetic://example/merged.xdi');
     typeInto(/^sha256/, FAKE_SHA_B);
     fireEvent.click(screen.getByRole('button', { name: 'Record This Reference' }));

@@ -84,10 +84,14 @@
  * THE ORDER CONTROL SHARES THE FILTER'S RULE RATHER THAN GETTING ITS OWN. They are
  * the same control in the same toolbar doing the same kind of thing — narrowing what
  * this window shows, changing nothing on the record — and two rules that must stay
- * identical are two rules that can drift apart.
+ * identical are two rules that can drift apart. Both are the themed `Select`
+ * (compact), sized to their content in the toolbar row.
  */
-.proposals-filter,
-.proposals-order,
+.select.proposals-filter,
+.select.proposals-order {
+  width: auto;
+}
+
 .proposal-form-input {
   font: inherit;
   font-size: 12px;
@@ -98,8 +102,6 @@
   padding: 5px 8px;
 }
 
-.proposals-filter:focus-visible,
-.proposals-order:focus-visible,
 .proposal-form-input:focus-visible,
 .proposal-history-toggle:focus-visible {
   outline: 2px solid var(--action);

@@ -8,6 +8,7 @@ import {
   type LibraryFacetId,
   type LibrarySortId,
 } from '../lib/library';
+import { Select } from './Select';
 
 interface LibraryToolbarProps {
   query: string;
@@ -121,19 +122,15 @@ export function LibraryToolbar({
           </label>
           {/* `aria-label` repeats the label so the select keeps its name where the
               label is not shown — on the library bar, at every width (`library.css`). */}
-          <select
+          <Select
             id={sortId}
             aria-label={LABELS.librarySortLabel}
             className="library-sort-select"
+            density="compact"
             value={sort}
-            onChange={(e) => onSort(e.target.value as LibrarySortId)}
-          >
-            {LIBRARY_SORTS.map((s) => (
-              <option key={s.id} value={s.id}>
-                {s.label}
-              </option>
-            ))}
-          </select>
+            onChange={(next) => onSort(next as LibrarySortId)}
+            options={LIBRARY_SORTS.map((s) => ({ value: s.id, label: s.label }))}
+          />
         </div>
       </div>
 

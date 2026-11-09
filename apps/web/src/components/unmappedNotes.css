@@ -77,8 +77,11 @@
   color: var(--text-secondary);
 }
 
-.notes-filter,
-.note-field-select,
+/* The Show filter is the themed `Select` (compact), sized to its content in the toolbar row. */
+.select.notes-filter {
+  width: auto;
+}
+
 .note-reason-input {
   font: inherit;
   font-size: 12px;
@@ -89,8 +92,6 @@
   padding: 5px 8px;
 }
 
-.notes-filter:focus-visible,
-.note-field-select:focus-visible,
 .note-reason-input:focus-visible,
 .notes-capture-input:focus-visible {
   outline: 2px solid var(--action);
@@ -268,7 +269,6 @@
   border-radius: 6px;
 }
 
-.note-field-select,
 .note-reason-input {
   max-width: 100%;
 }

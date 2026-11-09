@@ -5,6 +5,7 @@ import {
   DESCRIPTOR_NAME_SUGGESTIONS,
   DESCRIPTOR_SOURCES,
 } from '../lib/types';
+import { Select } from './Select';
 
 /**
  * The two controls that let a scientist supply a value the app will never generate.
@@ -387,43 +388,34 @@ export function DescriptorForm({ value, onChange, idPrefix }: DescriptorFormProp
           </datalist>
         </label>
 
-        <label className="structured-field" htmlFor={`${idPrefix}-kind`}>
-          <span className="structured-label">
+        {/* A DIV, NOT A WRAPPING LABEL, around each picker: a label wrapping the themed
+            `Select` would take its options' text into the label and forward clicks inside
+            the open list back to the trigger. The `<label htmlFor>` names it. */}
+        <div className="structured-field">
+          <label className="structured-label" htmlFor={`${idPrefix}-kind`}>
             Kind <abbr title="required">*</abbr>
-          </span>
-          <select
+          </label>
+          <Select
             id={`${idPrefix}-kind`}
-            className="input"
             value={value.kind}
-            onChange={(e) => set('kind')(e.target.value)}
-          >
-            <option value="">— choose —</option>
-            {DESCRIPTOR_KINDS.map((k) => (
-              <option key={k} value={k}>
-                {k}
-              </option>
-            ))}
-          </select>
-        </label>
+            onChange={set('kind')}
+            placeholder="— choose —"
+            options={DESCRIPTOR_KINDS.map((k) => ({ value: k, label: k }))}
+          />
+        </div>
 
-        <label className="structured-field" htmlFor={`${idPrefix}-source`}>
-          <span className="structured-label">
+        <div className="structured-field">
+          <label className="structured-label" htmlFor={`${idPrefix}-source`}>
             Source <abbr title="required">*</abbr>
-          </span>
-          <select
+          </label>
+          <Select
             id={`${idPrefix}-source`}
-            className="input"
             value={value.source}
-            onChange={(e) => set('source')(e.target.value)}
-          >
-            <option value="">— choose —</option>
-            {DESCRIPTOR_SOURCES.map((k) => (
-              <option key={k} value={k}>
-                {k}
-              </option>
-            ))}
-          </select>
-        </label>
+            onChange={set('source')}
+            placeholder="— choose —"
+            options={DESCRIPTOR_SOURCES.map((k) => ({ value: k, label: k }))}
+          />
+        </div>
 
         <label className="structured-field" htmlFor={`${idPrefix}-value`}>
           <span className="structured-label">

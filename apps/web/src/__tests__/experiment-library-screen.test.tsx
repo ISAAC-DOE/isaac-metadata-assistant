@@ -17,6 +17,7 @@ import { MemoryRouter } from 'react-router-dom';
 import { ExperimentsHome } from '../screens/ExperimentsHome';
 import { LABELS } from '../lib/labels';
 import type { ApiExperimentSummary } from '../lib/types';
+import { chooseValue } from '../test/controls';
 
 function row(overrides: Partial<ApiExperimentSummary> = {}): ApiExperimentSummary {
   return {
@@ -233,9 +234,7 @@ describe('search, facets and sort', () => {
     const titles = () => [...container.querySelectorAll('.exp-title')].map((n) => n.textContent);
     // Default is last-updated, newest first.
     expect(titles()).toEqual(['Zinc', 'Aluminium']);
-    fireEvent.change(screen.getByLabelText(LABELS.librarySortLabel), {
-      target: { value: 'title' },
-    });
+    chooseValue(screen.getByLabelText(LABELS.librarySortLabel), 'title');
     expect(titles()).toEqual(['Aluminium', 'Zinc']);
   });
 });

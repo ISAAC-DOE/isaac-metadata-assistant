@@ -5,6 +5,7 @@ import { enumOptionLabel } from '../lib/runFields';
 import { api } from '../lib/api';
 import { mutationFailureCopy, statusOf } from '../lib/mutationErrors';
 import type { DraftField, DraftFieldCapture } from '../lib/types';
+import { Select } from './Select';
 
 /**
  * WHAT ONE FIELD ROW MAY SAY ABOUT ENTERING A VALUE — and the ONE case where it may
@@ -149,7 +150,7 @@ export function captureHint(
     // sample and facility paths are free-text or numeric, and always will be.
     //
     // ~~NOT YET OFFERED HERE … "this screen does not offer that input yet"~~ — FALSE,
-    // corrected 2026-10-12 (QA A-08). This component renders only a `<select>`, but
+    // corrected 2026-10-12 (QA A-08). This component renders only a picker (`Select`), but
     // the input for these twelve paths EXISTS on the same view: Record Description
     // (`RecordDescriptionPanel`, shipped in `7822b13`) types every one of them. The
     // sentence therefore names it — and `FieldRow` links to it and drops the sentence
@@ -253,7 +254,7 @@ export function FieldCaptureControl({
   const [error, setError] = useState<string | null>(null);
   const [saved, setSaved] = useState(false);
   const [staleAt, setStaleAt] = useState<string | null>(null);
-  const selectRef = useRef<HTMLSelectElement>(null);
+  const selectRef = useRef<HTMLButtonElement>(null);
 
   const baseId = useId();
   const selectId = `${baseId}-value`;
@@ -359,11 +360,12 @@ export function FieldCaptureControl({
         {field.present ? 'Change This Value' : 'Record This Value'}
       </label>
       <div className="field-capture-controls">
-        <select
+        <Select
           ref={selectRef}
           data-field-capture-path={field.path}
           id={selectId}
           className="field-capture-select"
+          density="compact"
           value={choice}
           aria-invalid={error !== null || undefined}
           /* The note is ALWAYS described, the same way the rename panel's character
@@ -371,25 +373,22 @@ export function FieldCaptureControl({
              the set comes from the official schema and that nothing is filled in for
              them, rather than having to find the sentence below it. */
           aria-describedby={error !== null ? `${errorId} ${noteId}` : noteId}
-          onChange={(e) => {
-            setChoice(e.target.value);
+          onChange={(next) => {
+            setChoice(next);
             setSaved(false);
             // A stale-write refusal is not cleared by choosing again: the held version
             // is still the rejected one. Every other error is fixable here, so it goes.
             if (error !== null && !isStale) setError(null);
           }}
-        >
-          {/* NOT a placeholder — it is the honest rendering of a value the record does
-              not hold. Choosing it sends nothing; see the header on why a blank is not
-              a delete here. */}
-          <option value="">— not recorded —</option>
-          {/* Words for a person, the schema's token as the value (QA A-15). */}
-          {choices.map((value) => (
-            <option key={value} value={value}>
-              {enumOptionLabel(value)}
-            </option>
-          ))}
-        </select>
+          options={[
+            /* NOT a placeholder — it is the honest rendering of a value the record does
+               not hold. Choosing it sends nothing; see the header on why a blank is not
+               a delete here. */
+            { value: '', label: '— not recorded —' },
+            /* Words for a person, the schema's token as the value (QA A-15). */
+            ...choices.map((value) => ({ value, label: enumOptionLabel(value) })),
+          ]}
+        />
         <button
           type="submit"
           className="btn btn-secondary"

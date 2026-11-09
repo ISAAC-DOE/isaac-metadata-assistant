@@ -36,6 +36,7 @@ import type {
   ApiRunCheckResponse,
   ApiRunView,
 } from '../lib/types';
+import { chooseValue } from '../test/controls';
 
 /*
  * The EVIDENCE GRAPH — one experiment, shaped around its runs.
@@ -1590,8 +1591,8 @@ describe('evidence graph · the rendered panel', () => {
 
   it('focusing a run is a URL action, so the view can be linked', () => {
     const { container, onFocusRun } = renderPanel();
-    const select = container.querySelector<HTMLSelectElement>('#evgraph-focus-select')!;
-    fireEvent.change(select, { target: { value: RUN_B } });
+    const select = container.querySelector<HTMLElement>('#evgraph-focus-select')!;
+    chooseValue(select, RUN_B);
     expect(onFocusRun).toHaveBeenCalledWith(RUN_B);
   });
 

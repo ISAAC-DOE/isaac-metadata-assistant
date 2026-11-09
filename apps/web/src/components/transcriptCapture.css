@@ -735,6 +735,11 @@
   border-radius: 6px;
 }
 
+/* The run picker (`Select`) keeps the form's 68ch measure, as the textarea does. */
+.capture-run-select {
+  max-width: 68ch;
+}
+
 .capture-textarea {
   min-height: 7em;
   resize: vertical;

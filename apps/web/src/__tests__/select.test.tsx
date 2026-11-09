@@ -1,9 +1,9 @@
-import { describe, it, expect, vi } from 'vitest';
+import { afterEach, describe, it, expect, vi } from 'vitest';
 import { render, screen, fireEvent, within, act } from '@testing-library/react';
 import { useState } from 'react';
 
 import { Select, type SelectOption } from '../components/Select';
-import { chooseOption, selectGroups, selectValue } from '../test/controls';
+import { chooseOption, chooseValue, optionValues, selectGroups, selectValue } from '../test/controls';
 
 /**
  * SELECT — the APG select-only combobox. What is pinned is the contract a native `<select>` user relies on:
@@ -316,17 +316,35 @@ describe('Select', () => {
     expect(activeText()).toBe('system.technique');
   });
 
-  it('a disabled picker does not open', () => {
+  it('a disabled picker does not open, and none of its options chooses', () => {
+    const onChange = vi.fn();
     render(
       <>
         <label htmlFor="x">X</label>
-        <Select id="x" value="" options={FRUIT} onChange={() => {}} disabled placeholder="Choose…" />
+        <Select id="x" value="" options={FRUIT} onChange={onChange} disabled placeholder="Choose…" />
       </>,
     );
     const c = screen.getByRole('combobox', { name: 'X' });
     expect(c).toBeDisabled();
     fireEvent.keyDown(c, { key: 'ArrowDown' });
     expect(c).toHaveAttribute('aria-expanded', 'false');
+    // Its options stay in the page (hidden) so `aria-controls` resolves; a click reaching one — a script, a
+    // test helper — still changes nothing.
+    chooseValue(c, 'apple');
+    expect(onChange).not.toHaveBeenCalled();
+  });
+
+  it('chooses by value with the chooseValue helper, as fireEvent.change did on a native select', () => {
+    const onChange = vi.fn();
+    render(<Harness onChange={onChange} />);
+    expect(optionValues(combo())).toEqual(FRUIT.map((f) => f.value));
+    chooseValue(combo(), 'banana');
+    expect(onChange).toHaveBeenCalledTimes(1);
+    expect(selectValue(combo())).toBe('banana');
+    // A disabled option is clicked like any other and, as in the app, changes nothing.
+    chooseValue(combo(), 'blueberry');
+    expect(selectValue(combo())).toBe('banana');
+    expect(() => chooseValue(combo(), 'durian')).toThrow(/no option of value "durian"/);
   });
 
   it('works with the chooseOption test helper, and renders no hidden input unless named', () => {
@@ -348,5 +366,140 @@ describe('Select', () => {
       </form>,
     );
     expect(container.querySelector('input[type="hidden"][name="fruit"]')).toHaveValue('banana');
+  });
+
+  it('passes data-* attributes to the trigger, and a compact density marks the wrapper', () => {
+    render(
+      <>
+        <label htmlFor="d">Dense</label>
+        <Select
+          id="d"
+          density="compact"
+          data-run-field-path="a.b"
+          value="apple"
+          options={FRUIT}
+          onChange={() => {}}
+        />
+      </>,
+    );
+    const c = screen.getByRole('combobox', { name: 'Dense' });
+    expect(c).toHaveAttribute('data-run-field-path', 'a.b');
+    expect(c.closest('.select')).toHaveClass('select-compact');
+    expect(c).toHaveAttribute('data-value', 'apple');
+    // Each option carries its value too, so a browser test can choose by value (as `selectOption` did).
+    const listbox = document.getElementById(c.getAttribute('aria-controls')!)!;
+    expect(
+      Array.from(listbox.querySelectorAll('[role="option"]')).map((o) => o.getAttribute('data-value')),
+    ).toEqual(FRUIT.map((f) => f.value));
+  });
+
+  /*
+   * NOT CLIPPED BY ITS CONTAINER. The popup is fixed-positioned from the trigger's rect, so a card with
+   * `overflow: hidden` around it (a run card, a screen card, the drawer's scroll body) cannot cut it off.
+   * jsdom does no layout, so the rects are stubbed: the trigger sits at (40, 100), 200 wide and 40 tall, in a
+   * 1000 x 800 viewport, inside a clipping box.
+   */
+  describe('placement', () => {
+    const { innerWidth: W, innerHeight: H } = window;
+    afterEach(() => {
+      Object.defineProperty(window, 'innerWidth', { configurable: true, value: W });
+      Object.defineProperty(window, 'innerHeight', { configurable: true, value: H });
+      vi.restoreAllMocks();
+    });
+    function stubRect(el: Element, r: { top: number; left: number; width: number; height: number }) {
+      vi.spyOn(el, 'getBoundingClientRect').mockReturnValue({
+        ...r,
+        x: r.left,
+        y: r.top,
+        right: r.left + r.width,
+        bottom: r.top + r.height,
+        toJSON: () => ({}),
+      } as DOMRect);
+    }
+    function renderClipped() {
+      render(
+        <div style={{ overflow: 'hidden', height: 60 }}>
+          <Harness />
+        </div>,
+      );
+      const c = combo();
+      const list = document.getElementById(c.getAttribute('aria-controls')!)!;
+      stubRect(c, { top: 100, left: 40, width: 200, height: 40 });
+      return { c, list };
+    }
+
+    it('is fixed at the trigger, below it, at least as wide as it and never past the right gutter', () => {
+      Object.defineProperty(window, 'innerWidth', { configurable: true, value: 1000 });
+      Object.defineProperty(window, 'innerHeight', { configurable: true, value: 800 });
+      const { c, list } = renderClipped();
+      fireEvent.click(c);
+      expect(getComputedStyle(list).position).toBe('fixed');
+      expect(list.style.top).toBe('144px'); // trigger bottom (140) + the 4px gap
+      expect(list.style.left).toBe('40px');
+      expect(list.style.minWidth).toBe('200px');
+      expect(list.style.maxWidth).toBe('512px');
+      expect(list).not.toHaveClass('is-above');
+    });
+
+    it('takes off the offset of a transformed ancestor (its containing block), as in the drawer', () => {
+      Object.defineProperty(window, 'innerWidth', { configurable: true, value: 1000 });
+      Object.defineProperty(window, 'innerHeight', { configurable: true, value: 800 });
+      const { c, list } = renderClipped();
+      // Put at 0,0, the popup lands at the containing block's origin: here a drawer at (600, 20).
+      stubRect(list, { top: 20, left: 600, width: 200, height: 120 });
+      fireEvent.click(c);
+      expect(list.style.top).toBe(`${144 - 20}px`);
+      expect(list.style.left).toBe(`${40 - 600}px`);
+    });
+
+    it('flips above when there is no room below, and caps its height to the room it has', () => {
+      Object.defineProperty(window, 'innerWidth', { configurable: true, value: 1000 });
+      Object.defineProperty(window, 'innerHeight', { configurable: true, value: 160 });
+      const { c, list } = renderClipped();
+      Object.defineProperty(list, 'scrollHeight', { configurable: true, value: 120 });
+      Object.defineProperty(list, 'offsetHeight', { configurable: true, value: 88 });
+      fireEvent.click(c);
+      // Below: 160 - 140 - 4 - 8 = 8px. Above: 100 - 4 - 8 = 88px, so it opens above, capped at 88px.
+      expect(list).toHaveClass('is-above');
+      expect(list.style.maxHeight).toBe('88px');
+      expect(list.style.top).toBe(`${100 - 4 - 88}px`);
+    });
+
+    it('closes when the page scrolls the trigger out of view, and ignores its own scrolling', () => {
+      Object.defineProperty(window, 'innerWidth', { configurable: true, value: 1000 });
+      Object.defineProperty(window, 'innerHeight', { configurable: true, value: 800 });
+      const { c, list } = renderClipped();
+      fireEvent.click(c);
+      // The trigger is OUT of view while the popup scrolls its own options: the popup's own scroll is
+      // ignored, so it stays open (without the guard, this scroll would close it).
+      stubRect(c, { top: -200, left: 40, width: 200, height: 40 });
+      fireEvent.scroll(list);
+      expect(c).toHaveAttribute('aria-expanded', 'true');
+      // The page scrolling it out of view does close it.
+      act(() => {
+        window.dispatchEvent(new Event('scroll'));
+      });
+      expect(c).toHaveAttribute('aria-expanded', 'false');
+    });
+
+    it('re-places on resize while open, and removes its listeners when it closes', () => {
+      Object.defineProperty(window, 'innerWidth', { configurable: true, value: 1000 });
+      Object.defineProperty(window, 'innerHeight', { configurable: true, value: 800 });
+      const { c, list } = renderClipped();
+      const removed = vi.spyOn(window, 'removeEventListener');
+      fireEvent.click(c);
+      expect(list.style.top).toBe('144px');
+      stubRect(c, { top: 300, left: 60, width: 200, height: 40 });
+      act(() => {
+        window.dispatchEvent(new Event('resize'));
+      });
+      expect(list.style.top).toBe('344px');
+      expect(list.style.left).toBe('60px');
+      removed.mockClear();
+      fireEvent.keyDown(c, { key: 'Escape' });
+      expect(c).toHaveAttribute('aria-expanded', 'false');
+      const types = removed.mock.calls.map(([type]) => type);
+      expect(types).toEqual(expect.arrayContaining(['resize', 'scroll']));
+    });
   });
 });

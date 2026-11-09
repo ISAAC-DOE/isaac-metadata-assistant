@@ -195,7 +195,8 @@
   grid-column: 1 / -1;
   justify-self: start;
 }
-.runs-control > .run-input {
+.runs-control > .run-input,
+.runs-control > .run-select {
   width: 100%;
   /* `.run-input` caps at 320px for the run-field editor; in this grid the cap left
      the search short of its own column, so a wide Runs section (1024px, the rail
@@ -713,7 +714,8 @@
     width: auto;
     padding-top: 0;
   }
-  .run-field .run-input {
+  .run-field .run-input,
+  .run-field .run-select {
     max-width: none;
   }
 }
@@ -792,6 +794,11 @@
   background: var(--surface);
   border: 1px solid var(--border-input);
   border-radius: var(--radius-control);
+}
+
+/* The themed picker (`Select`, compact) in a run's field editor, capped as `.run-input` is. */
+.run-select {
+  max-width: 320px;
 }
 
 .run-input:focus-visible {
@@ -1629,7 +1636,8 @@
   .run-field-label {
     padding-top: 0;
   }
-  .run-input {
+  .run-input,
+  .run-select {
     max-width: none;
   }
   /*

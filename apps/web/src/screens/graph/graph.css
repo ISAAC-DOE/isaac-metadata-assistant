@@ -185,7 +185,6 @@
   font-size: 11.5px;
   color: var(--text-tertiary);
 }
-.memory-graph-filter select,
 .memory-graph-filter input[type='text'] {
   max-width: 100%;
   min-width: 0;
@@ -196,7 +195,10 @@
   color: var(--text-primary);
   font-size: 12px;
 }
-.memory-graph-filter select {
+/* The themed pickers (`Select`, compact) sit inline beside their labels at their content's width, up to the
+   260px the native cluster select was capped at. */
+.select.memory-graph-filter-select {
+  width: auto;
   max-width: 260px;
 }
 
@@ -2066,7 +2068,7 @@
 
      `width: 0` + `flex: 1 1 auto` is deliberate, not a hack for its own sake.
      In a stretched column the flex line's cross size is driven by the widest
-     item's max-content, and a <select> carrying 112 cluster options has a
+     item's max-content, and a picker carrying 112 cluster options had a
      max-content width of ~600px — which stretched EVERY control to 605px inside
      a 255px column and made <main> scroll horizontally at 375px. Zeroing the
      field's preferred width removes that contribution; flex-grow then fills the
@@ -2078,10 +2080,11 @@
     gap: 8px;
     max-width: 100%;
   }
-  .memory-graph-filter > span {
+  .memory-graph-filter > span,
+  .memory-graph-filter > label {
     flex: none;
   }
-  .memory-graph-filter select,
+  .select.memory-graph-filter-select,
   .memory-graph-filter input[type='text'] {
     flex: 1 1 auto;
     width: 0;

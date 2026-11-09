@@ -62,6 +62,7 @@ import {
 } from '../test/apiFixtures';
 import type { RecordChangeSummary } from '../lib/recordChanges';
 import type { ApiProposal, ApiProposalsResponse } from '../lib/types';
+import { chooseValue, optionValues, selectValue } from '../test/controls';
 
 const EXP = 'demo';
 const LIST = `GET /api/experiments/${EXP}/proposals`;
@@ -398,9 +399,11 @@ describe('the order control', () => {
     renderPanel();
 
     await screen.findByText('Proposed value');
-    const control = screen.getByLabelText('Order') as HTMLSelectElement;
-    expect(control.tagName).toBe('SELECT');
-    expect(control.value).toBe('oldest_first');
+    // A labelled picker a keyboard reaches: the themed `Select` is a focusable combobox.
+    const control = screen.getByRole('combobox', { name: 'Order' });
+    control.focus();
+    expect(control).toHaveFocus();
+    expect(selectValue(control)).toBe('oldest_first');
     // THE DEFAULT IS THE SERVER'S AND IS NOT RESTATED. A client that sent
     // `order=oldest_first` would be keeping a second copy of a default it does not own.
     expect(urls().every((u) => !u.includes('order='))).toBe(true);
@@ -411,7 +414,7 @@ describe('the order control', () => {
     renderPanel();
 
     await screen.findByText('Proposed value');
-    fireEvent.change(screen.getByLabelText('Order'), { target: { value: 'newest_first' } });
+    chooseValue(screen.getByLabelText('Order'), 'newest_first');
 
     await waitFor(() =>
       expect(urls().some((u) => u.endsWith('/proposals?order=newest_first'))).toBe(true),
@@ -451,7 +454,7 @@ describe('the order control', () => {
     fireEvent.click(await screen.findByRole('button', { name: 'Next Page' }));
     await waitFor(() => expect(urls().some((u) => u.endsWith('?after=P1'))).toBe(true));
 
-    fireEvent.change(screen.getByLabelText('Order'), { target: { value: 'newest_first' } });
+    chooseValue(screen.getByLabelText('Order'), 'newest_first');
     await waitFor(() =>
       expect(urls().some((u) => u.endsWith('/proposals?order=newest_first'))).toBe(true),
     );
@@ -481,7 +484,7 @@ describe('the order control', () => {
     const line = await screen.findByText(/Showing 1 of 61 proposals on this record · oldest first/);
     expect(line.getAttribute('aria-live')).toBe('polite');
 
-    fireEvent.change(screen.getByLabelText('Order'), { target: { value: 'newest_first' } });
+    chooseValue(screen.getByLabelText('Order'), 'newest_first');
     await screen.findByText(/Showing 1 of 61 proposals on this record · newest first/);
 
     // ONE live region for this fact, not two. `role="status"` here is the ACT
@@ -520,7 +523,7 @@ describe('the order control', () => {
     renderPanel();
 
     await screen.findByText(/Showing 1 of 61 proposals on this record · oldest first/);
-    fireEvent.change(screen.getByLabelText('Order'), { target: { value: 'newest_first' } });
+    chooseValue(screen.getByLabelText('Order'), 'newest_first');
 
     // I3: a VIEW-CHANGE failure, not a plain background one — the same text
     // reaches both the sr-only status region and the visible notice, so this is
@@ -601,7 +604,7 @@ describe('the order control', () => {
       renderPanel();
 
       await screen.findByText(/Showing 1 of 61 proposals on this record · oldest first/);
-      fireEvent.change(screen.getByLabelText('Order'), { target: { value: 'newest_first' } });
+      chooseValue(screen.getByLabelText('Order'), 'newest_first');
       await waitFor(() => expect(attempts).toBe(1));
 
       // First failure: the VIEW-CHANGE sentence, correctly.
@@ -657,7 +660,7 @@ describe('the order control', () => {
       const view = renderPanel(null);
       await screen.findByText(/Showing 1 of 61 proposals on this record · oldest first/);
 
-      fireEvent.change(screen.getByLabelText('Order'), { target: { value: 'newest_first' } });
+      chooseValue(screen.getByLabelText('Order'), 'newest_first');
       await screen.findByText(/Showing 1 of 61 proposals on this record · newest first/);
 
       // A colleague's unrelated change arrives over the feed; this silent
@@ -706,12 +709,12 @@ describe('the order control', () => {
     renderPanel();
 
     await screen.findByText(/· oldest first/);
-    fireEvent.change(screen.getByLabelText('Order'), { target: { value: 'newest_first' } });
+    chooseValue(screen.getByLabelText('Order'), 'newest_first');
     await waitFor(() => expect(release).not.toBeNull());
 
     // The control already says `newest_first` and the rows on screen are still the
     // oldest-first ones. MUTANT: the line claims "newest first" over them here.
-    expect((screen.getByLabelText('Order') as HTMLSelectElement).value).toBe('newest_first');
+    expect(selectValue(screen.getByLabelText('Order'))).toBe('newest_first');
     expect(screen.getByText(/· oldest first/)).toBeTruthy();
 
     release!();
@@ -728,7 +731,7 @@ describe('the order control', () => {
     renderPanel();
 
     await screen.findByText('Proposed value');
-    fireEvent.change(screen.getByLabelText('Order'), { target: { value: 'newest_first' } });
+    chooseValue(screen.getByLabelText('Order'), 'newest_first');
     // THE DEFECT THIS CATCHES is rule 5 in this component's header: a reload that
     // blanks the list unmounts every card and takes a half-written value with it.
     expect(screen.queryByText(/Loading this record’s ingestion proposals/)).toBeNull();
@@ -788,7 +791,7 @@ describe('a failed view change is named as unapplied for every view dimension', 
     renderPanel();
 
     await screen.findByText(/Showing 1 of 61 proposals on this record · oldest first/);
-    fireEvent.change(screen.getByLabelText('Show'), { target: { value: 'open' } });
+    chooseValue(screen.getByLabelText('Show'), 'open');
 
     expect(
       await screen.findByText(
@@ -804,7 +807,7 @@ describe('a failed view change is named as unapplied for every view dimension', 
     // …and this was a SILENT reload, so the list is protected rather than replaced
     // by the full `BackendDown` panel.
     expect(screen.queryByRole('alert')).toBeNull();
-    expect((screen.getByLabelText('Show') as HTMLSelectElement).value).toBe('open');
+    expect(selectValue(screen.getByLabelText('Show'))).toBe('open');
   });
 
   it('DEFECT/COVERAGE: a PAGER step whose read fails says it was never applied, not that it is stale', async () => {
@@ -2345,7 +2348,7 @@ describe('a background change-feed update', () => {
       // SILENT, VIEW-CHANGE reload (`changeOrder`), and it supersedes the first
       // one via `generationRef` — the first request's eventual (never-arriving)
       // resolution is now irrelevant.
-      fireEvent.change(screen.getByLabelText('Order'), { target: { value: 'newest_first' } });
+      chooseValue(screen.getByLabelText('Order'), 'newest_first');
       await waitFor(() => expect(calls).toBe(1));
 
       // NOT a permanent spinner: the full `BackendDown` panel appears, because
@@ -2481,7 +2484,7 @@ describe('the empty window', () => {
     renderPanel();
 
     await screen.findByLabelText('Show');
-    fireEvent.change(screen.getByLabelText('Show'), { target: { value: 'open' } });
+    chooseValue(screen.getByLabelText('Show'), 'open');
     fireEvent.click(await screen.findByRole('button', { name: 'Next Page' }));
 
     // Past the end of a FILTERED walk. Both controls are offered and they differ.
@@ -2491,7 +2494,7 @@ describe('the empty window', () => {
 
     // THE DEFECT: a control that promises paging silently discarding the filter.
     await waitFor(() =>
-      expect((screen.getByLabelText('Show') as HTMLSelectElement).value).toBe('open'),
+      expect(selectValue(screen.getByLabelText('Show'))).toBe('open'),
     );
     expect(urls().some((u) => u.endsWith('/proposals?state=open&after=P1'))).toBe(true);
   });
@@ -2511,13 +2514,13 @@ describe('the empty window', () => {
     renderPanel();
 
     await screen.findByLabelText('Show');
-    fireEvent.change(screen.getByLabelText('Show'), { target: { value: 'open' } });
+    chooseValue(screen.getByLabelText('Show'), 'open');
     fireEvent.click(await screen.findByRole('button', { name: 'Next Page' }));
     await screen.findByText(/This window holds no proposals/);
 
     fireEvent.click(screen.getByRole('button', { name: 'Show All Proposals' }));
     await waitFor(() =>
-      expect((screen.getByLabelText('Show') as HTMLSelectElement).value).toBe('all'),
+      expect(selectValue(screen.getByLabelText('Show'))).toBe('all'),
     );
   });
 });
@@ -2529,8 +2532,8 @@ describe('the state filter', () => {
     stubFetchRoutes({ [LIST]: { body: page([proposalFixture({ state: 'rejected' })]) } });
     renderPanel();
 
-    const select = (await screen.findByLabelText('Show')) as HTMLSelectElement;
-    expect(select.value).toBe('all');
+    const select = (await screen.findByLabelText('Show')) as HTMLElement;
+    expect(selectValue(select)).toBe('all');
     // The FIRST read asked for no state at all.
     expect(urls()[0].endsWith('/proposals')).toBe(true);
     await waitFor(() => expect(stateLine()).toEqual(['Rejected — kept on the record']));
@@ -2542,10 +2545,8 @@ describe('the state filter', () => {
     });
     renderPanel();
 
-    const select = (await screen.findByLabelText('Show')) as HTMLSelectElement;
-    const options = within(select)
-      .getAllByRole('option')
-      .map((o) => (o as HTMLOptionElement).value);
+    const select = (await screen.findByLabelText('Show')) as HTMLElement;
+    const options = optionValues(select);
     // Nothing this client invented: `rejected`, `superseded` and `withdrawn` were not
     // served, so they are not offered.
     expect(options).toEqual(['all', 'open', 'accepted']);
@@ -2561,7 +2562,7 @@ describe('the state filter', () => {
     renderPanel();
 
     await screen.findByLabelText('Show');
-    fireEvent.change(screen.getByLabelText('Show'), { target: { value: 'open' } });
+    chooseValue(screen.getByLabelText('Show'), 'open');
 
     // THE DEFECT: showing the filtered count as the record's size, which lets a
     // scientist read "1 proposal" off a record that holds nine.

@@ -93,6 +93,7 @@ import { recordFieldFacts } from '../lib/recordFields';
 import { enumOptionLabel } from '../lib/runFields';
 import { formatWhen } from '../lib/labels';
 import { ProposeTermLink } from './ProposeTermLink';
+import { Select } from './Select';
 
 /** The outcome of the last write, for the panel's one live region. */
 type Outcome =
@@ -1008,32 +1009,26 @@ function OverrideForm({
         the value is right.
       </p>
       {choices !== null ? (
-        <select
+        <Select
           id={inputId}
-          className="run-input"
+          className="run-select"
+          density="compact"
           ref={bindControl(FOCUS_KEYS.formInput(row.address))}
           value={text}
           aria-invalid={error !== null || undefined}
           aria-describedby={error !== null ? `${hintId} ${errorId}` : hintId}
-          onChange={(e) => onText(e.target.value)}
-        >
-          {/* EMPTY ON OPEN, for the reason the box's own note gives above. */}
-          <option value="">Choose a value…</option>
-          {/* A STORED VALUE OUTSIDE THE LIST IS SHOWN AS WHAT IT IS (review I-3) —
-              never a select reading "Choose a value…" while holding it. Disabled, and
-              refused on submit, so it is never re-confirmed by a reader who did not
-              choose it. */}
-          {outsideTheList && (
-            <option value={text} disabled>
-              {`${text} — not an allowed value`}
-            </option>
-          )}
-          {choices.map((option) => (
-            <option key={option} value={option}>
-              {enumOptionLabel(option)}
-            </option>
-          ))}
-        </select>
+          onChange={onText}
+          /* EMPTY ON OPEN, for the reason the box's own note gives above. */
+          placeholder="Choose a value…"
+          options={[
+            /* A STORED VALUE OUTSIDE THE LIST IS SHOWN AS WHAT IT IS (review I-3) —
+               never a select reading "Choose a value…" while holding it. Disabled, and
+               refused on submit, so it is never re-confirmed by a reader who did not
+               choose it. */
+            ...(outsideTheList ? [{ value: text, label: `${text} — not an allowed value`, disabled: true }] : []),
+            ...choices.map((option) => ({ value: option, label: enumOptionLabel(option) })),
+          ]}
+        />
       ) : (
         <input
           id={inputId}

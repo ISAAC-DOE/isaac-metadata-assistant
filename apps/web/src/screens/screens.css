@@ -890,7 +890,7 @@
 }
 
 /* ---- toolbar: search + category filters ------------------------------
-   A grid with a FIXED track minimum, not an auto-sized flex row. A <select>
+   A grid with a FIXED track minimum, not an auto-sized flex row. A picker
    carrying real anchor-document / cluster labels has a max-content width of
    several hundred pixels; in an auto-sized track that contribution stretches
    the whole toolbar and makes <main> scroll horizontally at 375px (the same
@@ -947,22 +947,11 @@
   gap: 4px;
   min-width: 0;
 }
-.concept-lookup-filter > span {
+.concept-lookup-filter > label {
   font-size: 10.5px;
   letter-spacing: 0.04em;
   text-transform: uppercase;
   color: var(--text-tertiary);
-}
-.concept-lookup-filter select {
-  width: 100%;
-  min-width: 0;
-  max-width: 100%;
-  padding: 6px 8px;
-  font-size: 12px;
-  color: var(--text-primary);
-  background: var(--surface);
-  border: 1px solid var(--border-input);
-  border-radius: var(--radius-control);
 }
 /* P36V S-A — the visible escape from an active search/filter. Its own row rather
    than a fourth toolbar grid track: a 190px `minmax` track would have stretched

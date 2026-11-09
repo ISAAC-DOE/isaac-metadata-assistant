@@ -29,6 +29,7 @@ import type {
   ApiImportUnitRow,
   ApiImportWorkflowStep,
 } from '../lib/types';
+import { chooseValue, optionValues, selectValue } from '../test/controls';
 
 const C = IMPORT_STAGE_COPY;
 
@@ -558,13 +559,12 @@ describe('C-10 · choosing the record’s technique', () => {
         shortList={['XAS', 'HERFD-XAS', 'XES', 'RIXS']}
       />,
     );
-    const select = (await screen.findByRole('combobox', { name: C.techniqueLabel })) as HTMLSelectElement;
-    await waitFor(() => expect(select.disabled).toBe(false));
-    expect(select.value).toBe('');
+    const select = (await screen.findByRole('combobox', { name: C.techniqueLabel })) as HTMLElement;
+    await waitFor(() => expect(select).not.toBeDisabled());
+    expect(selectValue(select)).toBe('');
     expect(screen.getByText('Zz_XAS.mac')).toBeTruthy();
     // The schema's own list, the four the registry names first.
-    expect(within(select).getAllByRole('option').map((o) => (o as HTMLOptionElement).value)).toEqual([
-      '',
+    expect(optionValues(select)).toEqual([
       'XAS',
       'HERFD-XAS',
       'XES',
@@ -573,7 +573,7 @@ describe('C-10 · choosing the record’s technique', () => {
     ]);
     const save = screen.getByRole('button', { name: C.techniqueSave }) as HTMLButtonElement;
     expect(save.disabled).toBe(true);
-    fireEvent.change(select, { target: { value: 'HERFD-XAS' } });
+    chooseValue(select, 'HERFD-XAS');
     fireEvent.click(save);
     await waitFor(() =>
       expect(answer).toHaveBeenCalledWith('01RECZZ0000000000000000001', { 'system.technique': 'HERFD-XAS' }, 'v.7'),
@@ -592,10 +592,10 @@ describe('C-10 · choosing the record’s technique', () => {
     const edit = vi.spyOn(api, 'editField').mockResolvedValue({} as never);
     render(<TechniqueChooser experimentId="R" recordTitle="FAKE" evidence={[]} shortList={[]} />);
     expect(await screen.findByText(C.techniqueCurrent('XAS'))).toBeTruthy();
-    const select = screen.getByRole('combobox', { name: C.techniqueLabel }) as HTMLSelectElement;
-    await waitFor(() => expect(select.disabled).toBe(false));
-    expect(select.value).toBe('');
-    fireEvent.change(select, { target: { value: 'XES' } });
+    const select = screen.getByRole('combobox', { name: C.techniqueLabel }) as HTMLElement;
+    await waitFor(() => expect(select).not.toBeDisabled());
+    expect(selectValue(select)).toBe('');
+    chooseValue(select, 'XES');
     fireEvent.click(screen.getByRole('button', { name: C.techniqueSave }));
     await waitFor(() => expect(edit).toHaveBeenCalledWith('R', { 'system.technique': 'XES' }, 'v.8'));
     expect(answer).not.toHaveBeenCalled();

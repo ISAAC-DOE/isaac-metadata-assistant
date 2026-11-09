@@ -38,6 +38,7 @@ import {
 } from '../components/StructuredValueEntry';
 import { pendingItemToBlocker } from '../lib/adapt';
 import type { PendingBlocker } from '../lib/types';
+import { chooseValue, selectValue } from '../test/controls';
 
 const base = (kind: 'series' | 'descriptor'): PendingBlocker => ({
   id: kind,
@@ -207,8 +208,8 @@ describe('the descriptor form', () => {
     fireEvent.change(screen.getByLabelText(/^name/i), {
       target: { value: 'inflection_point_energy' },
     });
-    fireEvent.change(screen.getByLabelText(/^kind/i), { target: { value: 'absolute' } });
-    fireEvent.change(screen.getByLabelText(/^source/i), { target: { value: 'manual' } });
+    chooseValue(screen.getByLabelText(/^kind/i), 'absolute');
+    chooseValue(screen.getByLabelText(/^source/i), 'manual');
     fireEvent.change(screen.getByLabelText(/^value/i), { target: { value: '9001.2' } });
     fireEvent.change(screen.getByLabelText(/^unit/i), { target: { value: 'eV' } });
 
@@ -327,7 +328,10 @@ describe('accessibility of the entry controls', () => {
     for (const label of ['name', 'kind', 'source', 'value']) {
       const field = screen.getByLabelText(new RegExp(`^${label}`, 'i'));
       expect(field).toBeInTheDocument();
-      const required = within(field.closest('label') as HTMLElement).queryByTitle('required');
+      // The label wraps a text box; it names a picker (the themed `Select`) through `htmlFor`.
+      const labelEl =
+        field.closest('label') ?? document.querySelector(`label[for="${CSS.escape(field.id)}"]`);
+      const required = within(labelEl as HTMLElement).queryByTitle('required');
       expect(required, `${label} is required and must say so`).not.toBeNull();
     }
   });
@@ -509,8 +513,8 @@ describe('the entry editor opens on the value it is editing', () => {
     expect((screen.getByLabelText(/^Name/) as HTMLInputElement).value).toBe(
       'inflection_point_energy',
     );
-    expect((screen.getByLabelText(/^Kind/) as HTMLSelectElement).value).toBe('absolute');
-    expect((screen.getByLabelText(/^Source/) as HTMLSelectElement).value).toBe('manual');
+    expect(selectValue(screen.getByLabelText(/^Kind/))).toBe('absolute');
+    expect(selectValue(screen.getByLabelText(/^Source/))).toBe('manual');
     expect((screen.getByLabelText(/^Value/) as HTMLInputElement).value).toBe('9001.2');
     expect((screen.getByLabelText(/^Unit/) as HTMLInputElement).value).toBe('eV');
     expect((screen.getByLabelText(/Uncertainty \(σ\)/) as HTMLInputElement).value).toBe('0.01');

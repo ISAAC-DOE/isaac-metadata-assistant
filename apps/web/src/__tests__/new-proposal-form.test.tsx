@@ -66,6 +66,7 @@ import {
 } from '../test/apiFixtures';
 import type { RecordChangeSummary } from '../lib/recordChanges';
 import type { ApiProposalsResponse } from '../lib/types';
+import { chooseValue, selectValue } from '../test/controls';
 
 const EXP = 'demo';
 const LIST = `GET /api/experiments/${EXP}/proposals`;
@@ -184,9 +185,7 @@ async function openForm() {
 }
 
 function chooseField(path: string) {
-  fireEvent.change(screen.getByLabelText('Field this value is for'), {
-    target: { value: path },
-  });
+  chooseValue(screen.getByLabelText('Field this value is for'), path);
 }
 
 // ---------------------------------------------------------------------------
@@ -239,9 +238,7 @@ describe('New Proposal · scope is the server’s answer, never inferred', () =>
     await openForm();
 
     fireEvent.click(screen.getByLabelText('Cite a note this record already holds'));
-    fireEvent.change(await screen.findByLabelText(/The note this value was read from/), {
-      target: { value: NOTE_ID },
-    });
+    chooseValue(await screen.findByLabelText(/The note this value was read from/), NOTE_ID);
     chooseField(RECORD_PATH);
 
     expect(screen.queryByLabelText('Run this value is about')).toBeNull();
@@ -272,9 +269,7 @@ describe('New Proposal · scope is the server’s answer, never inferred', () =>
     await openForm();
 
     fireEvent.click(screen.getByLabelText('Cite a note this record already holds'));
-    fireEvent.change(await screen.findByLabelText(/The note this value was read from/), {
-      target: { value: NOTE_ID },
-    });
+    chooseValue(await screen.findByLabelText(/The note this value was read from/), NOTE_ID);
     chooseField(RUN_PATH);
     await screen.findByLabelText('Run this value is about');
     fireEvent.change(screen.getByLabelText('The value, as JSON'), {
@@ -291,9 +286,7 @@ describe('New Proposal · scope is the server’s answer, never inferred', () =>
     expect(posts().length).toBe(0);
 
     // Choosing the run makes it submittable and the run travels with the request.
-    fireEvent.change(screen.getByLabelText('Run this value is about'), {
-      target: { value: RUN_ID },
-    });
+    chooseValue(screen.getByLabelText('Run this value is about'), RUN_ID);
     fireEvent.click(screen.getByRole('button', { name: 'Store This Proposal' }));
     await waitFor(() => expect(posts().length).toBe(1));
     expect(posts()[0].body.run_id).toBe(RUN_ID);
@@ -328,9 +321,7 @@ describe('New Proposal · the note anchor is never bypassed', () => {
     await openForm();
 
     fireEvent.click(screen.getByLabelText('Cite a note this record already holds'));
-    fireEvent.change(await screen.findByLabelText(/The note this value was read from/), {
-      target: { value: NOTE_ID },
-    });
+    chooseValue(await screen.findByLabelText(/The note this value was read from/), NOTE_ID);
     chooseField(RECORD_PATH);
     fireEvent.change(screen.getByLabelText('The value, as JSON'), {
       target: { value: '"XANES"' },
@@ -489,9 +480,7 @@ describe('New Proposal · nothing typed is ever destroyed', () => {
     await openForm();
 
     fireEvent.click(screen.getByLabelText('Cite a note this record already holds'));
-    fireEvent.change(await screen.findByLabelText(/The note this value was read from/), {
-      target: { value: NOTE_ID },
-    });
+    chooseValue(await screen.findByLabelText(/The note this value was read from/), NOTE_ID);
     chooseField(RECORD_PATH);
     fireEvent.change(screen.getByLabelText('The value, as JSON'), {
       target: { value: '"XANES"' },
@@ -504,7 +493,7 @@ describe('New Proposal · nothing typed is ever destroyed', () => {
       (screen.getByLabelText('The value, as JSON') as HTMLTextAreaElement).value,
     ).toBe('"XANES"');
     expect(
-      (screen.getByLabelText('Field this value is for') as HTMLSelectElement).value,
+      selectValue(screen.getByLabelText('Field this value is for')),
     ).toBe(RECORD_PATH);
   });
 
@@ -541,9 +530,7 @@ describe('New Proposal · nothing typed is ever destroyed', () => {
     await openForm();
 
     fireEvent.click(screen.getByLabelText('Cite a note this record already holds'));
-    fireEvent.change(await screen.findByLabelText(/The note this value was read from/), {
-      target: { value: NOTE_ID },
-    });
+    chooseValue(await screen.findByLabelText(/The note this value was read from/), NOTE_ID);
     chooseField(RECORD_PATH);
     fireEvent.change(screen.getByLabelText('The value, as JSON'), {
       target: { value: '"XANES"' },

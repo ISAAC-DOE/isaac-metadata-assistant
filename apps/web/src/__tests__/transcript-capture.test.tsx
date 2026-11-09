@@ -42,6 +42,7 @@ import {
   isCaptureGuidanceSeen,
 } from '../lib/transcriptCapturePreference';
 import { runFixture, stubFetchRoutes } from '../test/apiFixtures';
+import { chooseValue, optionValues, selectValue } from '../test/controls';
 
 const EXP = 'demo';
 const RUNS = `GET /api/experiments/${EXP}/runs`;
@@ -256,9 +257,7 @@ function writes(): { key: string; body: Record<string, unknown>; ifMatch?: strin
 async function typeAndFinalize(text = 'Temperature was 300 K.') {
   const box = await screen.findByLabelText('Transcript');
   fireEvent.change(box, { target: { value: text } });
-  fireEvent.change(await screen.findByLabelText(CAPTURE_COPY.runLabel), {
-    target: { value: 'run-1' },
-  });
+  chooseValue(await screen.findByLabelText(CAPTURE_COPY.runLabel), 'run-1');
   fireEvent.click(screen.getByRole('button', { name: CAPTURE_COPY.finalize }));
 }
 
@@ -1161,9 +1160,7 @@ describe('processing: the finalize lock', () => {
     await renderPanel();
     const box = await screen.findByLabelText('Transcript');
     fireEvent.change(box, { target: { value: 'Temperature was 300 K.' } });
-    fireEvent.change(await screen.findByLabelText(CAPTURE_COPY.runLabel), {
-      target: { value: 'run-1' },
-    });
+    chooseValue(await screen.findByLabelText(CAPTURE_COPY.runLabel), 'run-1');
     const finalizeButton = screen.getByRole('button', { name: CAPTURE_COPY.finalize });
     fireEvent.click(finalizeButton);
     fireEvent.click(finalizeButton);
@@ -1212,9 +1209,7 @@ describe('processing: the finalize lock', () => {
     const { container } = await renderPanel();
     const box = await screen.findByLabelText('Transcript');
     fireEvent.change(box, { target: { value: 'Temperature was 300 K.' } });
-    fireEvent.change(await screen.findByLabelText(CAPTURE_COPY.runLabel), {
-      target: { value: 'run-1' },
-    });
+    chooseValue(await screen.findByLabelText(CAPTURE_COPY.runLabel), 'run-1');
 
     const form = container.querySelector('form.capture-form');
     expect(form).not.toBeNull();
@@ -2020,9 +2015,7 @@ describe('I2: exactly one .btn-primary is ever visible', () => {
     fireEvent.change(await screen.findByLabelText('Transcript'), {
       target: { value: 'Temperature was 300 K.' },
     });
-    fireEvent.change(await screen.findByLabelText(CAPTURE_COPY.runLabel), {
-      target: { value: 'run-1' },
-    });
+    chooseValue(await screen.findByLabelText(CAPTURE_COPY.runLabel), 'run-1');
     fireEvent.click(screen.getByRole('button', { name: CAPTURE_COPY.finalize }));
     await screen.findByRole('button', { name: /Reading/ });
 
@@ -2237,7 +2230,7 @@ describe('the run selector empty state', () => {
     fireEvent.click(await screen.findByRole('button', { name: CAPTURE_COPY.runCreate }));
     const select = await screen.findByLabelText(CAPTURE_COPY.runLabel);
     await waitFor(() => expect(select).toHaveFocus());
-    expect((select as HTMLSelectElement).value).toBe('run-1');
+    expect(selectValue(select)).toBe('run-1');
   });
 
   it('the run selector renders normally, with no permanent Create a Run button, once a run exists', async () => {
@@ -2251,9 +2244,7 @@ describe('the run selector empty state', () => {
     stubFetchRoutes(BASE_ROUTES as never);
     await renderPanel();
     expect(await screen.findByText(CAPTURE_COPY.runTargetsNone)).toBeInTheDocument();
-    fireEvent.change(await screen.findByLabelText(CAPTURE_COPY.runLabel), {
-      target: { value: 'run-1' },
-    });
+    chooseValue(await screen.findByLabelText(CAPTURE_COPY.runLabel), 'run-1');
     expect(await screen.findByText(CAPTURE_COPY.runTargetsRun('Run 1'))).toBeInTheDocument();
   });
 });
@@ -3136,9 +3127,7 @@ describe('leaving a record: the panel keeps its own promise, whoever the caller 
     const rendered = await renderOpenedFor(EXP);
     const box = await screen.findByLabelText('Transcript');
     fireEvent.change(box, { target: { value: 'Temperature was 300 K.' } });
-    fireEvent.change(await screen.findByLabelText(CAPTURE_COPY.runLabel), {
-      target: { value: 'run-1' },
-    });
+    chooseValue(await screen.findByLabelText(CAPTURE_COPY.runLabel), 'run-1');
     fireEvent.click(screen.getByRole('button', { name: CAPTURE_COPY.finalize }));
 
     await act(async () => {
@@ -3147,7 +3136,7 @@ describe('leaving a record: the panel keeps its own promise, whoever the caller 
     });
     // Record B's own runs resolve FIRST — the un-gated route — so the ordering
     // below is deterministic rather than a race the test happens to win.
-    await screen.findByRole('option', { name: 'Run B1' });
+    await screen.findByRole('option', { name: 'Run B1', hidden: true });
     await capture.release();
 
     const { container } = rendered;
@@ -3155,8 +3144,8 @@ describe('leaving a record: the panel keeps its own promise, whoever the caller 
     expect(status?.textContent ?? '').not.toMatch(/Finalized/);
     expect(screen.queryByText(CAPTURE_COPY.summaryStored(1, 1))).toBeNull();
     // Record A's run must not be selectable on record B's screen.
-    expect(screen.queryByRole('option', { name: 'Run 1' })).toBeNull();
-    expect(screen.getByRole('option', { name: 'Run B1' })).toBeInTheDocument();
+    expect(screen.queryByRole('option', { name: 'Run 1', hidden: true })).toBeNull();
+    expect(screen.getByRole('option', { name: 'Run B1', hidden: true })).toBeInTheDocument();
   });
 
   it('C2 (HAZARD-CLASS, NOT REPRODUCIBLE IN THIS APP): held mounted, a stale finalize does not hand the next record another record’s version token', async () => {
@@ -3183,7 +3172,7 @@ describe('leaving a record: the panel keeps its own promise, whoever the caller 
       rendered.rerender(panelFor(OTHER));
       await Promise.resolve();
     });
-    await screen.findByRole('option', { name: 'Run B1' });
+    await screen.findByRole('option', { name: 'Run B1', hidden: true });
     await capture.release();
 
     // Now write on record B and read the token off the wire.
@@ -3380,7 +3369,7 @@ describe('leaving a record: the panel keeps its own promise, whoever the caller 
       [OTHER_RUNS]: otherRuns.route,
     } as never);
     const rendered = await renderOpenedFor(EXP);
-    await screen.findByRole('option', { name: 'Run 1' });
+    await screen.findByRole('option', { name: 'Run 1', hidden: true });
 
     await act(async () => {
       rendered.rerender(panelFor(OTHER));
@@ -3390,15 +3379,15 @@ describe('leaving a record: the panel keeps its own promise, whoever the caller 
     // THE WINDOW. Record B's runs have not arrived. Record A's must not be
     // selectable here: choosing one would aim record B's write at another
     // record's run id, holding another record's version token.
-    expect(screen.queryByRole('option', { name: 'Run 1' })).toBeNull();
+    expect(screen.queryByRole('option', { name: 'Run 1', hidden: true })).toBeNull();
     // THE DOCUMENTED COST OF CLEARING, pinned so it stays a known trade-off and
     // not a discovery: for the length of the fetch the panel shows its
     // zero-runs branch, exactly as it already does on every first open.
     expect(screen.getByRole('button', { name: CAPTURE_COPY.runCreate })).toBeInTheDocument();
 
     await otherRuns.release();
-    expect(await screen.findByRole('option', { name: 'Run B1' })).toBeInTheDocument();
-    expect(screen.queryByRole('option', { name: 'Run 1' })).toBeNull();
+    expect(await screen.findByRole('option', { name: 'Run B1', hidden: true })).toBeInTheDocument();
+    expect(screen.queryByRole('option', { name: 'Run 1', hidden: true })).toBeNull();
   });
 
   it('I2 (HAZARD-CLASS): held mounted, a runs response for the previous record does not overwrite the next record’s list', async () => {
@@ -3419,12 +3408,12 @@ describe('leaving a record: the panel keeps its own promise, whoever the caller 
       rendered.rerender(panelFor(OTHER));
       await Promise.resolve();
     });
-    await screen.findByRole('option', { name: 'Run B1' });
+    await screen.findByRole('option', { name: 'Run B1', hidden: true });
 
     // Record A's runs arrive LAST, and must be discarded rather than displayed.
     await firstRuns.release();
-    expect(screen.queryByRole('option', { name: 'Run 1' })).toBeNull();
-    expect(screen.getByRole('option', { name: 'Run B1' })).toBeInTheDocument();
+    expect(screen.queryByRole('option', { name: 'Run 1', hidden: true })).toBeNull();
+    expect(screen.getByRole('option', { name: 'Run B1', hidden: true })).toBeInTheDocument();
   });
 
   /* ------------------------------------------------------------------------
@@ -4002,9 +3991,7 @@ describe('the no-run pre-flight', () => {
     fireEvent.change(box, { target: { value: 'Temperature was 300 K.' } });
     expect(screen.getByText(CAPTURE_COPY.finalizePreflightNoRun)).toBeInTheDocument();
 
-    fireEvent.change(await screen.findByLabelText(CAPTURE_COPY.runLabel), {
-      target: { value: 'run-1' },
-    });
+    chooseValue(await screen.findByLabelText(CAPTURE_COPY.runLabel), 'run-1');
     expect(screen.queryByText(CAPTURE_COPY.finalizePreflightNoRun)).toBeNull();
     expect(
       screen.getByRole('button', { name: CAPTURE_COPY.finalize }).getAttribute('aria-describedby'),
@@ -4234,10 +4221,11 @@ describe('mode="write" — the focused Write view', () => {
     stubFetchRoutes(BASE_ROUTES as never);
     const onSelectedRunChange = vi.fn();
     const view = renderMode('write', { selectedRunId: '', onSelectedRunChange });
-    const select = (await screen.findByLabelText(CAPTURE_COPY.runLabel)) as HTMLSelectElement;
-    await waitFor(() => expect(select.options.length).toBeGreaterThan(1));
-    expect(select.value).toBe('');
-    fireEvent.change(select, { target: { value: 'run-1' } });
+    const select = (await screen.findByLabelText(CAPTURE_COPY.runLabel)) as HTMLElement;
+    // The runs have arrived (the empty prompt is the picker's placeholder, not an option).
+    await waitFor(() => expect(optionValues(select).length).toBeGreaterThan(0));
+    expect(selectValue(select)).toBe('');
+    chooseValue(select, 'run-1');
     expect(onSelectedRunChange).toHaveBeenLastCalledWith('run-1');
     const withShared = (selectedRunId: string) => (
       <MemoryRouter initialEntries={['/']} future={{ v7_startTransition: true, v7_relativeSplatPath: true }}>
@@ -4253,10 +4241,10 @@ describe('mode="write" — the focused Write view', () => {
     );
     // The caller echoes the choice back: nothing moves, nothing loops.
     view.rerender(withShared('run-1'));
-    expect((screen.getByLabelText(CAPTURE_COPY.runLabel) as HTMLSelectElement).value).toBe('run-1');
+    expect(selectValue(screen.getByLabelText(CAPTURE_COPY.runLabel))).toBe('run-1');
     // A choice made ELSEWHERE (the Record Map's picker clearing it) arrives here.
     view.rerender(withShared(''));
-    expect((screen.getByLabelText(CAPTURE_COPY.runLabel) as HTMLSelectElement).value).toBe('');
+    expect(selectValue(screen.getByLabelText(CAPTURE_COPY.runLabel))).toBe('');
   });
 });
 

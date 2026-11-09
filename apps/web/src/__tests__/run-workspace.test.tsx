@@ -33,6 +33,7 @@ import {
   VERSION_FIELDS,
   type RouteEntry,
 } from '../test/apiFixtures';
+import { chooseValue, selectValue } from '../test/controls';
 
 /*
  * WHY THIS FILE RAISES THE ASYNC TIMEOUT, measured rather than guessed.
@@ -578,7 +579,7 @@ describe('autosave', () => {
       await vi.advanceTimersByTimeAsync(10);
     });
     expect((within(card).getByLabelText('Temperature (K)') as HTMLInputElement).value).toBe('500');
-    expect((within(card).getByLabelText('Environment') as HTMLSelectElement).value).toBe('operando');
+    expect(selectValue(within(card).getByLabelText('Environment'))).toBe('operando');
     expect(within(card).queryByText('Conflict')).toBeNull();
     expect(within(card).queryByText('Saved')).toBeNull();
   });
@@ -963,11 +964,11 @@ describe('a run is "All Recorded" without the reaction and the cell type', () =>
     await screen.findByRole('button', { name: /Add Run/ });
     await expand('RUNFUL');
     const group = within(cardFor('RUNFUL')).getByRole('group', { name: 'Electrochemistry · if it applies' });
-    const reaction = within(group).getByLabelText('Reaction', { exact: true }) as HTMLSelectElement;
-    const cell = within(group).getByLabelText('Cell type', { exact: true }) as HTMLSelectElement;
-    expect(reaction.value).toBe('OER');
-    expect(cell.value).toBe('');
-    expect(cell.selectedOptions[0]?.textContent).toBe('Not set');
+    const reaction = within(group).getByLabelText('Reaction', { exact: true }) as HTMLElement;
+    const cell = within(group).getByLabelText('Cell type', { exact: true }) as HTMLElement;
+    expect(selectValue(reaction)).toBe('OER');
+    expect(selectValue(cell)).toBe('');
+    expect(cell).toHaveTextContent('Not set');
   });
 });
 
@@ -1035,7 +1036,7 @@ describe('two runs on one screen', () => {
     expect(within(b).getByText('Run 2')).toBeInTheDocument();
     expect(within(b).getByRole('status').textContent).toBe('Saved');
     expect((within(b).getByLabelText('Temperature (K)') as HTMLInputElement).value).toBe('78');
-    expect((within(b).getByLabelText('Environment') as HTMLSelectElement).value).toBe('ex_situ');
+    expect(selectValue(within(b).getByLabelText('Environment'))).toBe('ex_situ');
 
     // Leave focus — RUN B's full card unmounts — then open RUN A.
     vi.useRealTimers();
@@ -1050,12 +1051,10 @@ describe('two runs on one screen', () => {
     const a = cardFor('RUNAAA');
     expect(within(a).getByText('Run 1')).toBeInTheDocument();
     expect((within(a).getByLabelText('Temperature (K)') as HTMLInputElement).value).toBe('300');
-    expect((within(a).getByLabelText('Environment') as HTMLSelectElement).value).toBe('in_situ');
+    expect(selectValue(within(a).getByLabelText('Environment'))).toBe('in_situ');
     // PR #277 review (minor): the option READS "In situ" while its value — what is
     // stored — stays the raw schema token.
-    expect(
-      (within(a).getByLabelText('Environment') as HTMLSelectElement).selectedOptions[0].textContent,
-    ).toBe('In situ');
+    expect(within(a).getByLabelText('Environment')).toHaveTextContent('In situ');
     expect(within(a).getByRole('status').textContent).toBe('');
     // And only ONE write ever happened, for Run 2 — reopening Run 1 issued no
     // PATCH of its own.
@@ -1209,7 +1208,7 @@ describe('leaving the screen mid-save', () => {
 
     // Edit two is typed while that request is still open, so it is NOT in it.
     await act(async () => {
-      fireEvent.change(within(card).getByLabelText('Environment'), { target: { value: 'operando' } });
+      chooseValue(within(card).getByLabelText('Environment'), 'operando');
       await vi.advanceTimersByTimeAsync(AUTOSAVE_DEBOUNCE_MS + 50);
     });
     expect(within(card).getByRole('status').textContent).toBe('Saving…');
@@ -1280,7 +1279,7 @@ describe('leaving the screen mid-save', () => {
       await vi.advanceTimersByTimeAsync(AUTOSAVE_DEBOUNCE_MS + 50);
     });
     await act(async () => {
-      fireEvent.change(within(card).getByLabelText('Environment'), { target: { value: 'operando' } });
+      chooseValue(within(card).getByLabelText('Environment'), 'operando');
       await vi.advanceTimersByTimeAsync(AUTOSAVE_DEBOUNCE_MS + 50);
     });
     expect(log.seen).toHaveLength(1);
@@ -1334,7 +1333,7 @@ describe('leaving the screen mid-save', () => {
       await vi.advanceTimersByTimeAsync(AUTOSAVE_DEBOUNCE_MS + 50);
     });
     await act(async () => {
-      fireEvent.change(within(card).getByLabelText('Environment'), { target: { value: 'operando' } });
+      chooseValue(within(card).getByLabelText('Environment'), 'operando');
       await vi.advanceTimersByTimeAsync(AUTOSAVE_DEBOUNCE_MS + 50);
     });
     await act(async () => {

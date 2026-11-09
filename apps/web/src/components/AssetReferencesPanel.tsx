@@ -58,6 +58,7 @@ import './assets.css';
 // The collapsed mount reuses `FieldGroup`'s shell (`.field-group` / `.fg-header`
 // / `.fg-body`) rather than inventing a second disclosure idiom for this screen.
 import './fields.css';
+import { Select } from './Select';
 
 /** Same narrowing the other panels use — a non-`ApiError` throw still renders a panel. */
 function asApiError(err: unknown): ApiError {
@@ -1105,25 +1106,20 @@ function AssetForm({
         <label className="assets-control-label" htmlFor={`${base}-role`}>
           Role <span aria-hidden="true">*</span>
         </label>
-        <select
+        <Select
           id={`${base}-role`}
-          className="asset-input"
+          density="compact"
           value={values.content_role}
-          required
+          aria-required
           aria-invalid={showProblems && roleProblem !== null ? true : undefined}
           aria-describedby={
             showProblems && roleProblem !== null ? `${base}-role-problem` : undefined
           }
-          onChange={(e) => set('content_role', e.target.value)}
-        >
-          {/* No pre-selection. A person chooses; nothing is proposed for them. */}
-          <option value="">Choose a role…</option>
-          {contentRoles.map((role) => (
-            <option key={role} value={role}>
-              {roleLabel(role)}
-            </option>
-          ))}
-        </select>
+          onChange={(next) => set('content_role', next)}
+          /* No pre-selection. A person chooses; nothing is proposed for them. */
+          placeholder="Choose a role…"
+          options={contentRoles.map((role) => ({ value: role, label: roleLabel(role) }))}
+        />
         {showProblems && roleProblem !== null && (
           <p className="asset-problem" id={`${base}-role-problem`}>
             {roleProblem}

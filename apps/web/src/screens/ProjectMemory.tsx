@@ -3,6 +3,7 @@ import '../components/assistant.css';
 import {
   useCallback,
   useEffect,
+  useId,
   useMemo,
   useRef,
   useState,
@@ -40,6 +41,7 @@ import type {
   MemoryConsistency,
   SnapshotIntegrity,
 } from '../lib/types';
+import { Select } from '../components/Select';
 
 /**
  * Project Memory — a deliberately separate destination from the experiment queue
@@ -1160,6 +1162,9 @@ function ConceptLookupBrowser({ available, concepts, focusConceptId }: ConceptLo
   const [query, setQuery] = useState('');
   const [docFilter, setDocFilter] = useState<string>(CONCEPT_FILTER_ALL);
   const [clusterFilter, setClusterFilter] = useState<string>(CONCEPT_FILTER_ALL);
+  /* Per instance, so a second mounted lookup cannot repeat the pickers' ids (or the listbox and option ids
+     `Select` derives from them). */
+  const filterIdBase = useId();
   const [selectedId, setSelectedId] = useState<string | null>(null);
   // Roving-tabindex cursor for the master list. Focus and SELECTION are
   // deliberately separate: an arrow key moves the reading cursor, Enter/Space
@@ -1351,38 +1356,38 @@ function ConceptLookupBrowser({ available, concepts, focusConceptId }: ConceptLo
             onChange={(e) => setQuery(e.target.value)}
           />
         </label>
-        <label className="concept-lookup-filter">
-          <span>Anchor source</span>
-          <select value={docFilter} onChange={(e) => setDocFilter(e.target.value)}>
-            <option value={CONCEPT_FILTER_ALL}>All sources</option>
-            {docOptions.docs.map(([path, count]) => (
-              <option key={path} value={path}>
-                {path} ({count})
-              </option>
-            ))}
-            {docOptions.unlinked > 0 && (
-              <option value={CONCEPT_FILTER_UNLINKED_DOC}>
-                no linked source ({docOptions.unlinked})
-              </option>
-            )}
-          </select>
-        </label>
-        <label className="concept-lookup-filter">
-          <span>Cluster</span>
-          <select value={clusterFilter} onChange={(e) => setClusterFilter(e.target.value)}>
-            <option value={CONCEPT_FILTER_ALL}>All clusters</option>
-            {clusterOptions.clusters.map(([id, entry]) => (
-              <option key={id} value={id}>
-                {entry.label} ({entry.count})
-              </option>
-            ))}
-            {clusterOptions.noCluster > 0 && (
-              <option value={CONCEPT_FILTER_NO_CLUSTER}>
-                no cluster ({clusterOptions.noCluster})
-              </option>
-            )}
-          </select>
-        </label>
+        <div className="concept-lookup-filter">
+          <label htmlFor={`${filterIdBase}-doc`}>Anchor source</label>
+          <Select
+            id={`${filterIdBase}-doc`}
+            density="compact"
+            value={docFilter}
+            onChange={setDocFilter}
+            options={[
+              { value: CONCEPT_FILTER_ALL, label: 'All sources' },
+              ...docOptions.docs.map(([path, count]) => ({ value: path, label: `${path} (${count})` })),
+              ...(docOptions.unlinked > 0
+                ? [{ value: CONCEPT_FILTER_UNLINKED_DOC, label: `no linked source (${docOptions.unlinked})` }]
+                : []),
+            ]}
+          />
+        </div>
+        <div className="concept-lookup-filter">
+          <label htmlFor={`${filterIdBase}-cluster`}>Cluster</label>
+          <Select
+            id={`${filterIdBase}-cluster`}
+            density="compact"
+            value={clusterFilter}
+            onChange={setClusterFilter}
+            options={[
+              { value: CONCEPT_FILTER_ALL, label: 'All clusters' },
+              ...clusterOptions.clusters.map(([id, entry]) => ({ value: id, label: `${entry.label} (${entry.count})` })),
+              ...(clusterOptions.noCluster > 0
+                ? [{ value: CONCEPT_FILTER_NO_CLUSTER, label: `no cluster (${clusterOptions.noCluster})` }]
+                : []),
+            ]}
+          />
+        </div>
       </div>
       {/* P36V S-A — a visible escape from the filters. The empty state has told
           readers to "clear the filters" since S7 while `clearFilters` was only

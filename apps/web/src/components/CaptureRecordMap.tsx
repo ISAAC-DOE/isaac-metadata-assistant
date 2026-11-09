@@ -5,6 +5,7 @@ import { RUN_LIST_LIMIT_MAX } from '../lib/runPaging';
 import { CAPTURE_COPY } from '../lib/transcriptCaptureContent';
 import type { ApiRunView } from '../lib/types';
 import { RunSchemaMirror } from './RunSchemaMirror';
+import { Select } from './Select';
 
 /**
  * THE LIVE RECORD MAP BESIDE A FOCUSED CAPTURE VIEW (owner QA 2026-09-22, C5).
@@ -124,22 +125,18 @@ export function CaptureRecordMap({
       <label className="capture-label" htmlFor={selectId}>
         {CAPTURE_COPY.mapRunLabel}
       </label>
-      <select
+      <Select
         id={selectId}
-        className="capture-control"
+        className="capture-map-run-select"
+        density="compact"
         value={runId}
-        onChange={(event) => onRunChange(event.target.value)}
-      >
-        <option value="">{CAPTURE_COPY.runPlaceholder}</option>
-        {options.map((run) => (
-          <option key={run.id} value={run.id}>
-            {run.label}
-          </option>
-        ))}
-        {selected !== null && listed === null && (
-          <option value={selected.id}>{selected.label}</option>
-        )}
-      </select>
+        onChange={onRunChange}
+        placeholder={CAPTURE_COPY.runPlaceholder}
+        options={[
+          ...options.map((run) => ({ value: run.id, label: run.label })),
+          ...(selected !== null && listed === null ? [{ value: selected.id, label: selected.label }] : []),
+        ]}
+      />
     </span>
   ) : undefined;
 

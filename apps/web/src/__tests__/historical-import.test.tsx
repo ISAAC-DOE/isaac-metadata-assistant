@@ -64,6 +64,7 @@ import type {
   ApiImportSource,
   ApiImportWorkflowStep,
 } from '../lib/types';
+import { chooseValue, optionElements, optionValues, selectOptions, selectValue } from '../test/controls';
 
 /* --------------------------------------------------------------------------
  * Fixtures — shaped exactly as the real server answers, and UNMISTAKABLY FAKE.
@@ -1070,7 +1071,9 @@ describe('§5 · a candidate that cannot be sent says why, and offers no control
       if (el === null) throw new Error('no destination control yet');
       return el;
     });
-    fireEvent.change(destination, { target: { value: '01RECORD00000000000000001' } });
+    // The picker (themed `Select`) is chosen from; the id box (list unreadable) is typed into.
+    if (destination.getAttribute('role') === 'combobox') chooseValue(destination, '01RECORD00000000000000001');
+    else fireEvent.change(destination, { target: { value: '01RECORD00000000000000001' } });
     fireEvent.click(within(card).getByRole('button', { name: IMPORT_COPY.actionPropose }));
 
     await waitFor(() => {
@@ -1430,9 +1433,7 @@ async function chooseRecordAndAdd() {
   goTo(IMPORT_STAGE_COPY.add.title);
   const panel = document.querySelector('.hi-addwhole') as HTMLElement;
   expect(panel).not.toBeNull();
-  fireEvent.change(within(panel).getByRole('combobox'), {
-    target: { value: '01RECORD00000000000000001' },
-  });
+  chooseValue(within(panel).getByRole('combobox'), '01RECORD00000000000000001');
   fireEvent.click(
     within(panel).getByRole('button', { name: IMPORT_COPY.actionAddWhole }),
   );
@@ -1672,9 +1673,9 @@ describe('§11 · creating the destination, from either form', () => {
     );
 
     // THE PICKER THIS FORM SUBMITS now holds the new record AND has it selected.
-    const select = (await within(panel).findByRole('combobox')) as HTMLSelectElement;
-    expect([...select.options].map((o) => o.textContent)).toContain(created.title);
-    expect(select.value).toBe(created.id);
+    const select = await within(panel).findByRole('combobox');
+    expect(selectOptions(select)).toContain(created.title);
+    expect(selectValue(select)).toBe(created.id);
     expect(
       within(panel).getByRole('button', { name: IMPORT_COPY.actionAddWhole }),
     ).not.toBeDisabled();
@@ -2178,7 +2179,7 @@ async function chooseRecordIn(scope: HTMLElement) {
     if (el === null) throw new Error('no destination control yet');
     return el;
   });
-  fireEvent.change(destination, { target: { value: '01RECORD00000000000000001' } });
+  chooseValue(destination, '01RECORD00000000000000001');
 }
 
 describe('§16 · a run-owned value goes to its own measurement’s run', () => {
@@ -2190,8 +2191,8 @@ describe('§16 · a run-owned value goes to its own measurement’s run', () => 
     await openRouted([run('R-A', 'run A', KEY_A), run('R-B', 'run B', KEY_B), run('R-FREE', 'by hand', null)]);
     const card = openCandidate(goTo(IMPORT_STAGE_COPY.review.title), 'timestamps.acquired_start_utc');
     await chooseRecordIn(card);
-    const picker = (await within(card).findByRole('combobox', { name: /which run/i })) as HTMLSelectElement;
-    await waitFor(() => expect(picker.value).toBe('R-B'));
+    const picker = await within(card).findByRole('combobox', { name: /which run/i });
+    await waitFor(() => expect(selectValue(picker)).toBe('R-B'));
     expect(within(card).getByText(IMPORT_STAGE_COPY.ownRunPreselected)).toBeTruthy();
 
     fireEvent.click(within(card).getByRole('button', { name: IMPORT_COPY.actionPropose }));
@@ -2208,20 +2209,23 @@ describe('§16 · a run-owned value goes to its own measurement’s run', () => 
     const card = openCandidate(goTo(IMPORT_STAGE_COPY.review.title), 'timestamps.acquired_start_utc');
     await chooseRecordIn(card);
     const picker = await within(card).findByRole('combobox', { name: /which run/i });
-    const options = [...picker.querySelectorAll('option')];
-    const a = options.find((o) => o.value === 'R-A')!;
-    expect(a.disabled).toBe(true);
+    const options = optionElements(picker);
+    const a = options.find((o) => o.dataset.value === 'R-A')!;
+    expect(a).toHaveAttribute('aria-disabled', 'true');
     expect(a.textContent).toBe(`run A${IMPORT_STAGE_COPY.otherMeasurementRun}`);
     // a run with NO recorded origin stays the scientist's choice
-    expect(options.find((o) => o.value === 'R-FREE')!.disabled).toBe(false);
+    expect(options.find((o) => o.dataset.value === 'R-FREE')!).not.toHaveAttribute('aria-disabled');
+    // and the disabled one cannot be chosen: clicking it changes nothing
+    chooseValue(picker, 'R-A');
+    expect(selectValue(picker)).not.toBe('R-A');
   });
 
   it('never infers a run: with no run made from this measurement, nothing is preselected', async () => {
     await openRouted([run('R-FREE', 'by hand', null)]);
     const card = openCandidate(goTo(IMPORT_STAGE_COPY.review.title), 'timestamps.acquired_start_utc');
     await chooseRecordIn(card);
-    const picker = (await within(card).findByRole('combobox', { name: /which run/i })) as HTMLSelectElement;
-    expect(picker.value).toBe('');
+    const picker = await within(card).findByRole('combobox', { name: /which run/i });
+    expect(selectValue(picker)).toBe('');
     expect(within(card).queryByText(IMPORT_STAGE_COPY.ownRunPreselected)).toBeNull();
   });
 
@@ -2273,9 +2277,9 @@ describe('§16 · a run-owned value goes to its own measurement’s run', () => 
     const panel = document.querySelector('.hi-addwhole') as HTMLElement;
     await chooseRecordIn(panel);
     const picker = await within(panel).findByRole('combobox', { name: /which run/i });
-    fireEvent.change(picker, { target: { value: 'R-A' } });
+    chooseValue(picker, 'R-A');
     expect(within(panel).getByText(IMPORT_STAGE_COPY.namedRunIsAnotherMeasurement)).toBeTruthy();
-    fireEvent.change(picker, { target: { value: 'R-FREE' } });
+    chooseValue(picker, 'R-FREE');
     expect(within(panel).queryByText(IMPORT_STAGE_COPY.namedRunIsAnotherMeasurement)).toBeNull();
   });
 });
@@ -2369,14 +2373,14 @@ describe('§17 · archives by name, and runs when nothing can be sent', () => {
     fireEvent.click(await screen.findByRole('button', { name: IMPORT_COPY.actionStart }));
     await sessionOpen();
     const picker = within(goTo(IMPORT_STAGE_COPY.sources.title)).getByRole('combobox', { name: /which archive/i });
-    const options = [...picker.querySelectorAll('option')];
-    expect(options.map((o) => o.textContent)).toEqual([NAMES.bl15_synthetic_mini_corpus, NAMES.bl15_synthetic_semantics_corpus]);
-    expect(options.map((o) => o.value)).toEqual(archives);
-    expect(options.some((o) => (o.textContent ?? '').includes('_'))).toBe(false);
+    const options = selectOptions(picker);
+    expect(options).toEqual([NAMES.bl15_synthetic_mini_corpus, NAMES.bl15_synthetic_semantics_corpus]);
+    expect(optionValues(picker)).toEqual(archives);
+    expect(options.some((o) => o.includes('_'))).toBe(false);
     /* MUTATION-GUARDED: the picker opens on the SERVER's default — the archive the hosted
        image ships — not on whichever id sorts first. Dropping `default_archive` makes
        this RED (the mini corpus sorts first). */
-    expect((picker as HTMLSelectElement).value).toBe('bl15_synthetic_semantics_corpus');
+    expect(selectValue(picker)).toBe('bl15_synthetic_semantics_corpus');
   });
 
   it('falls back to the humanised id only when the server names nothing', async () => {
@@ -2385,7 +2389,7 @@ describe('§17 · archives by name, and runs when nothing can be sent', () => {
     fireEvent.click(await screen.findByRole('button', { name: IMPORT_COPY.actionStart }));
     await sessionOpen();
     const picker = within(goTo(IMPORT_STAGE_COPY.sources.title)).getByRole('combobox', { name: /which archive/i });
-    expect(picker.querySelector('option')?.textContent).toBe('BL15 synthetic mini corpus');
+    expect(selectOptions(picker)[0]).toBe('BL15 synthetic mini corpus');
   });
 
   it('MUTATION-GUARDED: with nothing sendable, an archive still offers to make its runs, and sends `create_runs`', async () => {

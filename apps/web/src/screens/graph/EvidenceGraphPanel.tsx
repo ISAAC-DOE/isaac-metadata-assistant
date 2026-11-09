@@ -54,6 +54,7 @@ import type {
   ApiRunCheckResponse,
   ApiRunView,
 } from '../../lib/types';
+import { Select } from '../../components/Select';
 
 /**
  * The EVIDENCE GRAPH — one experiment, shaped around its RUNS, for the
@@ -980,19 +981,17 @@ function LoadedEvidenceGraph({
           <label className="evgraph-focus-label" htmlFor="evgraph-focus-select">
             Focus on run
           </label>
-          <select
+          <Select
             id="evgraph-focus-select"
             className="evgraph-focus-select"
+            density="compact"
             value={focusRunId ?? ''}
-            onChange={(e) => onFocusRun(e.target.value === '' ? null : e.target.value)}
-          >
-            <option value="">Whole experiment</option>
-            {runs.map((run) => (
-              <option key={run.id} value={run.id}>
-                {run.label || `Run ${run.ordinal}`}
-              </option>
-            ))}
-          </select>
+            onChange={(next) => onFocusRun(next === '' ? null : next)}
+            options={[
+              { value: '', label: 'Whole experiment' },
+              ...runs.map((run) => ({ value: run.id, label: run.label || `Run ${run.ordinal}` })),
+            ]}
+          />
         </div>
 
         <div className="evgraph-buttons" role="group" aria-label="Graph view controls">

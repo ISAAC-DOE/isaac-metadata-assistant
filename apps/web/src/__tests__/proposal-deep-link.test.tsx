@@ -54,6 +54,7 @@ import { RECORD_PROPOSAL_PARAM, ROUTES } from '../lib/routes';
 import { fieldLabel } from '../lib/fieldLabels';
 import type { RecordChangeSummary } from '../lib/recordChanges';
 import type { ApiProposal, ApiProposalsResponse } from '../lib/types';
+import { chooseValue } from '../test/controls';
 
 const EXP = 'demo';
 const LIST = `GET /api/experiments/${EXP}/proposals`;
@@ -564,7 +565,7 @@ describe('a deep link the loaded window does not contain', () => {
     await waitFor(() => expect(noticeText()).not.toBeNull());
 
     /* Ask for the view the control would produce, through the ordinary control. */
-    fireEvent.change(screen.getByLabelText('Order'), { target: { value: 'newest_first' } });
+    chooseValue(screen.getByLabelText('Order'), 'newest_first');
     await waitFor(() => expect(listRequests(calls)).toHaveLength(2));
 
     /* A control that changes no state issues no read and therefore does nothing
@@ -625,7 +626,7 @@ describe('the one case where "this record does not hold it" is claimable', () =>
     renderPanel(`?${RECORD_PROPOSAL_PARAM}=${LINKED}`);
     await waitFor(() => expect(noticeText()).toContain('this record does not hold'));
 
-    fireEvent.change(screen.getByLabelText('Show'), { target: { value: 'accepted' } });
+    chooseValue(screen.getByLabelText('Show'), 'accepted');
 
     await waitFor(() => expect(noticeText()).toContain('is not in the window shown here'));
     expect(noticeText()).not.toContain('this record does not hold');

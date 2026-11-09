@@ -184,8 +184,7 @@
   color: var(--text-tertiary);
 }
 
-.evgraph-search-input,
-.evgraph-focus-select {
+.evgraph-search-input {
   width: 100%;
   max-width: 100%;
   box-sizing: border-box;
@@ -199,8 +198,7 @@
   color: var(--text-primary);
 }
 
-.evgraph-search-input:focus-visible,
-.evgraph-focus-select:focus-visible {
+.evgraph-search-input:focus-visible {
   outline: 2px solid var(--action);
   outline-offset: 1px;
 }

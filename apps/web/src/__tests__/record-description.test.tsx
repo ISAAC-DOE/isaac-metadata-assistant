@@ -33,6 +33,7 @@ import {
   type RouteEntry,
 } from '../test/apiFixtures';
 import officialSchema from '../../../../schema/isaac_record_v1.json';
+import { chooseValue, optionValues, selectValue } from '../test/controls';
 
 const BASE = `/api/experiments/${EXP_ID}`;
 
@@ -120,8 +121,8 @@ describe('the record description panel', () => {
 
   it('offers the technique picker over the schema\'s own values, read from the API', async () => {
     await open();
-    const technique = screen.getByLabelText('Technique') as HTMLSelectElement;
-    const offered = [...technique.options].map((o) => o.value).filter((v) => v !== '');
+    const technique = screen.getByLabelText('Technique') as HTMLElement;
+    const offered = optionValues(technique).filter((v) => v !== '');
     // THE SCHEMA'S OWN LIST, compared against the schema rather than against a literal:
     // a transcription in either the panel or this test would be a second copy free to
     // drift from the document.
@@ -129,7 +130,7 @@ describe('the record description panel', () => {
     expect(offered).toEqual(declared);
     expect(offered.length).toBeGreaterThan(30);
     // NO DEFAULT IS SELECTED beyond what the record already holds.
-    expect(technique.value).toBe('HERFD-XAS');
+    expect(selectValue(technique)).toBe('HERFD-XAS');
   });
 
   it('says the pickers are unavailable when the schema cannot be read, and offers no free text', async () => {
@@ -223,7 +224,7 @@ describe('the record description panel', () => {
         },
       },
     });
-    fireEvent.change(screen.getByLabelText('Technique'), { target: { value: 'XES' } });
+    chooseValue(screen.getByLabelText('Technique'), 'XES');
     await act(async () => {
       fireEvent.click(screen.getByRole('button', { name: /Save record description/ }));
     });

@@ -142,6 +142,7 @@ import {
   officialFindingSource,
   officialFindingsHeading,
 } from '../lib/officialAttribution';
+import { Select } from './Select';
 
 /** The glyph for each save state. Paired with words; never used alone. */
 const SAVE_ICON: Record<Exclude<RunSaveStatus, 'idle'>, typeof Check> = {
@@ -663,27 +664,25 @@ export function RunCard({
           </div>
           <div className="run-field-control">
             {spec.kind === 'enum' ? (
-              <select
+              <Select
                 id={fieldId}
                 ref={(el) => {
                   fieldControls.current[spec.path] = el;
                 }}
                 data-run-field-path={spec.path}
-                className="run-input"
+                className="run-select"
+                density="compact"
                 value={value}
                 aria-invalid={error !== undefined || undefined}
                 aria-describedby={describedBy}
-                onChange={(e) => onFieldChange(spec, e.target.value)}
-              >
-                {/* The empty option is how a value is CLEARED. It is not
-                    a placeholder: choosing it sends `null`. */}
-                <option value="">Not set</option>
-                {spec.options?.map((option) => (
-                  <option key={option} value={option}>
-                    {enumOptionLabel(option)}
-                  </option>
-                ))}
-              </select>
+                onChange={(next) => onFieldChange(spec, next)}
+                options={[
+                  /* The empty option is how a value is CLEARED. It is not
+                     a placeholder: choosing it sends `null`. */
+                  { value: '', label: 'Not set' },
+                  ...(spec.options ?? []).map((option) => ({ value: option, label: enumOptionLabel(option) })),
+                ]}
+              />
             ) : isDatetime ? (
               /*
                 THE LABEL IS UNCHANGED — no `(UTC)` suffix on it. The

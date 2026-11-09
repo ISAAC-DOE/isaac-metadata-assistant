@@ -3,6 +3,7 @@ import { render, fireEvent, within, waitFor } from '@testing-library/react';
 import { MemoryRouter } from 'react-router-dom';
 import { AppRoutes } from '../App';
 import { bundleRoutes, completePendingPage, stubFetchRoutes } from '../test/apiFixtures';
+import { chooseValue, selectValue } from '../test/controls';
 
 /**
  * THE COMPLETION SCREEN WITH RUN-OWNED QUESTIONS — the case no test rendered.
@@ -782,8 +783,9 @@ describe('editing a structured answer opens on the value being edited', () => {
     const fill = (label: RegExp, value: string) =>
       fireEvent.change(screen.getByLabelText(label), { target: { value } });
     fill(/^Name/, 'inflection_point_energy');
-    fill(/^Kind/, 'absolute');
-    fill(/^Source/, 'manual');
+    // Kind and Source are pickers (the themed `Select`): chosen, not typed.
+    chooseValue(screen.getByLabelText(/^Kind/), 'absolute');
+    chooseValue(screen.getByLabelText(/^Source/), 'manual');
     fill(/^Value/, '9001.2');
     fill(/^Unit/, 'eV');
     fill(/Uncertainty \(σ\)/, '0.4');
@@ -793,8 +795,10 @@ describe('editing a structured answer opens on the value being edited', () => {
 
     fireEvent.click(screen.getByRole('button', { name: /^Edit/ }));
     const editor = screen.getByText('Save').closest('section') as HTMLElement;
-    const field = (label: RegExp) =>
-      (within(editor).getByLabelText(label) as HTMLInputElement | HTMLSelectElement).value;
+    const field = (label: RegExp) => {
+      const el = within(editor).getByLabelText(label);
+      return el.getAttribute('role') === 'combobox' ? selectValue(el) : (el as HTMLInputElement).value;
+    };
 
     expect(field(/^Name/)).toBe('inflection_point_energy');
     expect(field(/^Kind/)).toBe('absolute');

@@ -35,6 +35,7 @@ import {
   stubFetchRoutes,
 } from '../test/apiFixtures';
 import type { ApiProposal, ApiProposalsResponse } from '../lib/types';
+import { chooseValue, optionValues, selectValue } from '../test/controls';
 
 const EXP = 'demo';
 const LIST = `GET /api/experiments/${EXP}/proposals`;
@@ -318,21 +319,22 @@ describe('a value outside the field’s closed list is never accepted as propose
     });
     renderPanel({ available: true, reason: null });
     fireEvent.click(await screen.findByRole('button', { name: 'Correct the Value, Then Accept' }));
-    const select = screen.getByLabelText('The corrected value') as HTMLSelectElement;
-    expect(select.tagName).toBe('SELECT');
+    // A CHOICE, not a text box: the themed picker.
+    const select = screen.getByRole('combobox', { name: 'The corrected value' });
     // "in situ" is NEVER mapped to `in_situ` on the reader's behalf.
-    expect(select.value).toBe('');
-    const options = Array.from(select.options).map((o) => o.value);
-    expect(options).toEqual(['', 'operando', 'in_situ', 'ex_situ', 'in_silico']);
+    expect(selectValue(select)).toBe('');
+    expect(select).toHaveTextContent('Choose a value…');
+    const options = optionValues(select);
+    expect(options).toEqual(['operando', 'in_situ', 'ex_situ', 'in_silico']);
     // The option a person reads is words; the value sent is the schema's token.
-    expect(screen.getByRole('option', { name: 'In situ' })).toBeTruthy();
+    expect(screen.getByRole('option', { name: 'In situ', hidden: true })).toBeTruthy();
 
     // Nothing chosen yet → nothing sent.
     fireEvent.click(screen.getByRole('button', { name: 'Accept the Corrected Value' }));
     await screen.findByText(/Choose one of the values/);
     expect(posts()).toHaveLength(0);
 
-    fireEvent.change(select, { target: { value: 'in_situ' } });
+    chooseValue(select, 'in_situ');
     fireEvent.click(screen.getByRole('button', { name: 'Accept the Corrected Value' }));
     await waitFor(() => expect(posts()).toHaveLength(1));
     expect(posts()[0]).toMatchObject({ accepted_from: 'edited', value: 'in_situ' });
@@ -404,8 +406,8 @@ describe('a value outside the field’s closed list is never accepted as propose
       expect(screen.queryByRole('button', { name: 'Accept as Proposed' })).toBeNull(),
     );
     fireEvent.click(screen.getByRole('button', { name: 'Correct the Value, Then Accept' }));
-    const select = screen.getByLabelText('The corrected value') as HTMLSelectElement;
-    expect(Array.from(select.options).map((o) => o.value)).toEqual(['', 'XAS', 'XES']);
+    const select = screen.getByLabelText('The corrected value') as HTMLElement;
+    expect(optionValues(select)).toEqual(['XAS', 'XES']);
   });
 });
 

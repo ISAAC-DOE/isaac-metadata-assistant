@@ -68,6 +68,32 @@ export function chooseIn(select: HTMLElement, optionText: Matcher): void {
   fireEvent.click(option);
 }
 
+/** The option elements a `Select` offers, in display order (its popup need not be open). */
+export function optionElements(select: HTMLElement): HTMLElement[] {
+  const listbox = document.getElementById(select.getAttribute('aria-controls') ?? '');
+  if (!listbox) throw new Error(`not a themed Select: ${select.tagName}#${select.id} controls no listbox`);
+  return Array.from(listbox.querySelectorAll<HTMLElement>('[role="option"]'));
+}
+
+/** The values a `Select` offers, in display order (what a native select's `options` carried). */
+export function optionValues(select: HTMLElement): string[] {
+  return optionElements(select).map((o) => o.getAttribute('data-value') ?? '');
+}
+
+/**
+ * Open a `Select` and click the option whose VALUE is `value` — the move `fireEvent.change(select, { target:
+ * { value } })` made on a native select, done the way a person does it. A disabled option is clicked like
+ * any other and, as in the app, changes nothing.
+ */
+export function chooseValue(select: HTMLElement, value: string): void {
+  const option = optionElements(select).find((o) => o.getAttribute('data-value') === value);
+  if (!option) {
+    throw new Error(`no option of value ${JSON.stringify(value)} in ${select.id}: ${optionValues(select).join(' | ')}`);
+  }
+  if (select.getAttribute('aria-expanded') !== 'true') fireEvent.click(select);
+  fireEvent.click(option);
+}
+
 /** Click the segment named `optionText` in the segmented control named `groupLabel`. */
 export function chooseSegment(groupLabel: Matcher, optionText: Matcher, root: HTMLElement = document.body): void {
   const group = within(root).getByRole('radiogroup', { name: groupLabel });

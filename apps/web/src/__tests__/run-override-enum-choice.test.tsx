@@ -13,6 +13,7 @@ import { act, fireEvent, render, screen, waitFor, within } from '@testing-librar
 import { RunInheritedPanel } from '../components/RunInheritedPanel';
 import { stubFetchRoutes, type RouteEntry } from '../test/apiFixtures';
 import type { ApiRunView } from '../lib/types';
+import { chooseValue, optionElements, optionValues, selectValue } from '../test/controls';
 
 const EXP = 'demo';
 const RUN = 'RUNAAA';
@@ -93,13 +94,15 @@ describe('an override at a field the schema closes with a list', () => {
     render(<RunInheritedPanel experimentId={EXP} run={runView()} onRun={vi.fn()} />);
 
     await openOverride(TECHNIQUE);
-    const select = (await within(rowFor(TECHNIQUE)).findByRole('combobox')) as HTMLSelectElement;
+    const select = (await within(rowFor(TECHNIQUE)).findByRole('combobox')) as HTMLElement;
     expect(within(rowFor(TECHNIQUE)).queryByRole('textbox')).toBeNull();
-    expect(select.value).toBe('');
-    expect(Array.from(select.options).map((o) => o.value)).toEqual(['', 'XAS', 'XES', 'RIXS']);
+    // Empty on open: nothing chosen, the prompt shows, and the choices are the schema's own.
+    expect(selectValue(select)).toBe('');
+    expect(select).toHaveTextContent('Choose a value…');
+    expect(optionValues(select)).toEqual(['XAS', 'XES', 'RIXS']);
 
     await act(async () => {
-      fireEvent.change(select, { target: { value: 'XES' } });
+      chooseValue(select, 'XES');
     });
     await act(async () => {
       fireEvent.click(within(rowFor(TECHNIQUE)).getByRole('checkbox'));
@@ -177,12 +180,13 @@ describe('an override at a field the schema closes with a list', () => {
         within(rowFor(TECHNIQUE)).getByRole('button', { name: /Change this run's value/ }),
       );
     });
-    const select = (await within(rowFor(TECHNIQUE)).findByRole('combobox')) as HTMLSelectElement;
+    const select = (await within(rowFor(TECHNIQUE)).findByRole('combobox')) as HTMLElement;
     // What the control DISPLAYS is what it holds, and it says what that is.
-    expect(select.value).toBe('ZZ-not-a-technique');
-    const shown = select.options[select.selectedIndex];
+    expect(selectValue(select)).toBe('ZZ-not-a-technique');
+    const shown = optionElements(select).find((o) => o.getAttribute('aria-selected') === 'true')!;
     expect(shown.textContent).toBe('ZZ-not-a-technique — not an allowed value');
-    expect(shown.disabled).toBe(true);
+    expect(shown).toHaveAttribute('aria-disabled', 'true');
+    expect(select).toHaveTextContent('ZZ-not-a-technique — not an allowed value');
     await act(async () => {
       fireEvent.click(within(rowFor(TECHNIQUE)).getByRole('checkbox'));
     });

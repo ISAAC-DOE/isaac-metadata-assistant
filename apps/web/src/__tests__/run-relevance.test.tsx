@@ -231,10 +231,14 @@ describe('an unclassified field is never a Run control', () => {
     const card = await showRun(RUN_WITH_UNCLASSIFIED);
     // Every fixture value is `SYNTHETIC-<path>`, so one substring covers all eight.
     expect(card.textContent ?? '').not.toContain('SYNTHETIC-');
+    // The text boxes and the enum pickers (the themed `Select` carries its value as `data-value`).
     const boxes = Array.from(
-      card.querySelectorAll<HTMLInputElement | HTMLSelectElement>('.run-fields input, .run-fields select'),
+      card.querySelectorAll<HTMLElement>('.run-fields input, .run-fields [role="combobox"]'),
     );
-    for (const box of boxes) expect(box.value).not.toContain('SYNTHETIC-');
+    expect(boxes.some((b) => b.getAttribute('role') === 'combobox')).toBe(true);
+    for (const box of boxes) {
+      expect(box.getAttribute('data-value') ?? (box as HTMLInputElement).value).not.toContain('SYNTHETIC-');
+    }
   });
 
   it('offers exactly the writable set — no control addresses a path outside it', async () => {
@@ -259,7 +263,7 @@ describe('an unclassified field is never a Run control', () => {
      */
     const card = await showRun(RUN_WITH_UNCLASSIFIED);
     const boxes = Array.from(
-      card.querySelectorAll<HTMLElement>('.run-fields input, .run-fields select'),
+      card.querySelectorAll<HTMLElement>('.run-fields input, .run-fields [role="combobox"]'),
     );
     const addressed = boxes.map(
       (el) => el.dataset.runFieldPath ?? el.dataset.runFieldIsoPath ?? null,

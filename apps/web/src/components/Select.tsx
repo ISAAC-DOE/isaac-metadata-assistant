@@ -32,6 +32,12 @@ import { Check, ChevronDown } from './icons';
  *
  * `onChange` fires once per real change, never for re-choosing the current value. A value that matches no
  * option (for example `''` before anything is chosen) shows `placeholder`.
+ *
+ * THE POPUP IS FIXED-POSITIONED from the trigger's rect, not placed inside the wrapper, so a card, scroll box
+ * or panel with `overflow: hidden | auto` around the picker cannot clip it. It stays in the wrapper's DOM (not
+ * portalled), so it keeps working inside a modal `<dialog>`'s top layer, and its position is measured against
+ * its real containing block, so a transformed ancestor (the assistant drawer slides in with `transform`) does
+ * not offset it.
  */
 
 export interface SelectOption {
@@ -64,14 +70,22 @@ export interface SelectProps {
   /** Passed to the trigger, for forms that validate when a field is left. */
   onFocus?: (e: FocusEvent<HTMLButtonElement>) => void;
   onBlur?: (e: FocusEvent<HTMLButtonElement>) => void;
+  /** `compact` is the toolbar and filter-row size: a 34px trigger in body-size text. */
+  density?: 'regular' | 'compact';
+  /** `data-*` attributes go on the trigger, where a caller's own lookups expect the control. */
+  [dataAttribute: `data-${string}`]: string | undefined;
 }
 
 /** How long typed letters accumulate into one search, as the APG example does. */
 const TYPEAHEAD_MS = 500;
-/** The room the popup keeps from the viewport's right edge (the page's own gutter at a phone width). */
+/** The room the popup keeps from the viewport's edges (the page's own gutter at a phone width). */
 const EDGE_GUTTER = 16;
 /** The popup's widest, however much room there is. */
 const POPUP_MAX = 512;
+/** The popup's tallest (18rem), however much room there is. */
+const POPUP_MAX_HEIGHT = 288;
+/** The gap between the trigger and the popup. */
+const POPUP_GAP = 4;
 const PAGE_STEP = 10;
 
 export const Select = forwardRef<HTMLButtonElement, SelectProps>(function Select(
@@ -91,9 +105,13 @@ export const Select = forwardRef<HTMLButtonElement, SelectProps>(function Select
     'aria-labelledby': labelledBy,
     onFocus,
     onBlur,
+    density = 'regular',
+    ...rest
   },
   ref,
 ) {
+  /** Only `data-*` attributes pass through to the trigger; everything else is a named prop above. */
+  const dataAttributes = Object.fromEntries(Object.entries(rest).filter(([k]) => k.startsWith('data-')));
   const autoId = useId();
   const id = idProp ?? `select-${autoId}`;
   const listboxId = `${id}-listbox`;
@@ -301,21 +319,47 @@ export const Select = forwardRef<HTMLButtonElement, SelectProps>(function Select
     return () => document.removeEventListener('mousedown', onDown);
   }, [open, close]);
 
-  // Open below, and flip above when there is no room below and more above. Never wider than the room from the
-  // trigger's left edge to the viewport's right gutter (so an indented trigger at a phone width cannot push the
-  // page sideways), and never narrower than the trigger. Measured again while open if the window changes.
-  const [maxWidth, setMaxWidth] = useState<number | undefined>(undefined);
+  // Placement. The popup is `position: fixed` at the trigger, so no clipping ancestor can cut it off. It opens
+  // below, and flips above when there is no room below and more above; it is never taller than the room on the
+  // side it opens, never wider than the room from the trigger's left edge to the viewport's right gutter (so an
+  // indented trigger at a phone width cannot push the page sideways), and never narrower than the trigger.
+  //
+  // A fixed box is placed against its containing block, which is the viewport unless an ancestor has a
+  // `transform`, `filter` or `contain` (the assistant drawer does). So the popup is first put at 0,0, where it
+  // lands is read, and that offset is taken off. Measured again while open as the page scrolls or resizes; if
+  // the trigger scrolls fully out of view, the popup closes rather than float over unrelated content.
   useLayoutEffect(() => {
     if (!open) return;
-    function place() {
-      const trigger = buttonRef.current?.getBoundingClientRect();
+    function place(event?: Event) {
+      const button = buttonRef.current;
       const list = listRef.current;
-      if (!trigger || !list) return;
-      const wanted = Math.min(list.scrollHeight, list.offsetHeight || list.scrollHeight) || 0;
-      const below = window.innerHeight - trigger.bottom;
-      setAbove(below < wanted + 8 && trigger.top > below);
-      const room = window.innerWidth - trigger.left - EDGE_GUTTER;
-      setMaxWidth(Math.max(trigger.width, Math.min(POPUP_MAX, room)));
+      if (!button || !list) return;
+      if (event && event.target === list) return; // the popup scrolling its own options moves nothing
+      const trigger = button.getBoundingClientRect();
+      const viewW = window.innerWidth;
+      const viewH = window.innerHeight;
+      if (event && (trigger.bottom < 0 || trigger.top > viewH)) {
+        close();
+        return;
+      }
+      const style = list.style;
+      style.top = '0px';
+      style.left = '0px';
+      style.minWidth = `${trigger.width}px`;
+      style.maxWidth = `${Math.max(trigger.width, Math.min(POPUP_MAX, viewW - trigger.left - EDGE_GUTTER))}px`;
+      const below = viewH - trigger.bottom - POPUP_GAP - EDGE_GUTTER / 2;
+      const aboveRoom = trigger.top - POPUP_GAP - EDGE_GUTTER / 2;
+      style.maxHeight = '';
+      const wanted = Math.min(list.scrollHeight || list.offsetHeight, POPUP_MAX_HEIGHT);
+      const flip = below < wanted && aboveRoom > below;
+      const room = Math.max(0, Math.floor(flip ? aboveRoom : below));
+      if (room < wanted) style.maxHeight = `${room}px`;
+      const height = Math.min(list.offsetHeight || wanted, room < wanted ? room : wanted);
+      const origin = list.getBoundingClientRect();
+      const top = flip ? trigger.top - POPUP_GAP - height : trigger.bottom + POPUP_GAP;
+      style.top = `${top - origin.top}px`;
+      style.left = `${trigger.left - origin.left}px`;
+      setAbove(flip);
     }
     place();
     window.addEventListener('resize', place);
@@ -324,7 +368,7 @@ export const Select = forwardRef<HTMLButtonElement, SelectProps>(function Select
       window.removeEventListener('resize', place);
       window.removeEventListener('scroll', place, true);
     };
-  }, [open]);
+  }, [open, close, options]);
 
   // Keep the active option in view as it moves.
   useEffect(() => {
@@ -344,6 +388,8 @@ export const Select = forwardRef<HTMLButtonElement, SelectProps>(function Select
         key={`${option.value}-${index}`}
         id={optionId(index)}
         role="option"
+        // The value, for a lookup by value (an end-to-end test choosing a schema token, as `selectOption` did).
+        data-value={option.value}
         aria-selected={isSelected}
         aria-disabled={option.disabled ? true : undefined}
         aria-labelledby={detailId ? `${optionId(index)}-name` : undefined}
@@ -351,7 +397,8 @@ export const Select = forwardRef<HTMLButtonElement, SelectProps>(function Select
         className={`select-option${isActive ? ' is-active' : ''}${isSelected ? ' is-selected' : ''}`}
         onMouseEnter={() => !option.disabled && setActive(index)}
         onClick={() => {
-          if (option.disabled) return;
+          // A disabled option, or any option of a disabled picker (which never opens), chooses nothing.
+          if (option.disabled || disabled) return;
           commit(index);
           close();
           buttonRef.current?.focus();
@@ -373,7 +420,10 @@ export const Select = forwardRef<HTMLButtonElement, SelectProps>(function Select
   };
 
   return (
-    <div className={`select${className ? ` ${className}` : ''}`} ref={wrapRef}>
+    <div
+      className={`select${density === 'compact' ? ' select-compact' : ''}${className ? ` ${className}` : ''}`}
+      ref={wrapRef}
+    >
       <button
         ref={buttonRef}
         id={id}
@@ -389,6 +439,7 @@ export const Select = forwardRef<HTMLButtonElement, SelectProps>(function Select
         aria-required={required}
         aria-label={ariaLabel}
         aria-labelledby={labelledBy}
+        {...dataAttributes}
         data-value={value}
         disabled={disabled}
         onClick={() => (open ? close() : openWith(selectedIndex >= 0 ? selectedIndex : firstEnabled()))}
@@ -417,7 +468,6 @@ export const Select = forwardRef<HTMLButtonElement, SelectProps>(function Select
         aria-label={open ? listName : undefined}
         aria-labelledby={open && listName === undefined ? (labelledBy ?? id) : undefined}
         className={`select-popup${above ? ' is-above' : ''}`}
-        style={maxWidth !== undefined ? { maxWidth } : undefined}
         hidden={!open}
         tabIndex={-1}
         // A press inside the popup must not take focus from the trigger.

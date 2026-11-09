@@ -15,6 +15,7 @@ import {
   memoryConceptDetailWithheldAnchor,
   memoryGraphUnavailable,
 } from '../test/apiFixtures';
+import { chooseValue, selectValue } from '../test/controls';
 
 /*
  * P24.5 — the Concept Lookup card: the curated concepts Graphify anchored in
@@ -288,22 +289,22 @@ describe('P36R S7 · Concept Lookup — category filters', () => {
     const cluster = getByRole('combobox', { name: /Cluster/i });
     // Cluster 55 holds two of the four concepts — the count in the option label
     // is the real membership, not a guess.
-    expect(getByRole('option', { name: 'community 55 (2)' })).toBeInTheDocument();
-    fireEvent.change(cluster, { target: { value: '55' } });
+    expect(getByRole('option', { name: 'community 55 (2)', hidden: true })).toBeInTheDocument();
+    chooseValue(cluster, '55');
     expect(rowButtons(container)).toHaveLength(2);
     expect(getByText('2 of 4')).toBeInTheDocument();
 
     // "no cluster" is a real, honest bucket — never folded into a made-up one.
-    fireEvent.change(cluster, { target: { value: '__no_cluster__' } });
+    chooseValue(cluster, '__no_cluster__');
     expect(rowButtons(container)).toHaveLength(1);
     expect(getByText('Two-Layer Architecture')).toBeInTheDocument();
-    fireEvent.change(cluster, { target: { value: 'all' } });
+    chooseValue(cluster, 'all');
     expect(rowButtons(container)).toHaveLength(4);
 
     const doc = getByRole('combobox', { name: /Anchor source/i });
-    fireEvent.change(doc, { target: { value: 'docs/fake-note.md' } });
+    chooseValue(doc, 'docs/fake-note.md');
     expect(rowButtons(container)).toHaveLength(2);
-    fireEvent.change(doc, { target: { value: 'README.md' } });
+    chooseValue(doc, 'README.md');
     expect(rowButtons(container)).toHaveLength(1);
   });
 });
@@ -334,9 +335,7 @@ describe('P36R S7 · Concept Lookup — the aggregate missing-file note is true 
     // P36R S10 renamed the sentinel `__withheld__` → `__unlinked__` with the
     // option label "no linked source (N)": a null `source_file` also covers the
     // graph naming no source at all, so "anchor withheld" overclaimed.
-    fireEvent.change(getByRole('combobox', { name: /Anchor source/i }), {
-      target: { value: '__unlinked__' },
-    });
+    chooseValue(getByRole('combobox', { name: /Anchor source/i }), '__unlinked__');
     expect(rowButtons(container)).toHaveLength(1);
     expect(getByText('Withheld Anchor')).toBeInTheDocument();
     expect(queryByText(AGGREGATE_NOTE)).toBeNull();
@@ -993,14 +992,14 @@ describe('P36V S-A · Concepts — visible Clear Filters', () => {
     // A filter alone shows it too, and one click clears BOTH selects at once.
     const cluster = getByRole('combobox', { name: /Cluster/i });
     const doc = getByRole('combobox', { name: /Anchor source/i });
-    fireEvent.change(cluster, { target: { value: '55' } });
-    fireEvent.change(doc, { target: { value: 'docs/fake-note.md' } });
+    chooseValue(cluster, '55');
+    chooseValue(doc, 'docs/fake-note.md');
     expect(getByRole('button', clearName)).toBeInTheDocument();
     expect(rowButtons(container)).toHaveLength(2);
 
     fireEvent.click(getByRole('button', clearName));
-    expect((cluster as HTMLSelectElement).value).toBe('all');
-    expect((doc as HTMLSelectElement).value).toBe('all');
+    expect(selectValue(cluster)).toBe('all');
+    expect(selectValue(doc)).toBe('all');
     expect(rowButtons(container)).toHaveLength(4);
     expect(getByText('4 of 4')).toBeInTheDocument();
   });

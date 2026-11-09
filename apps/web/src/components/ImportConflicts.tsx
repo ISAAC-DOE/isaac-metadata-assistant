@@ -17,6 +17,7 @@ import {
 import type { ProposalDestinations } from '../lib/importDestinations';
 import { ExperimentPicker, RuleScopeFields, type RuleScope } from './ImportScope';
 import { Breakable } from './Breakable';
+import { Select } from './Select';
 
 /* Moved to `ImportScope` (2026-10-18) with the scope fields; re-exported so existing
    importers keep one path. */
@@ -620,16 +621,18 @@ function GroupRuleForm({
       }}
     >
       <p className="hi-sub">{COPY.resolve.groupLead}</p>
-      <label className="hi-field">
-        <span className="hi-field-label">{COPY.resolve.groupWhich}</span>
-        <select className="hi-input" value={group} onChange={(e) => setGroup(e.target.value)}>
-          {choices.groups.map((g) => (
-            <option key={g.token} value={g.token}>
-              Sample {g.token} ({g.count} conflicts)
-            </option>
-          ))}
-        </select>
-      </label>
+      <div className="hi-field">
+        <label className="hi-field-label" htmlFor={`${name}-group`}>
+          {COPY.resolve.groupWhich}
+        </label>
+        <Select
+          id={`${name}-group`}
+          density="compact"
+          value={group}
+          onChange={setGroup}
+          options={choices.groups.map((g) => ({ value: g.token, label: `Sample ${g.token} (${g.count} conflicts)` }))}
+        />
+      </div>
       <fieldset className="hi-resolve-group">
         <legend className="hi-field-label">{COPY.resolve.groupRole}</legend>
         {choices.roles.map((r) => (
