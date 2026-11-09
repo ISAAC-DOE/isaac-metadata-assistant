@@ -7,6 +7,7 @@ import { Link } from 'react-router-dom';
    claim a permission denial and a person glyph would imply an identity. */
 import { CircleDashed, LayoutList } from '../../components/icons';
 import { ROUTES } from '../../lib/routes';
+import { LABELS } from '../../lib/labels';
 import {
   type CurrentUserSource,
   disabledCurrentUserSource,
@@ -157,7 +158,7 @@ export function MyStats({ source, currentUser = disabledCurrentUserSource }: MyS
         }
         footer={
           <>
-            <Link to={ROUTES.settingsTab('privacy')}>Open Privacy Settings</Link>
+            <Link to={ROUTES.settingsTab('data')}>{LABELS.openDataSettings}</Link>
             <Link to={ROUTES.statisticsTab('general')}>See Workspace Statistics</Link>
           </>
         }

@@ -6,9 +6,11 @@ import { MemoryRouter, useLocation, useNavigate, type NavigateFunction } from 'r
 
 import { SettingsPage } from '../screens/SettingsPage';
 import {
+  SETTINGS_CARD_ANCHORS,
   SETTINGS_TAB_ALIASES,
   SETTINGS_TAB_IDS,
   ROUTES,
+  isSettingsCardAnchor,
   isSettingsTab,
   isSettingsTabAlias,
   resolveSettingsTab,
@@ -562,6 +564,46 @@ describe('Settings — deep-linkable tabs (?tab=)', () => {
     } finally {
       Element.prototype.scrollIntoView = original;
     }
+  });
+
+  /*
+   * A CARD ANCHOR: `?tab=data` is where Statistics' "Open Data Settings" goes. It
+   * opens Overview, scrolls the Data card into view and moves focus to its
+   * heading, so the reader lands ON the card. Not a retired alias, and no alias
+   * moves focus (the walkthrough's `?tab=help` manages focus itself).
+   */
+  it('?tab=data opens Overview, scrolls the Data card into view and focuses its heading', async () => {
+    const scrolled: Element[] = [];
+    const original = Element.prototype.scrollIntoView;
+    Element.prototype.scrollIntoView = function (this: Element) {
+      scrolled.push(this);
+    };
+    try {
+      stubFetchRoutes(fullRoutes());
+      renderSettings(ROUTES.settingsTab('data'));
+      expect(Object.keys(SETTINGS_CARD_ANCHORS)).toEqual(['data']);
+      expect(isSettingsCardAnchor('data')).toBe(true);
+      expect(isSettingsTabAlias('data')).toBe(false);
+      expect(isSettingsTab('data')).toBe(false);
+      expect(resolveSettingsTab('data')).toEqual({ tab: 'overview', widget: 'settings-data-heading', focus: true });
+      expect(tab('Overview')).toHaveAttribute('aria-selected', 'true');
+      const region = screen.getByRole('region', { name: 'Data' });
+      const heading = within(region).getByRole('heading', { name: 'Data' });
+      await waitFor(() => expect(scrolled).toContain(region));
+      expect(document.activeElement).toBe(heading);
+      expect(heading).toHaveAttribute('tabindex', '-1'); // focusable from script, not a Tab stop
+      expect(search()).toBe('?tab=data');
+    } finally {
+      Element.prototype.scrollIntoView = original;
+    }
+  });
+
+  it('a retired alias scrolls its widget into view but leaves focus where it was', async () => {
+    stubFetchRoutes(fullRoutes());
+    renderSettings('/settings?tab=privacy');
+    const region = screen.getByRole('region', { name: 'Data' });
+    await screen.findAllByText(dataRows(settingsFactsFrom(aboutResponse))[0].text);
+    expect(region.contains(document.activeElement)).toBe(false);
   });
 
   it('?tab=api opens Integrations with the key state as a STATE, not a disabled button', async () => {

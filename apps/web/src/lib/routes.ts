@@ -72,9 +72,28 @@ export const SETTINGS_TAB_ALIASES = {
 
 export type SettingsTabAlias = keyof typeof SETTINGS_TAB_ALIASES;
 
-/** Every value `?tab=` may carry and still mean something: the four tabs, plus
- *  the five retired ids that alias onto them. */
-export type SettingsTabLink = SettingsTabId | SettingsTabAlias;
+/**
+ * CARD ANCHORS — a `?tab=` value that names one card rather than a tab, for a
+ * link from another screen that is about that card. It opens the card's tab,
+ * scrolls the card into view AND moves focus to its heading, so a keyboard or
+ * screen-reader user arrives on the card the link named rather than at the top
+ * of the page. (A retired alias scrolls only: the walkthrough navigates by
+ * `?tab=help` and manages focus itself.) The widget id is the card heading's DOM
+ * id, as in `SETTINGS_TAB_ALIASES`.
+ */
+export const SETTINGS_CARD_ANCHORS = {
+  data: { tab: 'overview', widget: 'settings-data-heading' },
+} as const satisfies Record<string, { tab: SettingsTabId; widget: string }>;
+
+export type SettingsCardAnchor = keyof typeof SETTINGS_CARD_ANCHORS;
+
+export function isSettingsCardAnchor(value: string | null | undefined): value is SettingsCardAnchor {
+  return typeof value === 'string' && Object.prototype.hasOwnProperty.call(SETTINGS_CARD_ANCHORS, value);
+}
+
+/** Every value `?tab=` may carry and still mean something: the three tabs, the
+ *  retired ids that alias onto them, and the card anchors. */
+export type SettingsTabLink = SettingsTabId | SettingsTabAlias | SettingsCardAnchor;
 
 export function isSettingsTabAlias(value: string | null | undefined): value is SettingsTabAlias {
   return typeof value === 'string' && Object.prototype.hasOwnProperty.call(SETTINGS_TAB_ALIASES, value);
@@ -89,11 +108,17 @@ export function isSettingsTabAlias(value: string | null | undefined): value is S
 export function resolveSettingsTab(value: string | null | undefined): {
   tab: SettingsTabId;
   widget: string | null;
+  /** True for a card anchor: the page also moves focus to the widget's heading. */
+  focus?: true;
 } {
   if (isSettingsTab(value)) return { tab: value, widget: null };
   if (isSettingsTabAlias(value)) {
     const alias = SETTINGS_TAB_ALIASES[value];
     return { tab: alias.tab, widget: alias.widget };
+  }
+  if (isSettingsCardAnchor(value)) {
+    const anchor = SETTINGS_CARD_ANCHORS[value];
+    return { tab: anchor.tab, widget: anchor.widget, focus: true };
   }
   return { tab: 'overview', widget: null };
 }
