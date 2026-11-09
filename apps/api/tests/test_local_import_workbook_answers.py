@@ -164,7 +164,8 @@ def _workbook(bdir, path, answers=None, *, extra=None, rename=None):
                                                         "ISAAC question ID": abs_q["question_id"]})])
     _tab(wb, "8 Clock time zone", QHEAD, [a("8-0001", {"Folder": OTHER, "ISAAC question ID": "Q-3333333333"})])
     _tab(wb, "9 Confirm (optional)", QHEAD, [
-        a("9-G001", {"Folder": FOLDER, "Topic": "Applied potential (V)", "ISAAC question ID": "G-syn0000002"})])
+        a("9-G001", {"Folder": FOLDER, "Topic": "Applied potential (V)", "ISAAC question ID": "G-syn0000002",
+                     "Allowed answers": "yes only (each record's own shown value)"})])
     _tab(wb, "9b Confirm (opt) per record", QHEAD_B, [
         a(f"9-000{i}", {"Folder": FOLDER, "Topic": "Applied potential (V)", "Suggested answer (NOT confirmed)": q_val,
                         "ISAAC question ID": q["question_id"], "Covered by collapsed row": "9-G001"})
@@ -461,7 +462,7 @@ def test_counter_merge_clock_absorber_and_athena_version_rows_map_to_their_decid
 
 def test_answer_words_topics_and_absorber_text():
     assert [W.classify(x) for x in (None, " ", "Yes", "OK.", "y", "no", "No (wrong sample)", "?", "unknown", "in situ", 0.5)] == [
-        "blank", "blank", "yes", "yes", "yes", "no", "no", "unsure", "unsure", "value", "value"]
+        "blank", "blank", "yes", "yes", "yes", "no", "no", "unsure", "placeholder", "value", "value"]
     assert W.topic_field("Atmosphere  or gas") == "context.thermodynamics.atmosphere"
     assert W.topic_field("Facility’s organization") == "system.facility.organization"
     assert W.topic_field("Sample composition: SYNX2 mass fraction") == "sample.composition.SYNX2_mass_fraction"
@@ -528,5 +529,149 @@ def test_a_field_its_question_no_longer_asks_is_reported_with_the_question_that_
     code, rep, _ = _run(bdir, xlsx, capsys)
     assert code == 0 and not rep["decisions"]
     (p,) = rep["not_applied"]
-    assert p["problem"] == "not_resolving" and "no longer asks context.temperature_K" in p["reason"]
-    assert now[0]["question_id"] in p["reason"] and "not applied here" in p["reason"]
+    assert p["problem"] == "asked_elsewhere" and "the bundle changed" not in p["reason"]
+    assert p["reason"].startswith(f"context.temperature_K is asked in its own question for this scope, {now[0]['question_id']}")
+    assert "not applied here" in p["reason"] and opt["question_id"] in p["reason"]
+
+
+# --- review of 65d86a6e: the reviewer's scenarios (sc2.py, s5.py, s6.py), synthetic ---------------------------------
+
+
+def test_med1_an_answer_that_would_replace_a_later_decision_is_refused_and_named_unless_supersede(bdir, tmp_path, capsys):
+    xlsx = tmp_path / "SYN_stale.xlsx"
+    info = _workbook(bdir, xlsx, {"2-0002": ("in_situ", None), "2-0001": ("yes", None)})
+    later = M.decide_question(bdir, question_id=info["env"]["question_id"], decision="correct", value="operando",
+                              by="SYN Later", orcid=None, note="said later")
+    assert later["recorded"]
+    held = len(M.load(bdir)["scientist_decisions"])
+    code, rep, _ = _run(bdir, xlsx, capsys)
+    by_ref = {p["ref"]: p for p in rep["decisions"]}
+    p = by_ref["2-0002"]
+    assert p["outcome"] == "refused_replaces" and "SYN Later" in p["reason"] and "'operando'" in p["reason"]
+    assert p["replaces"][0]["decided_by"] == "SYN Later" and p["replaces"][0]["decided_utc"]
+    assert "--supersede" in p["reason"] and by_ref["2-0001"]["outcome"] == "would_record"
+    assert rep["freshness"] == "per_target"
+    capsys.readouterr()
+    assert cli.main(["bundle", "answers", "import", str(bdir), str(xlsx), "--by", WHO]) == 0
+    assert "would replace: " in capsys.readouterr().out
+    # --apply: the later decision stands; the rest is recorded
+    code, rep, _ = _run(bdir, xlsx, capsys, "--apply")
+    log = M.load(bdir)["scientist_decisions"]
+    env_targets = {t["id"] for t in info["env"]["targets"]}
+    assert not [d for d in log[held:] if d["target"]["id"] in env_targets]
+    assert len(log) > held and {p["ref"]: p["outcome"] for p in rep["decisions"]}["2-0002"] == "refused_replaces"
+    # --supersede: recorded over it, and said so
+    code, rep, _ = _run(bdir, xlsx, capsys, "--apply", "--supersede")
+    p = {p["ref"]: p for p in rep["decisions"]}["2-0002"]
+    assert p["outcome"] == "recorded" and p["statement"].startswith("REPLACED a later decision:")
+    last = [d for d in M.load(bdir)["scientist_decisions"] if d["target"]["id"] in env_targets][-1]
+    assert (last["value"], last["decided_by"]["name"]) == ("in_situ", WHO)
+
+
+def test_med2_ok_on_a_confirm_proposal_only_confirms_the_value_the_files_give_now(bdir, tmp_path, capsys):
+    pot = [q for q in _qs(bdir) if q["kind"] == "confirm_value"
+           and q.get("target_field_path") == "context.electrochemistry.potential_setpoint_V"]
+    path = "context.electrochemistry.potential_setpoint_V"
+    xlsx = tmp_path / "SYN_confirm.xlsx"
+    _workbook(bdir, xlsx, extra=[
+        ("SYN proposals 2", PHEAD, [
+            {"Ref": "P-0009", "Kind": "Value", "Folder": FOLDER, "Topic": "Applied potential (V)", "Claude proposes": 0.95,
+             "What 'ok' records": f"confirms the value the files give: {path} = 0.95",
+             "ISAAC question ID": pot[2]["question_id"], "YOUR ANSWER": "ok"},
+            {"Ref": "P-0010", "Kind": "Value", "Folder": FOLDER, "Topic": "Applied potential (V)", "Claude proposes": 0.8,
+             "What 'ok' records": f"confirms the value the files give: {path} = 0.8",
+             "ISAAC question ID": pot[3]["question_id"], "YOUR ANSWER": "ok"}]),
+        ("SYN stale", QHEAD, [{"Ref": "9-0099", "Folder": FOLDER, "Topic": "Applied potential (V)",
+                               "Suggested answer (NOT confirmed)": 0.95, "ISAAC question ID": pot[4]["question_id"],
+                               "YOUR ANSWER": "yes"}])])
+    code, rep, _ = _run(bdir, xlsx, capsys)
+    assert [(p["ref"], p["decision"], p["value"]) for p in rep["decisions"]] == [("P-0010", "confirm", None)]
+    stale = {p["ref"]: p for p in rep["not_applied"]}
+    assert stale["P-0009"]["problem"] == "stale" and "the files now give 0.4" in stale["P-0009"]["reason"]
+    assert stale["9-0099"]["problem"] == "stale" and "the files now give 0.8" in stale["9-0099"]["reason"]
+
+
+def test_low1_the_runs_refusal_ignores_case_and_follows_links(base, tmp_path, capsys):
+    upper = tmp_path / "_RUNS_v98" / FOLDER / "bundle"
+    shutil.copytree(base, upper)
+    (tmp_path / "innocent").symlink_to(tmp_path / "_RUNS_v98")
+    assert W.protected_part(upper) == "_RUNS_v98"
+    assert W.protected_part(tmp_path / "innocent" / FOLDER / "bundle") == "_RUNS_v98"
+    xlsx = tmp_path / "SYN.xlsx"
+    _workbook(upper, xlsx, {"2-0002": ("in_situ", None)})
+    before = _digest(upper)
+    for d in (upper, tmp_path / "innocent" / FOLDER / "bundle"):
+        code, _, err = _run(d, xlsx, capsys, "--apply")
+        assert code == W.EXIT_OUTPUT_REFUSED and "_RUNS_v98" in err
+    assert _digest(upper) == before
+
+
+def test_low3_a_blank_folder_is_no_bundles_and_folder_must_be_the_workbooks_and_the_bundles(bdir, tmp_path, capsys):
+    xlsx = tmp_path / "SYN_folders.xlsx"
+    env = _q(bdir, "missing_value", "context.environment")
+    _workbook(bdir, xlsx, {"2-0002": ("in_situ", None)}, extra=[("SYN no folder", QHEAD, [
+        {"Ref": "X-0001", "Topic": "Measurement environment (operando / in situ / ex situ)", "YOUR ANSWER": "ex_situ",
+         "ISAAC question ID": env["question_id"]}])])
+    code, rep, _ = _run(bdir, xlsx, capsys)
+    assert code == 0 and [p["ref"] for p in rep["decisions"]] == ["2-0002"]
+    (p,) = [p for p in rep["not_applied"] if p["ref"] == "X-0001"]
+    assert p["problem"] == "blank_folder"
+    assert {t["tab"]: t.get("blank_folder") for t in rep["tabs"]}["SYN no folder"] == 1
+    assert ("CR1" not in {p["ref"] for p in rep["not_applied"]})  # a free-text row with no Folder is every bundle's
+    assert rep["workbook_folders"] == sorted([FOLDER, OTHER]) and rep["bundle_folder"] == FOLDER
+    code, _, err = _run(bdir, xlsx, capsys, "--folder", "SYN_NOT_IN_IT")
+    assert code == W.EXIT_INPUT_REFUSED and "no row of" in err
+    code, _, err = _run(bdir, xlsx, capsys, "--folder", OTHER)
+    assert code == W.EXIT_USAGE and "--folder-differs-ok" in err
+    code, rep, _ = _run(bdir, xlsx, capsys, "--folder", OTHER, "--folder-differs-ok")
+    assert code == 0 and rep["folder"] == OTHER and rep["counts"]["answered_rows_other_beamtimes"] >= 1
+
+
+def test_low4_placeholder_answers_record_nothing_and_keep_no_vocabulary_request(bdir, tmp_path, capsys):
+    xlsx = tmp_path / "SYN_placeholders.xlsx"
+    words = {"2-0001": "-", "2-0002": "none", "2-0003": "TBD", "11-0001": "not applicable", "9-0003": "—",
+             "9-0004": "n.a."}
+    _workbook(bdir, xlsx, {k: (v, None) for k, v in words.items()} | {"AM02": ("none", None), "12-0001": ("None", None)})
+    code, rep, _ = _run(bdir, xlsx, capsys)
+    assert code == 0 and not rep["decisions"]
+    kinds = {p["ref"]: p["problem"] for p in rep["not_applied"]}
+    assert all(kinds[k] == "placeholder" for k in words)
+    # on the Athena tabs "none" is a listed answer, read there
+    assert {a["ref"]: list(a["params_entry"] or {}) for a in rep["athena_merges"]}["AM02"] == ["athena_ignore"]
+    assert kinds["12-0001"] != "placeholder"
+    code, rep, _ = _run(bdir, xlsx, capsys, "--apply")
+    assert not [r for r in M.load(bdir).get("vocabulary_requests") or () if (r.get("requested_by") or {}).get("name") == WHO]
+
+
+def test_low5_collapsed_rows_yes_without_a_suggestion_and_per_record_precedence(bdir, tmp_path, capsys):
+    pot = [q for q in _qs(bdir) if q["kind"] == "confirm_value"
+           and q.get("target_field_path") == "context.electrochemistry.potential_setpoint_V"]
+    sf = [q for q in _qs(bdir) if q["kind"] == "missing_value" and q.get("target_field_path") == "sample.sample_form"]
+
+    def g_tab(g_row, kids):
+        return [("SYN G", QHEAD, [g_row]), ("SYN Gb", QHEAD_B, kids)]
+
+    kids = [{"Ref": f"K-000{i}", "Folder": FOLDER, "Topic": "Applied potential (V)", "Suggested answer (NOT confirmed)": v,
+             "ISAAC question ID": q["question_id"], "Covered by collapsed row": "K-G001"}
+            for i, (q, v) in enumerate(((pot[0], 0.1), (pot[1], 0.2)), start=1)]
+    # 'yes' on a collapsed row that shows no suggestion and does not say "each record's own": reported, not expanded
+    xlsx = tmp_path / "SYN_g1.xlsx"
+    _workbook(bdir, xlsx, extra=g_tab({"Ref": "K-G001", "Folder": FOLDER, "Topic": "Applied potential (V)",
+                                       "ISAAC question ID": "G-synk", "YOUR ANSWER": "yes"}, kids))
+    code, rep, _ = _run(bdir, xlsx, capsys)
+    assert not rep["decisions"]
+    (p,) = [p for p in rep["not_applied"] if p["ref"] == "K-G001"]
+    assert p["problem"] == "needs_translation" and "shows no suggestion" in p["reason"]
+    # a per-record answer overrides the collapsed row for its record; the others take the collapsed row's answer
+    kids3 = [{"Ref": f"S-000{i}", "Folder": FOLDER, "Topic": "Sample form (powder, film, ...)",
+              "ISAAC question ID": q["question_id"], "Covered by collapsed row": "S-G001",
+              **({"YOUR ANSWER": "pellet"} if i == 1 else {})} for i, q in enumerate(sf, start=1)]
+    xlsx = tmp_path / "SYN_g2.xlsx"
+    _workbook(bdir, xlsx, extra=g_tab({"Ref": "S-G001", "Folder": FOLDER, "Topic": "Sample form (powder, film, ...)",
+                                       "ISAAC question ID": "G-syns", "YOUR ANSWER": "film"}, kids3))
+    code, rep, _ = _run(bdir, xlsx, capsys)
+    got = {(p["question_id"], p["value"]) for p in rep["decisions"]}
+    assert got == {(sf[0]["question_id"], "pellet"), (sf[1]["question_id"], "film"), (sf[2]["question_id"], "film")}
+    (o,) = [p for p in rep["not_applied"] if p["problem"] == "overridden"]
+    assert o["ref"] == "S-G001" and o["for_row"] == "S-0001" and "takes precedence" in o["reason"]
+    assert not [p for p in rep["not_applied"] if "answered differently" in p["reason"]]

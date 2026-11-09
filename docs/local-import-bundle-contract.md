@@ -1101,7 +1101,7 @@ sample form and formula). The template lets a scientist answer them in one sitti
   lists every decision and cell; `--json` prints the whole report.
 - **A filled question workbook** (the spreadsheet of consolidated questions a scientist is sent, one tab per kind,
   an `ISAAC question ID` column and a `YOUR ANSWER` column): `isaac bundle answers import <dir> <file.xlsx> --by
-  "<name>" [--orcid ...] [--folder <name>] [--apply] [--json]` (`workbook_answers.py`). A preview by default:
+  "<name>" [--orcid ...] [--folder <name> [--folder-differs-ok]] [--supersede] [--apply] [--json]` (`workbook_answers.py`). A preview by default:
   each answered row of this bundle's folder becomes the exact `bundle decide` it stands for, dry-run through
   `mutations.decide_question` / `mutations.decide` (`dry_run=True`) on a temporary copy of `bundle.json`, so
   the bundle folder is not touched. `yes`/`ok` accepts the row's shown suggestion only when it is the files'
@@ -1112,7 +1112,12 @@ sample form and formula). The template lets a scientist answer them in one sitti
   never applied; "same for all" is reported, never expanded. `--apply` records through the same calls with
   the note `workbook <file> '<tab>'!<cell>`; a second run records nothing new. It refuses (exit 4) a bundle
   inside a folder named `_runs…`. Tabs and columns are found from header rows, not titles; an unknown tab
-  is listed, an id that no longer resolves is listed per row with the reason.
+  is listed, an id that no longer resolves is listed per row with the reason. The workbook carries no bundle id
+  or decisions fingerprint, so freshness is checked per target: an answer the decide path would record over a
+  DIFFERENT scientist decision already held (same target, same decision family) is refused, naming that
+  decision, unless `--supersede`. A "confirms the value the files give" proposal is only ever a confirm of the
+  files' current value; placeholders (`-`, `none`, `TBD` …) record nothing; a blank Folder on an id row is no
+  bundle's; a per-record answer overrides its collapsed row.
 
 ## 20. Suggestions: the absorber, facility hints, and a Claude reading pass
 

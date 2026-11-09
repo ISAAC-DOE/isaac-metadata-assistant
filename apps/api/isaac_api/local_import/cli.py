@@ -2349,7 +2349,8 @@ def cmd_bundle_answers_import(args) -> int:
 
     try:
         report = W.import_answers(Path(args.bundle_dir), Path(args.xlsx), by=args.by, orcid=args.orcid,
-                                  apply=args.apply, folder=args.folder, bundle_arg=args.bundle_dir)
+                                  apply=args.apply, folder=args.folder, bundle_arg=args.bundle_dir,
+                                  supersede=args.supersede, folder_differs_ok=args.folder_differs_ok)
     except T.TemplateRefused as exc:  # W.AnswersRefused, and the workbook reader's own refusals
         _err(str(exc))
         return exc.code
@@ -2625,7 +2626,13 @@ def build_parser(prog: str = "isaac") -> argparse.ArgumentParser:
                    help="record the decisions (default: preview, nothing written); refused for a bundle inside a "
                         "folder named _runs… (apply to a copy first)")
     a.add_argument("--folder", help="the beamtime folder whose rows are this bundle's (default: the folder name the "
-                                    "bundle records)")
+                                    "bundle records); it must be a folder the workbook names")
+    a.add_argument("--folder-differs-ok", action="store_true",
+                   help="with --folder: the user confirms these rows are this bundle's although the bundle records "
+                        "another folder name")
+    a.add_argument("--supersede", action="store_true",
+                   help="record an answer even where the target already holds a DIFFERENT scientist decision (by "
+                        "default that row is refused and the existing decision is named)")
     a.add_argument("--json", action="store_true", help="print the full report as JSON")
     a.set_defaults(func=cmd_bundle_answers_import)
     return parser

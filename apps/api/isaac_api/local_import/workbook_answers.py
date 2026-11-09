@@ -78,6 +78,9 @@ H_PROJECTS = "athena project file(s)"
 H_LABEL = "athena group label"
 H_STORED = "athena group (as stored)"
 H_NEAR = "near name"  # prefix: "Near name (hint only, never matched)"
+#: what a row says its answer may be; a collapsed row's "yes only (each record's own shown value)" is read from it
+H_ALLOWED = "allowed answers"
+_EACH_OWN = re.compile(r"each record'?s own", re.IGNORECASE)
 
 #: how a tab is read, decided from its header row alone
 TAB_KINDS = {
@@ -141,7 +144,13 @@ YES_WORDS = frozenset({"yes", "y", "ok", "okay"})
 NO_WORDS = frozenset({"no", "n"})
 #: answers that say the scientist does not know: reported, nothing recorded (never turned into a defer)
 UNSURE_WORDS = frozenset({"?", "??", "unsure", "not sure", "don't know", "dont know", "do not know", "i don't know",
-                          "i dont know", "idk", "unknown", "n/a", "na"})
+                          "i dont know", "idk"})
+#: a placeholder, not an answer ("-", "—", "none", "TBD", "n.a.", "not applicable", "unknown" …), compared with every
+#: space and punctuation mark removed: reported, nothing recorded (never a value, never a vocabulary request). On the
+#: Athena tabs "none" is a listed answer and is read there.
+PLACEHOLDER_WORDS = frozenset({"", "none", "tbd", "tba", "tbc", "na", "notapplicable", "notavailable", "unknown", "nil",
+                               "null", "nothing", "pending", "xx", "xxx"})
+_SQUASH = re.compile(r"[\s.,;:/\\_\-\u2010-\u2015\u2212*'\"()]+")
 #: a note (or answer) asking to repeat an answer elsewhere: reported for a person to translate, never expanded
 SAME_FOR_ALL = re.compile(r"\b(?:same\s+(?:for|as)\s+(?:all|every\w*|each|the\s+rest|others|above|below)|ditto)\b",
                           re.IGNORECASE)
@@ -150,6 +159,7 @@ VALUE_KINDS = frozenset({"missing_value", "confirm_value", "resolve_conflict", "
 _EDGES = ("K", "L1", "L2", "L3", "M1", "M2", "M3", "M4", "M5")
 _ABSORBER = re.compile(r"\s*([A-Za-z]{1,2})[\s,_-]+(K|L[1-3]|M[1-5])(?:[\s-]*edge)?\s*", re.IGNORECASE)
 _OK_RECORDS = re.compile(r"(?:sets|confirms the value the files give:)\s+([A-Za-z_][\w.\[\]]*)\s*=\s*(.+?)\s*$")
+_CONFIRM_FORM = re.compile(r"\s*confirms the value the files give:", re.IGNORECASE)
 _OK_ABSORBER = re.compile(r"absorber to ([A-Z][a-z]?)\s+(K|L[1-3]|M[1-5])\b")
 _RG_ID = re.compile(r"rg-[0-9a-f]{16}")
 _VERSION = re.compile(r"v?0*(\d{1,3})", re.IGNORECASE)
@@ -188,7 +198,7 @@ def topic_field(topic: Any) -> str | None:
 
 
 def classify(raw: Any) -> str:
-    """``blank`` / ``yes`` / ``no`` / ``unsure`` / ``value`` for one answer cell's typed content."""
+    """``blank`` / ``yes`` / ``no`` / ``unsure`` / ``placeholder`` / ``value`` for one answer cell's typed content."""
     if raw is None or (isinstance(raw, str) and not raw.strip()):
         return "blank"
     if isinstance(raw, str):
@@ -199,6 +209,8 @@ def classify(raw: Any) -> str:
             return "no"
         if w in UNSURE_WORDS or _norm(raw) in UNSURE_WORDS:
             return "unsure"
+        if _SQUASH.sub("", _norm(raw)) in PLACEHOLDER_WORDS:
+            return "placeholder"
     return "value"
 
 
@@ -245,7 +257,7 @@ def read_tabs(wb) -> list[dict]:
             "suggestion": _find(header, H_SUGGESTION, prefix=True), "ok_records": _find(header, H_OK_RECORDS),
             "covered_by": _find(header, H_COVERED), "field": _find(header, H_FIELD),
             "projects": _find(header, H_PROJECTS), "label": _find(header, H_LABEL), "stored": _find(header, H_STORED),
-            "near": _find(header, H_NEAR, prefix=True),
+            "near": _find(header, H_NEAR, prefix=True), "allowed": _find(header, H_ALLOWED),
         }
         if col["answer"] is None:
             kind = "no_answer"
@@ -273,7 +285,10 @@ def read_tabs(wb) -> list[dict]:
                 "kind": _shown(get("kind")), "suggestion": get("suggestion"), "ok_records": _shown(get("ok_records")),
                 "covered_by": _shown(get("covered_by")), "field": _shown(get("field")), "notes": _shown(get("notes")),
                 "projects": _shown(get("projects")), "label": _shown(get("label")), "stored": _shown(get("stored")),
-                "near": _shown(get("near")),
+                "near": _shown(get("near")), "allowed": _shown(get("allowed")),
+                # a row that names a bundle's id (or an Athena merge) belongs to the bundle its Folder names; a
+                # free-text row with no Folder (a rule, a rule proposal) is every bundle's
+                "folder_required": col["folder"] is not None and (get("id") is not None or kind == "athena_merges"),
                 "cell": answer_cell.coordinate if answer_cell is not None else None,
             }
             if answer_cell is not None:
@@ -328,7 +343,12 @@ class _Ctx:
         return cite + (f" (collapsed row {row['ref']}, for row {via['ref']})" if via else "")
 
     def mine(self, row: Mapping) -> bool:
-        return self.folder is None or row.get("folder") is None or row["folder"] == self.folder
+        """This bundle's row: its Folder is the bundle's (a row with no id on a tab with no Folder column, or a
+        free-text row, is every bundle's). An id or Athena row whose Folder cell is BLANK is no bundle's: it is
+        skipped and reported."""
+        if not row.get("folder_required"):
+            return True
+        return row.get("folder") is not None and (self.folder is None or row["folder"] == self.folder)
 
 
 def _where(row: Mapping) -> dict:
@@ -400,8 +420,8 @@ def _field_for(row: Mapping, q: Mapping) -> tuple[str | None, str | None, str | 
                                 "`bundle decide --question … --field <path>`")
         path = named[0]
         if path not in fields:
-            return None, None, (f"this question no longer asks {path} (it asks: {', '.join(fields) or 'nothing'}); "
-                                "the bundle changed since the workbook was made")
+            return None, None, (f"question {q['question_id']} does not ask {path} on this build (it asks: "
+                                f"{', '.join(fields) or 'nothing'})")
         return path, path, None
     path = q.get("target_field_path")
     for other in named:
@@ -411,9 +431,9 @@ def _field_for(row: Mapping, q: Mapping) -> tuple[str | None, str | None, str | 
     return path, None, None
 
 
-def _asked_now_by(row: Mapping, q: Mapping, ctx: "_Ctx") -> str | None:
-    """The ONE other question of the same scope that asks the field the row names, when its own question no longer
-    does (a pointer in the reason only: the answer is never moved to it)."""
+def _asked_now_by(row: Mapping, q: Mapping, ctx: "_Ctx") -> tuple[str, str] | None:
+    """``(question id, field)``: the ONE other question of the same scope that asks the field the row names, when the
+    row's own question does not (a pointer in the reason only: the answer is never moved to it)."""
     stated = _OK_RECORDS.search(row.get("ok_records") or "")
     path = next((p for p in (stated.group(1) if stated else None, row.get("field"), topic_field(row.get("topic"))) if p),
                 None)
@@ -421,7 +441,7 @@ def _asked_now_by(row: Mapping, q: Mapping, ctx: "_Ctx") -> str | None:
         return None
     hits = [o["question_id"] for o in ctx.questions.values() if o["question_id"] != q["question_id"]
             and o.get("scope") == q.get("scope") and (o.get("target_field_path") == path or path in (o.get("fields") or {}))]
-    return hits[0] if len(hits) == 1 else None
+    return (hits[0], path) if len(hits) == 1 else None
 
 
 def _offered(q: Mapping, path: str | None) -> list[Any]:
@@ -459,8 +479,12 @@ def _plan_value_row(row: Mapping, ans: str, raw: Any, q: Mapping, ctx: _Ctx, via
     if problem:
         asked = _asked_now_by(row, q, ctx)
         if asked:
-            problem += (f"; question {asked} asks it for this scope now: answer it there if the scientist's answer "
-                        "is for it (`bundle decide --question " + asked + " …`), not applied here")
+            other, opath = asked
+            return [_problem(cite, (
+                f"{opath} is asked in its own question for this scope, {other} ({ctx.questions[other]['kind']}), not in "
+                f"this row's question {q['question_id']}: the answer is not applied here. Answer {other} with the "
+                f"scientist's value (`isaac bundle decide <bundle_dir> --question {other} --decision correct "
+                "--value <value> --by \"<name>\"`)"), kind="asked_elsewhere", via=row if via else None)]
         return [_problem(cite, problem, kind="not_resolving", via=row if via else None)]
     allowed = list(q.get("allowed_decisions") or ())
     common = dict(question_id=q["question_id"], field=field, record_field=path)
@@ -474,10 +498,17 @@ def _plan_value_row(row: Mapping, ans: str, raw: Any, q: Mapping, ctx: _Ctx, via
             return [_problem(cite, f"the shown suggestion {_shown(shown)!r} is not a value this field takes ({why})",
                              via=row if via else None)]
         stated = _OK_RECORDS.search(row.get("ok_records") or "")
-        if q["kind"] == "confirm_value" and "confirm" in allowed:
-            cands = [ctx.candidates.get(t.get("id")) for t in q.get("targets") or () if t.get("kind") == "candidate"]
-            if cands and all(c is not None and T.agrees_for(path, sug, c.get("value")) for c in cands):
-                return [_plan(cite, ctx, call="question", decision="confirm", via=row if via else None, **common)]
+        cands = [ctx.candidates.get(t.get("id")) for t in q.get("targets") or () if t.get("kind") == "candidate"]
+        now = [c.get("value") for c in cands if c is not None]
+        files_agree = bool(cands) and all(c is not None and T.agrees_for(path, sug, c.get("value")) for c in cands)
+        if q["kind"] == "confirm_value" and "confirm" in allowed and files_agree:
+            return [_plan(cite, ctx, call="question", decision="confirm", via=row if via else None, **common)]
+        if _CONFIRM_FORM.match(row.get("ok_records") or ""):
+            # "confirms the value the files give": only ever a confirm, and only of the value the files give NOW
+            why = (f"the files now give {', '.join(map(repr, now))}, not the {_shown(shown)!r} this row shows"
+                   if now and not files_agree else f"question {q['question_id']} has no file value to confirm now")
+            return [_problem(cite, f"'ok' confirms the files' value, but {why}: nothing recorded (ask again)",
+                             kind="stale", via=row if via else None)]
         offered = _offered(q, path)
         if stated:
             lit = stated.group(2)
@@ -489,9 +520,10 @@ def _plan_value_row(row: Mapping, ans: str, raw: Any, q: Mapping, ctx: _Ctx, via
                     break
                 return [_plan(cite, ctx, call="question", decision="correct", value=sug, via=row if via else None,
                               **common)]
+        stale = (f"; the files now give {', '.join(map(repr, now))}" if q["kind"] == "confirm_value" and now else "")
         return [_problem(cite, (f"the shown suggestion {_shown(shown)!r} is not a value ISAAC offers for {q['question_id']} "
-                                "now (the bundle changed, or the text carries commentary): type the value itself"),
-                         via=row if via else None)]
+                                f"now (it may be stale, or carry commentary){stale}: type the value itself"),
+                         kind="stale" if stale else "needs_translation", via=row if via else None)]
     if "correct" not in allowed:
         return [_problem(cite, f"question {q['question_id']} takes no typed value now (it allows: "
                                f"{', '.join(allowed) or 'no answer'})", kind="refused", via=row if via else None)]
@@ -581,7 +613,9 @@ def _plan_athena_version(row: Mapping, ans: str, raw: Any, ctx: _Ctx) -> list[di
         return [_problem(row, f"record group {gid} has no Athena versions to choose from now", kind="not_resolving")]
     m = _VERSION.fullmatch(_word(raw)) if ans == "value" and isinstance(raw, (str, int)) else None
     if not m:
-        return [_problem(row, "answer one listed version (v01, v02, …); 'none' or anything else needs a person")]
+        return [_problem(row, ("'none': no listed version is the result; that needs a person (nothing is recorded)"
+                               if _word(raw) == "none" else
+                               "answer one listed version (v01, v02, …); anything else needs a person"))]
     vid = f"{gid}-v{int(m.group(1)):02d}"
     holding = [r for r in results if any(v.get("version_id") == vid for v in r["athena_versions"])]
     if len(holding) != 1:
@@ -597,18 +631,33 @@ def _plan_row(row: Mapping, ans: str, ctx: _Ctx, covered: Mapping[str, list[dict
     rid = row.get("id") or ""
     ref = row.get("ref")
     if (ref and ref in covered) or rid.startswith("G-"):
-        rows = [c for c in covered.get(ref or "", ()) if ctx.mine(c)]
-        if not rows:
+        out: list[dict] = []
+        rows = []
+        for c in covered.get(ref or "", ()):
+            if not ctx.mine(c):
+                continue
+            if classify(c.get("answer")) != "blank" or c.get("answer_refusal"):
+                # the workbook's rule: a per-record answer overrides the collapsed row for that record
+                out.append(_problem(row, f"row {c.get('ref')} has its own answer in '{c['tab']}'!{c['cell']}, which "
+                                         "takes precedence for that record", kind="overridden", via=c))
+                continue
+            rows.append(c)
+        if not rows and not out:
             return [_problem(row, f"collapsed row {ref} covers no per-record row of this bundle in the workbook",
                              kind="not_resolving")]
+        own = _shown(row.get("suggestion"))
+        if ans == "yes" and own is None and not _EACH_OWN.search(row.get("allowed") or ""):
+            return out + [_problem(row, "this collapsed row shows no suggestion, so 'yes' accepts nothing: it is not "
+                                        "taken as each record's own value (the row does not say so); answer per record")]
         if ans == "value":
             shown = {_shown(c.get("suggestion")) for c in rows if _shown(c.get("suggestion")) is not None}
             if len(shown) > 1:
-                return [_problem(row, f"its {len(rows)} records show different values, so this row takes 'yes' only "
-                                      "(each record's own value); type a value per record on its own row",
-                                 kind="refused")]
-        out: list[dict] = []
+                return out + [_problem(row, f"its {len(rows)} records show different values, so this row takes 'yes' "
+                                            "only (each record's own value); type a value per record on its own row",
+                                       kind="refused")]
         for c in rows:
+            if ans == "yes" and own is not None:
+                c = {**c, "suggestion": row.get("suggestion")}  # 'yes' accepts what THIS row shows, for each record
             q = ctx.questions.get(c.get("id") or "")
             if q is None:
                 out.append(_problem(row, f"no question {c.get('id')} in this bundle (open or answered)",
@@ -662,7 +711,7 @@ def _athena_entry(row: Mapping, ans: str, ctx: _Ctx) -> dict:
     raw = row["answer"]
     entry, reading = None, None
     w = _word(raw) if isinstance(raw, str) else ""
-    if ans == "value" and w == "none":
+    if w == "none":
         entry, reading = {"athena_ignore": items()}, "no group's: set it aside (athena_ignore)"
     elif ans == "no":
         if near:
@@ -762,7 +811,82 @@ def _outcome(plan: dict, bundle_dir: Path, *, by: str, orcid: str | None, dry_ru
         recorded = result.get("slots_recorded")
     n = len(recorded) if isinstance(recorded, (list, tuple)) else int(recorded or 0)
     return {"outcome": ("would_record" if dry_run else "recorded") if n else "unchanged", "targets": n,
-            "statement": result.get("statement")}
+            "statement": result.get("statement"),
+            "_recorded_targets": [str(t) for t in recorded] if isinstance(recorded, (list, tuple)) else []}
+
+
+# --- a decision recorded since the workbook was made (MED-1) ------------------------------------------------------
+
+#: decisions that share one target with others and are compared only within their own family, as record_decision
+#: compares a replay (the experiment target, a record group's side answers, a processing result's version choice)
+_FAMILIES = (frozenset({"set_counter_positions", B.NOT_COUNTER_DECISION}), frozenset({"set_clock_time_zone"}),
+             frozenset({B.ATHENA_SELECT_DECISION}), frozenset({"set_absorber"}), frozenset({"approve_calibration"}))
+
+
+def _family(decision: str) -> frozenset | None:
+    return next((f for f in _FAMILIES if decision in f), None)
+
+
+def _prior_decision(bundle: Mapping, target_id: str, decision: str) -> Mapping | None:
+    """The latest scientist decision that a new ``decision`` on ``target_id`` would replace: on the same target (and,
+    for a candidate, on its conflict; for a conflict, on its candidate), of the same family when the target holds
+    several (:data:`_FAMILIES`)."""
+    linked = {target_id}
+    for c in bundle.get("conflicts") or ():
+        if c.get("candidate_id") == target_id:
+            linked.add(c.get("conflict_id"))
+        if c.get("conflict_id") == target_id and c.get("candidate_id"):
+            linked.add(c["candidate_id"])
+    fam = _family(decision)
+    for d in reversed(bundle.get("scientist_decisions") or ()):
+        if (d.get("target") or {}).get("id") not in linked:
+            continue
+        if fam is not None and d.get("decision") not in fam:
+            continue
+        if fam is None and _family(d.get("decision") or "") is not None:
+            continue
+        return d
+    return None
+
+
+def _same_answer(prior: Mapping, plan: Mapping, ctx: "_Ctx", target_id: str) -> bool:
+    def effective(decision, value):
+        if decision == "confirm":
+            cand = ctx.candidates.get(target_id)
+            return "value", (cand or {}).get("value")
+        return decision, value
+
+    a = effective(prior.get("decision"), prior.get("value"))
+    b = effective(plan["decision"], plan.get("value"))
+    if a[0] == "value" or b[0] == "value":  # a confirm is the files' value: equal to a correct with that value
+        a = ("value", a[1]) if a[0] in ("value", "correct") else a
+        b = ("value", b[1]) if b[0] in ("value", "correct") else b
+    same = a[0] == b[0] and json.dumps(a[1], sort_keys=True, default=str) == json.dumps(b[1], sort_keys=True, default=str)
+    return same and all(prior.get(k) == plan.get(k) for k in ("element", "edge") if plan.get(k) or prior.get(k))
+
+
+def _replaces(plan: Mapping, bundle: Mapping, ctx: "_Ctx") -> list[dict]:
+    """The scientist decisions this planned decision would replace with a DIFFERENT answer, named (who, when, what)."""
+    out = []
+    for tid in plan.get("_recorded_targets") or ():
+        prior = _prior_decision(bundle, tid, plan["decision"])
+        if prior is None or _same_answer(prior, plan, ctx, tid):
+            continue
+        out.append({"target_id": tid, "decision_id": prior.get("decision_id"), "decision": prior.get("decision"),
+                    "value": prior.get("value"), **({"element": prior["element"], "edge": prior.get("edge")}
+                                                    if prior.get("element") else {}),
+                    "decided_by": (prior.get("decided_by") or {}).get("name"), "decided_utc": prior.get("decided_utc"),
+                    "note": prior.get("note")})
+    return out
+
+
+def _replaced_sentence(replaces: Sequence[Mapping]) -> str:
+    first = replaces[0]
+    what = first["decision"] + (f" {first['value']!r}" if first.get("value") is not None else "") + (
+        f" {first['element']} {first.get('edge')}" if first.get("element") else "")
+    more = f" (and {len(replaces) - 1} more target(s))" if len(replaces) > 1 else ""
+    return (f"{first['target_id']} already holds {what} by {first['decided_by']} on {first['decided_utc']} "
+            f"({first['decision_id']}){more}")
 
 
 # --- the import -------------------------------------------------------------------------------------------------
@@ -771,13 +895,14 @@ def _outcome(plan: dict, bundle_dir: Path, *, by: str, orcid: str | None, dry_ru
 def protected_part(bundle_dir: Path) -> str | None:
     """The folder name starting with ``_runs`` the bundle sits in (resolved path), or ``None``."""
     for part in Path(bundle_dir).expanduser().resolve().parts:
-        if part.startswith(PROTECTED_PREFIX):
+        if part.casefold().startswith(PROTECTED_PREFIX):
             return part
     return None
 
 
 def import_answers(bundle_dir: Path, xlsx: Path, *, by: str, orcid: str | None = None, apply: bool = False,
-                   folder: str | None = None, bundle_arg: str | None = None) -> dict:
+                   folder: str | None = None, bundle_arg: str | None = None, supersede: bool = False,
+                   folder_differs_ok: bool = False) -> dict:
     """Read a filled question workbook against one bundle. Preview (default) writes nothing; ``apply`` records."""
     from . import mutations as M
 
@@ -800,7 +925,18 @@ def import_answers(bundle_dir: Path, xlsx: Path, *, by: str, orcid: str | None =
         raise AnswersRefused(str(exc), code=exc.code) from exc
     tabs = read_tabs(wb)
     label = (bundle.get("source_root") or {}).get("label")
-    folder = folder or (str(label) if label else None)
+    label = str(label) if label else None
+    workbook_folders = sorted({r["folder"] for t in tabs for r in t["rows"] if r.get("folder")})
+    if folder is not None:
+        if folder not in workbook_folders:
+            raise AnswersRefused(f"--folder {folder!r}: no row of {xlsx.name} names that folder (it names: "
+                                 f"{', '.join(workbook_folders) or 'none'}). Nothing was recorded.",
+                                 code=EXIT_INPUT_REFUSED)
+        if label is not None and folder != label and not folder_differs_ok:
+            raise AnswersRefused(f"--folder {folder!r} is not the folder this bundle records ({label!r}). If these rows "
+                                 "are this bundle's all the same (the folder was renamed), say so with "
+                                 "--folder-differs-ok. Nothing was recorded.")
+    folder = folder or label
     uses_folder = any("folder" in (t.get("columns") or {}) for t in tabs if t["kind"] in ("questions", "athena_merges"))
     if folder is None and uses_folder:
         raise AnswersRefused("The bundle does not record its folder's name and the workbook has a Folder column: say "
@@ -835,6 +971,13 @@ def import_answers(bundle_dir: Path, xlsx: Path, *, by: str, orcid: str | None =
             mine = ctx.mine(r)
             if rid:
                 info["id_rows"] += 1
+            blank_folder = bool(r.get("folder_required")) and not r.get("folder")
+            if blank_folder:
+                info["blank_folder"] = info.get("blank_folder", 0) + 1
+                if t["kind"] != "no_answer" and classify(r.get("answer")) != "blank":
+                    problems.append(_problem(r, "its Folder cell is blank, so it is no bundle's row: not read (say "
+                                                "which beamtime it is for)", kind="blank_folder"))
+                continue
             info["for_this_bundle" if mine else "other_beamtimes"] += 1
             if rid.startswith("Q-"):
                 q_rows += 1
@@ -870,6 +1013,11 @@ def import_answers(bundle_dir: Path, xlsx: Path, *, by: str, orcid: str | None =
             if r.get("answer_refusal"):
                 problems.append(_problem(r, r["answer_refusal"], kind="invalid"))
                 info["problems"] += 1
+                continue
+            listed_none = _word(raw) == "none" and (t["kind"] == "athena_merges" or rid.startswith("rg-"))
+            if ans == "placeholder" and not listed_none:
+                problems.append(_problem(r, f"{_answer_text(raw)!r} is a placeholder, not an answer: nothing is "
+                                            "recorded (ask for the value, or leave the cell blank)", kind="placeholder"))
                 continue
             if t["kind"] == "athena_merges":
                 athena.append(_athena_entry(r, ans, ctx))
@@ -908,14 +1056,34 @@ def import_answers(bundle_dir: Path, xlsx: Path, *, by: str, orcid: str | None =
         info["problems"] = sum(1 for p in problems if p["tab"] == info["tab"])
 
     if plans:
+        # every decision is first dry-run on a copy (what the decide path would record, on which targets), so a
+        # workbook answer that would REPLACE a scientist decision recorded since is found before anything is written
+        with tempfile.TemporaryDirectory(prefix="isaac-answers-") as tmp:
+            shutil.copy2(B.bundle_path(bundle_dir), Path(tmp) / B.BUNDLE_FILE)
+            for p in plans:
+                p.update(_outcome(p, Path(tmp), by=by, orcid=orcid, dry_run=True))
+        for p in plans:
+            replaces = _replaces(p, bundle, ctx) if p["outcome"] == "would_record" else []
+            if replaces:
+                p["replaces"] = replaces
+                said = _replaced_sentence(replaces)
+                if supersede:
+                    p["statement"] = f"REPLACES a later decision: {said}. " + (p.get("statement") or "")
+                else:
+                    p.pop("statement", None)
+                    p.update(outcome="refused_replaces", reason=(
+                        f"{said}; this workbook answer would replace it. Not recorded: ask which holds, and add "
+                        "--supersede to record the workbook's answer over it"))
         if apply:
             for p in plans:
+                if p["outcome"] in ("refused", "refused_replaces"):
+                    continue
                 p.update(_outcome(p, bundle_dir, by=by, orcid=orcid, dry_run=False))
-        else:
-            with tempfile.TemporaryDirectory(prefix="isaac-answers-") as tmp:
-                shutil.copy2(B.bundle_path(bundle_dir), Path(tmp) / B.BUNDLE_FILE)
-                for p in plans:
-                    p.update(_outcome(p, Path(tmp), by=by, orcid=orcid, dry_run=True))
+                if p.get("replaces") and p["outcome"] == "recorded":
+                    p["statement"] = f"REPLACED a later decision: {_replaced_sentence(p['replaces'])}. " + (
+                        p.get("statement") or "")
+        for p in plans:
+            p.pop("_recorded_targets", None)
 
     outcomes: dict[str, int] = {}
     for p in plans:
@@ -946,7 +1114,11 @@ def import_answers(bundle_dir: Path, xlsx: Path, *, by: str, orcid: str | None =
                      "translate by hand. Add --apply to record (a copy first).")
     return {
         "format": FORMAT_ID, "format_version": FORMAT_VERSION, "applied": apply, "workbook": xlsx.name,
-        "bundle_id": bundle.get("bundle_id"), "folder": folder, "statement": statement, "counts": counts,
+        "bundle_id": bundle.get("bundle_id"), "folder": folder, "bundle_folder": label,
+        "workbook_folders": workbook_folders, "supersede": supersede,
+        # the workbook carries no bundle id, export time or decisions fingerprint (unlike the metadata template's
+        # _isaac sheet), so freshness is checked per target: a decision recorded since is named, never replaced silently
+        "freshness": "per_target", "statement": statement, "counts": counts,
         "id_rows": {"question_id_rows": q_rows, "for_this_bundle": q_rows_here, "not_resolving": q_unresolved,
                     "not_resolving_by_tab": unresolved_by_tab},
         "tabs": tab_rows,
@@ -985,6 +1157,9 @@ def render_report(rep: Mapping) -> str:
                        f"{p['outcome']}: {p['command']}")
             if tail:
                 out.append(f"      {_clip(tail, 400)}")
+            for r in p.get("replaces") or ():
+                out.append(f"      {'replaces' if rep['supersede'] else 'would replace'}: {r['target_id']} "
+                           f"{r['decision']} {r.get('value')!r} by {r['decided_by']} on {r['decided_utc']} ({r['decision_id']})")
             for f in p.get("follow_up") or ():
                 out.append(f"      then: {f}")
             if p.get("also_from"):

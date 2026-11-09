@@ -4,10 +4,14 @@ The question workbook is the spreadsheet of ISAAC questions a scientist is sent:
 question, a header row, an `ISAAC question ID` column and a yellow **YOUR ANSWER** column. When it comes
 back filled in, read it back with:
 
-`<isaac> bundle answers import <bundle> <workbook.xlsx> --by "<name>" [--orcid <id>] [--folder <name>] [--apply] [--json]`
+`<isaac> bundle answers import <bundle> <workbook.xlsx> --by "<name>" [--orcid <id>] [--folder <name> [--folder-differs-ok]] [--supersede] [--apply] [--json]`
 
-It works on ONE bundle: a row is this bundle's when its `Folder` is the folder the bundle records
-(`--folder` names another). Rows of other beamtimes are counted, never read; run it once per bundle.
+It works on ONE bundle: a row is this bundle's when its `Folder` is the folder the bundle records.
+Rows of other beamtimes are counted, never read; run it once per bundle. An id row (or Athena row) whose
+Folder cell is blank is no bundle's: it is listed (`blank_folder`), not read; a free-text row with no
+Folder (a rule) is every bundle's. `--folder <name>` must be a folder the workbook names (else exit 3),
+and when it is not the folder the bundle records it is refused (exit 2) unless the user confirms the rows
+are this bundle's with `--folder-differs-ok`.
 
 ## The order, always
 
@@ -22,14 +26,21 @@ It works on ONE bundle: a row is this bundle's when its `Folder` is the folder t
 A second `--apply` records nothing new (every decision is `unchanged`; an off-list word only re-stamps
 the request it already kept, as `decide --as-said` does). `bundle check <bundle>` stays valid.
 
+**A decision recorded since the workbook was made is never replaced silently.** The workbook carries no
+bundle id or decisions fingerprint, so every target is checked: when the decide path would record a
+workbook answer on a target that already holds a DIFFERENT scientist decision, that row is refused
+(`refused_replaces`) and the existing decision is named (who, when, what, its id). Ask which holds.
+`--supersede` records the workbook's answer over it, and the report says `REPLACED a later decision: …`.
+
 ## How a cell is read
 
 | The cell | What is planned |
 |---|---|
 | blank | nothing. A blank row is never inferred, never filled from a neighbour |
-| `yes` / `ok` (any case) | accepts the suggestion SHOWN on that row: `confirm` when it is the files' own value (and the question allows confirm), else `correct` with the shown value, but only when that value is exactly one ISAAC offers for the question now (a hint literal, its suggested value, or the proposal's own "What 'ok' records"). Anything else (stale, or text with commentary) is not applied: "type the value itself" |
+| `yes` / `ok` (any case) | accepts the suggestion SHOWN on that row: `confirm` when it is the files' own value now (and the question allows confirm), else `correct` with the shown value, but only when that value is exactly one ISAAC offers for the question now (a hint literal, its suggested value, or a "sets X = …" proposal's own value). A proposal that "confirms the value the files give" is only ever a confirm, refused (`stale`) when the files now give another value. Anything else (stale, or text with commentary) is not applied: "type the value itself" |
 | a typed value | `correct` with it, parsed as `template import` parses a cell (numbers as numbers, a temperature with its unit). A field with a list: the value goes through decide with `--as-said`, so a word off the list is kept as a vocabulary request in `--by`'s name, never recorded as a value |
 | `no`, `?`, `unsure`, `don't know` | nothing; listed (`declined` / `unsure`). Never turned into a reject or a defer |
+| a placeholder: `-`, `—`, `none`, `TBD`, `n.a.`, `not applicable`, `unknown` … | nothing; listed (`placeholder`): never a value, never a vocabulary request. On the Athena tabs `none` is a listed answer |
 | a formula | nothing; listed (`invalid`) |
 | `same for all` / `same as above` / `ditto` (in the answer or the notes) | listed under `same_for_all`, never expanded. Ask which rows they mean and answer those |
 
@@ -41,8 +52,12 @@ question asks about one position, then `<isaac> bundle group <bundle> --regroup`
 (`v01`, `v02` … → `select_athena_version`; `none` needs a person).
 
 A **collapsed row** (a `G-…` id, whose Ref a per-record row names in `Covered by collapsed row`) answers
-each per-record row it covers, citing the collapsed row's cell. When those records show different
-values it takes `yes` only. The same question answered differently in two cells: neither is recorded.
+each per-record row it covers, citing the collapsed row's cell; `yes` accepts the value the collapsed row
+shows. A collapsed row that shows no suggestion takes `yes` only where its Allowed answers say "each
+record's own" value; otherwise its `yes` is listed, never spread onto the records' own suggestions. When
+those records show different values it takes `yes` only. A per-record row with its own answer overrides
+the collapsed row for that record (listed as `overridden`). The same question answered differently in two
+cells of the same kind: neither is recorded.
 
 Each decision is listed as the exact `bundle decide` it is (question id, `--field` for one field of a
 several-field question, decision, value, note) with its outcome (`would_record` / `recorded`,
@@ -66,7 +81,9 @@ note cites the cell: `workbook <file> '<tab>'!<cell>`.
 ## Not resolving
 
 An id that no longer resolves in the bundle (re-imported, regrouped) is listed per answered row with the
-reason, and counted per tab for unanswered rows (`id_rows.not_resolving_by_tab`). Never re-import before
+reason, and counted per tab for unanswered rows (`id_rows.not_resolving_by_tab`). A row whose field is now
+asked in its own question (e.g. a temperature row of a several-field question, now a per-group question)
+is listed as `asked_elsewhere`, naming that question; it is not applied. Never re-import before
 applying a workbook made from a bundle: its ids are that bundle's.
 
 ## Tabs
