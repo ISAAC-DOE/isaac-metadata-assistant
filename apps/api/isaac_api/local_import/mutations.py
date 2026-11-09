@@ -1240,6 +1240,7 @@ def decide(
     as_said: bool = False,
     accept_shift: float | None = None,
     e0_measured: bool = False,
+    dry_run: bool = False,
 ) -> dict:
     """Record a scientist decision for each target (ALL-OR-NOTHING), idempotently.
 
@@ -1249,7 +1250,9 @@ def decide(
     ``decision_id`` and time, so a record exported again cites the new decision. Each target is its own entry even in a bulk call, sharing a
     ``batch_id``. ``expected_version``: see :func:`mutate` (the CLI passes none). ``as_said``
     (``--as-said``): a value refused only for being off its field's list is kept as a vocabulary
-    request under ``by``; without it nothing is kept (:class:`OffListRefused`).
+    request under ``by``; without it nothing is kept (:class:`OffListRefused`). ``dry_run`` (as for
+    :func:`decide_question`): every check a write makes, on a copy; nothing is written, and an off-list value raises
+    :class:`OffListRefused` with nothing kept (``workbook_answers`` previews with it).
     """
     if (refusal := _as_said_refusal(as_said, decision, value)) is not None:
         raise MutationRefused(refusal)
@@ -1264,6 +1267,9 @@ def decide(
     with locked(Path(bundle_dir)):
         _require_version(Path(bundle_dir), expected_version)
         bundle = load(bundle_dir)
+        if dry_run:
+            planned = record_decision(copy.deepcopy(bundle), **params)
+            return {"dry_run": True, **planned, "statement": _would_say(planned.get("statement"))}
         before = open_requests_before(bundle, decision)
         peers = _same_ruling_peers(bundle, target_ids)  # c15b M2: read before this decision is recorded
         try:

@@ -2340,6 +2340,30 @@ def cmd_bundle_template_import(args) -> int:
     return EXIT_OK
 
 
+def cmd_bundle_answers_import(args) -> int:
+    """``isaac bundle answers import``: a scientist's filled-in question workbook (its YOUR ANSWER column), read back
+    as the exact ``bundle decide`` calls it stands for. Preview by default; ``--apply`` records them."""
+    from . import mutations as M
+    from . import template as T
+    from . import workbook_answers as W
+
+    try:
+        report = W.import_answers(Path(args.bundle_dir), Path(args.xlsx), by=args.by, orcid=args.orcid,
+                                  apply=args.apply, folder=args.folder, bundle_arg=args.bundle_dir,
+                                  supersede=args.supersede, folder_differs_ok=args.folder_differs_ok)
+    except T.TemplateRefused as exc:  # W.AnswersRefused, and the workbook reader's own refusals
+        _err(str(exc))
+        return exc.code
+    except M.MutationRefused as exc:
+        _err(str(exc))
+        return exc.code
+    if args.json:
+        _print(report)
+    else:
+        print(W.render_report(report))
+    return EXIT_OK
+
+
 # --- argparse ---------------------------------------------------------------------------
 
 
@@ -2589,6 +2613,28 @@ def build_parser(prog: str = "isaac") -> argparse.ArgumentParser:
     t.add_argument("--full", action="store_true",
                    help="list every decision and cell (default: one line per cell or column, problems in full)")
     t.set_defaults(func=cmd_bundle_template_import)
+
+    q = bsub.add_parser("answers", help="a scientist's filled-in question workbook (the YOUR ANSWER column of each tab)")
+    asub = q.add_subparsers(dest="answers_command", required=True)
+    a = asub.add_parser("import", help="read the answers back as bundle decide calls: preview by default, --apply to "
+                                       "record them (free-text rows and Athena merges are reported, never applied)")
+    a.add_argument("bundle_dir")
+    a.add_argument("xlsx", help="the filled question workbook (.xlsx)")
+    a.add_argument("--by", required=True, help="the name of the person whose answers these are")
+    a.add_argument("--orcid")
+    a.add_argument("--apply", action="store_true",
+                   help="record the decisions (default: preview, nothing written); refused for a bundle inside a "
+                        "folder named _runs… (apply to a copy first)")
+    a.add_argument("--folder", help="the beamtime folder whose rows are this bundle's (default: the folder name the "
+                                    "bundle records); it must be a folder the workbook names")
+    a.add_argument("--folder-differs-ok", action="store_true",
+                   help="with --folder: the user confirms these rows are this bundle's although the bundle records "
+                        "another folder name")
+    a.add_argument("--supersede", action="store_true",
+                   help="record an answer even where the target already holds a DIFFERENT scientist decision (by "
+                        "default that row is refused and the existing decision is named)")
+    a.add_argument("--json", action="store_true", help="print the full report as JSON")
+    a.set_defaults(func=cmd_bundle_answers_import)
     return parser
 
 
