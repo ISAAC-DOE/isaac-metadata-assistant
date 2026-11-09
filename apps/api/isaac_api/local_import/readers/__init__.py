@@ -27,6 +27,17 @@ TWO ADDITIONS (2026-10-28)
 * **Analysis files** (``.larix``, ``.pxp``) are read by :data:`ANALYSIS_READERS` after the run
   readers, into :attr:`UnifiedCollection.analysis_files`. They are evidence only: never a run,
   never a record group, never a processed output.
+
+A ZIP GIVEN AS THE ROOT (2026-11-09)
+====================================
+:func:`collect_all_generic_zip` runs the same readers over a top-level ZIP's members, so a ZIP of a
+folder gives the readers what the folder gives them. Its members are the ENGINE's own walk of a
+ZIP root (``bl15.archive.inventory_zip`` with ``refuse_duplicates=True``, exactly the call
+``historical_import`` makes): the same guards and refusals, the same relative paths (the member
+path with a "compress this folder" wrapper stripped by ``common_root_prefix``, no ``<zip>!/``
+prefix), ``__MACOSX/`` and ``.DS_Store`` left out as the engine leaves them out. Accepted members
+are staged and digest-checked exactly as a nested ZIP's are, and offered in the order the folder
+walk would list the same files. As for the engine, a ZIP among the members is NOT opened.
 """
 
 from __future__ import annotations
@@ -34,6 +45,7 @@ from __future__ import annotations
 import hashlib
 import re
 import tempfile
+import zipfile
 from dataclasses import dataclass, field, replace
 from pathlib import Path, PurePosixPath
 from typing import Iterable
@@ -64,6 +76,7 @@ __all__ = [
     "READERS",
     "UnifiedCollection",
     "collect_all_generic",
+    "collect_all_generic_zip",
     "igor_pxp",
     "larch_session",
     "mca",
@@ -116,6 +129,93 @@ def _staged_name(index: int, member: str) -> str:
     """
     suffix = PurePosixPath(member).suffix
     return f"m{index:06d}{suffix if _SAFE_SUFFIX.match(suffix) else ''}"
+
+
+def _stage_member(dest: Path, data: bytes, digest: str, rel: str, failures: list[dict]) -> bool:
+    """Write one walked member to ``dest`` and check its bytes against the walk's ``digest``.
+
+    ``True`` when the staged file may be offered to the readers. Otherwise the reason is appended
+    to ``failures`` under ``rel`` (the member's reported path) and nothing is left at ``dest``.
+    """
+    try:
+        dest.parent.mkdir(parents=True, exist_ok=True)
+        dest.write_bytes(data)
+        staged_bytes = dest.read_bytes()
+    except OSError as exc:
+        failures.append({"relative_path": rel, "reason": f"the member could not be staged ({type(exc).__name__})"})
+        return False
+    if hashlib.sha256(staged_bytes).hexdigest() != digest:
+        try:
+            dest.unlink()
+        except OSError:
+            pass
+        failures.append(
+            {"relative_path": rel, "reason": "the staged bytes do not match the digest the walk recorded; the member was not read"}
+        )
+        return False
+    return True
+
+
+def _folder_walk_order(rel: str) -> list[str]:
+    """The sort key that lists archive paths in the order :func:`~._common.walk` lists the same
+    files in a folder: depth-first, each directory's entries by name, so ``b/x`` comes before
+    ``b.txt`` (``"b" < "b.txt"``) where a plain string sort would put it after (``"." < "/"``)."""
+    return rel.split("/")
+
+
+def _zip_root_members(
+    zip_path: Path,
+    staging: Path,
+    limits: Limits,
+    refused: list[dict],
+    trunc: dict[str, int],
+    failures: list[dict],
+) -> list[FileEntry]:
+    """Every member of the top-level ZIP the ENGINE accepts, staged under ``staging``.
+
+    The walk IS the engine's: ``archive.inventory_zip(..., refuse_duplicates=True)``, the call
+    ``historical_import._inventory_and_containers_of`` makes for a ZIP root, so the guards
+    (traversal, absolute, symlink, size, declared and measured ratio, entry-count, total-byte,
+    depth, path length, duplicate paths), the ``__MACOSX/`` / ``.DS_Store`` exclusion and the
+    wrapper-folder strip all match it, and each staged member is reported under the very path the
+    engine gives it. The bytes come through ``archive.iter_zip_member_bytes`` (the bounded member
+    read); the member name it is asked for re-derives the stripped wrapper exactly as the engine's
+    own ``_locate_zip_member`` does. Nothing is offered to a reader before its staged bytes hash
+    to the walk's digest.
+    """
+    inventory = _archive.inventory_zip(
+        zip_path, root_label=zip_path.name, limits=limits.archive, refuse_duplicates=True
+    )
+    for row in inventory.refused:
+        refused.append({"relative_path": row.get("archive_path"), "reason": row.get("reason")})
+    if inventory.truncated_reason:
+        trunc[f"zip_walk_{inventory.truncated_reason}"] = 1
+    if not inventory.entries:
+        return []
+    try:
+        with zipfile.ZipFile(zip_path, "r") as zf:  # NAMES ONLY: nothing is read here
+            prefix = _archive.common_root_prefix(
+                i.filename for i in zf.infolist() if not i.is_dir() and not _archive.is_os_metadata(i.filename)
+            )
+    except (zipfile.BadZipFile, OSError, EOFError):
+        prefix = None  # the engine walk opened it a moment ago; a failure here fails each member below
+    by_member = {(f"{prefix}/{e.archive_path}" if prefix else e.archive_path): e for e in inventory.entries}
+    root = staging.resolve()
+    out: list[FileEntry] = []
+    member_index = 0
+    for member, data in _archive.iter_zip_member_bytes(zip_path, list(by_member), limits.archive):
+        entry = by_member[member]
+        if data is None:
+            failures.append(
+                {"relative_path": entry.archive_path, "reason": "the member could not be read again for the generic readers"}
+            )
+            continue
+        member_index += 1
+        dest = root / "z0001" / _staged_name(member_index, member)
+        if _stage_member(dest, data, entry.content_sha256, entry.archive_path, failures):
+            out.append((entry.archive_path, dest, len(data)))
+    out.sort(key=lambda f: _folder_walk_order(f[0]))
+    return out
 
 
 def _expand_nested_zips(
@@ -180,23 +280,7 @@ def _expand_nested_zips(
                 continue
             member_index += 1
             dest = root / f"z{index:04d}" / _staged_name(member_index, member)
-            try:
-                dest.parent.mkdir(parents=True, exist_ok=True)
-                dest.write_bytes(data)
-                staged_bytes = dest.read_bytes()
-            except OSError as exc:
-                failures.append(
-                    {"relative_path": nested_rel, "reason": f"the member could not be staged ({type(exc).__name__})"}
-                )
-                continue
-            if hashlib.sha256(staged_bytes).hexdigest() != expected[member].content_sha256:
-                try:
-                    dest.unlink()
-                except OSError:
-                    pass
-                failures.append(
-                    {"relative_path": nested_rel, "reason": "the staged bytes do not match the digest the walk recorded; the member was not read"}
-                )
+            if not _stage_member(dest, data, expected[member].content_sha256, nested_rel, failures):
                 continue
             out.append((nested_rel, dest, len(data)))
             staged_total += len(data)
@@ -218,10 +302,42 @@ def collect_all_generic(root: str | Path, limits: Limits = Limits(), skip: Itera
         staging_dir.cleanup()
 
 
-def _collect(base, files, limits, skip, refused, trunc, staging_dir) -> UnifiedCollection:
-    nested_zips: list[dict] = []
+def collect_all_generic_zip(
+    zip_path: str | Path, limits: Limits = Limits(), skip: Iterable[str] = ()
+) -> UnifiedCollection:
+    """:func:`collect_all_generic` for a ZIP given AS THE ROOT of an import.
+
+    The readers see the members the engine's walk of that ZIP accepts, under the engine's own
+    relative paths (so ``skip``, the bundle's source rows and every claim are one set of strings),
+    staged in a private temporary directory that is removed before this returns. A ZIP among the
+    members is not opened, as the engine does not open it for a ZIP root: it is offered to the
+    readers like any other member (none claims it) and stays an ordinary unread file.
+    """
+    path = Path(zip_path)
+    if path.is_symlink() or not path.is_file():
+        raise ValueError("the source ZIP must be an existing file that is not a symlink")
+    refused: list[dict] = []
+    trunc: dict[str, int] = {}
     staging_failures: list[dict] = []
-    files = _expand_nested_zips(files, Path(staging_dir.name), limits, nested_zips, refused, staging_failures)
+    staging_dir = tempfile.TemporaryDirectory(prefix="isaac-zip-root-")
+    try:
+        files = _zip_root_members(path, Path(staging_dir.name), limits, refused, trunc, staging_failures)
+        return _collect(
+            path, files, limits, skip, refused, trunc, staging_dir,
+            expand_nested=False, staging_failures=staging_failures,
+        )
+    finally:
+        staging_dir.cleanup()
+
+
+def _collect(
+    base, files, limits, skip, refused, trunc, staging_dir, *, expand_nested: bool = True,
+    staging_failures: list[dict] | None = None,
+) -> UnifiedCollection:
+    nested_zips: list[dict] = []
+    staging_failures = list(staging_failures or ())
+    if expand_nested:
+        files = _expand_nested_zips(files, Path(staging_dir.name), limits, nested_zips, refused, staging_failures)
     skip_set = set(skip)
     claimed: set[str] = set(skip_set)
     runs: list[GenericRun] = []

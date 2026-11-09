@@ -174,7 +174,11 @@ def reachable_source_root(bundle: Mapping, bundle_dir: Path, source_root: Path |
     sr = bundle.get("source_root") or {}
     hint = sr.get("local_root_hint")
     zipped = sr.get("kind") == "zip"
-    what = "the beamtime folder you imported" + (" (unzipped: processing reads a folder, not a ZIP)" if zipped else "")
+    # a ZIP whose members all sit in ONE top-level folder was read from inside that folder (the import strips the wrapper), so its
+    # bundle's paths start there: the folder to pass is that one, not the folder it was unzipped into
+    what = "the beamtime folder you imported" + (
+        " (unzipped: processing reads a folder, not a ZIP; if everything in the ZIP is inside one folder, that folder)"
+        if zipped else "")
     if source_root:
         root, named = Path(source_root).expanduser(), f"--source {source_root}"
     elif hint:
@@ -192,7 +196,8 @@ def reachable_source_root(bundle: Mapping, bundle_dir: Path, source_root: Path |
             # "not an existing folder" — processing reads the raw scans from a folder
             raise _refuse(f"Nothing was processed and nothing was written: {named} is a ZIP file, and processing reads "
                           "the raw scans from a folder, not a ZIP. Unzip it and pass the unzipped folder as "
-                          "--source <the unzipped beamtime folder>.")
+                          "--source <the unzipped beamtime folder> (if everything in the ZIP is inside one folder, pass "
+                          "that folder: the bundle's file paths start inside it).")
         raise _refuse(f"Nothing was processed and nothing was written: {named} is not an existing folder on this "
                       f"computer. Pass --source <{what}>.")
     if not paths:

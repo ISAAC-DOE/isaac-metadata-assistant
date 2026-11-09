@@ -2853,9 +2853,9 @@ ANALYSIS_SCOPE = "analysis_file"
 
 
 def _staging_failure_rows(generic: Any, unread: list[dict]) -> None:
-    """A nested ZIP member the generic readers were never given (it could not be staged, or its
-    staged bytes did not match the walk's digest) stays in ``unread_files`` with that reason
-    rather than the generic "no reader for this type"."""
+    """A ZIP member (of a ZIP inside the folder, or of a ZIP given as the root) the generic readers were
+    never given (it could not be staged, or its staged bytes did not match the walk's digest) stays in
+    ``unread_files`` with that reason rather than the generic "no reader for this type"."""
     by_path = {u["relative_path"]: u for u in unread}
     for failure in getattr(generic, "staging_failures", None) or ():
         row = by_path.get(failure.get("relative_path"))

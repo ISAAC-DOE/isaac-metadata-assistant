@@ -174,8 +174,8 @@ Enforced by the builder (refuse, or clamp visibly and count) and by the validato
   scientist's machine. **A remote server cannot open a local path** — a bundle sent anywhere
   carries descriptions, digests and literals, never access to the files.
 - Nothing is extracted from a ZIP to disk by the engine walk (§21: the generic readers stage a
-  NESTED ZIP's accepted members in a private temporary directory that is deleted before the
-  import returns); symlinks are never followed; no source is ever
+  nested ZIP's, or a ZIP root's, accepted members in a private temporary directory that is
+  deleted before the import returns); symlinks are never followed; no source is ever
   executed (macros are read as text; a test proves a macro containing shell text runs
   nothing).
 
@@ -851,14 +851,16 @@ Exit codes for the LOCAL-2 commands: `validate` and `export` exit 1 when any dra
 
 ## 14. LOCAL-3: generic readers, grouping, processing
 
-- `isaac import` (folders) runs `readers.collect_all_generic(root, skip=<files the engine
-  read>)` after the engine. Each generic run is a `runs[]` entry with `source_type:
+- `isaac import` runs `readers.collect_all_generic(root, skip=<files the engine read>)` after
+  the engine for a folder, and `readers.collect_all_generic_zip(zip, skip=...)` for a ZIP given as
+  the root (§21, "A ZIP given as the root"). Each generic run is a `runs[]` entry with `source_type:
   generic:<profile>` and `reader {reader_id, profile, profile_version, statements_total,
   statements_kept}`; its statements are `extended_context` entries (`source_recorded`,
   `run_id`, at most 200 per run, the total stated). No statement maps to a field unless an
   explicit, tested rule says so; there is exactly one, `ssrl_xdc_scan_start_v1` (§9 "What 1.4.0
-  added"), and the statements stay extended context even then. Claimed files leave `unread_files`. A ZIP given AS THE ROOT is not walked by the
-  generic readers; a ZIP found INSIDE a folder is (§21).
+  added"), and the statements stay extended context even then. Claimed files leave `unread_files`. Since 2026-11-09 a ZIP given AS THE ROOT is read
+  by the generic readers too, over the members the engine accepts (§21); a ZIP found INSIDE a
+  folder is walked one level deep (§21).
   **Since 1.2.0 an XDI file whose header states Athena/Demeter is a `processed_outputs[]`
   entry instead of a run** (§9, "What 1.2.0 added").
 - `isaac bundle group <dir> [--regroup]` stores LOCAL-P's proposed `record_groups[]`
@@ -1393,6 +1395,30 @@ none of this validates as before.
 - **Not covered:** a ZIP given as the root does not expand ZIPs among its members (they are listed
   as ordinary unread files), and `isaac bundle show ... excerpt` re-walks without nested expansion,
   so it cannot show text from a nested member.
+
+### A ZIP given as the root (2026-11-09)
+
+- **The generic readers read a top-level ZIP's members** (`readers.collect_all_generic_zip`). Before
+  this, `isaac import <x>.zip` ran only the engine, so a beamtime of SSRL XDC scans, XDI or other
+  generic formats handed over as a ZIP imported no runs while the same files as a folder did.
+- **The members are the engine's.** The walk is the engine's own call for a ZIP root
+  (`bl15.archive.inventory_zip(..., refuse_duplicates=True)`), so every guard and refusal of §21's
+  nested walk applies, and each member is offered under the very `archive_path` the engine gives
+  it: the member path, with a "compress this folder" wrapper stripped (`common_root_prefix`), never
+  a `<zip>!/` prefix. `skip`, the bundle's `sources[]` and every claim are one set of strings.
+- **`__MACOSX/` and `.DS_Store` are left out**, as the engine leaves them out (one
+  `operating_system_metadata` row in `unread_files`). An AppleDouble `._<name>` member OUTSIDE
+  `__MACOSX/` is an ordinary member, as the same file is in a folder.
+- **Staging** is as for a nested ZIP (`z0001/m<member number><suffix>`, digest re-checked, removed
+  before the import returns, `member_not_staged` for a member that could not be offered). The
+  members are offered in the order the folder walk lists the same files, so a ZIP of a folder
+  gives the same runs, run ids, candidates, missing values, questions and groups as the folder;
+  only what records the source kind differs (`source_root.kind`/`label`, `experiment.label`, the
+  `__MACOSX/` row).
+- **A ZIP among a top-level ZIP's members is not opened**, by the engine or by the generic readers:
+  it stays an ordinary unread file, as before.
+- Processing still reads a folder: after a ZIP import, `--source` is the unzipped folder, and when
+  everything in the ZIP sits in one folder, that folder (the bundle's paths start inside it).
 
 ### Analysis files
 
