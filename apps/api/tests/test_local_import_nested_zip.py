@@ -302,7 +302,8 @@ def test_a_member_that_cannot_be_staged_is_reported_and_the_import_continues(tmp
     real = Path.write_bytes
 
     def flaky(self, payload):
-        if self.name.endswith("000001.nor"):
+        # both names staging tries for the first member fail: its real basename, then its numbered fallback
+        if self.name == "bad.nor" or self.name.endswith("000001.nor"):
             raise OSError(36, "File name too long")
         return real(self, payload)
 

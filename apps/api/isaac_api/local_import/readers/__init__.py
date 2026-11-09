@@ -117,43 +117,89 @@ class UnifiedCollection:
 
 _SAFE_SUFFIX = re.compile(r"^\.[A-Za-z0-9_-]{1,15}$")
 
+#: Longest staged basename, in UTF-8 bytes: the common file-system limit for one path segment.
+_MAX_BASENAME_BYTES = 255
+
 
 def _staged_name(index: int, member: str) -> str:
-    """A collision-free file name for one staged member, KEEPING its suffix.
+    """The FALLBACK name for one staged member: its number, keeping only a plain suffix.
 
-    The readers decide by ``Path.suffix`` (``.mca``, ``.nor`` ...), so the suffix survives; the
-    rest of the name is the member's number, so two members that differ only by case or by
-    Unicode normalisation (one file on a case-insensitive volume), a member called ``x`` beside
-    ``x/y``, or a name segment longer than the file system allows can never collide or fail.
-    The REPORTED relative path is the member's real one and is not derived from this name.
+    Used only when the member's real basename cannot be written safely (:func:`_safe_basename`
+    says no, or writing it raised ``OSError``, e.g. a name the staging volume will not hold). The
+    REPORTED relative path is the member's real one and is never derived from this name.
     """
     suffix = PurePosixPath(member).suffix
     return f"m{index:06d}{suffix if _SAFE_SUFFIX.match(suffix) else ''}"
 
 
-def _stage_member(dest: Path, data: bytes, digest: str, rel: str, failures: list[dict]) -> bool:
-    """Write one walked member to ``dest`` and check its bytes against the walk's ``digest``.
+def _safe_basename(member: str) -> str | None:
+    """The member's real basename when it can be a file name as it stands, else ``None``.
 
-    ``True`` when the staged file may be offered to the readers. Otherwise the reason is appended
-    to ``failures`` under ``rel`` (the member's reported path) and nothing is left at ``dest``.
+    The readers decide by the staged file's ``Path.suffix`` (``.mca``, ``.nor``, ``.nor (copy)``),
+    and the folder walk gives them the real name, so a member is staged under its real basename.
+    The walk's normalisation already removed separators and ``.``/``..`` segments; this re-checks
+    that and refuses a NUL, a control character or a name over :data:`_MAX_BASENAME_BYTES` bytes.
+    """
+    name = PurePosixPath(member).name
+    if not name or name in (".", "..") or "/" in name or "\\" in name:
+        return None
+    if any(ord(ch) < 32 or ord(ch) == 127 for ch in name):
+        return None
+    if len(name.encode("utf-8", "surrogatepass")) > _MAX_BASENAME_BYTES:
+        return None
+    return name
+
+
+def _stage_member(
+    member_dir: Path, index: int, member: str, data: bytes, digest: str, rel: str, failures: list[dict]
+) -> Path | None:
+    """Write one walked member into its OWN directory ``member_dir`` and check its bytes against the
+    walk's ``digest``; the staged path, or ``None`` with the reason appended to ``failures``.
+
+    One directory per member (``z<zip>/m<member number>/``) is what keeps staging collision-free:
+    two members that differ only by case or Unicode form (one file on a case-insensitive volume),
+    or a member ``x`` beside ``x/y``, land in different directories whatever their names. Inside
+    it the member keeps its REAL basename, so a reader sees the very ``Path.suffix`` (and name) the
+    folder walk would give it; only when that name cannot be written safely is it staged under
+    :func:`_staged_name` instead.
+
+    The digest checked is the one the GENERIC side's own walk of the ZIP recorded (for a ZIP root its own
+    ``inventory_zip`` pass, for a nested ZIP ``walk_nested_zip``), not the engine's manifest digest: the
+    generic side walks the source itself, as its folder walk does.
     """
     try:
-        dest.parent.mkdir(parents=True, exist_ok=True)
-        dest.write_bytes(data)
-        staged_bytes = dest.read_bytes()
+        member_dir.mkdir(parents=True, exist_ok=True)
     except OSError as exc:
         failures.append({"relative_path": rel, "reason": f"the member could not be staged ({type(exc).__name__})"})
-        return False
-    if hashlib.sha256(staged_bytes).hexdigest() != digest:
+        return None
+    names = [n for n in (_safe_basename(member), _staged_name(index, member)) if n]
+    last_error: OSError | None = None
+    for name in names:
+        dest = member_dir / name
         try:
-            dest.unlink()
-        except OSError:
-            pass
-        failures.append(
-            {"relative_path": rel, "reason": "the staged bytes do not match the digest the walk recorded; the member was not read"}
-        )
-        return False
-    return True
+            dest.write_bytes(data)
+            staged_bytes = dest.read_bytes()
+        except OSError as exc:
+            last_error = exc
+            try:
+                dest.unlink()
+            except OSError:
+                pass
+            continue
+        if hashlib.sha256(staged_bytes).hexdigest() != digest:
+            try:
+                dest.unlink()
+            except OSError:
+                pass
+            failures.append(
+                {"relative_path": rel, "reason": "the staged bytes do not match the digest the walk recorded; the member was not read"}
+            )
+            return None
+        return dest
+    failures.append(
+        {"relative_path": rel, "reason": f"the member could not be staged ({type(last_error).__name__})"}
+    )
+    return None
 
 
 def _folder_walk_order(rel: str) -> list[str]:
@@ -211,8 +257,11 @@ def _zip_root_members(
             )
             continue
         member_index += 1
-        dest = root / "z0001" / _staged_name(member_index, member)
-        if _stage_member(dest, data, entry.content_sha256, entry.archive_path, failures):
+        dest = _stage_member(
+            root / "z0001" / f"m{member_index:06d}", member_index, member, data, entry.content_sha256,
+            entry.archive_path, failures,
+        )
+        if dest is not None:
             out.append((entry.archive_path, dest, len(data)))
     out.sort(key=lambda f: _folder_walk_order(f[0]))
     return out
@@ -279,8 +328,11 @@ def _expand_nested_zips(
                 failures.append({"relative_path": nested_rel, "reason": "the member could not be read again for the generic readers"})
                 continue
             member_index += 1
-            dest = root / f"z{index:04d}" / _staged_name(member_index, member)
-            if not _stage_member(dest, data, expected[member].content_sha256, nested_rel, failures):
+            dest = _stage_member(
+                root / f"z{index:04d}" / f"m{member_index:06d}", member_index, member, data,
+                expected[member].content_sha256, nested_rel, failures,
+            )
+            if dest is None:
                 continue
             out.append((nested_rel, dest, len(data)))
             staged_total += len(data)

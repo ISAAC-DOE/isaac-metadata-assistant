@@ -32,6 +32,7 @@ import copy
 import gzip
 import json
 import os
+import shutil
 import zipfile
 from pathlib import Path
 
@@ -50,6 +51,9 @@ from test_local_import_reader_ssrl_xdc import make_scan
 from test_local_import_reader_two_column import make_two
 from test_local_import_reader_xdi import make_xdi
 from test_local_import_xdc_v2_and_bare_names import BINARY_V2, BINARY_V4, make_v2
+
+#: Real-looking file names whose ``Path.suffix`` is not a short plain one (a Finder copy, a long suffix).
+UNUSUAL_SUFFIXES = ("SAMPLEA.nor (copy)", "SAMPLEB.normalised_spectrum")
 
 APPLEDOUBLE = b"\x00\x05\x16\x07\x00\x02\x00\x00Mac OS X        synthetic resource fork"
 
@@ -81,6 +85,13 @@ def beamtime(src: Path) -> Path:
     # an XDI file, a Larch session and an Athena project (read later by `process`, unread at import)
     make_xdi(src / "proc" / "SAMPLEZ.nor")
     (src / "proc" / "SAMPLEZ.larix").write_bytes(gzip.compress(make_session_text().encode()))
+    # two more analysis files in an `x/` vs `x.y/` arrangement: their extended_context entries come in walk order
+    for name in ("lar/a.larix", "lar.b/c.larix"):
+        (src / name).parent.mkdir(parents=True, exist_ok=True)
+        (src / name).write_bytes(gzip.compress(make_session_text().encode()))
+    # XDI files whose suffix is no plain `.abc`: readers report `Path.suffix` of the REAL name
+    for name in UNUSUAL_SUFFIXES:
+        make_xdi(src / "proc" / name)
     (src / "proc" / "SYN_project.prj").write_bytes(gzip.compress(b"synthetic athena project, not a real one"))
     (src / "notes.txt").write_text("synthetic notes, not data\n")
     return src
@@ -139,6 +150,15 @@ def same_groups_but_for_the_label(zipped: dict, folder: dict) -> bool:
         text = text.replace(g["group_id"], G.group_id_for(fk, g["member_run_keys"]))
     text = text.replace(json.dumps(zk), json.dumps(fk))
     return json.loads(text) == json.loads(json.dumps(fg, sort_keys=True))
+
+
+def extensions(bundle: dict) -> list[tuple[str, str]]:
+    """``(relative path, extension)`` of every processed-output file and every XDI run hint, in bundle order."""
+    out = [(f["relative_path"], f["extension"]) for po in bundle["processed_outputs"] for f in po["files"]]
+    for r in bundle["runs"]:
+        hints = (r.get("other_relationships") or {}).get("role_hints") or r.get("role_hints") or {}
+        out += [(r["run_key"], e) for e in hints.get("extensions") or ()]
+    return out
 
 
 def unread(bundle: dict) -> dict:
@@ -212,6 +232,13 @@ def test_a_zip_of_a_folder_imports_exactly_as_the_folder(tmp_path, capsys, wrapp
     # the analysis file and the Athena project are what they are in the folder
     by_path = {s["relative_path"]: s for s in zipped["sources"]}
     assert by_path["proc/SAMPLEZ.larix"]["reader"]["reader_id"] == "larch_session_v1"
+    # the files' extensions are the real names' suffixes, as in the folder (staging keeps the real basename)
+    assert extensions(zipped) == extensions(folder)
+    assert {"proc/SAMPLEA.nor (copy)": ".nor (copy)", "proc/SAMPLEB.normalised_spectrum": ".normalised_spectrum"}.items() \
+        <= dict(extensions(zipped)).items()
+    # the analysis files' context entries, in the folder's order (`lar/` before `lar.b/`, unlike a string sort)
+    order = [e.get("source_id") for e in zipped["extended_context"] if e.get("scope") == B.ANALYSIS_SCOPE]
+    assert order == [e.get("source_id") for e in folder["extended_context"] if e.get("scope") == B.ANALYSIS_SCOPE] and order
     assert unread(zipped)["proc/SYN_project.prj"] == unread(folder)["proc/SYN_project.prj"]
     # and everything else, field for field
     assert comparable(zipped) == comparable(folder)
@@ -366,10 +393,63 @@ def test_a_zip_among_the_members_is_not_opened_like_the_engine(tmp_path, capsys)
     u = readers.collect_all_generic_zip(z)
     assert u.nested_zips == [] and "sub/Box.zip" in u.unclaimed
     assert not any("!/" in c["relative_path"] for c in u.claims)
-    zipped = run_import(z, tmp_path / "out", capsys)
+    assert cli.main(["import", str(z), "--out", str(tmp_path / "out")]) == 0
+    printed = capsys.readouterr().out
+    zipped = json.loads((tmp_path / "out" / "bundle.json").read_text(encoding="utf-8"))
+    assert B.validate_bundle(zipped) == []
     assert "SAMPLEIN" not in {r["stem"] for r in zipped["runs"]}
-    assert "sub/Box.zip" in unread(zipped)
     assert not any("!/" in s["relative_path"] for s in zipped["sources"])
+    # the row says what happened and what to do, not "no reader for this kind of source"
+    row = unread(zipped)["sub/Box.zip"]
+    assert row["reason_code"] == B.ZIP_INSIDE_ZIP_REASON_CODE == "zip_inside_zip_not_opened"
+    assert row["reason"] == B.ZIP_INSIDE_ZIP_REASON and row["source_id"]
+    assert "a ZIP inside a ZIP is not opened" in row["reason"] and "import the unzipped folder" in row["reason"]
+    assert B.zip_inside_zip_count(zipped) == 1
+    assert ("  1 ZIP file inside the imported ZIP was not opened (a ZIP inside a ZIP is not opened): to read its "
+            "files, unzip the imported ZIP and import the unzipped folder instead") in printed.splitlines()
+    # the unzipped folder opens it (a ZIP inside a folder is walked one level deep)
+    folder = tmp_path / "unzipped" / "SYNBT"
+    shutil.copytree(src, folder)
+    (folder / "sub" / "Box.zip").write_bytes(inner.read_bytes())
+    unzipped = run_import(folder, tmp_path / "out-folder", capsys)
+    assert "SAMPLEIN" in {r["stem"] for r in unzipped["runs"]} and B.zip_inside_zip_count(unzipped) == 0
+
+
+def test_inner_zip_rows_are_counted_and_worded_for_two_and_a_corrupt_one(tmp_path, capsys):
+    src = tmp_path / "src"
+    make_scan(src / "SAMPLEX_A.001")
+    inner = tmp_path / "i.zip"
+    with zipfile.ZipFile(inner, "w") as zf:
+        zf.writestr("x.txt", "synthetic")
+    z = zip_of(src, tmp_path / "s.zip", extra={"a/One.zip": inner.read_bytes(), "Two.ZIP": b"not a zip at all"})
+    assert cli.main(["import", str(z), "--out", str(tmp_path / "out")]) == 0
+    printed = capsys.readouterr().out
+    bundle = json.loads((tmp_path / "out" / "bundle.json").read_text(encoding="utf-8"))
+    rows = unread(bundle)
+    assert {p: rows[p]["reason_code"] for p in ("a/One.zip", "Two.ZIP")} == {
+        "a/One.zip": "zip_inside_zip_not_opened", "Two.ZIP": "zip_inside_zip_not_opened"}
+    assert "  2 ZIP files inside the imported ZIP were not opened" in printed
+    assert "to read their files" in printed
+
+
+def test_a_folder_root_keeps_its_nested_zip_rows_unchanged(tmp_path, capsys):
+    """Folder output is unchanged: a ZIP inside a ZIP inside a FOLDER keeps the engine's own code, and a ZIP in the
+    folder that will not open keeps its own; no import of a folder prints the ZIP-in-ZIP line."""
+    folder = tmp_path / "bt"
+    make_scan(folder / "SAMPLEX_A.001")
+    innermost = tmp_path / "ii.zip"
+    with zipfile.ZipFile(innermost, "w") as zf:
+        zf.writestr("x.txt", "synthetic")
+    with zipfile.ZipFile(folder / "Box.zip", "w") as zf:
+        zf.writestr("Deep.zip", innermost.read_bytes())
+    (folder / "Broken.zip").write_bytes(b"not a zip at all")
+    assert cli.main(["import", str(folder), "--out", str(tmp_path / "out")]) == 0
+    printed = capsys.readouterr().out
+    bundle = json.loads((tmp_path / "out" / "bundle.json").read_text(encoding="utf-8"))
+    rows = unread(bundle)
+    assert rows["Box.zip!/Deep.zip"]["reason_code"] == "nested_archive_too_deep"
+    assert rows["Broken.zip"]["reason_code"] == "reader_refused"
+    assert B.zip_inside_zip_count(bundle) == 0 and "inside the imported ZIP" not in printed
 
 
 # --- the staging directory --------------------------------------------------------------------------------------
@@ -383,8 +463,10 @@ def _spy_staging(monkeypatch) -> list[Path]:
         seen.append(Path(staging))
         out = real(zip_path, staging, *a, **kw)
         assert out and all(Path(p).is_file() and Path(p).is_relative_to(Path(staging).resolve()) for _r, p, _s in out)
-        assert {Path(p).parent.name for _r, p, _s in out} == {"z0001"}
-        assert all(Path(p).name.startswith("m") for _r, p, _s in out)
+        # one numbered directory per member under z0001/, the member keeping its real basename inside it
+        assert {Path(p).parent.parent.name for _r, p, _s in out} == {"z0001"}
+        assert len({Path(p).parent for _r, p, _s in out}) == len(out)
+        assert all(Path(p).parent.name.startswith("m") and Path(p).name == rel.rsplit("/", 1)[-1] for rel, p, _s in out)
         return out
 
     monkeypatch.setattr(readers, "_zip_root_members", spy)
@@ -422,3 +504,64 @@ def test_a_root_that_is_not_a_regular_zip_file_is_refused(tmp_path):
     link.symlink_to(z)
     with pytest.raises(ValueError, match="existing file that is not a symlink"):
         readers.collect_all_generic_zip(link)
+
+
+# --- the staged name: the real basename, so the same suffix as the folder -----------------------------------------
+
+
+def test_a_nested_zip_member_reports_the_suffix_its_loose_copy_reports(tmp_path, capsys):
+    """Shared staging: a ZIP INSIDE a folder keeps each member's real suffix too (before 2026-11-09 a suffix that
+    was not a short plain ``.abc`` was dropped for a nested member, e.g. ``.nor (copy)`` -> ``""``)."""
+    loose = tmp_path / "loose" / "bt"
+    for name in (*UNUSUAL_SUFFIXES, "SAMPLEC.nor"):
+        make_xdi(loose / "d" / name)
+    loose_b = run_import(loose, tmp_path / "out-loose", capsys)
+    nested = tmp_path / "nested" / "bt"
+    nested.mkdir(parents=True)
+    zip_of(loose / "d", nested / "d.zip")
+    nested_b = run_import(nested, tmp_path / "out-nested", capsys)
+    strip = lambda pairs: [(p.replace("d.zip!/", "d/"), e) for p, e in pairs]  # noqa: E731
+    assert strip(extensions(nested_b)) == extensions(loose_b)
+    assert dict(extensions(nested_b))["d.zip!/SAMPLEA.nor (copy)"] == ".nor (copy)"
+    assert dict(extensions(nested_b))["d.zip!/SAMPLEB.normalised_spectrum"] == ".normalised_spectrum"
+
+
+def test_a_basename_that_cannot_be_written_falls_back_to_the_numbered_name(tmp_path, monkeypatch):
+    src = tmp_path / "src"
+    make_xdi(src / "SAMPLEC.nor")
+    make_xdi(src / "SAMPLEA.nor (copy)")
+    z = zip_of(src, tmp_path / "s.zip")
+    real = Path.write_bytes
+
+    def refuse_real_names(self, payload):
+        if not self.name.startswith("m0"):
+            raise OSError(36, "File name too long")
+        return real(self, payload)
+
+    monkeypatch.setattr(Path, "write_bytes", refuse_real_names)
+    staged: list[tuple[str, Path]] = []
+    real_collect = readers._collect
+
+    def spy(base, files, *a, **kw):
+        staged.extend((rel, p) for rel, p, _s in files)
+        return real_collect(base, files, *a, **kw)
+
+    monkeypatch.setattr(readers, "_collect", spy)
+    u = readers.collect_all_generic_zip(z)
+    assert u.staging_failures == []
+    names = {rel: p.name for rel, p in staged}
+    assert names == {"SAMPLEA.nor (copy)": "m000001", "SAMPLEC.nor": "m000002.nor"}  # a plain suffix survives
+    assert {c["relative_path"] for c in u.claims} == {"SAMPLEA.nor (copy)", "SAMPLEC.nor"}
+
+
+@pytest.mark.parametrize("member, expected", [
+    ("d/SAMPLEA.nor (copy)", "SAMPLEA.nor (copy)"),
+    ("SAMPLEB.normalised_spectrum", "SAMPLEB.normalised_spectrum"),
+    ("d/café.txt", "café.txt"),
+    ("bad\x00name.txt", None),
+    ("tab\tname.txt", None),
+    ("x" * 252 + ".txt", None),
+    ("..", None),
+])
+def test_only_a_basename_that_is_a_plain_file_name_is_staged_as_it_is(member, expected):
+    assert readers._safe_basename(member) == expected

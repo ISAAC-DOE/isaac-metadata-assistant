@@ -2852,6 +2852,35 @@ ANALYSIS_CLASSIFIER_ID = "local_import_analysis_file_classifier_v1"
 ANALYSIS_SCOPE = "analysis_file"
 
 
+#: ``unread_files[].reason_code`` of a ``.zip`` found among the members of a ZIP given AS THE ROOT (2026-11-09).
+#: The engine opens a ZIP inside a FOLDER one level deep (§21) but never a ZIP inside a ZIP root, and the row
+#: used to carry the generic "no reader for this kind of source" text, which wrongly said ZIPs cannot be read.
+ZIP_INSIDE_ZIP_REASON_CODE = "zip_inside_zip_not_opened"
+ZIP_INSIDE_ZIP_REASON = (
+    "This ZIP is inside the ZIP that was imported, and a ZIP inside a ZIP is not opened, so none of its files "
+    "were read. To read them, unzip the imported ZIP and import the unzipped folder instead: a ZIP inside a "
+    "folder is opened."
+)
+#: The codes a not-opened inner ZIP's row had before it is named (the engine has no reader for a ``.zip``).
+_ZIP_INSIDE_ZIP_REPLACES = frozenset({"no_reader_for_source_type", "content_unavailable"})
+
+
+def _zip_inside_zip_rows(unread: list[dict]) -> None:
+    """For a ZIP ROOT only: name each inner ``.zip`` member's unread row for what it is (see
+    :data:`ZIP_INSIDE_ZIP_REASON_CODE`). Only rows of a real member (one with a ``source_id``) whose code
+    says no reader read it are renamed; the row stays, and nothing else about it changes."""
+    for row in unread:
+        if (row.get("source_id") and str(row.get("relative_path") or "").lower().endswith(".zip")
+                and row.get("reason_code") in _ZIP_INSIDE_ZIP_REPLACES):
+            row["reason_code"] = ZIP_INSIDE_ZIP_REASON_CODE
+            row["reason"] = ZIP_INSIDE_ZIP_REASON
+
+
+def zip_inside_zip_count(bundle: Mapping) -> int:
+    """How many ZIPs inside an imported ZIP were listed and not opened (``unread_files`` rows)."""
+    return sum(1 for u in bundle.get("unread_files") or () if u.get("reason_code") == ZIP_INSIDE_ZIP_REASON_CODE)
+
+
 def _staging_failure_rows(generic: Any, unread: list[dict]) -> None:
     """A ZIP member (of a ZIP inside the folder, or of a ZIP given as the root) the generic readers were
     never given (it could not be staged, or its staged bytes did not match the walk's digest) stays in
@@ -3996,6 +4025,8 @@ def build_bundle(
         _staging_failure_rows(generic, unread)
         if generic_claimed:
             unread = [u for u in unread if u["relative_path"] not in generic_claimed]
+    if source_kind == "zip":
+        _zip_inside_zip_rows(unread)
     propose_processed_links(processed_outputs, runs)
     runs_by_id = {r["run_id"]: r for r in runs}
 

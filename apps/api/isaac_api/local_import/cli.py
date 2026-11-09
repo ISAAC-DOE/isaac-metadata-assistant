@@ -644,6 +644,12 @@ def cmd_import(args) -> int:
     )
     if c.get(B.HEADER_COMMENT_RUNS_NOT_READ):
         print(f"  {B.header_comment_runs_not_read_text(c[B.HEADER_COMMENT_RUNS_NOT_READ])}")
+    if n_inner := B.zip_inside_zip_count(bundle):
+        print(
+            f"  {n_inner} ZIP file{'s' if n_inner != 1 else ''} inside the imported ZIP {'were' if n_inner != 1 else 'was'} "
+            f"not opened (a ZIP inside a ZIP is not opened): to read {'their' if n_inner != 1 else 'its'} files, unzip "
+            "the imported ZIP and import the unzipped folder instead"
+        )
     if replaced:
         # c16-r L1: a re-import is a NEW bundle
         from .records import REIMPORT_CAVEAT
