@@ -61,7 +61,9 @@ class GenericRun:
     """One run-like group of files and everything read from them. Pure data, no writes.
 
     ``run_key`` is ``<profile>:<relative directory>/<name>`` and cannot collide: two runs share
-    a key only if they share a directory and a name, which is one run. ``scans`` holds one entry
+    a key only if they share a directory and a name, which is one run (a reader that finds two
+    series one name would merge gives one of them a distinct, documented name instead, e.g. the
+    SSRL XDC reader's ``<name>.NNN``). ``scans`` holds one entry
     per file the reader parsed (``relative_path``, ``sha256``, ``size_bytes``, ``scan_index`` or
     ``None``, ``columns``, ``points`` and reader-specific literals). ``role_hints`` carries only
     what a file literally states (an application named in its own header, its extension); it is
@@ -91,6 +93,10 @@ class ReaderResult:
     unparsed: list[dict]
     #: ``(relative_path, role)`` for every file this reader consumed (a scan, a companion).
     consumed: list[tuple[str, str]]
+    #: Runs an EARLIER build of the reader did not find, placed AFTER every reader's :attr:`runs`
+    #: (``readers.collect_all_generic``; the import numbers their candidates last too): they only ADD
+    #: run and candidate ids after the ones an import by the earlier build gave the same files.
+    late_runs: list[GenericRun] = field(default_factory=list)
 
 
 @dataclass

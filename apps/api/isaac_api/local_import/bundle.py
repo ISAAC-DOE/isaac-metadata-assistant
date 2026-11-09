@@ -1568,7 +1568,7 @@ XDC_RUN_SOURCE_TYPE = f"generic:{XDC_PROFILE_ID}"
 XDC_START_RULE_ID = "ssrl_xdc_scan_start_v1"
 XDC_START_RULE = (
     f"{XDC_START_RULE_ID}: the run's acquisition start is the EARLIEST timestamp written on line 2 of "
-    "its SSRL EXAFS Data Collector 4.0 scan files, read as the instrument clock's local time. A scan "
+    "its SSRL EXAFS Data Collector 2.0 or 4.0 scan files, read as the instrument clock's local time. A scan "
     "whose line-2 time does not parse, or names a weekday its date does not fall on, is not used. The "
     "header names no time zone and states no epoch, so the time becomes a UTC value only under a "
     "time zone a scientist confirms for that clock."
@@ -1607,11 +1607,12 @@ LOCAL_CLOCK_NONEXISTENT = "nonexistent_in_zone"
 #: scientist states the value. A gas or atmosphere word is not read (no write route).
 XDC_COMMENT_RULE_ID = "ssrl_xdc_header_comment_v1"
 XDC_COMMENT_RULE = (
-    f"{XDC_COMMENT_RULE_ID}: a comment line of the run's SSRL EXAFS Data Collector 4.0 scan headers (lines 9-12, the "
+    f"{XDC_COMMENT_RULE_ID}: a comment line of the run's SSRL EXAFS Data Collector 2.0 or 4.0 scan headers (lines 9-12, the "
     "free text before Weights:; line 8, the experiment file's COMMENTS1, is not read) that writes an electrolyte and its concentration, a pH, or a potential (and its "
     "scale) in a plain form is read into a candidate that NEEDS REVIEW; a line that only mentions one gives a "
-    "candidate with no value that quotes the line. The line is free text, so the value is never proposed or "
-    "confirmed until a scientist confirms or corrects it."
+    "candidate with no value that quotes the line. A slit size written with its axis letters (1v x 3H mm) is no "
+    "potential: no value is read from a line that writes one. The line is free text, so the value is never proposed "
+    "or confirmed until a scientist confirms or corrects it."
 )
 XDC_COMMENT_LINES = range(9, 13)
 #: the reader's key for those lines (line 8, ``header_line_8_literal``: COMMENTS1, the gain on the BL4-3 headers seen,
@@ -4038,32 +4039,41 @@ def build_bundle(
                 )
             )
 
-    # ssrl_xdc_scan_start_v1: one start-time candidate per XDC run, continuing the cand sequence
-    for run_id, g, run_scans in xdc_runs:
-        built = _xdc_start_candidate(g, run_scans, run_id, f"cand-{len(out_candidates) + 1:04d}", sid_of, writable)
-        if built is None:
-            continue  # no scan states a usable time: the run's start stays a missing value
-        cand, order_anomaly = built
-        out_candidates.append(cand)
-        runs_by_id[run_id]["candidate_ids"].append(cand["candidate_id"])
-        if order_anomaly is not None:
-            runs_by_id[run_id]["other_relationships"]["anomalies"].append(order_anomaly)
-    # ssrl_xdc_header_comment_v1: what the comment lines state, AFTER every start-time candidate (their ids stand).
-    # c16-r M1: these readings never refuse an import. A run whose readings would pass MAX_CANDIDATES is not read
-    # this way (its lines stay in extended_context, as before the rule), and the bundle counts it
-    # (counts.header_comment_runs_not_read, said in the summary): a large XDC beamtime imports as it did before.
-    comment_runs_not_read = 0
-    for run_id, g, run_scans in xdc_runs:
-        if comment_runs_not_read:
-            comment_runs_not_read += 1  # in run order: once one run is left out, every later one is too
-            continue
-        cands = _xdc_comment_candidates(g, run_scans, run_id, len(out_candidates) + 1, sid_of, writable)
-        if len(out_candidates) + len(cands) > MAX_CANDIDATES:
-            comment_runs_not_read += 1
-            continue
-        for cand in cands:
+    # ssrl_xdc_scan_start_v1, then ssrl_xdc_header_comment_v1, continuing the cand sequence. FIRST over the runs reader
+    # ssrl_xdc 1.0.0 found too, THEN over the runs only a later reader finds (its ``late_runs``: a 2.0-only or bare
+    # NAME.NNN series), so a candidate an import by the earlier build gave keeps its id and a late run's only ADD ids.
+    late_keys = set(getattr(generic, "late_run_keys", None) or ()) if generic is not None else set()
+    not_read: set[str] = set()  # runs whose header comment lines are not read into candidates (c16-r M1)
+    for late in (False, True):
+        phase = [t for t in xdc_runs if (t[1].run_key in late_keys) is late]
+        for run_id, g, run_scans in phase:
+            if late and len(out_candidates) >= MAX_CANDIDATES:
+                not_read.add(run_id)  # a late run never pushes an import over the bound: its header is not read
+                continue
+            built = _xdc_start_candidate(g, run_scans, run_id, f"cand-{len(out_candidates) + 1:04d}", sid_of, writable)
+            if built is None:
+                continue  # no scan states a usable time: the run's start stays a missing value
+            cand, order_anomaly = built
             out_candidates.append(cand)
             runs_by_id[run_id]["candidate_ids"].append(cand["candidate_id"])
+            if order_anomaly is not None:
+                runs_by_id[run_id]["other_relationships"]["anomalies"].append(order_anomaly)
+        # ssrl_xdc_header_comment_v1: what the comment lines state, AFTER every start-time candidate of the phase.
+        # c16-r M1: these readings never refuse an import. A run whose readings would pass MAX_CANDIDATES is not read
+        # this way (its lines stay in extended_context, as before the rule), and the bundle counts it
+        # (counts.header_comment_runs_not_read, said in the summary): a large XDC beamtime imports as it did before.
+        for run_id, g, run_scans in phase:
+            if not_read:
+                not_read.add(run_id)  # in run order: once one run is left out, every later one is too
+                continue
+            cands = _xdc_comment_candidates(g, run_scans, run_id, len(out_candidates) + 1, sid_of, writable)
+            if len(out_candidates) + len(cands) > MAX_CANDIDATES:
+                not_read.add(run_id)
+                continue
+            for cand in cands:
+                out_candidates.append(cand)
+                runs_by_id[run_id]["candidate_ids"].append(cand["candidate_id"])
+    comment_runs_not_read = len(not_read)
     if len(out_candidates) > MAX_CANDIDATES:
         raise BundleBoundsExceeded(f"{len(out_candidates)} candidates exceeds the bound of {MAX_CANDIDATES}.")
 
@@ -4199,21 +4209,29 @@ def build_bundle(
         "nothing is defaulted, and a beamtime-level statement is never copied onto a "
         "run (DEC-69)."
     )
-    for path in sorted(writable, key=_value_id_order):
-        scope = _target_scope(path) or UPSTREAM_TARGET_FIELDS.get(path) or LOCAL_ANSWER_FIELDS.get(path)
-        if scope == "record":
-            # ONE record-scope question, asked whenever ANY run that becomes a record lacks
-            # a reading for it (real-data finding D3): "some run states it" used to suppress
-            # the question, leaving the other runs' records with no way to be answered.
-            lacking = [r for r in runs if r["run_candidate"] and path not in targets_by_run.get(r["run_id"], set())]
-            if lacking and (path not in any_target or targets_by_run.get(None, set()).isdisjoint({path})):
-                missing.append(_missing(len(missing), None, path, "record", reason, beamtime_targets, writable))
-            continue
-        for run in runs:
-            if not run["run_candidate"]:
+    # FIRST every run but the LATE ones (runs reader ssrl_xdc 1.0.0 did not find: ``late_keys``), THEN the late ones:
+    # a late run's missing values (and a record-scope one only it lacks) are numbered after every other, so the value
+    # ids an import by the earlier build gave the same files stand.
+    record_asked: set[str] = set()
+    for late in (False, True):
+        phase_runs = [r for r in runs if (r["run_key"] in late_keys) is late]
+        for path in sorted(writable, key=_value_id_order):
+            scope = _target_scope(path) or UPSTREAM_TARGET_FIELDS.get(path) or LOCAL_ANSWER_FIELDS.get(path)
+            if scope == "record":
+                # ONE record-scope question, asked whenever ANY run that becomes a record lacks
+                # a reading for it (real-data finding D3): "some run states it" used to suppress
+                # the question, leaving the other runs' records with no way to be answered.
+                lacking = [r for r in phase_runs if r["run_candidate"] and path not in targets_by_run.get(r["run_id"], set())]
+                if (lacking and path not in record_asked
+                        and (path not in any_target or targets_by_run.get(None, set()).isdisjoint({path}))):
+                    record_asked.add(path)
+                    missing.append(_missing(len(missing), None, path, "record", reason, beamtime_targets, writable))
                 continue
-            if path not in targets_by_run.get(run["run_id"], set()):
-                missing.append(_missing(len(missing), run["run_id"], path, "run", reason, beamtime_targets, writable))
+            for run in phase_runs:
+                if not run["run_candidate"]:
+                    continue
+                if path not in targets_by_run.get(run["run_id"], set()):
+                    missing.append(_missing(len(missing), run["run_id"], path, "run", reason, beamtime_targets, writable))
 
     unmapped = [
         {

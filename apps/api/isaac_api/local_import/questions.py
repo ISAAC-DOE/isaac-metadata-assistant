@@ -4197,6 +4197,52 @@ _SETPOINT_CONTEXT = re.compile(
     r"|cell|->|\u2192|(?<![a-z])ref(?:erence)?(?![a-z]))|(?<![A-Za-z])(?:dE|mA|RE)(?![a-z])")
 #: any voltage a line writes (``-0.3 V``, ``0.5Vrhe``, ``300mV``): the line MENTIONS a potential
 _VOLTS_MENTIONED = re.compile(r"\d\s*(?:m?V|mv|v(?![a-z]))")
+#: A SLIT SIZE ``A x B`` (:func:`dimension_spans`): two unsigned numbers joined by ``x``, ``X``, ``\u00d7`` or ``*``,
+#: one marked with the axis letter ``v`` (vertical) and the other ``h`` (horizontal), in either order and either case,
+#: AND either a length unit (mm, um, \u00b5m, cm) right after it (``slits= 1v x 3H mm``, ``1 v x 3 h um``) or a slit,
+#: beam or spot word earlier in its own segment (no ``,`` ``;`` ``|`` between) with nothing but a separator after it (``slits 1v x 3h, -0.3 V vs RHE``,
+#: ``beam 3x1 (1 v x 3 H)``). Its ``1v`` is a SIZE, never a potential mention and never a set-point. Everything else
+#: is doubtful and keeps the reading the build before gave (a mention, no value: the scientist is asked): no axis
+#: letter on the other side (``0.6 V x 2 cycles``, ``10 x 1 mV``, ``1V x 3 mm``, ``3 x 1v``), an hour (``-0.3 V x 2h``,
+#: ``0.5 V x 1 h``, ``chrono 0.9V x 2h``), a sign, a potential's label before it (``pot``, ``E =``, ``held at``), or
+#: no unit and no slit word (``1 V x 3 H`` alone).
+_DIM_NUMBER = r"(?:\d+(?:\.\d+)?|\.\d+)"
+_DIMENSION = re.compile(
+    rf"(?<![\w.]){_DIM_NUMBER}\s*(?P<a>[vVhH])(?![A-Za-z])?"
+    rf"\s*\)?\s*[xX\u00d7*]\s*\(?\s*{_DIM_NUMBER}\s*(?P<b>[vVhH])(?![A-Za-z])"
+    r"(?:\s*(?P<unit>mm|um|\u00b5m|cm)(?![A-Za-z]))?")
+#: a potential's label right before a product (``pot 0.3 V x 1h``, ``E = 1v x 3h``): the product is doubtful
+_DIMENSION_LABEL_BEFORE = re.compile(r"(?i:(?<![a-z])(?:pot(?:ential)?|held|hold|at|E)\s*[=:]?\s*\(?\s*|@\s*)$")
+_DIMENSION_SIGN_BEFORE = re.compile(r"[-+\u2212\u2013]\s*\(?\s*$")
+_DIMENSION_WORD_BEFORE = re.compile(r"(?i)(?<![a-z])(?:slits?|beam|spot)")
+_DIMENSION_CLEAN_END = re.compile(r"\s*(?:$|[,;|)\]])")
+
+
+def dimension_spans(text: str) -> list[tuple[int, int]]:
+    """``[(start, end)]`` of every slit size (:data:`_DIMENSION`) in ``text``: unsigned, one side ``v`` and the other
+    ``h``, no potential's label before it, and a length unit after it or a slit / beam / spot word before it in the
+    same segment (then ending at a separator). Its numbers are sizes, so no part of it is a potential. Nothing else is listed: a doubtful
+    product keeps the reading it had."""
+    text = str(text or "")
+    out = []
+    for m in _DIMENSION.finditer(text):
+        before = text[:m.start()]
+        if ({m.group("a").casefold(), m.group("b").casefold()} != {"v", "h"} or _DIMENSION_SIGN_BEFORE.search(before)
+                or _DIMENSION_LABEL_BEFORE.search(before)):
+            continue
+        segment = re.split(r"[,;|]", before)[-1]  # the word must be in the product's OWN segment ('beam on; 0.5 V x 2h')
+        if m.group("unit") or (_DIMENSION_WORD_BEFORE.search(segment) and _DIMENSION_CLEAN_END.match(text, m.end())):
+            out.append(m.span())
+    return out
+
+
+def _without_dimensions(text: str) -> str:
+    """``text`` with every :func:`dimension_spans` span blanked to ``#`` (same length, no new separator)."""
+    for start, end in dimension_spans(text):
+        text = text[:start] + "#" * (end - start) + text[end:]
+    return text
+
+
 #: A pH segment, the whole of it: ``pH 1.3``, ``pH=12.5``, ``pH7``
 _PH_SEGMENT = re.compile(r"pH\s*=?\s*(?P<v>\d{1,2}(?:\.\d+)?)")
 _PH_MENTIONED = re.compile(r"(?<![A-Za-z])pH(?![a-z])")
@@ -4210,6 +4256,8 @@ _ELECTROLYTE_CONTEXT = re.compile(
     r"|\+|(?<![A-Za-z])RE(?![A-Za-z])")
 #: why a field a line mentions gives no value (the reading's ``why``)
 HEADER_UNREAD_WHY = "not written in a form ISAAC reads exactly"
+#: L1: why a line that also writes a slit size (:func:`dimension_spans`) gives no potential value
+HEADER_SIZE_WHY = "the line also writes a size (such as 1v x 3h), so no potential is read from it"
 #: what a line that mentions a field is said to mention, per field (:func:`header_unread_text`)
 _HEADER_MENTIONS = {
     "context.electrochemistry.potential_setpoint_V": "a potential",
@@ -4266,14 +4314,16 @@ def header_comment_readings(line: str) -> list[dict]:
     * the set-point (volts) and its scale: a segment :func:`header_setpoint` reads, the line's only potential-like
       number (:data:`_POTENTIAL_LIKE`), and none of :data:`_SETPOINT_CONTEXT`'s words in the line (OCP, onset, eta,
       a step, a rate, a sweep, galvanostatic, pre-/post-, then, an offset, a cell, a range, ...); the scale only
-      when it is one the record takes (:data:`POTENTIAL_SCALES`);
+      when it is one the record takes (:data:`POTENTIAL_SCALES`); and no slit size in the line
+      (:func:`dimension_spans`: ``slits= 1v x 3H mm``, whose ``1v`` is a size);
     * the pH: a segment ``pH 1.3`` / ``pH=1.3``, the line's only pH, with no range or comma decimal after it;
     * the electrolyte name and concentration (mol/L): the line's one segment ``template.electrolyte_statement``
       reads (the template's own grammar), the line's only concentration, and none of :data:`_ELECTROLYTE_CONTEXT`'s
       words (a reference, a bridge, a filling, a standard, ``+``, ``and``).
 
     A field the line MENTIONS (a voltage, ``pH``, a concentration) and gives no value for is a reading with NO
-    value, ``ambiguous`` and ``why``: the scientist says the value."""
+    value, ``ambiguous`` and ``why``: the scientist says the value. A number inside a slit size
+    (:func:`dimension_spans`: ``slits= 1v x 3H mm``) is not a mention."""
     from .template import (_CONCENTRATION_IN_NAME, ELECTROLYTE_CONC_PATH, ELECTROLYTE_NAME_PATH, PH_PATH, POTENTIAL_PATH,
                            electrolyte_statement)
 
@@ -4281,8 +4331,8 @@ def header_comment_readings(line: str) -> list[dict]:
     segments = [seg for seg, readable in comment_segments(text) if readable]
     out: list[dict] = []
 
-    def unread(path: str, unit: str | None) -> None:
-        out.append({"path": path, "value": None, "literal": text, "unit": unit, "ambiguous": True, "why": HEADER_UNREAD_WHY})
+    def unread(path: str, unit: str | None, why: str = HEADER_UNREAD_WHY) -> None:
+        out.append({"path": path, "value": None, "literal": text, "unit": unit, "ambiguous": True, "why": why})
 
     stated = [got for seg in segments if (got := electrolyte_statement(seg)) is not None]
     if (len(stated) == 1 and len(list(_CONCENTRATION_IN_NAME.finditer(text))) == 1
@@ -4299,14 +4349,15 @@ def header_comment_readings(line: str) -> list[dict]:
         unread(PH_PATH, None)
     pots = [got for seg in segments if (got := header_setpoint(seg)) is not None]
     like = sum(1 for m in _POTENTIAL_LIKE.finditer(text) if m.group("sign") or m.group("unit"))
-    if len(pots) == 1 and like == 1 and _SETPOINT_CONTEXT.search(text) is None:
+    sized = bool(dimension_spans(text))
+    if len(pots) == 1 and like == 1 and _SETPOINT_CONTEXT.search(text) is None and not sized:
         pot = pots[0]
         out.append({"path": POTENTIAL_PATH, "value": pot["volts"], "literal": text, "unit": "V", "scale": pot["scale"],
                     "segment": pot["literal"]})
         if pot["scale"] in POTENTIAL_SCALES:
             out.append({"path": SCALE_PATH, "value": pot["scale"], "literal": text, "unit": None})
-    elif _VOLTS_MENTIONED.search(text):
-        unread(POTENTIAL_PATH, "V")
+    elif _VOLTS_MENTIONED.search(_without_dimensions(text) if sized else text):
+        unread(POTENTIAL_PATH, "V", HEADER_SIZE_WHY if sized else HEADER_UNREAD_WHY)
     return out
 
 
@@ -4367,10 +4418,14 @@ def header_potential_mentions(line: str) -> list[dict]:
     to compare: never a value, never offered, never stored as one; a line with several mentions keeps them all and
     none is picked. r3c MED-1: a voltage that is no set-point is not a mention: a rate (:data:`_MENTION_RATE_AFTER`),
     one beside a detector, amplitude, over-potential, open-circuit or rate word (:data:`_MENTION_CONTEXT_WORDS`), or
-    one over :data:`MENTION_MAX_V` with no scale."""
+    one over :data:`MENTION_MAX_V` with no scale; nor is a number inside a slit size (:func:`dimension_spans`:
+    ``slits= 1v x 3H mm``; a doubtful product such as ``3 x 1v`` or ``0.5 V x 1 h`` is still a mention)."""
     text = str(line or "")
     out = []
+    sizes = dimension_spans(text)
     for m in _POTENTIAL_MENTION.finditer(text):
+        if any(start < m.end() and m.start() < end for start, end in sizes):
+            continue
         if (_MENTION_RATE_AFTER.match(text, m.end()) or _MENTION_CONTEXT_BEFORE.search(text[:m.start()])
                 or _MENTION_CONTEXT_AFTER.search(text[m.end():])):
             continue
@@ -4395,9 +4450,15 @@ def header_unread_text(path: str, line: str, locator: Any, relative_path: Any) -
     """What a candidate with no value from a comment line says (r1d): the line, where it is, what it mentions, and
     that the scientist states the value."""
     where = str(locator or "").replace("line:", "line ")
+    sizes = dimension_spans(line) if path == "context.electrochemistry.potential_setpoint_V" else []
+    beside = ""
+    if sizes:  # L1: the true cause: the line also writes a slit size, whose `v` is no volt
+        text = str(line or "")
+        beside = (" beside a size it writes (" + ", ".join(_quoted(text[a:b]) for a, b in sizes)
+                  + ", whose v is an axis, not volts), so no potential is read from it")
     return (f"the comment line {_quoted(line)}" + (f" ({where} of {relative_path})" if where and relative_path else "")
-            + f" mentions {_HEADER_MENTIONS.get(path, 'this field')}; ISAAC does not read a value from free text it "
-            "cannot parse exactly; tell me the value held during this scan, or say it isn't stated")
+            + f" mentions {_HEADER_MENTIONS.get(path, 'this field')}{beside}; ISAAC does not read a value from free "
+            "text it cannot parse exactly; tell me the value held during this scan, or say it isn't stated")
 
 
 def _generic_member_runs(bundle: Mapping, member_ids: set) -> list[Mapping]:

@@ -1075,8 +1075,33 @@ def merge_versus_set(merge: Mapping, aside: Mapping, params: Mapping, np) -> dic
     return {"verdict": got["verdict"], "metrics": metrics, "flags": list(got["flags"]), "tolerances": got["tolerances"]}
 
 
+#: The normalised stem of a bare SSRL XDC series kept apart from an ``_A`` series of the same name (the reader's
+#: ``<name>.NNN``, ``<name>.NNN-2`` ...: ``readers.ssrl_xdc.BARE_COLLISION_SUFFIX``), its base the ``_A`` run's stem.
+_COLLIDED_BARE_STEM = re.compile(r"^(?P<base>.+)_nnn(?:_\d+)?$")
+
+
+def _collided_partners(stems: Mapping[str, Sequence[str]]) -> dict[str, set[str]]:
+    """``{group_id: other group ids}`` for the record groups holding the two runs of a collided pair (an ``_A`` run
+    ``X`` and the bare run ``X.NNN`` beside it): an Athena name that fits one fits the other as well (``X.001`` is a
+    scan of the bare run, yet a suffix match of ``X``), so a match on either is AMBIGUOUS, never linked by name."""
+    gid_of: dict[str, set[str]] = {}
+    for gid, gstems in stems.items():
+        for st in gstems:
+            gid_of.setdefault(st, set()).add(gid)
+    out: dict[str, set[str]] = {}
+    for st, gids in gid_of.items():
+        m = _COLLIDED_BARE_STEM.match(st)
+        if m and m.group("base") in gid_of:
+            pair = gids | gid_of[m.group("base")]
+            for gid in pair:
+                out.setdefault(gid, set()).update(pair - {gid})
+    return out
+
+
 def _hits(entry: Mapping, stems: Mapping[str, Sequence[str]], bases: Mapping[str, set]) -> list[tuple]:
-    """``[(group_id, kind, covered stems or None)]``: every record group one Athena entry matches (module docstring)."""
+    """``[(group_id, kind, covered stems or None)]``: every record group one Athena entry matches (module docstring).
+    A hit on a group holding a run of a COLLIDED pair (:func:`_collided_partners`) is a hit on the other run's group
+    too, with the same kind: the entry is then ambiguous like any other that matches several groups."""
     hits = []
     for gid, gstems in stems.items():
         kinds = [k for k in (_match_kind(entry["names"], s) for s in gstems) if k]
@@ -1086,6 +1111,13 @@ def _hits(entry: Mapping, stems: Mapping[str, Sequence[str]], bases: Mapping[str
         covers = scientist_merge_of(entry["names"], gstems, bases.get(gid) or ())
         if covers:
             hits.append((gid, "scientist_merge", covers))
+    if hits:
+        partners = _collided_partners(stems)
+        have = {h[0] for h in hits}
+        for gid, kind, covers in list(hits):
+            for other in sorted(partners.get(gid, set()) - have):
+                hits.append((other, kind, covers))
+                have.add(other)
     return hits
 
 
