@@ -8,7 +8,7 @@ bundle builder) decides what to do with it.
 yet, in a fixed precedence order, so each file is claimed at most once and every claim is
 recorded. The precedence is most specific first, and the headerless two-column reader last:
 
-1. ``ssrl_xdc``    exact first-line signature, plus its ``.rgn/.det/.exp`` companions
+1. ``ssrl_xdc``    exact first-line signature (2.0 or 4.0), plus its ``.rgn/.det/.exp`` companions
 2. ``xdi``         ``# XDI/<v>`` first line
 3. ``mca``         ``.mca`` with ``#F``, ``#@MCA`` and ``@A``
 4. ``xes_tab``     ``.txt`` whose first line is tab-separated ``xes<N>`` names
@@ -94,6 +94,9 @@ class UnifiedCollection:
     analysis_files: list[AnalysisFile] = field(default_factory=list)
     #: ZIPs found in the folder: ``{relative_path, walked, members, refused, detail}``.
     nested_zips: list[dict] = field(default_factory=list)
+    #: The ``run_key`` of each run a reader returned as LATE (:attr:`~._common.ReaderResult.late_runs`), placed
+    #: after every reader's runs: the import numbers their candidates after every other run's too.
+    late_run_keys: list[str] = field(default_factory=list)
     #: Nested members the engine walk accepted but that could not be handed to the generic
     #: readers: ``{relative_path, reason}``. They are reported, never silently dropped.
     staging_failures: list[dict] = field(default_factory=list)
@@ -225,6 +228,7 @@ def _collect(base, files, limits, skip, refused, trunc, staging_dir) -> UnifiedC
     claims: list[dict] = []
     unparsed: list[dict] = []
     duplicates: list[dict] = []
+    late_runs: list[GenericRun] = []
     for name, module in READERS:
         result = module.collect_from_files(files, limits, set(claimed))
         for rel, role in result.consumed:
@@ -234,7 +238,11 @@ def _collect(base, files, limits, skip, refused, trunc, staging_dir) -> UnifiedC
             claimed.add(rel)
             claims.append({"relative_path": rel, "reader": name, "role": role})
         runs.extend(result.runs)
+        late_runs.extend(getattr(result, "late_runs", None) or ())
         unparsed.extend({**u, "reader": name} for u in result.unparsed)
+    # runs a reader marks LATE (the SSRL XDC reader's runs its 1.0.0 did not find: 2.0-only and bare
+    # ``NAME.NNN`` series) come after every reader's runs: they only ADD run ids after the earlier ones
+    runs.extend(late_runs)
     analysis: list[AnalysisFile] = []
     budget = MAX_ANALYSIS_ENTRIES_TOTAL
     for _name, module in ANALYSIS_READERS:
@@ -261,4 +269,5 @@ def _collect(base, files, limits, skip, refused, trunc, staging_dir) -> UnifiedC
         analysis_files=analysis,
         nested_zips=nested_zips,
         staging_failures=staging_failures,
+        late_run_keys=[r.run_key for r in late_runs],
     )

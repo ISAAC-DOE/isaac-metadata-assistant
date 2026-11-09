@@ -171,6 +171,27 @@ def _stem_tokens(stem: str) -> list[str]:
 _ALIGN_PREFIXES = ("align", "rough")
 _REFERENCE_PREFIXES = ("foil", "calib", "reference", "standard")
 _REFERENCE_EXACT = frozenset({"ref", "std", "stds", "refs"})
+#: THE ELEMENT-PREFIX ROLE RULE (its own rule id and basis, so a run the rule above classifies is unchanged): a token
+#: that is an element symbol glued onto ``calib`` or ``foil`` (``SCALIB``: S + calib, ``FeFOIL``, ``CuFoil``).
+ELEMENT_ROLE_RULE_ID = "isaac.grouping.run_role_element_prefix.v1"
+ELEMENT_ROLE_BASIS = "element_name_token"
+#: what may follow ``calib`` / ``foil``, the whole of it (``calib``, ``calibration``, ``calib2``, ``foil``, ``foils``,
+#: ``foil01``): stricter than :data:`_REFERENCE_PREFIXES`, so ``Scalibur`` (S + ``calibur``) is not one
+_ELEMENT_CALIB_REST = re.compile(r"calib(?:ration|rated|rate)?\d*")
+_ELEMENT_FOIL_REST = re.compile(r"foils?\d*")
+#: element + ``calib`` spellings that are a WORD, not an element's calibration: ``recalib`` (re-calibrated), and
+#: ``No`` (nobelium) is never read (``nocalib``: no calibration)
+_ELEMENT_CALIB_WORDS = frozenset({"recalib", "recalibration", "recalibrated", "recalibrate"})
+_ELEMENT_CALIB_NOT = frozenset({"no"})
+#: the elements an energy-calibration FOIL is commonly made of: ``Alfoil`` (a window or filter), ``Infoil``, ``Cfoil``,
+#: ``Bfoil``, ``nofoil`` are not read
+_FOIL_ELEMENTS = frozenset(e.casefold() for e in (
+    "Ti V Cr Mn Fe Co Ni Cu Zn Zr Mo Ru Rh Pd Ag Hf Ta W Re Ir Pt Au Pb Se").split())
+#: a word beside a foil that makes it something other than a reference (an electrode or its role, a cell part, a
+#: window or filter, the sample itself): ``Ptfoil_electrode``, ``Aufoil_cathode``, ``Cufoil_window``, ``Nifoil_WE``.
+#: Words are matched at a token's start; the electrode abbreviations WE / CE / RE only as a whole token.
+_FOIL_NOT_REFERENCE = re.compile(
+    r"^(?:electrode|working|counter|cathode|anode|cell|window|filter|kapton|tape|sample)|^(?:we|ce|re)$", re.IGNORECASE)
 _ENGINE_ROLE = {"alignment": ROLE_ALIGNMENT, "standard_or_reference": ROLE_REFERENCE}
 _NUMBERED_SCAN = re.compile(r"^(?P<stem>.+)\.(?P<index>\d{3})$")
 _SCAN_FILE_INDEX = re.compile(r"_(\d+)\.[A-Za-z0-9]+$")
@@ -741,14 +762,74 @@ def _name_tokens(name: str) -> list[str]:
 
 
 def role_from_name(name: str) -> tuple[str, str] | None:
-    """(role, token) when a name token marks a reference or alignment acquisition."""
+    """(role, token) when a name token marks a reference or alignment acquisition (a PROPOSAL the scientist confirms;
+    the token is the basis shown).
+
+    A token starting ``align``/``rough`` is alignment; one starting ``foil``/``calib``/``reference``/``standard`` or
+    equal to ``ref``/``std`` is a reference. THE ELEMENT RULE (:func:`element_reference_token`): a token that is a
+    chemical element symbol (the 118 of ``template.ELEMENT_SYMBOLS``, matched without case) followed by ``calib`` or
+    ``foil`` and nothing else but a calibration ending or digits (``SCALIB_901``, ``FeFOIL``, ``CuFoil_01``) is a
+    reference too, conservatively: not ``Scalibur`` or ``SCALE`` (no such word follows), not ``Recalib`` (a word,
+    :data:`_ELEMENT_REFERENCE_WORDS`), and not in a name that also writes a condition (a potential, pH,
+    concentration or open circuit: ``NiFoil_1MKOH_0p5V`` is a foil ELECTRODE measured as a sample)."""
     for tok in _name_tokens(name):
         if tok.startswith(_ALIGN_PREFIXES):
             return ROLE_ALIGNMENT, tok
     for tok in _name_tokens(name):
         if tok.startswith(_REFERENCE_PREFIXES) or tok in _REFERENCE_EXACT:
             return ROLE_REFERENCE, tok
+    tok = element_reference_token(name)
+    if tok is not None:
+        return ROLE_REFERENCE, tok
     return None
+
+
+def name_role(name: str) -> tuple[str, dict] | None:
+    """``(role, role_basis)`` a NAME proposes (:func:`role_from_name`), or ``None``. The basis is the rule's own:
+    ``name_token`` of :data:`ROLE_RULE_ID` for the prefix rules, ``element_name_token`` of
+    :data:`ELEMENT_ROLE_RULE_ID` for the element rule (so a run the prefix rules classify keeps its basis)."""
+    named = role_from_name(name)
+    if named is None:
+        return None
+    if named[0] == ROLE_REFERENCE and element_reference_token(name) == named[1] and not _prefix_reference(named[1]):
+        return named[0], {"rule_id": ELEMENT_ROLE_RULE_ID, "basis": ELEMENT_ROLE_BASIS, "token": named[1], "name": name}
+    return named[0], {"rule_id": ROLE_RULE_ID, "basis": "name_token", "token": named[1], "name": name}
+
+
+def _prefix_reference(tok: str) -> bool:
+    return tok.startswith(_REFERENCE_PREFIXES) or tok in _REFERENCE_EXACT
+
+
+def element_reference_token(name: str) -> str | None:
+    """The first token of ``name`` (casefolded) that the ELEMENT rule reads as a reference, or ``None``:
+
+    * an element symbol (``template.ELEMENT_SYMBOLS``, matched without case) + ``calib`` (``SCALIB``, ``Aucalib2``),
+      any element but ``No``, and not the word ``recalib``;
+    * a common calibration-foil element (:data:`_FOIL_ELEMENTS`) + ``foil`` (``FeFOIL``, ``CuFoil``), and only when
+      no other token is an electrode / cathode / anode / WE / CE / RE / cell / window / filter / sample word
+      (:data:`_FOIL_NOT_REFERENCE`) or an electrolyte formula (``NiFoil_KOH``);
+    * never in a name that writes a condition (a potential, pH, concentration, open circuit)."""
+    from .template import ELEMENT_SYMBOLS, electrolyte_formula
+
+    symbols = {e.casefold() for e in ELEMENT_SYMBOLS}
+    tokens = _name_tokens(name)
+    found = foil = None
+    for tok in tokens:
+        for n in (1, 2):
+            head, rest = tok[:n], tok[n:]
+            if head in symbols and head not in _ELEMENT_CALIB_NOT and tok not in _ELEMENT_CALIB_WORDS \
+                    and _ELEMENT_CALIB_REST.fullmatch(rest):
+                found = tok
+            elif head in _FOIL_ELEMENTS and _ELEMENT_FOIL_REST.fullmatch(rest):
+                found, foil = tok, tok
+        if found:
+            break
+    if found is None or any(_condition_shaped(t) for t in _stem_tokens(name)):
+        return None
+    if foil is not None and any(t != foil and (_FOIL_NOT_REFERENCE.match(t) or electrolyte_formula(orig))
+                                for t, orig in zip(tokens, [x for x in re.split(r"[_\-\s.]+", str(name)) if x])):
+        return None
+    return found
 
 
 def run_role(run: Mapping, sources_by_id: Mapping[str, Mapping] | None = None) -> tuple[str, dict]:
@@ -757,7 +838,8 @@ def run_role(run: Mapping, sources_by_id: Mapping[str, Mapping] | None = None) -
     1. The engine's content-led classifier: ``source_type`` ``alignment`` -> alignment,
        ``standard_or_reference`` -> reference.
     2. Otherwise a stem token: starting ``align``/``rough`` -> alignment; starting
-       ``foil``/``calib``/``reference``/``standard`` or equal to ``ref``/``std`` -> reference.
+       ``foil``/``calib``/``reference``/``standard`` or equal to ``ref``/``std`` -> reference; an element
+       symbol + ``calib``/``foil`` (``SCALIB``, ``FeFOIL``; :func:`role_from_name`) -> reference.
     3. Otherwise ``sample``.
     """
     stype = run.get("source_type")
@@ -772,9 +854,9 @@ def run_role(run: Mapping, sources_by_id: Mapping[str, Mapping] | None = None) -
             "classifier_reason": cls.get("reason"),
             "source_id": run.get("acquisition_source_id"),
         }
-    named = role_from_name(str(run.get("stem") or run.get("label") or ""))
+    named = name_role(str(run.get("stem") or run.get("label") or ""))
     if named:
-        return named[0], {"rule_id": ROLE_RULE_ID, "basis": "name_token", "token": named[1], "name": run.get("stem"), "source_id": run.get("acquisition_source_id")}
+        return named[0], {**named[1], "name": run.get("stem"), "source_id": run.get("acquisition_source_id")}
     return ROLE_SAMPLE, {"rule_id": ROLE_RULE_ID, "basis": "default_sample", "source_type": stype}
 
 
@@ -1474,7 +1556,7 @@ def propose_unread_acquisition_groups(bundle: Mapping) -> list[dict]:
     for (parent, stem), scans in sorted(acqs.items()):
         scans.sort(key=lambda s: s["scan_index"])
         key = f"unread:{parent}/{stem}" if parent else f"unread:{stem}"
-        named = role_from_name(stem)
+        named = name_role(stem)
         role = named[0] if named else ROLE_SAMPLE
         out.append(
             {
@@ -1486,9 +1568,7 @@ def propose_unread_acquisition_groups(bundle: Mapping) -> list[dict]:
                 "member_run_keys": [],
                 "member_scans": scans,
                 "role": role,
-                "role_basis": {"rule_id": ROLE_RULE_ID, "basis": "name_token", "token": named[1], "name": stem}
-                if named
-                else {"rule_id": ROLE_RULE_ID, "basis": "default_sample"},
+                "role_basis": named[1] if named else {"rule_id": ROLE_RULE_ID, "basis": "default_sample"},
                 "basis": {"sample": {}, "technique": {}, "environment": {}, "conditions": {}},
                 "split_reasons": [{"code": "conditions_not_extracted_by_import"}],
                 "status": "proposed",
@@ -1669,7 +1749,7 @@ def groups_from_generic_runs(runs: Iterable[Any], *, experiment_key: str, source
                     "scan_index": _attr(sc, "scan_index", "index", default=i + 1),
                 }
             )
-        named = role_from_name(stem)
+        named = name_role(stem)
         out.append(
             {
                 "group_id": group_id_for(experiment_key, [key]),
@@ -1680,9 +1760,7 @@ def groups_from_generic_runs(runs: Iterable[Any], *, experiment_key: str, source
                 "member_run_keys": [],
                 "member_scans": scans,
                 "role": named[0] if named else ROLE_SAMPLE,
-                "role_basis": {"rule_id": ROLE_RULE_ID, "basis": "name_token", "token": named[1], "name": stem}
-                if named
-                else {"rule_id": ROLE_RULE_ID, "basis": "default_sample"},
+                "role_basis": named[1] if named else {"rule_id": ROLE_RULE_ID, "basis": "default_sample"},
                 "basis": {"sample": {}, "technique": {}, "environment": {}, "conditions": {}},
                 "split_reasons": [{"code": "conditions_not_extracted_by_import"}],
                 "status": "proposed",

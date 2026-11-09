@@ -260,7 +260,7 @@ READER_LAYOUT = {
     "xes_tab_v1": "tab-separated columns whose header names are xes<N>",
     "mca_v1": "one MCA array of counts (#@MCA header, @A array)",
     "two_column_v1": "two numbers per line, no header",
-    "ssrl_xdc_v1": "SSRL EXAFS Data Collector 4.0 text scan",
+    "ssrl_xdc_v1": "SSRL EXAFS Data Collector 2.0 or 4.0 text scan",
     "xdi_v1": "XDI text file",
 }
 NA_STATEMENTS = {
