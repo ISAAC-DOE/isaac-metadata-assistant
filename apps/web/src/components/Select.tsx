@@ -482,7 +482,14 @@ export const Select = forwardRef<HTMLButtonElement, SelectProps>(function Select
         {...dataAttributes}
         data-value={value}
         disabled={disabled}
-        onClick={() => (open ? close() : openWith(selectedIndex >= 0 ? selectedIndex : firstEnabled()))}
+        onClick={(e) => {
+          // Safari (WebKit on macOS) does not focus a button it clicks. Focus is what the keys, the
+          // blur-close and `aria-activedescendant` hang on, so the trigger takes it here: without
+          // this, a picker opened by a click in Safari ignored Escape and the arrows.
+          if (document.activeElement !== e.currentTarget) e.currentTarget.focus();
+          if (open) close();
+          else openWith(selectedIndex >= 0 ? selectedIndex : firstEnabled());
+        }}
         onKeyDown={onKeyDown}
         onKeyUp={(e) => {
           // A button activates on Space at keyup (Firefox does so even when the keydown was prevented), which

@@ -588,6 +588,17 @@ describe('Select', () => {
     });
   });
 
+  it('a click focuses the trigger, as Safari does not, so the keys reach an open picker', () => {
+    render(<Harness />);
+    expect(document.activeElement).not.toBe(combo());
+    fireEvent.click(combo()); // fireEvent moves no focus, like a click in Safari
+    expect(document.activeElement).toBe(combo());
+    expect(combo()).toHaveAttribute('aria-expanded', 'true');
+    key('Escape');
+    expect(combo()).toHaveAttribute('aria-expanded', 'false');
+    expect(document.activeElement).toBe(combo());
+  });
+
   it('shows a value the options do not offer as itself, muted, and never changes it', () => {
     const onChange = vi.fn();
     render(<Harness initial="durian" onChange={onChange} />);
