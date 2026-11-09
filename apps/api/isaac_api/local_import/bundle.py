@@ -2861,19 +2861,31 @@ ZIP_INSIDE_ZIP_REASON = (
     "were read. To read them, unzip the imported ZIP and import the unzipped folder instead: a ZIP inside a "
     "folder is opened."
 )
-#: The codes a not-opened inner ZIP's row had before it is named (the engine has no reader for a ``.zip``).
-_ZIP_INSIDE_ZIP_REPLACES = frozenset({"no_reader_for_source_type", "content_unavailable"})
+#: The code a not-opened inner ZIP's row has before it is named: the engine has no reader for a ``.zip``. Only
+#: that one is renamed; a row the engine refused for a reason of its own keeps that reason.
+_ZIP_INSIDE_ZIP_REPLACES = frozenset({"no_reader_for_source_type"})
 
 
-def _zip_inside_zip_rows(unread: list[dict]) -> None:
-    """For a ZIP ROOT only: name each inner ``.zip`` member's unread row for what it is (see
-    :data:`ZIP_INSIDE_ZIP_REASON_CODE`). Only rows of a real member (one with a ``source_id``) whose code
-    says no reader read it are renamed; the row stays, and nothing else about it changes."""
+def _zip_inside_zip_rows(generic: Any, unread: list[dict], sources: list[dict]) -> None:
+    """For a ZIP ROOT only: name each inner ZIP's unread row for what it is (:data:`ZIP_INSIDE_ZIP_REASON_CODE`).
+
+    Only a member whose bytes OPEN as a ZIP (``generic.zip_members``, decided on the staged bytes by the test a
+    folder import's nested walk passes) is renamed, since only that one an import of the unzipped folder opens; a
+    ``.zip``-named file that is not a ZIP keeps the row it had. The row must be a real member's (it has a
+    ``source_id``) that no reader read. Its source's ``reader.refused_reason`` is set to the same sentence, so
+    ``bundle show source`` and ``unread_files`` say one thing; the row stays, and nothing else changes."""
+    openable = set(getattr(generic, "zip_members", None) or ())
+    if not openable:
+        return
+    by_sid = {s.get("source_id"): s for s in sources}
     for row in unread:
-        if (row.get("source_id") and str(row.get("relative_path") or "").lower().endswith(".zip")
+        if (row.get("source_id") and row.get("relative_path") in openable
                 and row.get("reason_code") in _ZIP_INSIDE_ZIP_REPLACES):
             row["reason_code"] = ZIP_INSIDE_ZIP_REASON_CODE
             row["reason"] = ZIP_INSIDE_ZIP_REASON
+            src = by_sid.get(row["source_id"])
+            if src is not None and not (src.get("reader") or {}).get("content_read"):
+                src["reader"]["refused_reason"] = ZIP_INSIDE_ZIP_REASON
 
 
 def zip_inside_zip_count(bundle: Mapping) -> int:
@@ -4026,7 +4038,7 @@ def build_bundle(
         if generic_claimed:
             unread = [u for u in unread if u["relative_path"] not in generic_claimed]
     if source_kind == "zip":
-        _zip_inside_zip_rows(unread)
+        _zip_inside_zip_rows(generic, unread, sources)
     propose_processed_links(processed_outputs, runs)
     runs_by_id = {r["run_id"]: r for r in runs}
 

@@ -46,6 +46,7 @@ import hashlib
 import re
 import tempfile
 import zipfile
+import zlib
 from dataclasses import dataclass, field, replace
 from pathlib import Path, PurePosixPath
 from typing import Iterable
@@ -113,6 +114,9 @@ class UnifiedCollection:
     #: Nested members the engine walk accepted but that could not be handed to the generic
     #: readers: ``{relative_path, reason}``. They are reported, never silently dropped.
     staging_failures: list[dict] = field(default_factory=list)
+    #: A ZIP given AS THE ROOT only: the members named ``.zip`` whose bytes OPEN as a ZIP archive (see
+    #: :func:`_opens_as_zip`), i.e. the ones an import of the unzipped folder would open. In walk order.
+    zip_members: list[str] = field(default_factory=list)
 
 
 _SAFE_SUFFIX = re.compile(r"^\.[A-Za-z0-9_-]{1,15}$")
@@ -202,6 +206,27 @@ def _stage_member(
     return None
 
 
+#: What counts as "this is not an openable ZIP": the error classes the engine's own ZIP walk catches.
+_NOT_A_ZIP = (zipfile.BadZipFile, OSError, EOFError, zlib.error, ValueError, RuntimeError, NotImplementedError)
+
+
+def _opens_as_zip(path: Path) -> bool:
+    """Whether the file at ``path`` opens as a ZIP archive, by the test a folder import's nested walk passes.
+
+    ``bl15.archive.walk_nested_zip`` marks a ZIP in a folder ``walked`` unless ``inventory_zip`` could not open
+    it or read its central directory; this is that same test (``zipfile.is_zipfile`` -- the engine's own test
+    for a ZIP ROOT -- then opening it and listing its members), and it reads NO member. A file merely named
+    ``.zip`` (empty, junk, a scan saved under that name) is not one, and a folder import would not open it."""
+    try:
+        if not zipfile.is_zipfile(path):
+            return False
+        with zipfile.ZipFile(path, "r") as zf:
+            zf.infolist()
+    except _NOT_A_ZIP:
+        return False
+    return True
+
+
 def _folder_walk_order(rel: str) -> list[str]:
     """The sort key that lists archive paths in the order :func:`~._common.walk` lists the same
     files in a folder: depth-first, each directory's entries by name, so ``b/x`` comes before
@@ -216,8 +241,11 @@ def _zip_root_members(
     refused: list[dict],
     trunc: dict[str, int],
     failures: list[dict],
+    zip_members: list[str] | None = None,
 ) -> list[FileEntry]:
     """Every member of the top-level ZIP the ENGINE accepts, staged under ``staging``.
+
+    ``zip_members`` (when given) receives each staged ``.zip`` member that opens as a ZIP archive.
 
     The walk IS the engine's: ``archive.inventory_zip(..., refuse_duplicates=True)``, the call
     ``historical_import._inventory_and_containers_of`` makes for a ZIP root, so the guards
@@ -263,6 +291,8 @@ def _zip_root_members(
         )
         if dest is not None:
             out.append((entry.archive_path, dest, len(data)))
+            if zip_members is not None and entry.extension == "zip" and _opens_as_zip(dest):
+                zip_members.append(entry.archive_path)
     out.sort(key=lambda f: _folder_walk_order(f[0]))
     return out
 
@@ -373,11 +403,15 @@ def collect_all_generic_zip(
     staging_failures: list[dict] = []
     staging_dir = tempfile.TemporaryDirectory(prefix="isaac-zip-root-")
     try:
-        files = _zip_root_members(path, Path(staging_dir.name), limits, refused, trunc, staging_failures)
-        return _collect(
+        zip_members: list[str] = []
+        files = _zip_root_members(path, Path(staging_dir.name), limits, refused, trunc, staging_failures, zip_members)
+        order = {rel: i for i, (rel, _p, _s) in enumerate(files)}
+        collection = _collect(
             path, files, limits, skip, refused, trunc, staging_dir,
             expand_nested=False, staging_failures=staging_failures,
         )
+        collection.zip_members = sorted(zip_members, key=order.__getitem__)
+        return collection
     finally:
         staging_dir.cleanup()
 

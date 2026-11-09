@@ -153,11 +153,11 @@ def same_groups_but_for_the_label(zipped: dict, folder: dict) -> bool:
 
 
 def extensions(bundle: dict) -> list[tuple[str, str]]:
-    """``(relative path, extension)`` of every processed-output file and every XDI run hint, in bundle order."""
+    """``(relative path, extension)`` of every processed-output file, in bundle order. That is the one place a
+    reader's suffix (``Path.suffix`` of the staged file) reaches the bundle: a run reader's ``role_hints`` are not
+    written to ``runs[]``, and ``sources[].extension`` is the engine's, taken from the member name."""
     out = [(f["relative_path"], f["extension"]) for po in bundle["processed_outputs"] for f in po["files"]]
-    for r in bundle["runs"]:
-        hints = (r.get("other_relationships") or {}).get("role_hints") or r.get("role_hints") or {}
-        out += [(r["run_key"], e) for e in hints.get("extensions") or ()]
+    assert out, "the fixture must hold processed outputs, or this compares nothing"
     return out
 
 
@@ -415,21 +415,79 @@ def test_a_zip_among_the_members_is_not_opened_like_the_engine(tmp_path, capsys)
     assert "SAMPLEIN" in {r["stem"] for r in unzipped["runs"]} and B.zip_inside_zip_count(unzipped) == 0
 
 
-def test_inner_zip_rows_are_counted_and_worded_for_two_and_a_corrupt_one(tmp_path, capsys):
+def _inner_zip_case(tmp_path: Path) -> tuple[Path, Path, dict[str, bytes]]:
+    """A beamtime with two real inner ZIPs (one upper-case ``.ZIP``) and three files only NAMED ``.zip``."""
     src = tmp_path / "src"
     make_scan(src / "SAMPLEX_A.001")
     inner = tmp_path / "i.zip"
     with zipfile.ZipFile(inner, "w") as zf:
         zf.writestr("x.txt", "synthetic")
-    z = zip_of(src, tmp_path / "s.zip", extra={"a/One.zip": inner.read_bytes(), "Two.ZIP": b"not a zip at all"})
+    extra = {
+        "a/One.zip": inner.read_bytes(),
+        "Two.ZIP": inner.read_bytes(),
+        "Junk.zip": b"not a zip at all",
+        "Empty.zip": b"",
+        "Scan.zip": (src / "SAMPLEX_A.001").read_bytes(),  # a scan saved under a .zip name
+    }
+    return src, zip_of(src, tmp_path / "s.zip", extra=extra), extra
+
+
+def test_only_inner_files_that_are_zips_get_the_zip_inside_zip_row(tmp_path, capsys):
+    src, z, extra = _inner_zip_case(tmp_path)
     assert cli.main(["import", str(z), "--out", str(tmp_path / "out")]) == 0
     printed = capsys.readouterr().out
     bundle = json.loads((tmp_path / "out" / "bundle.json").read_text(encoding="utf-8"))
+    assert B.validate_bundle(bundle) == []
     rows = unread(bundle)
-    assert {p: rows[p]["reason_code"] for p in ("a/One.zip", "Two.ZIP")} == {
-        "a/One.zip": "zip_inside_zip_not_opened", "Two.ZIP": "zip_inside_zip_not_opened"}
-    assert "  2 ZIP files inside the imported ZIP were not opened" in printed
-    assert "to read their files" in printed
+    assert {p: rows[p]["reason_code"] for p in extra} == {
+        "a/One.zip": "zip_inside_zip_not_opened", "Two.ZIP": "zip_inside_zip_not_opened",
+        # not ZIPs: the advice "import the unzipped folder" would be wrong for them, so they keep their own row
+        "Junk.zip": "no_reader_for_source_type", "Empty.zip": "no_reader_for_source_type",
+        "Scan.zip": "no_reader_for_source_type"}
+    assert all(rows[p]["reason"] != B.ZIP_INSIDE_ZIP_REASON for p in ("Junk.zip", "Empty.zip", "Scan.zip"))
+    assert "  2 ZIP files inside the imported ZIP were not opened" in printed and "to read their files" in printed
+    # ... because the unzipped folder opens the two ZIPs and refuses the other three
+    folder = tmp_path / "unzipped"
+    shutil.copytree(src, folder)
+    for name, data in extra.items():
+        (folder / name).parent.mkdir(parents=True, exist_ok=True)
+        (folder / name).write_bytes(data)
+    rows_f = unread(run_import(folder, tmp_path / "out-folder", capsys))
+    assert {p: rows_f[p]["reason_code"] for p in ("Junk.zip", "Empty.zip", "Scan.zip")} == dict.fromkeys(
+        ("Junk.zip", "Empty.zip", "Scan.zip"), "reader_refused")
+    assert "a/One.zip" not in rows_f and "Two.ZIP" not in rows_f  # walked: their members are sources
+
+
+def test_bundle_show_source_says_what_the_unread_row_says(tmp_path, capsys):
+    _src, z, _extra = _inner_zip_case(tmp_path)
+    out = tmp_path / "out"
+    bundle = run_import(z, out, capsys)
+    by_path = {s["relative_path"]: s for s in bundle["sources"]}
+    for path, reason in (("a/One.zip", B.ZIP_INSIDE_ZIP_REASON), ("Junk.zip", unread(bundle)["Junk.zip"]["reason"])):
+        src = by_path[path]
+        assert src["reader"]["refused_reason"] == unread(bundle)[path]["reason"] == reason
+        assert cli.main(["bundle", "show", str(out), "source", src["source_id"]]) == 0
+        shown = json.loads(capsys.readouterr().out)
+        assert shown["reader"]["refused_reason"] == reason and shown["reader"]["content_read"] is False
+    assert by_path["Junk.zip"]["reader"]["refused_reason"].startswith("This build has no reader")
+
+
+def test_build_bundle_renames_inner_zips_only_for_a_zip_root(tmp_path):
+    """The rename is keyed on the SOURCE KIND, not only on the generic collection: the same reading and the same
+    generic collection built as a ``folder`` bundle keep the engine's rows (a folder's ZIPs are walked instead)."""
+    _src, z, _extra = _inner_zip_case(tmp_path)
+    built = {}
+    for kind in ("zip", "folder"):
+        evidence: dict = {}
+        reading, candidates = hist.read_local_archive(z, source_id="local", evidence_sink=evidence)
+        engine_read = [r["archive_path"] for r in reading.reading if r.get("parser_id") and r.get("refused_reason") is None]
+        generic = readers.collect_all_generic_zip(z, skip=engine_read)
+        assert generic.zip_members == ["Two.ZIP", "a/One.zip"]
+        built[kind] = B.build_bundle(reading, candidates, evidence_by_source=evidence, source_kind=kind,
+                                     created_utc="2099-01-01T00:00:00Z", generic=generic, source_root=z)
+    assert B.zip_inside_zip_count(built["zip"]) == 2
+    assert B.zip_inside_zip_count(built["folder"]) == 0
+    assert unread(built["folder"])["a/One.zip"]["reason_code"] == "no_reader_for_source_type"
 
 
 def test_a_folder_root_keeps_its_nested_zip_rows_unchanged(tmp_path, capsys):
