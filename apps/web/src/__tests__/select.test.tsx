@@ -615,7 +615,27 @@ describe('Select', () => {
     fireEvent.blur(c);
     expect(onChange).not.toHaveBeenCalled();
     expect(selectValue(c)).toBe('durian');
-    // An empty value still shows the placeholder; a chosen option drops the muted look.
+    // Opened by click or key, nothing is highlighted, so Tab, Enter and Space leave the value alone.
+    for (const open of [() => fireEvent.click(c), () => key('ArrowDown'), () => key('Enter'), () => key(' ')]) {
+      open();
+      expect(c).toHaveAttribute('aria-expanded', 'true');
+      expect(c).not.toHaveAttribute('aria-activedescendant');
+      key('Tab');
+      expect(c).toHaveAttribute('aria-expanded', 'false');
+    }
+    key('Enter');
+    key('Enter');
+    key(' ');
+    key(' ');
+    expect(onChange).not.toHaveBeenCalled();
+    expect(selectValue(c)).toBe('durian');
+    // Moving to an option is a choice: ArrowDown from nothing lands on the first, and Tab commits it.
+    key('ArrowDown');
+    key('ArrowDown');
+    key('Tab');
+    expect(onChange).toHaveBeenCalledTimes(1);
+    onChange.mockClear();
+    // A chosen option drops the muted look.
     chooseValue(c, 'cherry');
     expect(c).toHaveTextContent('Cherry');
     expect(c).not.toHaveClass('is-unknown');

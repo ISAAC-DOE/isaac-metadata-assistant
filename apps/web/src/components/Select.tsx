@@ -192,6 +192,12 @@ export const Select = forwardRef<HTMLButtonElement, SelectProps>(function Select
   );
   const firstEnabled = useCallback(() => order.find(enabled) ?? -1, [order, enabled]);
   const lastEnabled = useCallback(() => [...order].reverse().find(enabled) ?? -1, [order, enabled]);
+  /**
+   * Where the highlight starts on opening: the chosen option, else the first one. A value the options do
+   * not offer opens with nothing highlighted, so Tab, Enter or Space cannot replace it with an option the
+   * person never moved to; the arrows still start from the top.
+   */
+  const openingIndex = () => (selectedIndex >= 0 ? selectedIndex : unknown ? -1 : firstEnabled());
 
   const openWith = useCallback(
     (index: number) => {
@@ -252,10 +258,10 @@ export const Select = forwardRef<HTMLButtonElement, SelectProps>(function Select
     const searching = Date.now() - search.current.at <= TYPEAHEAD_MS && search.current.text !== '';
 
     if (!open) {
-      const start = selectedIndex >= 0 ? selectedIndex : firstEnabled();
+      const start = openingIndex();
       if (key === 'ArrowDown' || key === 'ArrowUp' || key === 'Enter' || key === ' ') {
         e.preventDefault();
-        openWith(key === 'ArrowUp' && selectedIndex < 0 ? firstEnabled() : start);
+        openWith(start);
       } else if (key === 'Home') {
         e.preventDefault();
         openWith(firstEnabled());
@@ -488,7 +494,7 @@ export const Select = forwardRef<HTMLButtonElement, SelectProps>(function Select
           // this, a picker opened by a click in Safari ignored Escape and the arrows.
           if (document.activeElement !== e.currentTarget) e.currentTarget.focus();
           if (open) close();
-          else openWith(selectedIndex >= 0 ? selectedIndex : firstEnabled());
+          else openWith(openingIndex());
         }}
         onKeyDown={onKeyDown}
         onKeyUp={(e) => {
