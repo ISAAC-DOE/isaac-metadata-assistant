@@ -218,7 +218,7 @@ empty; `ISAAC Suggestions` shows what each run's own files say; every `--out` of
 `<isaac> bundle template import <bundle> <file.xlsx> --by "<name>"` previews; read back every invalid
 cell, clash, replaced or contradicted file reading, beamtime-wide cell and unread column, and add
 `--apply` only on their yes. Never fill the sheet for them; never import ISAAC's blank template. **They already filled ISAAC's template and say to use it:**
-`<isaac> bundle template adopt` (see "The scientist's own filled sheet" in the reference).
+`<isaac> bundle template adopt` (see "The scientist's own filled sheet" in the reference). **A question workbook came back filled in:** `reference/workbook-answers.md` (`bundle answers import` previews; apply to a copy, real only on the user's word).
 They may also answer on the local-only *Local Imports* page (see the reference); run `bundle questions` again after. If the beamline question says "The files' beamline hints disagree", read both hints back and ask; never pick one.
 
 ## Step 8 · Build and validate

@@ -1099,6 +1099,20 @@ sample form and formula). The template lets a scientist answer them in one sitti
   their kind, the value), then every invalid cell, clash, refusal and refused row in full,
   then totals; cells recorded nowhere and unmapped columns get one line per column. `--full`
   lists every decision and cell; `--json` prints the whole report.
+- **A filled question workbook** (the spreadsheet of consolidated questions a scientist is sent, one tab per kind,
+  an `ISAAC question ID` column and a `YOUR ANSWER` column): `isaac bundle answers import <dir> <file.xlsx> --by
+  "<name>" [--orcid ...] [--folder <name>] [--apply] [--json]` (`workbook_answers.py`). A preview by default:
+  each answered row of this bundle's folder becomes the exact `bundle decide` it stands for, dry-run through
+  `mutations.decide_question` / `mutations.decide` (`dry_run=True`) on a temporary copy of `bundle.json`, so
+  the bundle folder is not touched. `yes`/`ok` accepts the row's shown suggestion only when it is the files'
+  value (`confirm`) or exactly a value the question offers now (`correct`); a typed value is a `correct`,
+  parsed as a template cell, an off-list word kept as a vocabulary request as `decide --as-said` keeps it;
+  blank, `no` and `unsure` record nothing. Rules, new questions, rule proposals and the Athena merges tab
+  are reported (Athena rows with their `athena_match` / `athena_match_not` / `athena_ignore` entries),
+  never applied; "same for all" is reported, never expanded. `--apply` records through the same calls with
+  the note `workbook <file> '<tab>'!<cell>`; a second run records nothing new. It refuses (exit 4) a bundle
+  inside a folder named `_runs…`. Tabs and columns are found from header rows, not titles; an unknown tab
+  is listed, an id that no longer resolves is listed per row with the reason.
 
 ## 20. Suggestions: the absorber, facility hints, and a Claude reading pass
 
