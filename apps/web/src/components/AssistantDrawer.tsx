@@ -308,6 +308,11 @@ export function AssistantDrawer({
 
     function onKeyDown(e: KeyboardEvent) {
       if (e.key === 'Escape') {
+        // Escape on a picker (`Select`, any combobox) is the picker's key, not the drawer's. This listener runs
+        // in the capture phase, before the picker sees the key, so it has to step aside here: an open picker
+        // then closes only itself (and stops the key), and a closed one leaves the drawer as it is, so a second
+        // Escape after closing a picker does not take the whole panel away.
+        if (e.target instanceof Element && e.target.closest('[role="combobox"]')) return;
         e.stopPropagation();
         setOpen(false);
         return;

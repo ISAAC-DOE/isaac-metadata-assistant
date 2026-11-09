@@ -1,8 +1,9 @@
-import { afterEach, describe, it, expect, vi } from 'vitest';
+import { afterEach, beforeEach, describe, it, expect, vi } from 'vitest';
 import { render, screen, fireEvent, within, act } from '@testing-library/react';
 import { useState } from 'react';
 
 import { Select, type SelectOption } from '../components/Select';
+import { AssistantDrawer } from '../components/AssistantDrawer';
 import { chooseOption, chooseValue, optionValues, selectGroups, selectValue } from '../test/controls';
 
 /**
@@ -10,6 +11,11 @@ import { chooseOption, chooseValue, optionValues, selectGroups, selectValue } fr
  * the label names it, the keys a person uses work, a choice is reported once, Escape changes nothing, focus
  * never leaves the trigger, and groups are exposed as groups.
  */
+
+const layerCss = import.meta.glob(
+  ['../components/select.css', '../components/assistant-drawer.css', '../components/help-tip.css', '../screens/screens.css'],
+  { query: '?raw', import: 'default', eager: true },
+) as Record<string, string>;
 
 const FRUIT: SelectOption[] = [
   { value: 'apple', label: 'Apple' },
@@ -401,9 +407,22 @@ describe('Select', () => {
    */
   describe('placement', () => {
     const { innerWidth: W, innerHeight: H } = window;
+    /** A fake `requestAnimationFrame`: callbacks wait in `frames` until `nextFrame()` runs them. */
+    let frames: FrameRequestCallback[] = [];
+    function nextFrame() {
+      const due = frames;
+      frames = [];
+      act(() => due.forEach((cb) => cb(0)));
+    }
+    beforeEach(() => {
+      frames = [];
+      vi.stubGlobal('requestAnimationFrame', (cb: FrameRequestCallback) => frames.push(cb));
+      vi.stubGlobal('cancelAnimationFrame', () => {});
+    });
     afterEach(() => {
       Object.defineProperty(window, 'innerWidth', { configurable: true, value: W });
       Object.defineProperty(window, 'innerHeight', { configurable: true, value: H });
+      vi.unstubAllGlobals();
       vi.restoreAllMocks();
     });
     function stubRect(el: Element, r: { top: number; left: number; width: number; height: number }) {
@@ -475,11 +494,76 @@ describe('Select', () => {
       stubRect(c, { top: -200, left: 40, width: 200, height: 40 });
       fireEvent.scroll(list);
       expect(c).toHaveAttribute('aria-expanded', 'true');
-      // The page scrolling it out of view does close it.
+      expect(frames).toHaveLength(0); // and asks for no measure
+      // The page scrolling it out of view does close it, at the next frame.
       act(() => {
         window.dispatchEvent(new Event('scroll'));
       });
+      nextFrame();
       expect(c).toHaveAttribute('aria-expanded', 'false');
+    });
+
+    it('measures at most once a frame, however many scroll and resize events arrive', () => {
+      Object.defineProperty(window, 'innerWidth', { configurable: true, value: 1000 });
+      Object.defineProperty(window, 'innerHeight', { configurable: true, value: 800 });
+      const { c, list } = renderClipped();
+      const measure = c.getBoundingClientRect as unknown as ReturnType<typeof vi.fn>;
+      fireEvent.click(c);
+      const afterOpen = measure.mock.calls.length;
+      expect(afterOpen).toBe(1); // opening places it once, straight away
+      act(() => {
+        for (let i = 0; i < 25; i++) window.dispatchEvent(new Event('scroll'));
+        window.dispatchEvent(new Event('resize'));
+      });
+      expect(measure.mock.calls.length).toBe(afterOpen); // nothing measured yet
+      expect(frames).toHaveLength(1); // one frame asked for
+      stubRect(c, { top: 300, left: 60, width: 200, height: 40 });
+      const moved = c.getBoundingClientRect as unknown as ReturnType<typeof vi.fn>;
+      moved.mockClear();
+      nextFrame();
+      expect(moved.mock.calls.length).toBe(1); // one measure for the whole burst
+      expect(list.style.top).toBe('344px');
+      // The next burst gets the next frame, and again only one.
+      act(() => {
+        for (let i = 0; i < 10; i++) window.dispatchEvent(new Event('scroll'));
+      });
+      expect(frames).toHaveLength(1);
+      nextFrame();
+      expect(moved.mock.calls.length).toBe(2);
+      expect(c).toHaveAttribute('aria-expanded', 'true');
+    });
+
+    it('closes when a scroll box around it scrolls the trigger out of the box, keeping the value and focus', () => {
+      Object.defineProperty(window, 'innerWidth', { configurable: true, value: 1000 });
+      Object.defineProperty(window, 'innerHeight', { configurable: true, value: 800 });
+      const onChange = vi.fn();
+      render(
+        <div data-testid="scroller" style={{ overflow: 'auto', height: 120 }}>
+          <Harness initial="banana" onChange={onChange} />
+        </div>,
+      );
+      const box = screen.getByTestId('scroller');
+      Object.defineProperty(box, 'clientHeight', { configurable: true, value: 120 });
+      Object.defineProperty(box, 'clientWidth', { configurable: true, value: 400 });
+      stubRect(box, { top: 100, left: 20, width: 400, height: 120 });
+      const c = combo();
+      stubRect(c, { top: 140, left: 40, width: 200, height: 40 });
+      c.focus();
+      fireEvent.click(c);
+      expect(c).toHaveAttribute('aria-expanded', 'true');
+      // Scrolled part-way out (its top edge still shows inside the box): it stays open.
+      stubRect(c, { top: 90, left: 40, width: 200, height: 40 });
+      fireEvent.scroll(box);
+      nextFrame();
+      expect(c).toHaveAttribute('aria-expanded', 'true');
+      // Scrolled wholly above the box's visible top, though still inside the viewport: it closes.
+      stubRect(c, { top: 40, left: 40, width: 200, height: 40 });
+      fireEvent.scroll(box);
+      nextFrame();
+      expect(c).toHaveAttribute('aria-expanded', 'false');
+      expect(selectValue(c)).toBe('banana');
+      expect(onChange).not.toHaveBeenCalled();
+      expect(document.activeElement).toBe(c);
     });
 
     it('re-places on resize while open, and removes its listeners when it closes', () => {
@@ -493,6 +577,7 @@ describe('Select', () => {
       act(() => {
         window.dispatchEvent(new Event('resize'));
       });
+      nextFrame();
       expect(list.style.top).toBe('344px');
       expect(list.style.left).toBe('60px');
       removed.mockClear();
@@ -500,6 +585,89 @@ describe('Select', () => {
       expect(c).toHaveAttribute('aria-expanded', 'false');
       const types = removed.mock.calls.map(([type]) => type);
       expect(types).toEqual(expect.arrayContaining(['resize', 'scroll']));
+    });
+  });
+
+  it('shows a value the options do not offer as itself, muted, and never changes it', () => {
+    const onChange = vi.fn();
+    render(<Harness initial="durian" onChange={onChange} />);
+    const c = combo();
+    expect(c).toHaveTextContent('durian'); // not a blank trigger, and not the placeholder either
+    expect(c).not.toHaveTextContent('Choose a fruit…');
+    expect(c).toHaveClass('is-unknown');
+    expect(c).not.toHaveClass('is-empty');
+    expect(selectValue(c)).toBe('durian');
+    // Opening and closing it again changes nothing; no option claims to be chosen.
+    key('ArrowDown');
+    expect(screen.getAllByRole('option').every((o) => o.getAttribute('aria-selected') === 'false')).toBe(true);
+    key('Escape');
+    fireEvent.blur(c);
+    expect(onChange).not.toHaveBeenCalled();
+    expect(selectValue(c)).toBe('durian');
+    // An empty value still shows the placeholder; a chosen option drops the muted look.
+    chooseValue(c, 'cherry');
+    expect(c).toHaveTextContent('Cherry');
+    expect(c).not.toHaveClass('is-unknown');
+  });
+
+  describe('inside the assistant drawer', () => {
+    function renderInDrawer() {
+      const view = render(
+        <AssistantDrawer railClassName="record-right narrow">
+          <Harness />
+        </AssistantDrawer>,
+      );
+      const trigger = view.container.querySelector('.assistant-drawer-trigger') as HTMLButtonElement;
+      fireEvent.click(trigger);
+      return view;
+    }
+
+    it('Escape on an open picker closes only the picker', () => {
+      const view = renderInDrawer();
+      const c = within(view.getByRole('dialog')).getByRole('combobox', { name: 'Fruit' });
+      c.focus();
+      fireEvent.keyDown(c, { key: 'ArrowDown' });
+      expect(c).toHaveAttribute('aria-expanded', 'true');
+      fireEvent.keyDown(c, { key: 'Escape' });
+      expect(c).toHaveAttribute('aria-expanded', 'false');
+      expect(view.getByRole('dialog')).toBeTruthy();
+      expect(document.activeElement).toBe(c);
+    });
+
+    it('Escape on a closed picker does nothing to the drawer; elsewhere in it, Escape still closes it', () => {
+      const view = renderInDrawer();
+      const c = within(view.getByRole('dialog')).getByRole('combobox', { name: 'Fruit' });
+      c.focus();
+      fireEvent.keyDown(c, { key: 'Escape' });
+      expect(view.getByRole('dialog')).toBeTruthy();
+      expect(c).toHaveAttribute('aria-expanded', 'false');
+      expect(document.activeElement).toBe(c);
+      const after = view.getByRole('button', { name: 'After' });
+      after.focus();
+      fireEvent.keyDown(after, { key: 'Escape' });
+      expect(view.queryByRole('dialog', { hidden: true })).toBeNull();
+    });
+  });
+
+  describe('layering', () => {
+    /** The `z-index` a rule whose selector list is exactly `selector` sets (the one rule of it that sets one). */
+    function zOf(file: string, selector: string): number {
+      const css = Object.entries(layerCss).find(([path]) => path.endsWith(file))?.[1] ?? '';
+      const head = new RegExp(`(?:^|\\n)\\s*${selector.replace(/[.[\]'=]/g, '\\$&')}\\s*\\{([^}]*)\\}`, 'g');
+      const set = [...css.matchAll(head)]
+        .map((m) => m[1].match(/z-index:\s*(\d+)/)?.[1])
+        .filter((z): z is string => z !== undefined);
+      expect(set, `${selector} in ${file} sets one z-index`).toHaveLength(1);
+      return Number(set[0]);
+    }
+
+    it('puts the popup above the Assistant pill, its backdrop and the drawer, and below a modal', () => {
+      const popup = zOf('select.css', '.select-popup');
+      expect(popup).toBeGreaterThan(zOf('assistant-drawer.css', '.assistant-drawer-trigger'));
+      expect(popup).toBeGreaterThan(zOf('assistant-drawer.css', ".assistant-drawer-backdrop[data-open='true']"));
+      expect(popup).toBeGreaterThan(zOf('assistant-drawer.css', '.assistant-drawer-panel[data-open]'));
+      expect(popup).toBeGreaterThanOrEqual(zOf('help-tip.css', '.helptip-panel'));
+      expect(popup).toBeLessThan(zOf('screens.css', '.artifact-modal-backdrop'));
     });
   });
 });
