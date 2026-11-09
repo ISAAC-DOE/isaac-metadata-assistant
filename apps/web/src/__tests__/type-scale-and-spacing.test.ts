@@ -313,8 +313,15 @@ const CEILING = {
    * canonical-home box — were deleted with the elements, not left unreferenced.
    * The replacement sheet (`screens/settings/settings-widgets.css`) is tokens only.
    * Read from this file's own counter's failure message.
+   *
+   * -> 986, LOWERED 2026-11-08 (final declutter cleanup) in the same change that
+   * deleted the unreferenced `.preexport-coverage-title`, `.ready-heading
+   * .ready-note`, `.guided-num`, `.guided-blank`, `.guided-structured-hint`,
+   * `.settings-tab-note` and `.onramp-warn` rules. Those took the counter past
+   * the tolerance below main's 1015 (the earlier declutter PRs had already
+   * removed the rest of the drop). Read from the counter.
    */
-  fontSize: 1015,
+  fontSize: 986,
   fontWeight: 282,
   lineHeight: 421,
   /*
