@@ -75,14 +75,23 @@ def test_a_generic_run_gets_the_same_missing_value_questions(mixed, tmp_path, ca
     assert asked and all(m["value"] is None for m in bundle["missing_values"] if m["run_id"] == run["run_id"])
 
 
-def test_a_zip_is_not_walked_by_the_generic_readers(tmp_path, capsys):
+def test_a_zip_root_is_walked_by_the_generic_readers_as_its_folder_is(tmp_path, capsys):
+    """Until 2026-11-09 a ZIP given as the root got no generic runs (this test pinned that). It now reads as its
+    folder does, under the engine's member path (wrapper stripped): see test_local_import_zip_root_generic.py."""
     import zipfile
 
     archive = tmp_path / "c.zip"
     with zipfile.ZipFile(archive, "w") as zf:
         zf.writestr("c/zz_scan.xdi", XDI)
     bundle = _import(capsys, archive, tmp_path / "out")
-    assert bundle["runs"] == [] and any(u["relative_path"] == "zz_scan.xdi" for u in bundle["unread_files"])
+    folder = tmp_path / "c"
+    folder.mkdir()
+    (folder / "zz_scan.xdi").write_text(XDI)
+    plain = _import(capsys, folder, tmp_path / "out-folder")
+    assert [r["run_key"] for r in bundle["runs"]] == [r["run_key"] for r in plain["runs"]] == ["xdi_v1:zz_scan"]
+    assert bundle["runs"][0]["scans"][0]["relative_path"] == "zz_scan.xdi"
+    assert all(u["relative_path"] != "zz_scan.xdi" for u in bundle["unread_files"])
+    assert B.validate_bundle(bundle) == []
 
 
 # --- (b) group / process ---------------------------------------------------------------------------

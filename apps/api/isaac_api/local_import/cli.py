@@ -567,22 +567,25 @@ def cmd_import(args) -> int:
 
     from .. import __version__
 
-    # GENERIC READERS (LOCAL-3): claim the files the engine did not read. A folder only —
-    # `collect_all_generic` walks a directory; a ZIP's members stay where the engine put them.
-    generic = None
-    if source.is_dir():
-        from .readers import collect_all_generic
+    # GENERIC READERS (LOCAL-3): claim the files the engine did not read. A folder is walked by
+    # `collect_all_generic`; a ZIP given as the root by `collect_all_generic_zip`, over the members
+    # the engine's own ZIP walk accepts and under the same relative paths (`read_local_archive`
+    # has already refused a root that is neither a folder nor a ZIP).
+    from .readers import collect_all_generic, collect_all_generic_zip
 
-        engine_read = [
-            row["archive_path"]
-            for row in reading.reading
-            if row.get("parser_id") and row.get("refused_reason") is None
-        ]
-        try:
+    engine_read = [
+        row["archive_path"]
+        for row in reading.reading
+        if row.get("parser_id") and row.get("refused_reason") is None
+    ]
+    try:
+        if source.is_dir():
             generic = collect_all_generic(source, skip=engine_read)
-        except ValueError as exc:
-            _err(f"Refused (generic readers): {exc}")
-            return EXIT_INPUT_REFUSED
+        else:
+            generic = collect_all_generic_zip(source, skip=engine_read)
+    except ValueError as exc:
+        _err(f"Refused (generic readers): {exc}")
+        return EXIT_INPUT_REFUSED
 
     try:
         bundle = B.build_bundle(
@@ -641,6 +644,12 @@ def cmd_import(args) -> int:
     )
     if c.get(B.HEADER_COMMENT_RUNS_NOT_READ):
         print(f"  {B.header_comment_runs_not_read_text(c[B.HEADER_COMMENT_RUNS_NOT_READ])}")
+    if n_inner := B.zip_inside_zip_count(bundle):
+        print(
+            f"  {n_inner} ZIP file{'s' if n_inner != 1 else ''} inside the imported ZIP {'were' if n_inner != 1 else 'was'} "
+            f"not opened (a ZIP inside a ZIP is not opened): to read {'their' if n_inner != 1 else 'its'} files, unzip "
+            "the imported ZIP and import the unzipped folder instead"
+        )
     if replaced:
         # c16-r L1: a re-import is a NEW bundle
         from .records import REIMPORT_CAVEAT

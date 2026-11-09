@@ -150,7 +150,7 @@ If `<isaac> bundle group --help` fails, say "grouping is not in this build", ski
 `<isaac> process <bundle> --source <folder>` once groups are confirmed. Always pass `--source`, the
 folder that was imported (the bundle records it only with `import --record-local-root`); without a
 readable one `process` refuses and writes nothing. After a ZIP import, ask the scientist to unzip it
-outside the bundle, and confirm the unzipped folder is the data they approved. Read the Processing
+outside the bundle, confirm it is the data they approved (all in one folder: pass that folder). Read the Processing
 section of `reference/grouping-and-processing.md`. Page results with
 `<isaac> bundle list <bundle> processing-results --limit 20`. For each group show the verdict in words,
 glitch flags (with `glitch_check_few_scans` or `glitch_points_on_edge`, say its sentence instead), skipped scans,

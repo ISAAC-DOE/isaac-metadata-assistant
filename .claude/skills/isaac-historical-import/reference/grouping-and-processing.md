@@ -71,7 +71,7 @@ Get the groups with `bundle list <bundle> groups` and one in full with `bundle s
 `isaac process <bundle> --source <folder>` (always give `--source`; the bundle records the folder only
 with `import --record-local-root`, and without a readable one `process` exits 2 and writes nothing. After
 a ZIP import, ask the scientist to unzip it outside the bundle and confirm the folder is the data they
-approved; `--group <id>` redoes only that group and keeps every other group's result,
+approved, and if everything in the ZIP is inside one folder pass that folder, where the bundle's paths start; `--group <id>` redoes only that group and keeps every other group's result,
 `kept_other_groups`; rejected, merged and split groups are skipped, `not_live_groups`) computes, per live group, a normalised spectrum, an edge position, a quality
 verdict (pass / warn / fail), glitch flags, and compares with the scientist's own Athena output when
 it finds one. Show per group, in words:
