@@ -18,12 +18,8 @@
   container: settings-panel / inline-size;
 }
 .settings-panel > .settings-grid,
-.settings-panel > .settings-tab-note,
 .settings-panel > .fetch-state {
   margin-top: var(--space-lg);
-}
-.settings-panel > .settings-tab-note + .settings-grid {
-  margin-top: var(--space-md);
 }
 
 .settings-grid {
@@ -62,13 +58,6 @@
   .settings-grid-overview > .settings-widget-walkthrough {
     grid-area: walk;
   }
-}
-
-.settings-tab-note {
-  max-width: 72ch;
-  font-size: var(--font-size-body);
-  line-height: var(--line-height-normal);
-  color: var(--text-secondary);
 }
 
 /* ---- the in-widget view switches ------------------------------------------

@@ -1659,6 +1659,12 @@ export const LABELS = {
   memoryTrustInfoLabel: 'What Each Check Means',
   memorySizeTitle: 'How Big Is It?',
   memoryOriginTitle: 'Where Did It Come From?',
+  /* The SOURCE graph's node count (`/api/graph/status` `node_count`). One name on
+     Project Memory and Statistics: the Graph tab draws a smaller served-file
+     projection of that graph, so a bare "Nodes" would read as the drawn count. */
+  sourceGraphNodes: 'Source Graph Nodes',
+  /* Statistics' link to the Data card on Settings → Overview (`?tab=data`). */
+  openDataSettings: 'Open Data Settings',
   // The graph command bar's disclosure for the hint and the suggested commands.
   graphCommandsToggle: 'Suggestions',
   graphCanvasInfoLabel: 'About This View',

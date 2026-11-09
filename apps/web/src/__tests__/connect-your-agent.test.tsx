@@ -31,7 +31,7 @@ import { existsSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 
 import { describe, it, expect, afterEach, vi } from 'vitest';
-import { render, screen, within, cleanup, fireEvent } from '@testing-library/react';
+import { render, screen, within, cleanup, fireEvent, act, waitFor } from '@testing-library/react';
 import { MemoryRouter } from 'react-router-dom';
 
 import { SettingsPage } from '../screens/SettingsPage';
@@ -48,6 +48,7 @@ import {
   mcpStateLine,
 } from '../lib/mcpConnectContent';
 import { CAPTURE_COPY } from '../lib/transcriptCaptureContent';
+import { ASSISTANT_COMPANION_COPY } from '../lib/assistantCompanionContent';
 import { claudeVoiceState } from '../components/ClaudeVoicePath';
 import { __resetHealthCache } from '../lib/useHealth';
 import {
@@ -96,10 +97,34 @@ function fullRoutes() {
   };
 }
 
+/**
+ * EVERY RENDER HERE WAITS FOR ITS READS TO SETTLE before a test looks at it.
+ *
+ * The page and the panel issue their reads on mount (`/api/about`, `/api/openapi`
+ * and `/api/graph/status` at page level, `/api/health` and the companion link in
+ * the widget), and the stubs answer on the next tick. A test that asserted at
+ * once and returned left those answers to land after it, outside `act()`, as
+ * React warnings, and it was asserting against the loading state rather than the
+ * page a reader sees. So the helpers resolve only once nothing is still reading:
+ * no loading panel, no companion "reading" line, the agent state line past
+ * "checking", and one act() turn for the page-level reads that draw nothing on
+ * this tab.
+ */
+async function settled(container: HTMLElement): Promise<void> {
+  await act(async () => {
+    await new Promise((r) => setTimeout(r, 0));
+  });
+  await waitFor(() => {
+    expect(container.querySelectorAll('.fetch-state[role="status"]')).toHaveLength(0);
+    expect(visibleText(container)).not.toContain(ASSISTANT_COMPANION_COPY.loadingLabel);
+    expect(visibleText(container)).not.toContain(MCP_CONNECT_COPY.stateLineChecking);
+  });
+}
+
 /** The whole Settings page, deep-linked to a tab exactly as a shared link would. */
-function renderSettings(entry = ROUTES.settingsTab('mcp')) {
+async function renderSettings(entry = ROUTES.settingsTab('mcp')) {
   stubFetchRoutes(fullRoutes());
-  return render(
+  const view = render(
     <MemoryRouter
       initialEntries={[entry]}
       future={{ v7_startTransition: true, v7_relativeSplatPath: true }}
@@ -107,10 +132,12 @@ function renderSettings(entry = ROUTES.settingsTab('mcp')) {
       <SettingsPage />
     </MemoryRouter>,
   );
+  await settled(view.container);
+  return view;
 }
 
 /** The panel alone, so the endpoint branch can be driven without a deployment. */
-function renderPanel(
+async function renderPanel(
   endpoint?: string | null,
   options: { withCompanion?: boolean; posture?: string | null } = {},
 ) {
@@ -118,9 +145,11 @@ function renderPanel(
     'GET /api/runtime/assistant-companion': { body: assistantCompanionUnconfigured },
     ...healthWithPosture(options.posture === undefined ? 'unmounted' : options.posture),
   });
-  return render(
+  const view = render(
     <ConnectYourAgentPanel endpoint={endpoint} withCompanion={options.withCompanion} />,
   );
+  await settled(view.container);
+  return view;
 }
 
 const norm = (s: string) => s.replace(/\s+/g, ' ').trim();
@@ -166,14 +195,14 @@ describe('Connect Your Agent — the tab', () => {
     expect(resolveSettingsTab('mcp')).toEqual({ tab: 'integrations', widget: 'settings-agent-heading' });
   });
 
-  it('renders as a named widget region on the Integrations tab', () => {
-    renderSettings(ROUTES.settingsTab('integrations'));
+  it('renders as a named widget region on the Integrations tab', async () => {
+    await renderSettings(ROUTES.settingsTab('integrations'));
     expect(screen.queryByRole('tab', { name: TAB_LABEL })).toBeNull();
     expect(screen.getByRole('region', { name: TAB_LABEL })).toBeInTheDocument();
   });
 
   it('opens from the ?tab=mcp deep link, with its real content and not an empty panel', async () => {
-    renderSettings();
+    await renderSettings();
     expect(screen.getByRole('tab', { name: 'Integrations' })).toHaveAttribute('aria-selected', 'true');
 
     const panel = screen.getByRole('tabpanel', { name: 'Integrations' });
@@ -202,7 +231,7 @@ describe('Connect Your Agent — the unconfigured state', () => {
    * Configuration" plus two paragraphs of reasons. It still overstates nothing.
    */
   it('states the unconfigured state as one plain line about who sets it up', async () => {
-    const { container } = renderPanel();
+    const { container } = await renderPanel();
     await screen.findByText(MCP_CONNECT_COPY.stateLine);
     expect(norm(visibleText(container))).toContain(norm(MCP_CONNECT_COPY.stateLine));
     expect(MCP_CONNECT_COPY.stateLine).toMatch(/administrator/i);
@@ -210,7 +239,7 @@ describe('Connect Your Agent — the unconfigured state', () => {
   });
 
   it('conveys the state as text inside a live region, not as colour', async () => {
-    const { container } = renderPanel();
+    const { container } = await renderPanel();
     // The state is announced if it ever changes, and reads identically to a
     // screen reader, a monochrome display and a sighted user.
     const status = screen.getByRole('status');
@@ -219,8 +248,8 @@ describe('Connect Your Agent — the unconfigured state', () => {
     expect(visibleText(container)).not.toMatch(/\b(green|amber|red|yellow)\b/i);
   });
 
-  it('shows no placeholder address while unconfigured', () => {
-    const { container } = renderPanel();
+  it('shows no placeholder address while unconfigured', async () => {
+    const { container } = await renderPanel();
     fireEvent.click(screen.getByRole('button', { name: MCP_WIDGET_COPY.detailsSummary }));
     expect(container.querySelector('.settings-agent-endpoint')).toBeNull();
     // The only address-shaped text is the inert `<address>` placeholder in a command.
@@ -255,8 +284,8 @@ function everyAttributeValue(container: HTMLElement): string[] {
 }
 
 describe('Connect Your Agent — negative controls', () => {
-  it('NOTHING on the tab reads "connected" when the deployment is unconfigured', () => {
-    const { container } = renderPanel();
+  it('NOTHING on the tab reads "connected" when the deployment is unconfigured', async () => {
+    const { container } = await renderPanel();
     expect(visibleText(container)).not.toMatch(/\bconnected\b/i);
     // And no element is *named* it either — an accessible name is text a user
     // reads, and a `Connected` chip whose label lived in `aria-label` would
@@ -266,13 +295,13 @@ describe('Connect Your Agent — negative controls', () => {
     }
   });
 
-  it('the same ratchet holds through the whole Settings page on this tab', () => {
-    const { container } = renderSettings();
+  it('the same ratchet holds through the whole Settings page on this tab', async () => {
+    const { container } = await renderSettings();
     expect(visibleText(container)).not.toMatch(/\bconnected\b/i);
   });
 
-  it('fabricates no endpoint URL — no URL appears in text or in any attribute', () => {
-    const { container } = renderPanel();
+  it('fabricates no endpoint URL — no URL appears in text or in any attribute', async () => {
+    const { container } = await renderPanel();
     expect(visibleText(container)).not.toMatch(/https?:\/\//i);
     expect(visibleText(container)).not.toMatch(/\bwss?:\/\//i);
     for (const value of everyAttributeValue(container)) {
@@ -280,8 +309,8 @@ describe('Connect Your Agent — negative controls', () => {
     }
   });
 
-  it('renders no last-activity value — absent is the honest value', () => {
-    const { container } = renderPanel();
+  it('renders no last-activity value — absent is the honest value', async () => {
+    const { container } = await renderPanel();
     const text = visibleText(container);
     // ~~"and it says why" (activityNone)~~ — the sentence was retired 2026-11-02;
     // what is pinned is that no activity value is ever rendered.
@@ -293,8 +322,8 @@ describe('Connect Your Agent — negative controls', () => {
     expect(container.querySelector('time')).toBeNull();
   });
 
-  it('offers no Revoke or Disconnect control', () => {
-    renderPanel();
+  it('offers no Revoke or Disconnect control', async () => {
+    await renderPanel();
     for (const button of screen.queryAllByRole('button')) {
       expect(
         button.textContent ?? '',
@@ -317,15 +346,15 @@ describe('Connect Your Agent — negative controls', () => {
     expect(visibleText(root)).not.toMatch(/\b(paste|enter|copy) your\b|\byour (api )?key\b/i);
   }
 
-  it('has NOTHING that accepts typing anywhere on the tab', () => {
+  it('has NOTHING that accepts typing anywhere on the tab', async () => {
     // Asserted against the mounted DOM, not by reading the source: a field
     // arriving through a shared component would be invisible to a grep and
     // is the likeliest way one would arrive.
-    const { container } = renderPanel();
+    const { container } = await renderPanel();
     assertNothingAcceptsTyping(container);
   });
 
-  it('…and none in the tab PANEL either, chrome and shared card included', () => {
+  it('…and none in the tab PANEL either, chrome and shared card included', async () => {
     /*
      * The check above mounts the panel body alone, which is the component this
      * slice wrote. This one mounts the real Settings page, deep-linked to the
@@ -334,13 +363,13 @@ describe('Connect Your Agent — negative controls', () => {
      * likeliest to arrive through shared furniture, and the narrower check is
      * exactly the one that would not see it.
      */
-    renderSettings();
+    await renderSettings();
     // The widget region — its own chrome and the shared Widget primitive's.
     assertNothingAcceptsTyping(screen.getByRole('region', { name: TAB_LABEL }));
   });
 
-  it('names no credential value and no environment variable that would hold one', () => {
-    const { container } = renderPanel();
+  it('names no credential value and no environment variable that would hold one', async () => {
+    const { container } = await renderPanel();
     const text = visibleText(container);
     expect(text).not.toMatch(/VITE_[A-Z_]+/);
     expect(text).not.toMatch(/\bsk-[a-z0-9]/i);
@@ -351,8 +380,8 @@ describe('Connect Your Agent — negative controls', () => {
 // --- the claims a scientist is actually here for ------------------------------
 
 describe('Connect Your Agent — what it tells a scientist', () => {
-  it('states that no agent can submit, in its own section and in the boundary list', () => {
-    const { container } = renderPanel();
+  it('states that no agent can submit, in its own section and in the boundary list', async () => {
+    const { container } = await renderPanel();
     const text = norm(visibleText(container));
     expect(
       screen.getByRole('heading', { name: MCP_CONNECT_COPY.neverSubmitHeading, hidden: true }),
@@ -364,8 +393,8 @@ describe('Connect Your Agent — what it tells a scientist', () => {
     expect(text).toContain(norm(noSubmit!.detail));
   });
 
-  it('renders every allowed capability and every refused one', () => {
-    const { container } = renderPanel();
+  it('renders every allowed capability and every refused one', async () => {
+    const { container } = await renderPanel();
     const text = norm(visibleText(container));
     for (const capability of [...MCP_CAPABILITIES_ALLOWED, ...MCP_CAPABILITIES_REFUSED]) {
       expect(text, `missing capability: ${capability.action}`).toContain(norm(capability.action));
@@ -373,8 +402,8 @@ describe('Connect Your Agent — what it tells a scientist', () => {
     }
   });
 
-  it('renders every permission with what each allows and refuses', () => {
-    const { container } = renderPanel();
+  it('renders every permission with what each allows and refuses', async () => {
+    const { container } = await renderPanel();
     const text = norm(visibleText(container));
     // ~~`toHaveLength(2)`~~ — the count moved to 3 on 2026-09-01 and is now DERIVED,
     // because a hand-written count in a rendering test is a second copy of the enum
@@ -390,8 +419,8 @@ describe('Connect Your Agent — what it tells a scientist', () => {
     expect(text).toContain(norm(MCP_CONNECT_COPY.permissionsDetail));
   });
 
-  it('renders the setup steps, in order', () => {
-    const { container } = renderPanel();
+  it('renders the setup steps, in order', async () => {
+    const { container } = await renderPanel();
     const text = norm(visibleText(container));
     let last = -1;
     for (const step of MCP_SETUP_STEPS) {
@@ -401,18 +430,18 @@ describe('Connect Your Agent — what it tells a scientist', () => {
     }
   });
 
-  it('never presents the capability material as running or connected', () => {
-    const { container } = renderPanel();
+  it('never presents the capability material as running or connected', async () => {
+    const { container } = await renderPanel();
     expect(visibleText(container)).not.toMatch(/\b(is running|is live|connected|online now)\b/i);
   });
 
-  it('never implies ISAAC gains a model of its own', () => {
-    const { container } = renderPanel();
+  it('never implies ISAAC gains a model of its own', async () => {
+    const { container } = await renderPanel();
     expect(visibleText(container)).not.toMatch(/\b(ai-powered|powered by (an? )?(ai|model)|isaac'?s (own )?(ai|model))\b/i);
   });
 
-  it('the widget sits beside API Access on the same tab, so neither mechanism is read alone', () => {
-    renderSettings(ROUTES.settingsTab('integrations'));
+  it('the widget sits beside API Access on the same tab, so neither mechanism is read alone', async () => {
+    await renderSettings(ROUTES.settingsTab('integrations'));
     expect(screen.getByRole('region', { name: TAB_LABEL })).toBeInTheDocument();
     expect(screen.getByRole('region', { name: 'API Access' })).toBeInTheDocument();
   });
@@ -447,8 +476,8 @@ describe('Connect Your Agent — the draft-write confirmation, whose claim it is
     expect(writeRow!.tools).toEqual(['isaac_update_draft']);
   });
 
-  it('names the AGENT as the party asserting the confirmation', () => {
-    const { container } = renderPanel();
+  it('names the AGENT as the party asserting the confirmation', async () => {
+    const { container } = await renderPanel();
     const text = norm(visibleText(container));
     expect(text).toContain(norm(writeRow!.detail));
     expect(writeRow!.detail).toMatch(/the agent’s assertion that you gave it/i);
@@ -462,14 +491,14 @@ describe('Connect Your Agent — the draft-write confirmation, whose claim it is
     expect(writeRow!.detail).toMatch(/trust to ask you first/i);
   });
 
-  it('never describes the confirmation as one the scientist is known to have given', () => {
+  it('never describes the confirmation as one the scientist is known to have given', async () => {
     /*
      * A flat ratchet over the shapes that read as a gate, in the register the
      * rest of this file uses. It is deliberately not negation-aware: the
      * failure being guarded against is a future author restoring the shorter,
      * friendlier phrasing, not one writing a careful double negative.
      */
-    const { container } = renderPanel();
+    const { container } = await renderPanel();
     for (const text of [writeRow!.detail, visibleText(container)]) {
       expect(text).not.toMatch(/carries your confirmation/i);
       expect(text).not.toMatch(/your confirmation as its support/i);
@@ -556,8 +585,8 @@ describe('Connect Your Agent — the draft-write confirmation, whose claim it is
 // --- accessibility -------------------------------------------------------------
 
 describe('Connect Your Agent — accessibility', () => {
-  it('every heading has real text and the outline never skips a level', () => {
-    const { container } = renderSettings();
+  it('every heading has real text and the outline never skips a level', async () => {
+    const { container } = await renderSettings();
     const headings = Array.from(container.querySelectorAll('h1, h2, h3, h4, h5, h6'));
     expect(headings.length).toBeGreaterThan(0);
     for (const heading of headings) {
@@ -573,10 +602,10 @@ describe('Connect Your Agent — accessibility', () => {
      the widget's info toggle, its four view toggles, its Details trigger, and —
      inside Details — the Endpoint Explorer jump. None acts on anything outside
      this page; each is a real, named, keyboard-operable native button. */
-  it('every control on the widget is a real, keyboard-operable button with a name', () => {
+  it('every control on the widget is a real, keyboard-operable button with a name', async () => {
     /* 2026-11-02: one Details trigger ("Setup and Reference") holds every section in
        sequence — no info toggle, no view buttons, no Endpoint Explorer jump. */
-    renderPanel(undefined, { withCompanion: false });
+    await renderPanel(undefined, { withCompanion: false });
     const buttons = screen.getAllByRole('button', { hidden: true });
     expect(buttons.map((b) => b.getAttribute('aria-label') ?? b.textContent?.trim())).toEqual([
       MCP_WIDGET_COPY.detailsSummary,
@@ -589,8 +618,8 @@ describe('Connect Your Agent — accessibility', () => {
     }
   });
 
-  it('renders no link off this build and no external URL', () => {
-    const { container } = renderPanel();
+  it('renders no link off this build and no external URL', async () => {
+    const { container } = await renderPanel();
     for (const el of Array.from(container.querySelectorAll('[href], [src]'))) {
       const url = el.getAttribute('href') ?? el.getAttribute('src') ?? '';
       expect(/^(https?:)?\/\//.test(url), `external URL rendered: ${url}`).toBe(false);
@@ -619,7 +648,7 @@ describe('Connect Your Agent — the state line follows the server-reported post
 
   for (const [posture, line] of CASES) {
     it(`posture ${String(posture)} → its own line, in the live region`, async () => {
-      renderPanel(null, { posture });
+      await renderPanel(null, { posture });
       const status = screen.getByRole('status');
       expect(await within(status).findByText(line)).toBeInTheDocument();
       for (const [, other] of CASES) {
@@ -671,8 +700,8 @@ describe('Connect Your Agent — when a deployment does publish an address', () 
   // forbids naming one anyway.
   const ADDRESS = 'https://agent.example.invalid/mcp';
 
-  it('shows the address the deployment supplied, and still claims no connection', () => {
-    const { container } = renderPanel(ADDRESS);
+  it('shows the address the deployment supplied, and still claims no connection', async () => {
+    const { container } = await renderPanel(ADDRESS);
     expect(screen.getByText(ADDRESS)).toBeInTheDocument();
     expect(norm(visibleText(container))).toContain(norm(MCP_CONNECT_COPY.stateLinePublished));
     expect(visibleText(container)).not.toMatch(/\bconnected\b/i);
@@ -684,8 +713,8 @@ describe('Connect Your Agent — when a deployment does publish an address', () 
     expect(mcpDeploymentState(ADDRESS)).toBe('endpoint-published');
   });
 
-  it('does NOT deny the endpoint it is displaying — the state line follows the branch', () => {
-    const { container } = renderPanel(ADDRESS);
+  it('does NOT deny the endpoint it is displaying — the state line follows the branch', async () => {
+    const { container } = await renderPanel(ADDRESS);
     const text = norm(visibleText(container));
     expect(text).toContain(norm(MCP_CONNECT_COPY.stateLinePublished));
     expect(text).not.toContain(norm(MCP_CONNECT_COPY.stateLine));
@@ -693,7 +722,7 @@ describe('Connect Your Agent — when a deployment does publish an address', () 
   });
 
   it('the unconfigured branch is unaffected — it keeps its own line', async () => {
-    const { container } = renderPanel();
+    const { container } = await renderPanel();
     await screen.findByText(MCP_CONNECT_COPY.stateLine);
     const text = norm(visibleText(container));
     expect(text).toContain(norm(MCP_CONNECT_COPY.stateLine));

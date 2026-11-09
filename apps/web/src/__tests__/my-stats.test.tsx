@@ -382,7 +382,7 @@ const APPROVED_PANEL_SENTENCES: readonly string[] = [
   'Nothing on this tab is hidden from you, and none of the figures below are zero — they are absent.',
   'A count of zero would say you have no records;',
   'what is true is that this build cannot tell whose records these are.',
-  'Open Privacy Settings',
+  'Open Data Settings',
   'See Workspace Statistics',
   'Views Prepared for Your Account',
   'Each view below is defined as a typed dataset, so it can be filled in without changing this page\'s layout.',
@@ -1600,16 +1600,21 @@ describe('the gated state', () => {
     expect(textOf(container)).not.toContain('Export 3');
   });
 
-  it('offers a route back to the workspace figures and to the privacy settings', async () => {
+  it('offers a route back to the workspace figures and to the Data card in Settings', async () => {
     await renderMineTab();
     expect(screen.getByRole('link', { name: 'See Workspace Statistics' })).toHaveAttribute(
       'href',
       '/statistics?tab=general',
     );
-    expect(screen.getByRole('link', { name: 'Open Privacy Settings' })).toHaveAttribute(
+    // Named for where it goes: the Data card (`?tab=data`, a card anchor that
+    // `settings-page.test.tsx` proves scrolls to and focuses that card), not the
+    // retired Privacy tab.
+    expect(screen.getByRole('link', { name: 'Open Data Settings' })).toHaveAttribute(
       'href',
-      ROUTES.settingsTab('privacy'),
+      ROUTES.settingsTab('data'),
     );
+    expect(ROUTES.settingsTab('data')).toBe('/settings?tab=data');
+    expect(screen.queryByRole('link', { name: /Privacy Settings/ })).toBeNull();
   });
 });
 

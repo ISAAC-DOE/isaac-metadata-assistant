@@ -30,8 +30,9 @@ import { Check, ChevronDown } from './icons';
  * PageUp / PageDown move; Enter / Space choose and close; Escape closes without a change; Tab chooses the active
  * option and lets focus move on; typing jumps to the first option starting with the letters typed.
  *
- * `onChange` fires once per real change, never for re-choosing the current value. A value that matches no
- * option (for example `''` before anything is chosen) shows `placeholder`.
+ * `onChange` fires once per real change, never for re-choosing the current value. An empty value (`''`, before
+ * anything is chosen) shows `placeholder`. A non-empty value that matches no option (a stored value the list
+ * no longer offers) is shown as itself, muted, and left alone: the picker never quietly changes it.
  *
  * THE POPUP IS FIXED-POSITIONED from the trigger's rect, not placed inside the wrapper, so a card, scroll box
  * or panel with `overflow: hidden | auto` around the picker cannot clip it. It stays in the wrapper's DOM (not
@@ -88,6 +89,24 @@ const POPUP_MAX_HEIGHT = 288;
 const POPUP_GAP = 4;
 const PAGE_STEP = 10;
 
+/**
+ * Whether a scrolling box around the trigger has scrolled it wholly out of the box's visible area (its padding
+ * box, inside the borders and scrollbars). A box with no size, which shows nothing and so hides nothing, is
+ * ignored.
+ */
+function hides(box: Element, trigger: DOMRect): boolean {
+  if (box.clientWidth === 0 && box.clientHeight === 0) return false;
+  const r = box.getBoundingClientRect();
+  const top = r.top + box.clientTop;
+  const left = r.left + box.clientLeft;
+  return (
+    trigger.bottom <= top ||
+    trigger.top >= top + box.clientHeight ||
+    trigger.right <= left ||
+    trigger.left >= left + box.clientWidth
+  );
+}
+
 export const Select = forwardRef<HTMLButtonElement, SelectProps>(function Select(
   {
     id: idProp,
@@ -132,6 +151,8 @@ export const Select = forwardRef<HTMLButtonElement, SelectProps>(function Select
 
   const selectedIndex = options.findIndex((o) => o.value === value);
   const selected = selectedIndex >= 0 ? options[selectedIndex] : null;
+  /** A value the options do not offer: shown raw (muted) rather than as a blank trigger. */
+  const unknown = !selected && value !== '';
 
   /** The options grouped for display, each keeping its index in `options` (what `active` counts). */
   const sections = useMemo(() => {
@@ -171,6 +192,12 @@ export const Select = forwardRef<HTMLButtonElement, SelectProps>(function Select
   );
   const firstEnabled = useCallback(() => order.find(enabled) ?? -1, [order, enabled]);
   const lastEnabled = useCallback(() => [...order].reverse().find(enabled) ?? -1, [order, enabled]);
+  /**
+   * Where the highlight starts on opening: the chosen option, else the first one. A value the options do
+   * not offer opens with nothing highlighted, so Tab, Enter or Space cannot replace it with an option the
+   * person never moved to; the arrows still start from the top.
+   */
+  const openingIndex = () => (selectedIndex >= 0 ? selectedIndex : unknown ? -1 : firstEnabled());
 
   const openWith = useCallback(
     (index: number) => {
@@ -231,10 +258,10 @@ export const Select = forwardRef<HTMLButtonElement, SelectProps>(function Select
     const searching = Date.now() - search.current.at <= TYPEAHEAD_MS && search.current.text !== '';
 
     if (!open) {
-      const start = selectedIndex >= 0 ? selectedIndex : firstEnabled();
+      const start = openingIndex();
       if (key === 'ArrowDown' || key === 'ArrowUp' || key === 'Enter' || key === ' ') {
         e.preventDefault();
-        openWith(key === 'ArrowUp' && selectedIndex < 0 ? firstEnabled() : start);
+        openWith(start);
       } else if (key === 'Home') {
         e.preventDefault();
         openWith(firstEnabled());
@@ -328,20 +355,28 @@ export const Select = forwardRef<HTMLButtonElement, SelectProps>(function Select
   // `transform`, `filter` or `contain` (the assistant drawer does). So the popup is first put at 0,0, where it
   // lands is read, and that offset is taken off. Measured again while open as the page scrolls or resizes; if
   // the trigger scrolls fully out of view, the popup closes rather than float over unrelated content.
+  //
+  // Scroll and resize fire many times a frame, so they only ASK for a measure: at most one runs per animation
+  // frame. A scroll inside a box around the picker (a scrolling card, the drawer's body) is remembered until
+  // then, and once the trigger is wholly outside that box's visible area the popup closes, as a native select
+  // does. Closing keeps the value and leaves focus where it is.
   useLayoutEffect(() => {
     if (!open) return;
-    function place(event?: Event) {
+    let frame = 0;
+    const scrolled = new Set<Element>();
+    function place(remeasure: boolean) {
       const button = buttonRef.current;
       const list = listRef.current;
       if (!button || !list) return;
-      if (event && event.target === list) return; // the popup scrolling its own options moves nothing
       const trigger = button.getBoundingClientRect();
       const viewW = window.innerWidth;
       const viewH = window.innerHeight;
-      if (event && (trigger.bottom < 0 || trigger.top > viewH)) {
+      if (remeasure && (trigger.bottom < 0 || trigger.top > viewH || [...scrolled].some((box) => hides(box, trigger)))) {
+        scrolled.clear();
         close();
         return;
       }
+      scrolled.clear();
       const style = list.style;
       style.top = '0px';
       style.left = '0px';
@@ -361,12 +396,23 @@ export const Select = forwardRef<HTMLButtonElement, SelectProps>(function Select
       style.left = `${trigger.left - origin.left}px`;
       setAbove(flip);
     }
-    place();
-    window.addEventListener('resize', place);
-    window.addEventListener('scroll', place, true);
+    function request(event: Event) {
+      const target = event.target;
+      if (target === listRef.current) return; // the popup scrolling its own options moves nothing
+      if (target instanceof Element && buttonRef.current && target.contains(buttonRef.current)) scrolled.add(target);
+      if (frame) return;
+      frame = window.requestAnimationFrame(() => {
+        frame = 0;
+        place(true);
+      });
+    }
+    place(false);
+    window.addEventListener('resize', request);
+    window.addEventListener('scroll', request, true);
     return () => {
-      window.removeEventListener('resize', place);
-      window.removeEventListener('scroll', place, true);
+      if (frame) window.cancelAnimationFrame(frame);
+      window.removeEventListener('resize', request);
+      window.removeEventListener('scroll', request, true);
     };
   }, [open, close, options]);
 
@@ -429,7 +475,7 @@ export const Select = forwardRef<HTMLButtonElement, SelectProps>(function Select
         id={id}
         type="button"
         role="combobox"
-        className={`select-trigger${selected ? '' : ' is-empty'}`}
+        className={`select-trigger${selected ? '' : unknown ? ' is-unknown' : ' is-empty'}`}
         aria-haspopup="listbox"
         aria-expanded={open}
         aria-controls={listboxId}
@@ -442,7 +488,14 @@ export const Select = forwardRef<HTMLButtonElement, SelectProps>(function Select
         {...dataAttributes}
         data-value={value}
         disabled={disabled}
-        onClick={() => (open ? close() : openWith(selectedIndex >= 0 ? selectedIndex : firstEnabled()))}
+        onClick={(e) => {
+          // Safari (WebKit on macOS) does not focus a button it clicks. Focus is what the keys, the
+          // blur-close and `aria-activedescendant` hang on, so the trigger takes it here: without
+          // this, a picker opened by a click in Safari ignored Escape and the arrows.
+          if (document.activeElement !== e.currentTarget) e.currentTarget.focus();
+          if (open) close();
+          else openWith(openingIndex());
+        }}
         onKeyDown={onKeyDown}
         onKeyUp={(e) => {
           // A button activates on Space at keyup (Firefox does so even when the keydown was prevented), which
@@ -455,7 +508,7 @@ export const Select = forwardRef<HTMLButtonElement, SelectProps>(function Select
           onBlur?.(e);
         }}
       >
-        <span className="select-value">{selected ? selected.label : (placeholder ?? '')}</span>
+        <span className="select-value">{selected ? selected.label : unknown ? value : (placeholder ?? '')}</span>
         <ChevronDown className="select-chevron" size={16} strokeWidth={2} aria-hidden="true" />
       </button>
       {name !== undefined && <input type="hidden" name={name} value={value} />}

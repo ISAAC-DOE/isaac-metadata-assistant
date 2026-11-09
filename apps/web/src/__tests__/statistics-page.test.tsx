@@ -814,7 +814,7 @@ describe('Workspace at a Glance', () => {
     for (const region of ['Runtime', 'Project Memory', 'API Surface']) {
       expect(regionOf(region), `${region} must still render`).toBeInTheDocument();
     }
-    expect(figureValue('Project Memory', 'Nodes')).toBe(String(graphStatusAvailable.node_count));
+    expect(figureValue('Project Memory', 'Source Graph Nodes')).toBe(String(graphStatusAvailable.node_count));
     expect(cardValue('API Surface', 'Documented Operations')).toBe(OPERATION_COUNT);
 
     // Neither malformed fact is stated, and neither is replaced by a plausible
@@ -862,7 +862,7 @@ describe('Project Memory', () => {
       'Served Files (Path Set)': String(graphStatusAvailable.file_count),
       Concepts: String(graphStatusAvailable.concept_count),
       Communities: String(graphStatusAvailable.community_count),
-      Nodes: String(graphStatusAvailable.node_count),
+      'Source Graph Nodes': String(graphStatusAvailable.node_count),
       Edges: String(graphStatusAvailable.edge_count),
       // `v1`, not `1` — the same rendering Project Memory gives this field, so a
       // schema version in a column of counts cannot be read as a count.
@@ -939,7 +939,7 @@ describe('Project Memory', () => {
       'Served Files (Path Set)',
       'Concepts',
       'Communities',
-      'Nodes',
+      'Source Graph Nodes',
       'Edges',
       'Snapshot Schema Version',
     ]) {
@@ -1017,6 +1017,15 @@ describe('the served-file count is stated under ONE name on both screens', () =>
       `v${graphStatusAvailable.snapshot_schema_version}`,
     );
     expect(memoryFigures['Snapshot Schema Version']).toBe(statsFigures['Snapshot Schema Version']);
+
+    // The node count too: one name (`LABELS.sourceGraphNodes`), one number. "Nodes"
+    // alone was Statistics' name for it, and would read as the Graph tab's drawn
+    // subset, which is a different, smaller set.
+    expect(memoryFigures[LABELS.sourceGraphNodes]).toBe(String(graphStatusAvailable.node_count));
+    expect(memoryFigures[LABELS.sourceGraphNodes]).toBe(statsFigures[LABELS.sourceGraphNodes]);
+    expect(LABELS.sourceGraphNodes).toBe('Source Graph Nodes');
+    expect(Object.keys(statsFigures)).not.toContain('Nodes');
+    expect(Object.keys(memoryFigures)).not.toContain('Nodes');
 
     /* The one DELIBERATE difference that remains: Project Memory abbreviates the
        source commit to 7 chars while Statistics states it in full. Kept, because
@@ -1466,7 +1475,7 @@ describe('partial failure — one dead source degrades only what reads it', () =
     cleanup();
     renderStatisticsBuild(statisticsRoutes({ records: dead }));
     await settled();
-    expect(figureValue('Project Memory', 'Nodes')).toBe(String(graphStatusAvailable.node_count));
+    expect(figureValue('Project Memory', 'Source Graph Nodes')).toBe(String(graphStatusAvailable.node_count));
     expect(cardValue('API Surface', 'Documented Operations')).toBe(OPERATION_COUNT);
     expect(cardValue('Runtime', 'Runtime Mode')).toBe('Synthetic-Only');
   });
@@ -1548,7 +1557,7 @@ describe('partial failure — one dead source degrades only what reads it', () =
     cleanup();
     renderStatisticsBuild(statisticsRoutes({ openapi: dead }));
     await settled();
-    expect(figureValue('Project Memory', 'Nodes')).toBe(String(graphStatusAvailable.node_count));
+    expect(figureValue('Project Memory', 'Source Graph Nodes')).toBe(String(graphStatusAvailable.node_count));
 
     expect(figuresIn('API Surface')).toEqual({});
     expect(within(regionOf('API Surface')).getByRole('button', { name: 'Retry' })).toBeInTheDocument();
@@ -1915,7 +1924,7 @@ describe('Refresh', () => {
       ).toMatch(/^Refresh finished, but 7 of 7 reads failed/),
     );
     expect(cardValue('API Surface', 'Documented Operations')).toBe(OPERATION_COUNT);
-    expect(figureValue('Project Memory', 'Nodes')).toBe(String(graphStatusAvailable.node_count));
+    expect(figureValue('Project Memory', 'Source Graph Nodes')).toBe(String(graphStatusAvailable.node_count));
     expect(figureValue('Record Schema', 'Top-Level Fields')).toBe('6');
     expect(screen.queryAllByRole('alert')).toHaveLength(0);
   });

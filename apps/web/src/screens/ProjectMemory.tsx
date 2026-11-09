@@ -433,7 +433,7 @@ function MemorySizeWidget({
   if (data.node_count != null) {
     /* The SOURCE graph's node count — the Graph tab draws the smaller served-file
        projection of it, and says so in About This Graph — so the label names the set. */
-    figures.push({ label: 'Source Graph Nodes', value: data.node_count, tab: 'graph', name: 'Graph' });
+    figures.push({ label: LABELS.sourceGraphNodes, value: data.node_count, tab: 'graph', name: 'Graph' });
   }
   if (data.concept_count != null) {
     figures.push({ label: 'Concepts', value: data.concept_count, tab: 'concepts', name: 'Concepts' });
@@ -562,7 +562,7 @@ interface FigureRow {
  */
 function memoryFigureGroups(data: ApiGraphStatus): Record<SizeView | 'origin', FigureRow[]> {
   const rows: (FigureRow & { group: SizeView | 'origin' })[] = [];
-  if (data.node_count != null) rows.push({ label: 'Nodes', value: String(data.node_count), mono: true, group: 'graph' });
+  if (data.node_count != null) rows.push({ label: LABELS.sourceGraphNodes, value: String(data.node_count), mono: true, group: 'graph' });
   if (data.edge_count != null) rows.push({ label: 'Edges', value: String(data.edge_count), mono: true, group: 'graph' });
   if (data.community_count != null) {
     rows.push({ label: 'Communities', value: String(data.community_count), mono: true, group: 'graph' });

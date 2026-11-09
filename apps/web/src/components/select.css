@@ -54,6 +54,8 @@
 }
 /* The placeholder reaches the same contrast as `.input::placeholder`. */
 .select-trigger.is-empty .select-value { color: var(--text-tertiary); }
+/* A value the options no longer offer: shown as itself, quieter than a chosen option. */
+.select-trigger.is-unknown .select-value { color: var(--text-secondary); }
 /* The same chevron, turned a half when open. The turn is instant, not animated: a rotating down-chevron
    passes through 45 degrees, where it reads as an "L" in any frame caught mid-turn (a screenshot, a slow
    machine). Only its colour eases. */
@@ -79,10 +81,16 @@
 
 /* Fixed at the trigger (`Select.tsx` sets top, left, min-width, max-width and, when room is short, max-height
    from the trigger's rect), so a clipping ancestor — a card with `overflow: hidden`, a scroll box, the drawer —
-   cannot cut it off. */
+   cannot cut it off.
+
+   The layer is the help tip's (48), the one for a popover that floats over everything a page shows: above the
+   floating Assistant pill (45), its backdrop (46) and the drawer (47), which were painted over a popup at the
+   old 40, and below a modal backdrop (50) and the walkthrough (60+). Inside the drawer or a modal the popup is
+   in that box's own stacking context, so it is above the box's content either way.
+   `select.test.tsx` ("layering") pins the order. */
 .select-popup {
   position: fixed;
-  z-index: 40;
+  z-index: 48;
   top: 0;
   left: 0;
   width: max-content;

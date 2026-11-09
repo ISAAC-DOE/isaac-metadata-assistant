@@ -7,7 +7,7 @@ import { AppShell } from '../../components/AppShell';
 import { TopBar } from '../../components/TopBar';
 import { LeftNav } from '../../components/LeftNav';
 import { BackendDown, LoadingPanel } from '../../components/FetchStates';
-import { formatInstant } from '../../lib/labels';
+import { LABELS, formatInstant } from '../../lib/labels';
 import { Widget, WidgetGrid } from '../../components/Widget';
 import {
   BarChart3,
@@ -1560,7 +1560,7 @@ function memoryViews(facts: ReturnType<typeof deriveMemoryFacts>) {
           rows={[
             { label: 'Concepts', value: countOrUnavailable(facts.concepts), mono: true },
             { label: 'Communities', value: countOrUnavailable(facts.communities), mono: true },
-            { label: 'Nodes', value: countOrUnavailable(facts.nodes), mono: true },
+            { label: LABELS.sourceGraphNodes, value: countOrUnavailable(facts.nodes), mono: true },
             { label: 'Edges', value: countOrUnavailable(facts.edges), mono: true },
           ]}
         />

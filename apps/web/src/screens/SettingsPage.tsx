@@ -151,9 +151,11 @@ type GraphStatusState = ReturnType<typeof useFetch<ApiGraphStatus>>;
 export function SettingsPage() {
   const [searchParams, setSearchParams] = useSearchParams();
   const location = useLocation();
-  const { tab: activeTab, widget: aliasWidget } = resolveSettingsTab(
-    searchParams.get(SETTINGS_TAB_PARAM),
-  );
+  const {
+    tab: activeTab,
+    widget: aliasWidget,
+    focus: focusWidget,
+  } = resolveSettingsTab(searchParams.get(SETTINGS_TAB_PARAM));
 
   const about = useFetch(() => api.getAbout(), []);
   const openapi = useFetch(() => api.getOpenApi(), []);
@@ -200,6 +202,17 @@ export function SettingsPage() {
     // jsdom does not implement scrollIntoView — call it only where it exists.
     region?.scrollIntoView?.({ block: 'start' });
   }, [location.key, aliasWidget, about.status, openapi.status]);
+
+  /*
+   * A CARD ANCHOR (`?tab=data`) ALSO MOVES FOCUS, to the card's heading, once per
+   * navigation — not again as the reads settle, which would pull focus back from
+   * a reader who has already moved on. `preventScroll`, because the effect above
+   * owns the scroll. A retired alias never reaches here (see `SETTINGS_CARD_ANCHORS`).
+   */
+  useEffect(() => {
+    if (!aliasWidget || !focusWidget) return;
+    document.getElementById(aliasWidget)?.focus({ preventScroll: true });
+  }, [location.key, aliasWidget, focusWidget]);
 
   return (
     <AppShell
@@ -371,6 +384,9 @@ function OverviewTab({ state, graphStatus }: { state: AboutState; graphStatus: G
         id="settings-data-heading"
         className="settings-widget-data"
         title={COPY.dataTitle}
+        /* Focusable from script only: `?tab=data` (Statistics' "Open Data
+           Settings") moves focus here on arrival. */
+        headingProps={{ tabIndex: -1 }}
         icon={<Shield size={18} strokeWidth={2} />}
       >
         <AboutGate state={state}>
