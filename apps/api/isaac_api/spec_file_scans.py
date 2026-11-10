@@ -18,13 +18,15 @@ Pure text in, plain values out. Nothing here reads a file.
 from __future__ import annotations
 
 import re
+from pathlib import PurePosixPath
 from typing import Container
 
 #: The rule that lists a SPEC file's own `#S` blocks as its run's scans.
 SPEC_FILE_SCANS_RULE_ID = "spec_file_energy_scans_v1"
 #: A `#S` command that is an energy scan (its first word).
 SPEC_ENERGY_SCAN_COMMANDS = frozenset({"gscan"})
-_SPEC_S_LINE = re.compile(r"^#S[ \t]+(\S+)[ \t]*(.*)$")
+#: A `#S` line, matched on the STRIPPED line, as ``local_import.processing.readers`` matches it (``^#S\s``).
+_SPEC_S_LINE = re.compile(r"^#S\s+(\S+)\s*(.*)$")
 #: A `#S` number: ASCII digits only (``str.isdigit`` accepts ``²``, which ``int`` refuses).
 _ASCII_NUMBER = re.compile(r"[0-9]+")
 
@@ -40,17 +42,62 @@ def lists_in_file_scans(source_type: str | None, run_candidate: bool) -> bool:
     return (bool(run_candidate) and source_type == _SPEC_ACQUISITION) or source_type == _STANDARD_OR_REFERENCE
 
 
+def safe_relative(path: object) -> str | None:
+    """``path`` if it is a relative path with no ``..`` segment, else ``None``."""
+    if not isinstance(path, str) or not path:
+        return None
+    if path.startswith(("/", "\\")) or re.match(r"^[A-Za-z]:", path):
+        return None
+    if ".." in PurePosixPath(path.replace("\\", "/")).parts:
+        return None
+    return path
+
+
+def in_file_scans_apply(*, source_type: str | None, run_candidate: bool, scan_count: int, acquisition_path: object,
+                        known_paths: Container[str]) -> bool:
+    """THE ONE GATE of :data:`SPEC_FILE_SCANS_RULE_ID`, used by the import rule and by the HERFD selector's inputs alike.
+
+    True when the unit lists no `_dir` scan export, its source type's in-file scans are listed
+    (:func:`lists_in_file_scans`), and its acquisition file is a safe relative path the walk listed
+    (``known_paths``: the manifest's archive paths). An exported copy (:func:`exported_copy_of`) passes this gate
+    and then lists no scans, with its reason; :func:`reads_in_file_scans` is the gate for reading the blocks."""
+    return (not scan_count and lists_in_file_scans(source_type, run_candidate)
+            and safe_relative(acquisition_path) is not None and acquisition_path in known_paths)
+
+
+def reads_in_file_scans(*, source_type: str | None, run_candidate: bool, scan_count: int, acquisition_path: object,
+                        known_paths: Container[str], stem: str, stems: Container[str]) -> bool:
+    """Whether the unit's SPEC file is read for its own `#S` scans: :func:`in_file_scans_apply` and not an exported
+    copy of another unit. Exactly the units whose run lists the in-file scans when the file reads."""
+    return in_file_scans_apply(source_type=source_type, run_candidate=run_candidate, scan_count=scan_count,
+                               acquisition_path=acquisition_path, known_paths=known_paths) and not exported_copy_of(stem, stems)
+
+
+def _lines(text: str) -> list[str]:
+    """The file's lines exactly as ``local_import.processing.readers.parse_text`` splits them: one leading BOM
+    dropped, CRLF and CR read as LF, split on LF only."""
+    if text.startswith("\ufeff"):
+        text = text[1:]
+    if "\r" in text:
+        text = text.replace("\r\n", "\n").replace("\r", "\n")
+    return text.split("\n")
+
+
 def _split(text: str) -> tuple[list[str], list[dict]]:
-    """``(lines, blocks)``: each block ``{literal, command, rows, start, end}`` (line indices, ``end`` exclusive)."""
-    lines = text.lstrip("﻿").splitlines()
+    """``(lines, blocks)``: each block ``{literal, command, rows, start, end}`` (line indices, ``end`` exclusive).
+
+    A line is read STRIPPED, as processing reads it: an indented ``#S`` starts a block, an indented ``#`` line is a
+    header line, and any other non-blank line is a data row."""
+    lines = _lines(text)
     blocks: list[dict] = []
-    for i, line in enumerate(lines):
+    for i, raw in enumerate(lines):
+        line = raw.strip()
         m = _SPEC_S_LINE.match(line)
         if m:
             if blocks:
                 blocks[-1]["end"] = i
             blocks.append({"literal": m.group(1), "command": m.group(2).strip(), "rows": 0, "start": i, "end": len(lines)})
-        elif blocks and line.strip() and not line.startswith("#"):
+        elif blocks and line and not line.startswith("#"):
             blocks[-1]["rows"] += 1
     return lines, blocks
 

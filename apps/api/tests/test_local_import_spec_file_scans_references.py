@@ -158,14 +158,7 @@ def test_a_dir_holding_only_os_metadata_is_empty_and_one_holding_a_file_is_not(t
 
 def test_a_wrapped_zip_with_a_directory_entry_says_the_dir_is_empty(tmp_path):
     root = _folder(tmp_path)
-    zpath = tmp_path / "SYN_wrapped.zip"
-    with zipfile.ZipFile(zpath, "w") as zf:
-        for p in sorted(root.rglob("*")):
-            name = f"{root.name}/{p.relative_to(root).as_posix()}"
-            if p.is_dir():
-                zf.writestr(name + "/", b"")
-            else:
-                zf.write(p, name)
+    zpath = _zip_of(root, tmp_path / "SYN_wrapped.zip", dir_entries=True)
     zipped, folder = _import(tmp_path, zpath, "z"), _import(tmp_path, root, "f")
     assert _run(zipped, REF)["scans"] == _run(folder, REF)["scans"]
     assert _run(zipped, REF)["other_relationships"]["scans_in_spec_file"]["scan_dir_present_empty"] is True
@@ -188,23 +181,123 @@ def test_the_selector_proposes_vortdt_for_in_file_scans(tmp_path):
     assert sample["scans_present"] == 2
 
 
-def test_in_file_stats_skip_units_with_dir_stats_alignment_and_exported_copies():
-    class U:
-        def __init__(self, stem, source_type, run_candidate, scans=()):
-            self.stem, self.acquisition_path, self.source_type = stem, stem, source_type
-            self.run_candidate, self.scans = run_candidate, scans
+class _Unit:
+    def __init__(self, stem, source_type, run_candidate, scans=(), path=None):
+        self.stem, self.acquisition_path, self.source_type = stem, path or stem, source_type
+        self.run_candidate, self.scans = run_candidate, scans
 
+
+def test_in_file_stats_take_exactly_the_units_the_rule_reads():
     text = spec_text("SYN_U", [(1, GSCAN, True), (2, ASCAN, True), (3, GSCAN, True)])
-    units = [U("SYN_ref_pellet", "standard_or_reference", False), U("SYN_al_align", "alignment", False),
-             U("SYN_run", "spec_acquisition", True), U("SYN_run.dat", "spec_acquisition", True),
-             U("SYN_dir_run", "spec_acquisition", True)]
+    units = [_Unit("SYN_ref_pellet", "standard_or_reference", False), _Unit("SYN_al_align", "alignment", False),
+             _Unit("SYN_run", "spec_acquisition", True), _Unit("SYN_run.dat", "spec_acquisition", True),
+             _Unit("SYN_dir_run", "spec_acquisition", True, scans=("one export",)),
+             _Unit("SYN_unlisted", "spec_acquisition", True),
+             _Unit("SYN_up", "spec_acquisition", True, path="../SYN_up")]
+    known = {u.acquisition_path for u in units} - {"SYN_unlisted"}
     read = []
-    got = HI._in_file_scan_stats(units, scan_stats_by_stem={"SYN_dir_run": ["x"]},
-                                 read_text=lambda p: read.append(p) or text)
+    got = HI._in_file_scan_stats(units, known_paths=known, read_text=lambda p: read.append(p) or text)
     assert sorted(got) == ["SYN_ref_pellet", "SYN_run"] and sorted(read) == ["SYN_ref_pellet", "SYN_run"]
     assert [s.scan_path for s in got["SYN_run"]] == ["SYN_run#S1", "SYN_run#S3"]
     assert all(s.rows == len(GRID) for s in got["SYN_run"])
-    assert HI._in_file_scan_stats(units[:1], scan_stats_by_stem={}, read_text=lambda p: None) == {}
+    # the selector's gate IS the rule's gate: same answer unit by unit
+    stems = {u.stem for u in units}
+    for u in units:
+        reads = SFS.reads_in_file_scans(source_type=u.source_type, run_candidate=u.run_candidate, scan_count=len(u.scans),
+                                        acquisition_path=u.acquisition_path, known_paths=known, stem=u.stem, stems=stems)
+        assert reads == (u.acquisition_path in got), u.stem
+
+
+def test_a_file_that_cannot_be_read_gives_the_selector_no_scans_as_the_run_lists_none():
+    unit = _Unit("SYN_ref_pellet", "standard_or_reference", False)
+
+    def boom(path):
+        raise OSError("SYN unreadable")
+
+    assert HI._in_file_scan_stats([unit], known_paths={unit.acquisition_path}, read_text=boom) == {"SYN_ref_pellet": []}
+    assert HI._in_file_scan_stats([unit], known_paths={unit.acquisition_path}, read_text=lambda p: None) == {
+        "SYN_ref_pellet": []}
+
+
+def test_the_gate_refuses_a_listed_scan_an_unsafe_path_and_a_path_the_walk_did_not_list():
+    ok = dict(source_type="standard_or_reference", run_candidate=False, scan_count=0, acquisition_path="SYN_a/SYN_ref",
+              known_paths={"SYN_a/SYN_ref"})
+    assert SFS.in_file_scans_apply(**ok)
+    assert not SFS.in_file_scans_apply(**{**ok, "scan_count": 1})
+    assert not SFS.in_file_scans_apply(**{**ok, "known_paths": set()})
+    for bad in ("../SYN_ref", "/SYN_ref", "C:SYN_ref", None, ""):
+        assert not SFS.in_file_scans_apply(**{**ok, "acquisition_path": bad, "known_paths": {bad}})
+
+
+def test_when_the_gate_refuses_the_run_lists_no_scan_and_the_selector_reads_none(tmp_path, monkeypatch):
+    # the mismatch the shared gate exists to prevent: a unit the rule does not read must not get a channel from
+    # in-file scans its run does not list. Both sides call the one gate, so refusing it refuses both.
+    monkeypatch.setattr(SFS, "in_file_scans_apply", lambda **kw: False)
+    run = _run(_import(tmp_path, _folder(tmp_path)), REF)
+    assert run["scans"] == [] and run["scan_count"] == 0
+    assert run["signal_selection"]["reason_code"] == "no_candidate_channel"
+
+
+def _zip_of(root: Path, zpath: Path, *, dir_entries: bool) -> Path:
+    with zipfile.ZipFile(zpath, "w") as zf:
+        for p in sorted(root.rglob("*")):
+            name = f"{root.name}/{p.relative_to(root).as_posix()}"
+            if p.is_dir():
+                if dir_entries:
+                    zf.writestr(name + "/", b"")
+            else:
+                zf.write(p, name)
+    return zpath
+
+
+def test_a_zip_root_gives_the_same_scans_and_signal_selection_as_the_folder(tmp_path):
+    root = _folder(tmp_path)
+    zipped = _import(tmp_path, _zip_of(root, tmp_path / "SYN_plain.zip", dir_entries=False), "z")
+    folder = _import(tmp_path, root, "f")
+    for stem in (REF, ALIGN, SAMPLE):
+        assert _run(zipped, stem)["scans"] == _run(folder, stem)["scans"]
+        assert _run(zipped, stem)["signal_selection"] == _run(folder, stem)["signal_selection"]
+    assert _run(zipped, REF)["signal_selection"]["primary_channel"] == "vortDT"
+
+
+def test_a_dir_of_empty_subfolders_and_os_files_is_empty_in_a_folder_and_in_a_zip(tmp_path):
+    root = _folder(tmp_path)
+    (root / f"{REF}_dir" / "SYN_sub" / "SYN_deeper").mkdir(parents=True)
+    (root / f"{REF}_dir" / "SYN_sub" / ".DS_Store").write_bytes(b"\x00\x00\x00\x01Bud1")
+    with_dirs = _zip_of(root, tmp_path / "SYN_dirs.zip", dir_entries=True)
+    without_dirs = _zip_of(root, tmp_path / "SYN_nodirs.zip", dir_entries=False)
+    assert B._scan_dir_present_empty(root, REF, REF) is True
+    assert B._scan_dir_present_empty(with_dirs, REF, REF) is True
+    # no directory entries: only the OS file shows the folder is there, and it holds nothing else
+    assert B._scan_dir_present_empty(without_dirs, REF, REF) is True
+    # a file anywhere below makes it not empty, in all three
+    (root / f"{REF}_dir" / "SYN_sub" / "SYN_deeper" / "SYN_other.txt").write_text("SYNTHETIC\n")
+    assert B._scan_dir_present_empty(root, REF, REF) is False
+    assert B._scan_dir_present_empty(_zip_of(root, tmp_path / "SYN_dirs2.zip", dir_entries=True), REF, REF) is False
+    assert B._scan_dir_present_empty(_zip_of(root, tmp_path / "SYN_nodirs2.zip", dir_entries=False), REF, REF) is False
+
+
+def test_a_zip_with_no_directory_entries_does_not_see_an_empty_dir(tmp_path):
+    root = _folder(tmp_path)  # REF's `_dir` is truly empty: a ZIP without directory entries holds no trace of it
+    zpath = _zip_of(root, tmp_path / "SYN_nodirs.zip", dir_entries=False)
+    assert B._scan_dir_present_empty(zpath, REF, REF) is False
+    said = _run(_import(tmp_path, zpath, "z"), REF)["other_relationships"]["scans_in_spec_file"]
+    assert said["scans"] == [1, 3, 4] and "scan_dir_present_empty" not in said
+
+
+def test_an_indented_s_line_starts_a_block_for_the_splitter_and_for_processing(tmp_path):
+    from isaac_api.local_import.processing.readers import read_scan_file
+
+    text = spec_text(REF, [(1, GSCAN, True), (2, ASCAN, True), (3, GSCAN, True)]).replace(
+        f"#S 3  {GSCAN}", f"   #S 3  {GSCAN}").replace("\n", "\r\n")
+    assert SFS.spec_file_scans(text) == ([1, 3], [{"scan": "2", "command": "ascan", "why": "not an energy scan (ascan)"}])
+    path = tmp_path / "SYN_indented"
+    path.write_bytes(text.encode("utf-8"))
+    for number, block in SFS.spec_file_scan_blocks(text):
+        table = read_scan_file(path, scan=number)
+        assert table.error is None and f"scan_block_read:{number}" in table.notes
+        rows = [ln for ln in block.splitlines() if ln.strip() and not ln.strip().startswith("#")]
+        assert table.n_rows == len(rows) == len(GRID)
 
 
 def test_processing_uses_vortdt_over_i0_on_absev_for_the_reference(tmp_path, capsys):

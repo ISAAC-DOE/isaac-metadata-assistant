@@ -2971,7 +2971,7 @@ def read_archive_at(
     # CHANNEL CONTENTS OF THE SCANS KEPT INSIDE A SPEC FILE, for a unit with no `_dir` export to read.
     in_file_scan_stats = _in_file_scan_stats(
         relationships.units,
-        scan_stats_by_stem=scan_stats_by_stem,
+        known_paths={e.archive_path for e in inventory.entries},
         read_text=lambda path: archive.read_source_text(inventory, path, source_root=root)[0],
     )
 
@@ -3343,44 +3343,39 @@ def _apply_resolution(
     return marked, derived
 
 
-def _in_file_scan_stats(units, *, scan_stats_by_stem: Mapping[str, Sequence], read_text) -> dict[str, list]:
+def _in_file_scan_stats(units, *, known_paths, read_text) -> dict[str, list]:
     """``{unit key: [ScanChannelStats per #S energy scan]}`` for each unit whose scans are kept INSIDE its SPEC
     file. AGGREGATES ONLY, exactly as for a `_dir` export: no row value is kept.
 
-    A unit qualifies on the same terms as the local import's rule
-    (:data:`isaac_api.spec_file_scans.SPEC_FILE_SCANS_RULE_ID`): no `_dir` scan export, a source type whose
-    in-file scans are listed (:func:`isaac_api.spec_file_scans.lists_in_file_scans`: a run-candidate SPEC
-    acquisition or a standard/reference, never an alignment file), and not an exported copy of another unit.
-    The file is split by the SAME function the rule uses, so the selector reads exactly the scans the run lists.
-    ``read_text(path)`` returns the file's text as the walk read it, or ``None``."""
+    A unit is in the map exactly when the local import's rule
+    (:data:`isaac_api.spec_file_scans.SPEC_FILE_SCANS_RULE_ID`) reads its SPEC file for its own scans: the ONE
+    shared gate :func:`isaac_api.spec_file_scans.reads_in_file_scans` (no `_dir` scan export, a run-candidate SPEC
+    acquisition or a standard/reference and never an alignment file, a safe path the walk listed in
+    ``known_paths``, not an exported copy of another unit). The file is split by the SAME function the rule uses,
+    so the selector reads exactly the scans the run lists, and a file that cannot be read gives ``[]``, as the run
+    then lists none. ``read_text(path)`` returns the file's text as the walk read it, or ``None``."""
     from . import spec_file_scans as sfs
     from .bl15 import signals as sig
 
     stems = {u.stem for u in units}
     out: dict[str, list] = {}
     for unit in units:
-        if unit.scans or unit.stem in scan_stats_by_stem:
-            continue
-        if not sfs.lists_in_file_scans(unit.source_type, unit.run_candidate):
-            continue
-        if sfs.exported_copy_of(unit.stem, stems):
+        if not sfs.reads_in_file_scans(source_type=unit.source_type, run_candidate=unit.run_candidate,
+                                       scan_count=len(unit.scans), acquisition_path=unit.acquisition_path,
+                                       known_paths=known_paths, stem=unit.stem, stems=stems):
             continue
         try:
             text = read_text(unit.acquisition_path)
         except Exception:  # never let one unreadable file stop the import
             text = None
-        if text is None:
-            continue
-        stats = [
+        out[_unit_key(unit)] = [
             sig.scan_channel_stats(
                 block,
                 scan_path=f"{unit.acquisition_path}#S{number}",
                 channels=sig.BL152_VORTEX.candidate_channels,
             )
-            for number, block in sfs.spec_file_scan_blocks(text)
+            for number, block in (sfs.spec_file_scan_blocks(text) if text is not None else ())
         ]
-        if stats:
-            out[_unit_key(unit)] = stats
     return out
 
 
@@ -3591,12 +3586,13 @@ def _archive_semantics(
         digest = getattr(entry, "content_sha256", "") if entry is not None else ""
         shared = unit.legacy_number is not None and legacy_counts.get(unit.legacy_number, 0) > 1
         applies = applicability_by_path.get(unit.acquisition_path)
-        # A unit with `_dir` exports is read from them, as before; one whose scans are kept inside its SPEC file
-        # (no `_dir` export) is read from those `#S` blocks (`_in_file_scan_stats`).
+        # A unit whose run lists the `#S` blocks inside its SPEC file (no `_dir` export) is read from exactly those
+        # blocks (`_in_file_scan_stats`); every other unit from its `_dir` exports, as before.
+        in_file = in_file_scan_stats or {}
         channels = sig.summarize_channels(
-            scan_stats_by_stem.get(unit.stem)
-            if unit.stem in scan_stats_by_stem
-            else (in_file_scan_stats or {}).get(_unit_key(unit), ())
+            in_file[_unit_key(unit)]
+            if _unit_key(unit) in in_file
+            else scan_stats_by_stem.get(unit.stem, ())
         )
         elements = tuple(beamtime_elements) + tuple(filename_elements.get(unit.stem, ()))
         assignments, rule_ref = cr.signal_assignments_for(

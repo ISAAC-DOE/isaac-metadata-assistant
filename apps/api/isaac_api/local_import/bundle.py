@@ -29,11 +29,12 @@ from functools import lru_cache
 from pathlib import Path, PurePosixPath
 from typing import Any, Iterable, Mapping, Sequence
 
+from .. import spec_file_scans as _sfs
 from ..spec_file_scans import (  # re-exported: callers and tests use these names from this module
     SPEC_ENERGY_SCAN_COMMANDS,
     SPEC_FILE_SCANS_RULE_ID,
     exported_copy_of as _exported_copy_of,
-    lists_in_file_scans,
+    safe_relative as _safe_relative,
     spec_file_scans,
 )
 
@@ -319,17 +320,6 @@ def bundle_validator():
     return Draft202012Validator(bundle_schema())
 
 
-def _safe_relative(path: object) -> str | None:
-    """``path`` if it is a relative path with no ``..`` segment, else ``None``."""
-    if not isinstance(path, str) or not path:
-        return None
-    if path.startswith(("/", "\\")) or re.match(r"^[A-Za-z]:", path):
-        return None
-    if ".." in PurePosixPath(path.replace("\\", "/")).parts:
-        return None
-    return path
-
-
 def _rule_id(rule_text: object) -> str | None:
     """``bl15.spec.epoch_to_utc_iso.v1`` out of ``"bl15.spec.epoch_to_utc_iso.v1: ..."``."""
     if not isinstance(rule_text, str) or not rule_text.strip():
@@ -560,13 +550,17 @@ def _spec_file_scan_rows(root: Path | None, row: Mapping | None) -> tuple[tuple[
 
 
 def _scan_dir_present_empty(root: Path | None, acquisition_path: str, stem: str) -> bool:
-    """True only when the run's `<stem>_dir` folder is SEEN and holds nothing but OS metadata files.
+    """True only when the run's `<stem>_dir` folder is SEEN and holds no file but OS metadata files.
 
-    A folder import is looked at directly; a ZIP is looked at by its directory entries (re-deriving the
-    "compress this folder" wrapper the walk strips). A ZIP without directory entries, a ZIP inside the folder,
-    or anything that cannot be looked at answers False: the folder was not seen, so nothing is said about it."""
+    Read the same way in a folder and a ZIP: anything below the folder counts, at any depth, so a `_dir` holding
+    only empty subfolders and OS metadata files (``.DS_Store``, ``__MACOSX/``) is empty in both. A folder import is
+    looked at directly (symlinks are not followed, and one counts as content); a ZIP by its member names,
+    re-deriving the "compress this folder" wrapper the walk strips, and the folder is seen there when a directory
+    entry or any member lies under it. A ZIP with no member under it, a ZIP inside the folder, or anything that
+    cannot be looked at answers False: the folder was not seen, so nothing is said about it."""
     if root is None or not isinstance(acquisition_path, str) or "!/" in acquisition_path:
         return False
+    import os
     import zipfile
 
     from ..bl15 import archive
@@ -580,18 +574,23 @@ def _scan_dir_present_empty(root: Path | None, acquisition_path: str, stem: str)
             folder = root / dir_rel
             if folder.is_symlink() or not folder.is_dir():
                 return False
-            return not any(not archive.is_os_metadata(child.name) for child in folder.iterdir())
+            for here, dirs, files in os.walk(folder, followlinks=False):
+                rel = Path(here).relative_to(folder).as_posix()
+                for name in files + [d for d in dirs if (Path(here) / d).is_symlink()]:
+                    if not archive.is_os_metadata(f"{rel}/{name}"):
+                        return False
+            return True
         with zipfile.ZipFile(root) as zf:
             infos = zf.infolist()
     except Exception:  # never let a look at a folder stop the import
         return False
-    names = [i.filename for i in infos]
     files = [i.filename for i in infos if not i.is_dir() and not archive.is_os_metadata(i.filename)]
     prefix = archive.common_root_prefix(files)
     wanted = f"{prefix}/{dir_rel}/" if prefix else f"{dir_rel}/"
-    if wanted not in names:
+    under = [i for i in infos if i.filename.startswith(wanted)]
+    if not under:
         return False
-    return not any(n.startswith(wanted) and not n.endswith("/") and not archive.is_os_metadata(n) for n in names)
+    return not any(not i.is_dir() and not archive.is_os_metadata(i.filename) for i in under)
 
 
 def spec_file_scans_statement(numbers: Sequence[int], left_out: Sequence[Mapping], why: str | None = None, *,
@@ -3767,8 +3766,9 @@ def build_bundle(
             if isinstance(s, Mapping) and _safe_relative(s.get("path"))
         ]
         scan_count = u.scan_count
-        if (not scans and not scan_count and lists_in_file_scans(u.source_type, u.run_candidate)
-                and _safe_relative(u.acquisition_path) and u.acquisition_path in sid_of):
+        if not scans and _sfs.in_file_scans_apply(source_type=u.source_type, run_candidate=u.run_candidate,
+                                                  scan_count=scan_count, acquisition_path=u.acquisition_path,
+                                                  known_paths=sid_of):
             # r5d H1: no `<stem>_dir` scan file: the energy scans inside the SPEC file are the run's scans. A
             # standard or reference measurement (a reference pellet) is read the same way; an alignment file is not.
             copy_of = _exported_copy_of(u.stem, unit_stems)
