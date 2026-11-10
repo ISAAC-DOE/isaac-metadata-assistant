@@ -41,6 +41,7 @@ RULE_VERSIONS_SINCE_PROTOCOL_VERSION: dict[str, Any] = {
         "isaac.xas.in_scan_reference_min_scans.v0",
         "isaac.xas.own_signal_shift_confirmed.v0",
         "isaac.xas.post_edge_level.v1",
+        "isaac.xas.post_edge_order_is_larch_degree.v0",
         "isaac.xas.reference_channel_fallback.v1",
         "isaac.xas.reference_edges_agree.v0",
         "isaac.xas.reference_noise_not_degenerate.v0",
@@ -116,14 +117,21 @@ DEFAULT_PARAMS: dict[str, Any] = {
         "pre2": -30.0,
         # norm1 None -> min(norm1_rule_cap_eV, norm1_rule_fraction * (Emax - E0)). Measured
         # 2026-10-28 over 107 scientist Athena groups in the real archive: nor1 median
-        # 110 eV (43..150), pre2 mode -30, nnorm 2 (82) or 3 (25), flatten on (107/107).
+        # 110 eV (43..150), pre2 mode -30, bkg_nnorm 2 (82) or 3 (25), flatten on (107/107).
+        # bkg_nnorm is ATHENA's order, which counts coefficients (2 = a line, 3 = a quadratic);
+        # larch's nnorm is the polynomial DEGREE (1 = a line). So the scientists fitted a line in
+        # 82/107 and a quadratic in 25/107 (rule isaac.xas.post_edge_order_is_larch_degree.v0).
+        # Re-measured 9 Nov 2026 on 1304 groups in 50 real projects: bkg_nnorm 2 in 735, 3 in 569.
+        # nnorm None -> by the post-edge window width, as larch's own rule and Newville/Ravel: a line
+        # (1) under nnorm_rule_quadratic_from_eV, a quadratic (2) from it on (long EXAFS-range scans).
         # larch's own default (norm1 ~25 eV on these XANES ranges) put the post-edge fit on
         # the white line and was the dominant ISAAC-vs-Athena difference.
         "norm1": None,
         "norm1_rule_cap_eV": 100.0,
         "norm1_rule_fraction": 0.4,
         "norm2": None,
-        "nnorm": 2,
+        "nnorm": None,
+        "nnorm_rule_quadratic_from_eV": 300.0,
         "make_flat": True,
     },
     "qc": {
@@ -176,7 +184,11 @@ PARAM_DOCS: Mapping[str, tuple[str, bool]] = {
     "normalize.norm1_rule_cap_eV": ("Cap of the default norm1 rule (scientists' median nor1 = 110 eV in the archive).", True),
     "normalize.norm1_rule_fraction": ("Fraction of the post-E0 range for the default norm1 rule on short scans.", True),
     "normalize.norm2": ("Post-edge fit end relative to E0 (eV); None = larch default.", True),
-    "normalize.nnorm": ("Post-edge polynomial degree; default 2 (scientists: 2 in 82/107, 3 in 25/107).", True),
+    "normalize.nnorm": ("Post-edge polynomial DEGREE as larch counts it (0 constant, 1 line, 2 quadratic); None = by "
+                        "window width: a line under nnorm_rule_quadratic_from_eV, else a quadratic. Athena's bkg_nnorm "
+                        "counts coefficients (2 = a line): the scientists' 2 in 82/107 is a line.", True),
+    "normalize.nnorm_rule_quadratic_from_eV": ("Post-edge window width (eV) from which nnorm None gives a quadratic "
+                                               "(larch's own rule uses 300).", True),
     "qc.fail_min_points": ("Fewer merged points: fail.", True),
     "qc.warn_min_scans": ("Fewer scans: warn (no scan-to-scan spread).", True),
     "qc.warn_pre_edge_noise": ("Pre-edge residual std / edge step above this: warn.", True),

@@ -551,7 +551,17 @@ def normalize(energy, mu, params: Mapping, np, larch_xafs, *, e0: float | None =
             kwargs["norm1"] = min(float(p["norm1_rule_cap_eV"]), float(p["norm1_rule_fraction"]) * span)
             norm1_rule = {"cap_eV": p["norm1_rule_cap_eV"], "fraction": p["norm1_rule_fraction"], "post_e0_span_eV": span}
         if p.get("nnorm") is not None and span < 100 and kwargs.get("nnorm", 0) > 1:
-            kwargs["nnorm"] = 1  # a quadratic over < 100 eV is not constrained; recorded below
+            kwargs["nnorm"] = 1  # a quadratic over < 100 eV is not constrained (only when a scientist set >1); recorded below
+    if p.get("nnorm") is None and p.get("nnorm_rule_quadratic_from_eV") is not None:
+        # isaac.xas.post_edge_order_is_larch_degree.v0: a line under the threshold window, a quadratic from it on
+        try:
+            e0_w = use_e0 if use_e0 is not None else float(larch_xafs.find_e0(energy, mu))
+        except Exception as exc:  # noqa: BLE001
+            raise StepError("normalization_failed", f"find_e0: {type(exc).__name__}: {exc}") from exc
+        n1 = kwargs.get("norm1")
+        n2 = kwargs.get("norm2") if kwargs.get("norm2") is not None else float(energy[-1]) - e0_w
+        if n1 is not None:
+            kwargs["nnorm"] = 2 if (n2 - n1) >= float(p["nnorm_rule_quadratic_from_eV"]) else 1
     g = Group()
     try:
         larch_xafs.pre_edge(energy, mu, group=g, e0=use_e0, make_flat=bool(p.get("make_flat", True)), **kwargs)

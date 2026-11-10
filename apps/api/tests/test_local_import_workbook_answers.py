@@ -24,6 +24,19 @@ from isaac_api.local_import import workbook_answers as W
 
 from tests_support_records import SEMANTICS
 
+
+@pytest.fixture(scope="module", autouse=True)
+def _vendored_schema_basis(tmp_path_factory):
+    """Pin the VENDORED schema basis (no portal validator installed, as in CI). With the pinned validator
+    installed, DEC-76 rightly stops asking for context.temperature_K, which changes the question set these
+    tests expect. Module-scoped so it is in place before the module's own fixtures build bundles."""
+    d = tmp_path_factory.mktemp("no-validator")
+    with pytest.MonkeyPatch.context() as mp:
+        mp.setenv("ISAAC_PORTAL_VALIDATOR_DIR", str(d))
+        mp.setenv("ISAAC_PORTAL_VALIDATOR_PYTHON", str(d / "python"))
+        yield
+
+
 FOLDER = "SYN_BL00_2100-01_Synthetic"
 OTHER = "SYN_BL99_2100-02_OtherBeamtime"
 WHO = "SYN Scientist"
