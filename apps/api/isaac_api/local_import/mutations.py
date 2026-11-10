@@ -840,7 +840,34 @@ BULK_APPROVE_REVIEW = (("glitch_points_from_one_scan", "one scan's glitch on the
                        ("only_scan_with_edge", "the group's only scan with an edge"),
                        # r6 review M1: a curve tied to its group by the params file, not by its name
                        ("athena_named_by_scientist", "an Athena curve tied to its group by the params file's "
-                                                     "athena_match, not by its name"))
+                                                     "athena_match, not by its name"),
+                       # scan selection (processing.run.SCAN_SELECTION_FLAG): scans proposed for leaving out of the
+                       # merge, or to look at, that the scientist has not confirmed
+                       ("scan_selection_proposed", "open scan-selection proposals"))
+
+#: the statement that says a BULK_APPROVE_REVIEW key's sentence, when it is not the key itself
+_BULK_SENTENCE_KEY = {"scan_selection_proposed": "scan_selection"}
+#: ``processing.run.SCAN_SELECTION_KEY`` and the proposals it names (not imported: processing is an optional extra)
+C_SCAN_SELECTION = "scan_selection"
+_OPEN_PROPOSALS = (("exclude_proposed", "proposed for leaving out"), ("needs_look", "to look at"))
+
+
+def scan_selection_note(obj: Mapping) -> str | None:
+    """The sentence an approval of a result with OPEN scan-selection proposals records in its note: which scans were
+    still proposed for leaving out or to look at, and why (``None`` when none is open). Like :func:`tie_note`, it is
+    no decision kind of its own."""
+    sel = obj.get(C_SCAN_SELECTION) if isinstance(obj, Mapping) else None
+    if not isinstance(sel, Mapping) or not sel.get("open"):
+        return None
+    parts = []
+    for code, what in _OPEN_PROPOSALS:
+        xs = [x for x in sel.get("scans") or () if isinstance(x, Mapping) and x.get("proposal") == code]
+        if xs:
+            parts.append(f"{len(xs)} {what}: " + ", ".join(
+                f"{x.get('file')} ({', '.join(str(r) for r in x.get('reasons') or ())})" for x in xs[:20])
+                + (f" and {len(xs) - 20} more" if len(xs) > 20 else ""))
+    return (f"Approved with scan-selection proposals still open ({sel.get('rule_id')}): " + "; ".join(parts)
+            + "; the merge approved keeps every one of these scans.")
 
 
 #: ``processing.run.TIE_KEY`` (r6 review M1; not imported: processing is an optional extra).
@@ -866,7 +893,8 @@ def bulk_approve_problem(obj: Mapping) -> str | None:
     flags = set(obj.get("review_flags") or ()) | set(qc.get("reasons") or ())
     for key, what in BULK_APPROVE_REVIEW:
         if key in said or key in flags or (key == "outlier_scans" and "outlier_scans_flagged" in flags):
-            sentence = said.get(key) if isinstance(said.get(key), str) else ""
+            sentence = said.get(_BULK_SENTENCE_KEY.get(key, key))
+            sentence = sentence if isinstance(sentence, str) else ""
             return f"{B.processing_id(obj)} carries {what}" + (f": {sentence}" if sentence else ".")
     return None
 
@@ -3045,6 +3073,11 @@ def record_decision(
                 if tie:
                     # r6 review M1: a tie is no decision kind of its own: the approval's note records it
                     entry["note"] = f"{note.strip()} {tie}" if isinstance(note, str) and note.strip() else tie
+                open_sel = scan_selection_note(obj)
+                if open_sel:
+                    # scan selection: an approval with proposals still open records them, as a tie is recorded
+                    cur = entry.get("note")
+                    entry["note"] = f"{cur.strip()} {open_sel}" if isinstance(cur, str) and cur.strip() else open_sel
             if qc_status is not None:
                 # THE PERSON STATES THE QC STATUS; what they were shown is kept beside it.
                 qc = obj.get("qc") or {}
