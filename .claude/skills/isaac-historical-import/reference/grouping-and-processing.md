@@ -384,10 +384,13 @@ an element/edge already named for the group: approved, proposed, or the group's 
 
 ## Groups that need an explanation
 
-- A SPEC run with no `<stem>_dir` folder lists the energy scans (`gscan`) inside its SPEC file. Its
+- A SPEC run, or a standard/reference measurement (e.g. a reference pellet), with no scan file in a
+  `<stem>_dir` folder lists the energy scans (`gscan`) inside its SPEC file; an alignment file never does. Its
   `other_relationships.scans_in_spec_file` names the `#S` blocks used and each one left out, with why (an
-  alignment scan, no data rows, a repeated number). When its SPEC file could not be read, or the run is an
-  exported copy of another run (`SYN_A.dat` beside `SYN_A`), its `why` says so. Say so when you present the group.
+  alignment scan, no data rows, a repeated number), and `scan_dir_present_empty: true` when the `_dir` folder
+  exists but is empty. When its SPEC file could not be read, or the run is an
+  exported copy of another run (`SYN_A.dat` beside `SYN_A`), its `why` says so. The HERFD channel selector reads
+  the same `#S` blocks, so such a run's `signal_selection` reflects its in-file scans. Say so when you present the group.
 - `merged_despite_engine_reading`: more than one run was proposed as one group although the importer read
   something that differs. Say what differs in words and ask; confirming is the scientist's call.
 - `sample_key_basis: name_stem`: no file states the sample, so runs were grouped by the stem of their file

@@ -2968,12 +2968,20 @@ def read_archive_at(
         source_ids={path: source.source_id for path in evidence_by_source},
     )
 
+    # CHANNEL CONTENTS OF THE SCANS KEPT INSIDE A SPEC FILE, for a unit with no `_dir` export to read.
+    in_file_scan_stats = _in_file_scan_stats(
+        relationships.units,
+        known_paths={e.archive_path for e in inventory.entries},
+        read_text=lambda path: archive.read_source_text(inventory, path, source_root=root)[0],
+    )
+
     # --- 2026-09-22: the per-measurement semantics -------------------------------
     semantics = _archive_semantics(
         relationships=relationships,
         evidence_by_source=evidence_by_source,
         applicability_by_path=applicability_by_path,
         scan_stats_by_stem=scan_stats_by_stem,
+        in_file_scan_stats=in_file_scan_stats,
         entries_by_path={e.archive_path: e for e in inventory.entries},
         archive_name=name,
         rules=rules,
@@ -3335,12 +3343,49 @@ def _apply_resolution(
     return marked, derived
 
 
+def _in_file_scan_stats(units, *, known_paths, read_text) -> dict[str, list]:
+    """``{unit key: [ScanChannelStats per #S energy scan]}`` for each unit whose scans are kept INSIDE its SPEC
+    file. AGGREGATES ONLY, exactly as for a `_dir` export: no row value is kept.
+
+    A unit is in the map exactly when the local import's rule
+    (:data:`isaac_api.spec_file_scans.SPEC_FILE_SCANS_RULE_ID`) reads its SPEC file for its own scans: the ONE
+    shared gate :func:`isaac_api.spec_file_scans.reads_in_file_scans` (no `_dir` scan export, a run-candidate SPEC
+    acquisition or a standard/reference and never an alignment file, a safe path the walk listed in
+    ``known_paths``, not an exported copy of another unit). The file is split by the SAME function the rule uses,
+    so the selector reads exactly the scans the run lists, and a file that cannot be read gives ``[]``, as the run
+    then lists none. ``read_text(path)`` returns the file's text as the walk read it, or ``None``."""
+    from . import spec_file_scans as sfs
+    from .bl15 import signals as sig
+
+    stems = {u.stem for u in units}
+    out: dict[str, list] = {}
+    for unit in units:
+        if not sfs.reads_in_file_scans(source_type=unit.source_type, run_candidate=unit.run_candidate,
+                                       scan_count=len(unit.scans), acquisition_path=unit.acquisition_path,
+                                       known_paths=known_paths, stem=unit.stem, stems=stems):
+            continue
+        try:
+            text = read_text(unit.acquisition_path)
+        except Exception:  # never let one unreadable file stop the import
+            text = None
+        out[_unit_key(unit)] = [
+            sig.scan_channel_stats(
+                block,
+                scan_path=f"{unit.acquisition_path}#S{number}",
+                channels=sig.BL152_VORTEX.candidate_channels,
+            )
+            for number, block in (sfs.spec_file_scan_blocks(text) if text is not None else ())
+        ]
+    return out
+
+
 def _archive_semantics(
     *,
     relationships,
     evidence_by_source: Mapping[str, Sequence],
     applicability_by_path: Mapping[str, Any],
     scan_stats_by_stem: Mapping[str, Sequence],
+    in_file_scan_stats: Mapping[str, Sequence] | None = None,
     entries_by_path: Mapping[str, Any],
     archive_name: str,
     rules: Sequence[Any],
@@ -3541,7 +3586,14 @@ def _archive_semantics(
         digest = getattr(entry, "content_sha256", "") if entry is not None else ""
         shared = unit.legacy_number is not None and legacy_counts.get(unit.legacy_number, 0) > 1
         applies = applicability_by_path.get(unit.acquisition_path)
-        channels = sig.summarize_channels(scan_stats_by_stem.get(unit.stem, ()))
+        # A unit whose run lists the `#S` blocks inside its SPEC file (no `_dir` export) is read from exactly those
+        # blocks (`_in_file_scan_stats`); every other unit from its `_dir` exports, as before.
+        in_file = in_file_scan_stats or {}
+        channels = sig.summarize_channels(
+            in_file[_unit_key(unit)]
+            if _unit_key(unit) in in_file
+            else scan_stats_by_stem.get(unit.stem, ())
+        )
         elements = tuple(beamtime_elements) + tuple(filename_elements.get(unit.stem, ()))
         assignments, rule_ref = cr.signal_assignments_for(
             rules,
