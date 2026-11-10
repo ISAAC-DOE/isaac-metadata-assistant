@@ -244,11 +244,11 @@ def test_a_confirmed_potentiostatic_mode_makes_that_groups_setpoint_question_blo
 
 def test_the_v1_questions_ask_the_setpoint_of_a_potentiostatic_run_with_no_parsed_potential(tmp_path):
     from test_local_import_reader_ssrl_xdc import make_scan
-    from test_local_import_reader_two_column import make_two
+    from test_local_import_reader_xes_tab import make_xes
 
     src = tmp_path / "src" / "SYN_beamtime"
     make_scan(src / "SYN_run_A.001")
-    make_two(src / "SYN_cell.txt")
+    make_xes(src / "SYN_cell.txt")
     b = tmp_path / "b"
     assert cli.main(["import", str(src), "--out", str(b)]) == 0
     bd = M.load(b)

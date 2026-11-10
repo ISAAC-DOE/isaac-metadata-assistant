@@ -481,11 +481,11 @@ def test_potential_v_fills_a_run_with_no_parsed_potential_and_refuses_text(tmp_p
     """Potential (V) used to be "recorded nowhere" for a run whose files state no potential:
     the set-point had no missing value. It is answerable now (bundle.LOCAL_ANSWER_FIELDS)."""
     from test_local_import_reader_ssrl_xdc import make_scan
-    from test_local_import_reader_two_column import make_two
+    from test_local_import_reader_xes_tab import make_xes
 
     src = tmp_path / "src" / "SYN_beamtime"
     make_scan(src / "SYN_run_A.001")
-    make_two(src / "SYN_cell.txt")
+    make_xes(src / "SYN_cell.txt")
     bdir = tmp_path / "b"
     assert cli.main(["import", str(src), "--out", str(bdir)]) == 0
     M.group(bdir)

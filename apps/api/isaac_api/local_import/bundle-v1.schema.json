@@ -52,9 +52,10 @@
         "1.7.0",
         "1.8.0",
         "1.9.0",
-        "1.10.0"
+        "1.10.0",
+        "1.11.0"
       ],
-      "description": "1.1.0 adds record_groups, processing_results and exposures (all optional, so a 1.0.0 bundle still validates) and widens the decision, target and question enums. 1.2.0 adds processed_outputs (optional; absent means none were recorded) and extended_context_entry.processed_output_id. A 1.2.0 bundle REQUIRES processed_outputs (possibly empty); a bundle without it keeps its older version. 1.3.0 adds ai_interpretation.field_path and .run_ids and the optional eligibility_rederived and format_upgrades logs (all optional), and eligibility is derived under a larger writable set (context.electrochemistry.potential_setpoint_V). A 1.3.0 bundle also REQUIRES processed_outputs. 1.4.0 adds the set_clock_time_zone experiment decision (and its decision field clock_zone_binding on a confirm), the confirm_clock_time_zone question kind, the optional candidates[].local_clock block and the optional zone / zone_decision_id on a normalization step (all additive); nothing becomes newly writable. A 1.4.0 bundle also REQUIRES processed_outputs. 1.5.0 adds nothing to the bundle's shape; eligibility is derived under a larger writable set (context.electrochemistry.control_mode), as at 1.3.0. A 1.5.0 bundle also REQUIRES processed_outputs. 1.6.0 (DEC-91) adds three capture decisions — keep_apart on the new target kind merge_candidate, select_athena_version on a processing result (its value one of that result's athena_versions[].version_id; the derived athena_result_of_record / athena_result_of_record_basis), and set_not_counter_positions on the experiment (decision field not_counter_positions) — the optional superseded_merge_candidates section, the derived merge-candidate status kept_apart, and a merge decision's combined group (record_group.merged_by_decision); nothing becomes newly writable. A 1.6.0 bundle also REQUIRES processed_outputs. 1.7.0 (DEC-92) adds nothing to the bundle's shape; eligibility is derived under a larger writable set (context.electrochemistry.current_setpoint_mA_cm2), as at 1.3.0 and 1.5.0. A 1.7.0 bundle also REQUIRES processed_outputs. 1.8.0 adds nothing to the bundle's shape: the bounds on scientist_decisions and ai_interpretations are raised from 20000 to 200000 entries (both are append-only; at the old bound no further answer could be written). Nothing becomes newly writable. A 1.8.0 bundle also REQUIRES processed_outputs. 1.9.0 lets a set_counter_positions decision name -1 among its positions: the LAST filename token, whatever the name's length (`decide --positions last`), and adds a merge decision's optional same_conditions_tokens (`decide --same-conditions`); nothing else changes and nothing becomes newly writable. A 1.9.0 bundle also REQUIRES processed_outputs. 1.10.0 adds the optional vocabulary_requests section: an answer a scientist gave (decide, a template import cell, a template adopt cell of their own sheet) that its field refused only because it is not on the field's allowed list, kept as a request for the vocabulary (who, when, the field, the targets and runs, where it was said), never as a decision or a value; nothing becomes newly writable. A 1.10.0 bundle also REQUIRES processed_outputs."
+      "description": "1.1.0 adds record_groups, processing_results and exposures (all optional, so a 1.0.0 bundle still validates) and widens the decision, target and question enums. 1.2.0 adds processed_outputs (optional; absent means none were recorded) and extended_context_entry.processed_output_id. A 1.2.0 bundle REQUIRES processed_outputs (possibly empty); a bundle without it keeps its older version. 1.3.0 adds ai_interpretation.field_path and .run_ids and the optional eligibility_rederived and format_upgrades logs (all optional), and eligibility is derived under a larger writable set (context.electrochemistry.potential_setpoint_V). A 1.3.0 bundle also REQUIRES processed_outputs. 1.4.0 adds the set_clock_time_zone experiment decision (and its decision field clock_zone_binding on a confirm), the confirm_clock_time_zone question kind, the optional candidates[].local_clock block and the optional zone / zone_decision_id on a normalization step (all additive); nothing becomes newly writable. A 1.4.0 bundle also REQUIRES processed_outputs. 1.5.0 adds nothing to the bundle's shape; eligibility is derived under a larger writable set (context.electrochemistry.control_mode), as at 1.3.0. A 1.5.0 bundle also REQUIRES processed_outputs. 1.6.0 (DEC-91) adds three capture decisions — keep_apart on the new target kind merge_candidate, select_athena_version on a processing result (its value one of that result's athena_versions[].version_id; the derived athena_result_of_record / athena_result_of_record_basis), and set_not_counter_positions on the experiment (decision field not_counter_positions) — the optional superseded_merge_candidates section, the derived merge-candidate status kept_apart, and a merge decision's combined group (record_group.merged_by_decision); nothing becomes newly writable. A 1.6.0 bundle also REQUIRES processed_outputs. 1.7.0 (DEC-92) adds nothing to the bundle's shape; eligibility is derived under a larger writable set (context.electrochemistry.current_setpoint_mA_cm2), as at 1.3.0 and 1.5.0. A 1.7.0 bundle also REQUIRES processed_outputs. 1.8.0 adds nothing to the bundle's shape: the bounds on scientist_decisions and ai_interpretations are raised from 20000 to 200000 entries (both are append-only; at the old bound no further answer could be written). Nothing becomes newly writable. A 1.8.0 bundle also REQUIRES processed_outputs. 1.9.0 lets a set_counter_positions decision name -1 among its positions: the LAST filename token, whatever the name's length (`decide --positions last`), and adds a merge decision's optional same_conditions_tokens (`decide --same-conditions`); nothing else changes and nothing becomes newly writable. A 1.9.0 bundle also REQUIRES processed_outputs. 1.10.0 adds the optional vocabulary_requests section: an answer a scientist gave (decide, a template import cell, a template adopt cell of their own sheet) that its field refused only because it is not on the field's allowed list, kept as a request for the vocabulary (who, when, the field, the targets and runs, where it was said), never as a decision or a value; nothing becomes newly writable. A 1.10.0 bundle also REQUIRES processed_outputs. 1.11.0 adds a second processed-output origin rule, isaac.processed_output.origin.engine_classification.v0 (basis engine_classification: a file a generic reader read that the engine classifies processed_spectrum, the scientists' quick merges, is a processed output, never a run), and its link rule isaac.processed_output.link_by_legacy_number.v0 (match legacy_number; link notes spans_several_runs and run_has_no_scans); nothing else changes and nothing becomes newly writable. A 1.11.0 bundle also REQUIRES processed_outputs."
     },
     "is_official_record": {
       "const": false
@@ -3399,7 +3400,10 @@
                 ],
                 "properties": {
                   "rule_id": {
-                    "const": "isaac.processed_output.origin.v0"
+                    "enum": [
+                      "isaac.processed_output.origin.v0",
+                      "isaac.processed_output.origin.engine_classification.v0"
+                    ]
                   },
                   "processed_by": {
                     "type": [
@@ -3425,7 +3429,8 @@
                   "basis": {
                     "enum": [
                       "line_1",
-                      "fields"
+                      "fields",
+                      "engine_classification"
                     ]
                   },
                   "line_1_applications": {
@@ -3635,7 +3640,10 @@
             ],
             "properties": {
               "rule_id": {
-                "const": "isaac.processed_output.link_by_run_stem.v0"
+                "enum": [
+                  "isaac.processed_output.link_by_run_stem.v0",
+                  "isaac.processed_output.link_by_legacy_number.v0"
+                ]
               },
               "status": {
                 "const": "proposed"
@@ -3643,7 +3651,8 @@
               "match": {
                 "enum": [
                   "exact",
-                  "scan_selection_suffix"
+                  "scan_selection_suffix",
+                  "legacy_number"
                 ]
               },
               "scan_selection_literal": {
@@ -3706,7 +3715,9 @@
                   "enum": [
                     "ambiguous",
                     "no_run_named_like_it",
-                    "exact_name_run_has_no_scans"
+                    "exact_name_run_has_no_scans",
+                    "spans_several_runs",
+                    "run_has_no_scans"
                   ]
                 },
                 "match": {
@@ -3717,6 +3728,7 @@
                   "enum": [
                     "exact",
                     "scan_selection_suffix",
+                    "legacy_number",
                     null
                   ]
                 },
@@ -4043,6 +4055,23 @@
         "properties": {
           "format_version": {
             "const": "1.10.0"
+          }
+        },
+        "required": [
+          "format_version"
+        ]
+      },
+      "then": {
+        "required": [
+          "processed_outputs"
+        ]
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "format_version": {
+            "const": "1.11.0"
           }
         },
         "required": [

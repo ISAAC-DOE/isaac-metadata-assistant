@@ -295,7 +295,8 @@ def render_summary(bundle: Mapping) -> str:
         f"- Runs: {counts['runs']} ({counts['runs_sharing_a_legacy_number']} share a legacy "
         f"number with another run; all are kept)"
     )
-    pos = bundle.get("processed_outputs") or []
+    quick = [p for p in bundle.get("processed_outputs") or [] if B.is_engine_classified(p)]
+    pos = [p for p in bundle.get("processed_outputs") or [] if not B.is_engine_classified(p)]
     if pos:
         n_files = sum(len(p["files"]) for p in pos)
         linked = sum(1 for p in pos if p["proposed_links"])
@@ -308,6 +309,8 @@ def render_summary(bundle: Mapping) -> str:
             + (f"; {assumed} of them assume scans are numbered 1..N because the run states no scan index" if assumed else "")
             + "). Not counted as runs; no question is asked about them."
         )
+    if quick:
+        add(f"- {_quick_merges_text(quick)}")
     add(
         f"- Values: {counts['candidates']} — {counts['candidate_extracted']} extracted, "
         f"{counts['needs_review']} need review, {counts['conflicting_candidates']} conflicting, "
@@ -659,11 +662,15 @@ def cmd_import(args) -> int:
         print(f"  {_athena_read_by_process(n_athena)}")
     if n_kept := len(B.files_not_opened(bundle)):
         print(f"  {_not_opened_text(n_kept)}, not counted as unread: `isaac bundle list {out} unread --all` lists them")
-    if c.get("processed_output_files"):
+    n_quick = sum(len(p["files"]) for p in bundle.get("processed_outputs") or [] if B.is_engine_classified(p))
+    if c.get("processed_output_files") and c["processed_output_files"] > n_quick:
         print(
-            f"  {_processed_files_text(c['processed_output_files'])} from the scientists (Athena/Demeter), "
+            f"  {_processed_files_text(c['processed_output_files'] - n_quick)} from the scientists (Athena/Demeter), "
             "kept as reference results, not records"
         )
+    if n_quick:
+        print(f"  {_processed_files_text(n_quick)} the engine reads as processed spectra (the scientists' quick merges), "
+              "kept as rough reference results, not records or runs")
     print("  This is NOT a validated official ISAAC record. Start with summary.md.")
     return EXIT_OK
 
@@ -884,6 +891,21 @@ def _not_opened_text(n: int) -> str:
 
 def _processed_files_text(n: int) -> str:
     return f"{n} processed file{'s' if n != 1 else ''}"
+
+
+def _quick_merges_text(quick) -> str:
+    """bundle 1.11.0: the summary's line for the processed outputs the ENGINE classified (the scientists' quick merges)."""
+    n_files = sum(len(p["files"]) for p in quick)
+    linked = sum(1 for p in quick if p["proposed_links"])
+    codes = [(p["link_note"] or {}).get("code") for p in quick if not p["proposed_links"]]
+    spans, ambiguous = codes.count("spans_several_runs"), codes.count("ambiguous")
+    return (f"{_processed_files_text(n_files)} the engine reads as processed spectra (no header; every line two numbers: "
+            "the scientists' quick merges), kept as rough reference results, not records "
+            f"({linked} with a proposed link to a run by legacy number, {len(quick) - linked} unlinked"
+            + (f", {spans} of them spanning several runs" if spans else "")
+            + (f", {ambiguous} naming a legacy number several runs share" if ambiguous else "")
+            + "). Not counted as runs; no question is asked about them; `isaac process` compares each linked one with "
+            "ISAAC's merge as a rough reference, never as the result of record.")
 
 
 def _athena_read_by_process(n: int) -> str:

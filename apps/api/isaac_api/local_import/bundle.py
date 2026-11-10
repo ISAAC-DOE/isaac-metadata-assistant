@@ -80,7 +80,14 @@ FORMAT_ID = "isaac.local-import-bundle"
 #: kept as a request for the vocabulary, never as a decision or a value, and ``bundle propose-terms``
 #: drafts it. A 1.9.0 validator refuses a bundle holding the section, hence the version. Nothing
 #: becomes newly writable; the upgrade is disclosed (:data:`CHANGES_ADDED_IN`).
-FORMAT_VERSION = "1.10.0"
+#: 1.11.0 (additive): a second origin rule for ``processed_outputs[]`` — a file a generic reader read
+#: whose ENGINE classification is ``processed_spectrum`` (:data:`ENGINE_ORIGIN_RULE_ID`, basis
+#: ``engine_classification``: the scientists' quick merges, headerless two-column text) is a processed
+#: output, never a run — and its link rule, :data:`LEGACY_LINK_RULE_ID` (match ``legacy_number``; link
+#: notes ``spans_several_runs`` and ``run_has_no_scans``). A 1.10.0 validator refuses a bundle holding
+#: either, hence the version. Nothing becomes newly writable; the upgrade is disclosed
+#: (:data:`CHANGES_ADDED_IN`): a bundle imported before holds such files as runs until re-imported.
+FORMAT_VERSION = "1.11.0"
 #: The electrochemical control mode. Its allowed values are the official schema's enum (read at
 #: runtime by :func:`value_problem`); the schema's conditional rules key the set-point a record
 #: requires on it (:func:`required_record_paths`). Never defaulted, never derived.
@@ -106,7 +113,7 @@ VALUE_IDS_APPEND_FROM = "1.5.0"
 IMPORT_RULES_ADDED_IN: Mapping[str, tuple] = {
     "1.4.0": (("generic:ssrl_xdc_v1", "ssrl_xdc_scan_start_v1"),),
 }
-_VERSION_ORDER = ("1.0.0", "1.1.0", "1.2.0", "1.3.0", "1.4.0", "1.5.0", "1.6.0", "1.7.0", "1.8.0", "1.9.0", "1.10.0")
+_VERSION_ORDER = ("1.0.0", "1.1.0", "1.2.0", "1.3.0", "1.4.0", "1.5.0", "1.6.0", "1.7.0", "1.8.0", "1.9.0", "1.10.0", "1.11.0")
 #: A change a format version made that moves no eligibility and adds no import rule, but that the
 #: first save by a newer build still DISCLOSES in its ``format_upgrades`` entry (never silently).
 CHANGES_ADDED_IN: Mapping[str, str] = {
@@ -116,6 +123,9 @@ CHANGES_ADDED_IN: Mapping[str, str] = {
               "in labels (--same-conditions)"),
     "1.10.0": ("1.10.0 keeps an answer off its field's list as a vocabulary request (never a decision or a value) for "
                "`bundle propose-terms`"),
+    "1.11.0": ("1.11.0 keeps a file the engine reads as a processed spectrum (the scientists' quick merges) as a "
+               "processed output linked by legacy number, never a run; a bundle imported before holds such files as runs "
+               "until re-imported"),
 }
 #: A field composed into a draft only beside another of the SAME run (interim decision for the
 #: set-point, pending domain-owner review; ``records.compose_group`` applies it). The CURRENT
@@ -222,6 +232,29 @@ _PROCESSED_STATED_KEYS = {
 # the honest outcome when the scientist renamed the file. The validator re-runs it.
 LINK_RULE_ID = "isaac.processed_output.link_by_run_stem.v0"
 _SCAN_SELECTION_SUFFIX = re.compile(r"^(?P<base>.+)_(?P<sel>\d+(?:-\d+)?)$")
+
+# THE SECOND ORIGIN RULE (1.11.0, ``isaac.processed_output.origin.engine_classification.v0``): the ENGINE's own
+# content classification, never a folder or a file name. ``bl15.classify`` calls a file ``processed_spectrum`` when it
+# carries no header and every opening line is two numbers — the scientists' quick merges at the beamline (measured on a
+# real BL15-2 beamtime: 32 such files in a ``MERGE/`` folder, each made a run of its own by the two-column reader, so
+# 32 measurements nobody performed got record groups and questions). A file a GENERIC reader read whose engine class
+# is ``processed_spectrum`` is a processed output (basis ``engine_classification``), never a run. The folder it sits
+# in is context only: the same file anywhere else is classified, and kept, the same way. ``.mca`` files are the
+# engine's ``detector_product`` and are not touched by this rule.
+ENGINE_ORIGIN_RULE_ID = "isaac.processed_output.origin.engine_classification.v0"
+ENGINE_PROCESSED_SOURCE_TYPE = "processed_spectrum"
+
+# ITS LINK RULE (``isaac.processed_output.link_by_legacy_number.v0``, :func:`_link_by_legacy_number`) — applied to
+# engine-classified outputs ONLY (an XDI output keeps :data:`LINK_RULE_ID`). The whole-number tokens a name STARTS with
+# are read: the LAST is the electrode number and must equal the run's second token (both absent counts as equal: a
+# run ``01_IrO2_…`` and an output ``01_IrO2_…_0p2wtpc`` name none); the others are legacy numbers, matched against
+# each run's own ``legacy_number``. One legacy number and exactly ONE fitting run with scans -> a proposed link.
+# Several legacy numbers (``43_44_04_…``) -> ``spans_several_runs`` with every fitting run, no link. Several fitting
+# runs (a legacy number two runs share) -> ``ambiguous``. One fitting run without scans -> ``run_has_no_scans``. No
+# leading number -> unlinked. The rest of the two names (``f10`` / ``filter10_again``) is said in the link's
+# ``assumption`` and never decides anything. The validator re-runs it.
+LEGACY_LINK_RULE_ID = "isaac.processed_output.link_by_legacy_number.v0"
+_WHOLE_NUMBER = re.compile(r"^[0-9]+$")
 
 # --- value states --------------------------------------------------------------
 
@@ -407,6 +440,28 @@ def _processing_origin(scan: Mapping, line1: object) -> tuple[dict | None, dict 
         demeter_output_filetype=hints.get("demeter_output_filetype"),
         has_athena_fields=bool(hints.get("has_athena_fields")),
     )
+
+
+def engine_processing_origin() -> dict:
+    """The ``processing_origin`` of a file the engine classified ``processed_spectrum`` (:data:`ENGINE_ORIGIN_RULE_ID`).
+    Such a file states nothing about itself (no header), so every statement-derived field is empty or false; the
+    classification itself is the source's ``classification`` in ``sources[]``, which the validator checks."""
+    return {
+        "rule_id": ENGINE_ORIGIN_RULE_ID,
+        "basis": "engine_classification",
+        "processed_by": None,
+        "application_version": None,
+        "line_1_applications": [],
+        "names_a_processing_application": False,
+        "has_demeter_output_filetype": False,
+        "has_athena_fields": False,
+    }
+
+
+def is_engine_classified(po: Mapping) -> bool:
+    """True for a processed output kept by :data:`ENGINE_ORIGIN_RULE_ID` (every file's origin says so)."""
+    files = po.get("files") or ()
+    return bool(files) and all((f.get("processing_origin") or {}).get("rule_id") == ENGINE_ORIGIN_RULE_ID for f in files)
 
 
 def legacy_processed_runs(bundle: Mapping) -> list[str]:
@@ -632,6 +687,10 @@ def propose_processed_links(processed_outputs: Sequence[dict], runs: Sequence[Ma
         return [r for r in rs if r.get("run_candidate") and int(r.get("scan_count") or 0) > 0]
 
     for po in processed_outputs:
+        if is_engine_classified(po):
+            # 1.11.0: an output the ENGINE classified is linked by its legacy number, never by its stem
+            _link_by_legacy_number(po, runs)
+            continue
         stem = po["label"]
         po["proposed_links"] = []
         po["link_note"] = None
@@ -698,6 +757,109 @@ def propose_processed_links(processed_outputs: Sequence[dict], runs: Sequence[Ma
                     "scan selection whose every number is a scan that run has; it stays unlinked."
                 ),
             }
+
+
+def _leading_numbers(name: object) -> list[str]:
+    """The whole-number tokens a name STARTS with, as written (``04_01_JK3_x`` -> ["04", "01"]; ``IrO2_x`` -> [])."""
+    out = []
+    for tok in str(name or "").split("_"):
+        if not _WHOLE_NUMBER.match(tok):
+            break
+        out.append(tok)
+    return out
+
+
+def _run_electrode(run: Mapping) -> str | None:
+    """A run's electrode number: its stem's SECOND token when the stem starts with two whole numbers, else ``None``."""
+    toks = str(run.get("stem") or "").split("_")
+    return toks[1] if len(toks) > 1 and _WHOLE_NUMBER.match(toks[0]) and _WHOLE_NUMBER.match(toks[1]) else None
+
+
+def _same_number(a: str | None, b: str | None) -> bool:
+    return (a is None and b is None) or (a is not None and b is not None and int(a) == int(b))
+
+
+def _rest_differs(output_name: str, run_stem: str) -> tuple[list[str], list[str]]:
+    """The words after the leading numbers that only the output has, and only the run has (order kept)."""
+    a = str(output_name).split("_")[len(_leading_numbers(output_name)):]
+    b = str(run_stem).split("_")[len(_leading_numbers(run_stem)):]
+    return [t for t in a if t and t not in b], [t for t in b if t and t not in a]
+
+
+def _link_by_legacy_number(po: dict, runs: Sequence[Mapping]) -> None:
+    """:data:`LEGACY_LINK_RULE_ID` for ONE engine-classified processed output, in place. Proposes only."""
+    name = str(po["label"])
+    po["proposed_links"] = []
+    po["link_note"] = None
+    lead = _leading_numbers(name)
+    if not lead:
+        po["link_note"] = {
+            "code": "no_run_named_like_it", "match": None, "run_keys": [],
+            "detail": "Its name starts with no number, so no legacy number names a run; it stays unlinked.",
+        }
+        return
+    electrode = lead[-1] if len(lead) >= 2 else None
+    legacy = lead[:-1] if len(lead) >= 2 else lead
+
+    def numbered(n: str) -> list[Mapping]:
+        return [r for r in runs if isinstance(r.get("legacy_number"), int) and not isinstance(r.get("legacy_number"), bool)
+                and r["legacy_number"] == int(n)]
+
+    def fitting(n: str) -> list[Mapping]:
+        return [r for r in numbered(n) if _same_number(_run_electrode(r), electrode)]
+
+    said_electrode = f" and electrode number {electrode}" if electrode is not None else " (and no electrode number)"
+    if len(legacy) > 1:
+        hits = [r for n in legacy for r in fitting(n)]
+        po["link_note"] = {
+            "code": "spans_several_runs", "match": "legacy_number",
+            "run_keys": sorted({r["run_key"] for r in hits})[:20],
+            "detail": (f"Its name starts with {len(legacy)} legacy numbers ({', '.join(legacy)}){said_electrode}: it spans "
+                       f"several runs ({len(hits)} fit), so none is linked."),
+        }
+        return
+    n = legacy[0]
+    same, hits = numbered(n), fitting(n)
+    if len(hits) > 1:
+        po["link_note"] = {
+            "code": "ambiguous", "match": "legacy_number", "run_keys": sorted(r["run_key"] for r in hits)[:20],
+            "detail": f"{len(hits)} runs carry legacy number {n}{said_electrode}; none is chosen.",
+        }
+    elif len(hits) == 1:
+        run = hits[0]
+        if int(run.get("scan_count") or 0) <= 0:
+            po["link_note"] = {
+                "code": "run_has_no_scans", "match": "legacy_number", "run_keys": [run["run_key"]],
+                "detail": f"Run {run['stem']} carries legacy number {n}{said_electrode} but lists no scan, so nothing is linked.",
+            }
+            return
+        only_output, only_run = _rest_differs(name, run.get("stem") or "")
+        differs = ("The rest of the two names agrees." if not (only_output or only_run) else
+                   f"The rest of the two names differs (this output: {', '.join(only_output) or 'nothing more'}; the run: "
+                   f"{', '.join(only_run) or 'nothing more'}); a name difference decides nothing.")
+        po["proposed_links"].append(
+            {
+                "rule_id": LEGACY_LINK_RULE_ID,
+                "status": "proposed",
+                "match": "legacy_number",
+                "scan_selection_literal": None,
+                "scan_selection_basis": None,
+                "assumption": (f"linked by the leading numbers of its name alone: {n} is read as the run's legacy number"
+                               + (f" and {electrode} as its electrode number (the run's second token)" if electrode is not None
+                                  else "; neither name carries an electrode number") + f". {differs}"),
+                "run_id": run["run_id"],
+                "run_key": run["run_key"],
+                "run_stem": run["stem"],
+                "group_id": None,  # derived from record_groups[] by apply_derivations
+            }
+        )
+    else:
+        po["link_note"] = {
+            "code": "no_run_named_like_it", "match": "legacy_number" if same else None,
+            "run_keys": sorted(r["run_key"] for r in same)[:20],
+            "detail": (f"{len(same)} run(s) carry legacy number {n}, but none{said_electrode.replace(' and', ' with', 1)}; "
+                       "it stays unlinked." if same else f"No run carries legacy number {n}; it stays unlinked."),
+        }
 
 
 def processed_output_counts(processed_outputs: Sequence[Mapping]) -> dict[str, int]:
@@ -3901,6 +4063,12 @@ def build_bundle(
                 if (g.role_hints or {}).get("kind") == PROCESSED_OUTPUT_KIND
             }
             origin = {p: o for p, (o, _) in judged.items()}
+            # 1.11.0 (ENGINE_ORIGIN_RULE_ID): a file the ENGINE classified as a processed spectrum is the scientists'
+            # processed output, whatever generic reader read it and wherever it sits
+            for sc in all_scans:
+                rel = sc["relative_path"]
+                if origin.get(rel) is None and (row_of.get(rel) or {}).get("source_type") == ENGINE_PROCESSED_SOURCE_TYPE:
+                    origin[rel] = engine_processing_origin()
             # a file whose line 1 names another application but whose fields mention
             # Athena/Demeter stays an acquisition; the disagreement is recorded on it
             disagreements = [
@@ -3951,6 +4119,7 @@ def build_bundle(
                     )
                 entries = [_statement_entry(g, k, st, run_id=None, po_id=po_id) for k, st in enumerate(kept)]
                 generic_statements.extend(entries)
+                by_engine = all(f["processing_origin"]["rule_id"] == ENGINE_ORIGIN_RULE_ID for f in files)
                 processed_outputs.append(
                     {
                         "processed_output_id": po_id,
@@ -3961,6 +4130,10 @@ def build_bundle(
                         "is_acquisition": False,
                         "becomes_a_record": False,
                         "statement": (
+                            "The scientists' own processed spectrum, as the engine classifies its content (no header; "
+                            "every line two numbers): a quick merge, a rough reference result and evidence: never a run, "
+                            "never a record group, never preferred for a record."
+                            if by_engine else
                             "The scientists' own processed output, as its header states. A "
                             "reference result and evidence: never a run, never a record group."
                         ),
@@ -5581,6 +5754,7 @@ def validate_bundle(bundle: Any, *, max_errors: int = 50, encoded: bytes | None 
     po_ids = _unique(bundle.get("processed_outputs") or [], "processed_output_id", "processed_output_id")
     run_scan_paths = {s.get("relative_path") for r in bundle["runs"] for s in r.get("scans") or ()}
     runs_by_id_v = {r["run_id"]: r for r in bundle["runs"]}
+    source_type_of = {s.get("source_id"): (s.get("classification") or {}).get("source_type") for s in bundle.get("sources") or ()}
     for po in bundle.get("processed_outputs") or ():
         pid = po["processed_output_id"]
         for f in po["files"]:
@@ -5590,6 +5764,11 @@ def validate_bundle(bundle: Any, *, max_errors: int = 50, encoded: bytes | None 
                 errors.append(f"paths: processed output {pid} has an absolute or escaping path")
             if f["relative_path"] in run_scan_paths:
                 errors.append(f"consistency: processed output {pid} file {f['relative_path']} is also a run's scan")
+            if (f.get("processing_origin") or {}).get("rule_id") == ENGINE_ORIGIN_RULE_ID and (
+                    (source_type_of.get(f["source_id"]) if f["source_id"] is not None else None) != ENGINE_PROCESSED_SOURCE_TYPE):
+                # the origin is the engine's classification, never a label: it must be what sources[] records
+                errors.append(f"consistency: processed output {pid} file {f['relative_path']} is kept by {ENGINE_ORIGIN_RULE_ID} "
+                              f"but its source is not classified {ENGINE_PROCESSED_SOURCE_TYPE}")
         for link in po["proposed_links"]:
             if link["run_id"] not in run_ids or link["run_key"] not in run_keys:
                 errors.append(f"reference: processed output {pid} links to unknown run {link['run_id']}")
@@ -5610,7 +5789,8 @@ def validate_bundle(bundle: Any, *, max_errors: int = 50, encoded: bytes | None 
 
         for po, e in zip(bundle["processed_outputs"], again):
             if _bare(po["proposed_links"]) != _bare(e["proposed_links"]) or po["link_note"] != e["link_note"]:
-                errors.append(f"consistency: processed output {po['processed_output_id']} link is not what {LINK_RULE_ID} gives over the stored runs")
+                rule = LEGACY_LINK_RULE_ID if is_engine_classified(po) else LINK_RULE_ID
+                errors.append(f"consistency: processed output {po['processed_output_id']} link is not what {rule} gives over the stored runs")
     # A RUN IS IN AT MOST ONE LIVE GROUP (proposed / confirmed / merged); rejected and split
     # groups are history and do not hold their runs.
     live_of: dict[str, list[str]] = {}
