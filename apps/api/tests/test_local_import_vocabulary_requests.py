@@ -852,7 +852,7 @@ def test_a_1_9_0_bundle_still_validates_and_its_first_save_says_what_1_10_0_adde
                         "--value", "cathodic corrosion")
     assert code == 0 and KEPT in err
     after = M.load(b)
-    assert after["format_version"] == B.FORMAT_VERSION == "1.10.0" and len(after["vocabulary_requests"]) == 1
+    assert after["format_version"] == B.FORMAT_VERSION == "1.11.0" and len(after["vocabulary_requests"]) == 1
     [u] = after["format_upgrades"]
     assert u["from_format_version"] == "1.9.0" and B.CHANGES_ADDED_IN["1.10.0"] in u["statement"]
     # the section is part of v1.10.0 only as an optional addition: a bundle without it is valid at 1.10.0

@@ -1,6 +1,6 @@
 # ISAAC Local Import Bundle — contract v1
 
-Status: **v1.10.0** (an answer refused only because it is not on its field's list is kept as a vocabulary request, `vocabulary_requests`, and `bundle propose-terms` drafts it, 2026-10-30, §9 "What 1.10.0 added", §29; v1.9.0 (`set_counter_positions` may name the LAST file-name token, `--positions last`, and a scientist's merge has a working path, 2026-10-30, §9 "What 1.9.0 added", §27; v1.8.0 the bounds on `scientist_decisions` and `ai_interpretations` raised to 200,000, so an append-only log can no longer lock a bundle; decide refuses a value its field refuses, 2026-10-29, §9 "What 1.8.0 added", §25; v1.7.0 `context.electrochemistry.current_setpoint_mA_cm2` answerable, so a confirmed galvanostatic record can complete, 2026-10-29, §9 "What 1.7.0 added", DEC-92; v1.6.0 capture decisions — keep apart, the Athena result of record, "no counter" — a merge decision applied as one combined group, and question ids that survive answers, 2026-10-29, §9 "What 1.6.0 added"; v1.5.0 control mode answerable the same day; v1.4.0 the SSRL XDC scan start time, the instrument clock's time zone and its binding, 2026-10-29, §9 "What 1.4.0 added"; v1.3.0 absorber readings on record groups, a larger writable set and STALE bundles, the same day; v1.2.0 processed outputs 2026-10-28; v1.1.0 LOCAL-2 and v1.0.0 LOCAL-1 the same day). Machine contract:
+Status: **v1.11.0** (a file the engine classifies `processed_spectrum` — the scientists' quick merges — is a processed output linked by legacy number, never a run, 2026-11-09, §9 "What 1.11.0 added"; v1.10.0 an answer refused only because it is not on its field's list is kept as a vocabulary request, `vocabulary_requests`, and `bundle propose-terms` drafts it, 2026-10-30, §9 "What 1.10.0 added", §29; v1.9.0 (`set_counter_positions` may name the LAST file-name token, `--positions last`, and a scientist's merge has a working path, 2026-10-30, §9 "What 1.9.0 added", §27; v1.8.0 the bounds on `scientist_decisions` and `ai_interpretations` raised to 200,000, so an append-only log can no longer lock a bundle; decide refuses a value its field refuses, 2026-10-29, §9 "What 1.8.0 added", §25; v1.7.0 `context.electrochemistry.current_setpoint_mA_cm2` answerable, so a confirmed galvanostatic record can complete, 2026-10-29, §9 "What 1.7.0 added", DEC-92; v1.6.0 capture decisions — keep apart, the Athena result of record, "no counter" — a merge decision applied as one combined group, and question ids that survive answers, 2026-10-29, §9 "What 1.6.0 added"; v1.5.0 control mode answerable the same day; v1.4.0 the SSRL XDC scan start time, the instrument clock's time zone and its binding, 2026-10-29, §9 "What 1.4.0 added"; v1.3.0 absorber readings on record groups, a larger writable set and STALE bundles, the same day; v1.2.0 processed outputs 2026-10-28; v1.1.0 LOCAL-2 and v1.0.0 LOCAL-1 the same day). Machine contract:
 [`apps/api/isaac_api/local_import/bundle-v1.schema.json`](../apps/api/isaac_api/local_import/bundle-v1.schema.json)
 (JSON Schema draft 2020-12) plus the checks in
 [`bundle.py`](../apps/api/isaac_api/local_import/bundle.py) `validate_bundle` that JSON
@@ -747,6 +747,52 @@ writable, and `processed_outputs` is required at 1.10.0 as at 1.2.0–1.9.0.
 - **The upgrade is disclosed**: the first write by this build of an older bundle appends one
   `format_upgrades` entry whose statement includes `bundle.CHANGES_ADDED_IN["1.10.0"]`. A statement may
   now be 1,500 characters (600 before): from 1.4.0 or older, every change since no longer fit.
+
+### What 1.11.0 added (the scientists' quick merges, by the engine's classification)
+
+A minor version: the schema **accepts more**, and only where the project owner approved it. Measured on a real
+BL15-2 beamtime: 32 headerless two-column `.txt` files in a `MERGE/` folder (the scientists' quick merges at the
+beamline) each became a run through the two-column reader — 32 measurements nobody performed, each with a record
+group and questions.
+
+- **Origin** `isaac.processed_output.origin.engine_classification.v0` (`processing_origin.basis:
+  engine_classification`; `bundle.ENGINE_ORIGIN_RULE_ID`): a file a generic reader read whose ENGINE classification
+  (`sources[].classification.source_type`, `bl15.classify`: no header, every opening line two numbers) is
+  `processed_spectrum` is a processed output, never a run — ONLY when the bundle also holds an engine SPEC acquisition
+  run (`bundle.quick_merges_apply`). A root of headerless two-column files alone (another facility's energy/mu
+  exports) keeps them as runs, each with the run anomaly `engine_reads_processed_spectrum` asking a scientist which it
+  is. The folder and the file name decide nothing: the same file outside `MERGE/` is kept the same way. Every
+  statement-derived origin field is empty or false (the file states nothing about itself). `.mca` files are the
+  engine's `detector_product` and are not touched. The validator re-derives the condition from the stored runs (an
+  engine-classified output without a SPEC run, or — in a bundle a 1.11.0 build imported — such a file kept as a run
+  beside SPEC runs, is refused) and re-derives what it can of the origin: the source is classified
+  `processed_spectrum`, is the same file (path, sha256), and the output states nothing a headerless file cannot. The
+  classification itself is not re-run: it reads the file's content, which a bundle does not hold.
+- **Link** `isaac.processed_output.link_by_legacy_number.v0` (`bundle.LEGACY_LINK_RULE_ID`, `match: legacy_number`),
+  for these outputs ONLY (an XDI output keeps `link_by_run_stem.v0`, byte for byte). The whole-number tokens a name
+  starts with: the last is the electrode number and must equal the run's second token (both absent is equal, and then
+  the two names must also share a word after the number, else `no_run_named_like_it`); the others are legacy numbers,
+  matched to `runs[].legacy_number`, which the validator re-derives from an engine run's stem
+  (`bl15.applicability.legacy_number_of`). One legacy number and exactly one fitting run with
+  scans: a proposed link, whose `assumption` says what was read and how the rest of the names differ (`f10` /
+  `filter10_again`; never deciding). Several legacy numbers (`43_44_04_…`): `link_note.code: spans_several_runs`
+  with every fitting run, no link. Several fitting runs (a shared legacy number): `ambiguous`. One fitting run
+  without scans: `run_has_no_scans`. No leading number, or no fitting run: `no_run_named_like_it`. The validator
+  re-runs the rule.
+- **Processing** (`isaac.processed_output.quick_merge_compare.v0`, `processing/quick_merge.py`): each LINKED quick
+  merge is compared with ISAAC's own result under `processing_results[].scientist_quick_merges` — a rough reference,
+  never `preferred_for_record`, never truth, moving no id or verdict. Column 1 is read as energy only when strictly
+  monotonic and inside the group's energy range (an assumption, recorded). Already normalised: compared as stored,
+  edge step 1. Otherwise: raw signal against ISAAC's merged mu, the curve normalised with ISAAC's own parameters
+  (said), and, for at most 10 scans, the one subset that alone rebuilds it named as an `exclude_scans` HINT, never
+  applied.
+- **A 1.11.0 validator accepts 1.0.0–1.10.0 bundles;** a 1.10.0 validator refuses a 1.11.0 one (the label), and one
+  holding either rule. Nothing becomes newly writable; `processed_outputs` is required at 1.11.0 as at 1.2.0–1.10.0.
+- **The upgrade is disclosed**: the first write of an older bundle appends one `format_upgrades` entry whose
+  statement includes `bundle.CHANGES_ADDED_IN["1.11.0"]`: a bundle imported before holds such files as runs until it
+  is re-imported, and when it still holds any beside SPEC runs the statement names them (`bundle.quick_merge_runs`)
+  and says a re-import keeps them as processed outputs. Answers given to questions about those runs do not carry over: `isaac bundle answers import`
+  reports each such row as `not_resolving` and applies nothing for it.
 
 ## 10. Exit codes (`isaac import` / `isaac bundle`)
 
