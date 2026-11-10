@@ -123,7 +123,7 @@ def test_normalization_recovers_a_known_edge_step():
     assert abs(nm["edge_step"] - 1.5) / 1.5 < 0.03
     assert abs(nm["e0_eV"] - E0) < 1.0
     rp = nm["resolved_params"]
-    assert rp["pre2"] == -30.0 and rp["nnorm"] == 2 and rp["norm1"] == pytest.approx(min(100.0, 0.4 * (GRID[-1] - rp["e0"])), abs=1.0)
+    assert rp["pre2"] == -30.0 and rp["nnorm"] == 1 and rp["norm1"] == pytest.approx(min(100.0, 0.4 * (GRID[-1] - rp["e0"])), abs=1.0)
     assert np.allclose(nm["flat"][GRID > E0 + 60], 1.0, atol=0.03)
 
 
@@ -490,3 +490,26 @@ def test_zero_scan_runs_do_not_make_athena_matches_ambiguous():
     ]
     matched, notes = A.match(groups, [entry], np)
     assert list(matched) == ["rg-real"] and notes == []
+
+
+def test_post_edge_order_default_is_a_line_in_larch_degree():
+    """Athena's bkg_nnorm counts coefficients (2 = a line); larch's nnorm is the degree (1 = a line).
+    The scientists' Athena order 2 (82/107 groups) is a line, so the larch default must be 1, not 2."""
+    from isaac_api.local_import.processing import protocol as P
+
+    assert P.DEFAULT_PARAMS["normalize"]["nnorm"] is None
+    assert P.DEFAULT_PARAMS["normalize"]["nnorm_rule_quadratic_from_eV"] == 300.0
+    assert "isaac.xas.post_edge_order_is_larch_degree.v0" in P.RULE_VERSIONS_SINCE_PROTOCOL_VERSION["rule_ids"]
+    assert "DEGREE" in P.PARAM_DOCS["normalize.nnorm"][0]
+
+
+@pytest.mark.parametrize("top,expected", [(180.0, 1), (280.0, 1), (700.0, 2), (1000.0, 2)])
+def test_post_edge_order_follows_the_window_width(top, expected):
+    """A XANES-length post-edge gets a line; a long EXAFS-range one a quadratic (larch's own rule, 300 eV)."""
+    from larch import xafs as larch_xafs
+    from isaac_api.local_import.processing import core as C, protocol as P
+
+    e = np.arange(11100.0, 11217.0 + top, 1.0)
+    mu = 0.1 + 1.0 / (1.0 + np.exp(-(e - 11217.0) / 1.5))
+    nm = C.normalize(e, mu, P.resolve_params(), np, larch_xafs)
+    assert nm["resolved_params"]["nnorm"] == expected

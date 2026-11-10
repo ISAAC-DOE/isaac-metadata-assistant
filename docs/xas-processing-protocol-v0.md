@@ -299,9 +299,13 @@ added after the run id.
 ## 6. Normalize
 
 larch `pre_edge` on the merged mu: e0 = find_e0, pre1 larch default, **pre2 −30 eV**,
-**norm1 = min(100 eV, 0.4·(Emax−E0))**, norm2 larch default, **nnorm 2** (1 if the post-E0
-range < 100 eV), flatten on. Defaults measured on 107 scientist Athena groups in the archive
-(nor1 median 110 eV, pre2 mode −30, nnorm 2 in 82). Resolved values are recorded.
+**norm1 = min(100 eV, 0.4·(Emax−E0))**, norm2 larch default, **nnorm by window width: a line under 300 eV, a quadratic from 300 eV** (larch
+counts the polynomial degree, and this is larch's own rule), flatten on. Defaults measured on 107 scientist Athena groups in the archive
+(nor1 median 110 eV, pre2 mode −30, Athena order 2 in 82). Athena's order counts coefficients, so
+its 2 is a line, larch's 1 (`isaac.xas.post_edge_order_is_larch_degree.v0`, 9 Nov 2026; until then
+the default was larch 2, a quadratic, for every window: one order above what the scientists used on XANES ranges). Re-measured on
+1304 groups in 50 real projects: Athena order 2 in 735, 3 in 569. A scientist who sets a degree
+above 1 gets 1 when the post-E0 range is under 100 eV. Resolved values are recorded.
 Outputs `normalized.csv` (norm, flat). **All need approval.**
 
 ## 7. QC (data quality only; provenance flags do not move it)
