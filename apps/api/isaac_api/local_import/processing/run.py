@@ -61,7 +61,9 @@ RESULTS_FILE = "processing_results.json"
 STATUS_FILE = "status.json"
 RESULTS_FORMAT = "isaac.processing-results"
 #: 0.2.0 (additive): ``applicability`` on a not-applicable result; ``summary.not_applicable``.
-RESULTS_FORMAT_VERSION = "0.2.0"
+#: 0.3.0 (additive): ``scan_selection`` on an ISAAC result (:data:`SCAN_SELECTION_KEY`), the review flag
+#: :data:`SCAN_SELECTION_FLAG` and ``qc.statements.scan_selection``; ``scan_selection_series`` on the payload.
+RESULTS_FORMAT_VERSION = "0.3.0"
 
 ELEMENTS = REF.ELEMENTS
 #: The region/method-file shape ``<Element><Edge>_...`` — the same shape
@@ -191,6 +193,8 @@ class _Ctx:
         self.sources = sources
         self.runs_by_key = runs_by_key
         self.athena_ties: dict[str, list[dict]] = {}  # r6 G1: {group id: the ties the scientist named for it}
+        self.scan_series: dict | None = None  # scan selection: the series pass (:func:`scan_selection_series`)
+        self.sha_cache: dict = {}  # review M5: each source file hashed once per run (path, size, mtime) -> sha256
 
 
 def group_scans(group: Mapping, runs_by_key: Mapping[str, Mapping]) -> tuple[list[dict], list[str], dict | None]:
@@ -1713,6 +1717,407 @@ def _post_edge_range(resolved: Mapping) -> str | None:
     return f"norm1 {lo:g} to norm2 {hi:g} eV above E0" if lo is not None and hi is not None else None
 
 
+#: SCAN SELECTION (C.SCAN_SELECTION_RULE_ID): a proposal per scan of a merge, attached to an ISAAC result after its run
+#: id, so it moves no result id. ``False`` turns the whole pass off (the series pass too); merged.csv and run_id are
+#: byte-identical either way.
+SCAN_SELECTION_ENABLED = True
+#: the result key, the statement key and the review flag (a bulk approval refuses it: mutations.BULK_APPROVE_REVIEW)
+SCAN_SELECTION_KEY = "scan_selection"
+SCAN_SELECTION_FLAG = "scan_selection_proposed"
+#: the payload key listing every series (scan template) and its E0
+SCAN_SERIES_KEY = "scan_selection_series"
+#: proposals for an input the merge does not take (a skip reason) or for a scan that is not an energy scan
+LEFT_OUT = "left_out"
+NOT_EVALUATED = "not_evaluated"
+_SPEC_S_FULL = re.compile(r"^#S\s+\d+\s+(\w+)\s+([^\s]+)")
+_HEADER_KEY_VALUE = re.compile(r"(?<![\w.])([A-Za-z_][\w.]*)=(-?[0-9.]+(?:[eE][-+]?\d+)?)")
+
+
+def _scan_template(header_lines: Sequence[str] | None) -> tuple[str, str] | None:
+    """``(command, scanned motor)`` a SPEC ``#S`` line states (``("gscan", "energy")``), or ``None``."""
+    for line in header_lines or ():
+        m = _SPEC_S_FULL.match(str(line).strip())
+        if m:
+            return m.group(1), m.group(2)
+    return None
+
+
+def _is_energy_scan(template: tuple[str, str] | None) -> bool:
+    """A scan whose ``#S`` line scans ``energy`` (``gscan energy``, ``ascan energy``); a motor scan (``ascan Sz``,
+    ``a2scan``, ``loopscan``) is ``not_an_energy_scan``. A scan with no ``#S`` line is taken as the energy scan the
+    channel choice already found."""
+    return template is None or template[1] == "energy"
+
+
+def _header_setup(header_lines: Sequence[str] | None) -> dict:
+    """The setup values (:data:`core.SEL_SETUP_KEYS`) a SPEC ``#P`` line states as ``key=value``."""
+    want = {k for k, _ in C.SEL_SETUP_KEYS}
+    out: dict = {}
+    for line in header_lines or ():
+        text = str(line).strip()
+        if not text.startswith("#P"):
+            continue
+        for k, v in _HEADER_KEY_VALUE.findall(text):
+            if k in want and k not in out:
+                try:
+                    out[k] = float(v)
+                except ValueError:
+                    pass
+    return out
+
+
+def _scan_seed(entry: Mapping, ctx: _Ctx) -> int:
+    """The noise-injection seed of one scan: from its own bytes' hash (and its scan number), so a re-run repeats."""
+    sha = (ctx.sources.get(entry.get("source_id") or "") or {}).get("content_sha256") or str(entry.get("relative_path"))
+    return int(hashlib.sha256(f"{sha}#{entry.get('scan')}".encode()).hexdigest()[:15], 16)
+
+
+def _find_e0(energy, mu, xafs) -> float | None:
+    try:
+        return C._f(xafs.find_e0(energy, mu))
+    except Exception:  # noqa: BLE001 - no E0 for this scan: it takes no part in the median
+        return None
+
+
+#: what a series is said as (review LOW 6): never one sample's scans
+SERIES_MEANING = "scan-template series (all samples measured with the same scan command)"
+
+
+def series_fingerprint(groups: Sequence[Mapping], ctx: _Ctx) -> str:
+    """What a stored series pass depends on: every source's bytes (its ``content_sha256``), every group's scans, the
+    channel and merge parameters and the rule. Equal fingerprints: the stored series E0s still hold."""
+    src = sorted((str(k), str((v or {}).get("content_sha256"))) for k, v in (ctx.sources or {}).items())
+    grp = sorted((str(g.get("group_id")), sorted((str(s.get("source_id")), str(s.get("scan_index")))
+                                               for s in group_scans(g, ctx.runs_by_key)[0])) for g in groups)
+    basis = {"rule": C.SCAN_SELECTION_RULE_ID, "sources": src, "groups": grp,
+             "channels": ctx.params.get("channels"), "min_points": ctx.params["merge"]["min_points"]}
+    return hashlib.sha256(json.dumps(basis, sort_keys=True, default=str).encode()).hexdigest()
+
+
+def _stored_series(out_dir: Path, fingerprint: str) -> dict | None:
+    """The series pass a previous run stored (``processing_results.json``), when its fingerprint is this run's."""
+    try:
+        old = json.loads((out_dir / RESULTS_FILE).read_text(encoding="utf-8")).get(SCAN_SERIES_KEY) or {}
+    except (OSError, ValueError):
+        return None
+    if old.get("fingerprint") != fingerprint or old.get("error") or not isinstance(old.get("members"), list):
+        return None
+    series = {x["series_id"]: x for x in old.get("series") or () if isinstance(x, Mapping) and x.get("series_id")}
+    of = {(m[0], m[1]): m[2] for m in old["members"] if isinstance(m, list) and len(m) == 3 and m[2] in series}
+    return {"series": series, "of": of, "computed_utc": old.get("computed_utc")}
+
+
+def run_series_pass(groups: Sequence[Mapping], ctx: _Ctx, out_dir: Path, *, reuse: bool, now: str) -> dict:
+    """The series pass, GUARDED (review M4): any exception is recorded (``error``) and every group's proposal is then
+    ``not_evaluated`` with that reason; processing never fails for it. ``reuse`` (a ``--group`` run): the stored pass
+    is used when its fingerprint is this run's (no other group's file is read for it), and that is said."""
+    try:
+        fp = series_fingerprint(groups, ctx)
+        if reuse:
+            got = _stored_series(out_dir, fp)
+            if got is not None:
+                return {**got, "fingerprint": fp, "reused": True}
+        return {**scan_selection_series(groups, ctx), "fingerprint": fp, "reused": False, "computed_utc": now}
+    except Exception as exc:  # noqa: BLE001 - never a processing failure
+        return {"series": {}, "of": {}, "error": f"{type(exc).__name__}: {exc}"[:300]}
+
+
+def _series_payload(ser: Mapping) -> dict:
+    out = {"rule_id": C.SCAN_SELECTION_RULE_ID, "meaning": SERIES_MEANING,
+           "series": list((ser.get("series") or {}).values())}
+    if ser.get("error"):
+        return {**out, "error": ser["error"]}
+    return {**out, "fingerprint": ser.get("fingerprint"), "computed_utc": ser.get("computed_utc"),
+            "reused": bool(ser.get("reused")),
+            **({"statement": "The scan-template series E0s were reused from the last processing run that read every "
+                             "group (same sources, groups and parameters): this run read no other group's files."}
+               if ser.get("reused") else {}),
+            "members": sorted([k[0], k[1], v] for k, v in (ser.get("of") or {}).items())}
+
+
+def scan_selection_series(groups: Sequence[Mapping], ctx: _Ctx) -> dict:
+    """THE SERIES PASS: every energy scan of the bundle (every group's, once each), by SPEC template (``#S`` command
+    and scanned motor) and overlapping energy range, and the series E0 = the median per-scan E0 (larch ``find_e0``) of
+    the series' scans that cover at least :data:`core.SEL_COVERAGE_MIN` of its median scan's span (a stopped scan
+    takes no part; a few longer scans do not leave the usual ones out). ``{"series": {id: ...},
+    "of": {(source_id, scan_index): id}}``. Scans with no ``#S`` line belong to no series (their group's own scans
+    give its E0)."""
+    np = ctx.np
+    seen: set = set()
+    rows: list[dict] = []
+    for g in groups:
+        scans, _stems, sel = group_scans(g, ctx.runs_by_key)
+        if not scans:
+            continue
+        shared: dict = {}
+        for s in scans:
+            shared[s.get("source_id")] = shared.get(s.get("source_id"), 0) + 1
+        choice = None
+        for s in scans:
+            key = (s.get("source_id"), s.get("scan_index"))
+            if key in seen:
+                continue
+            seen.add(key)
+            try:
+                table, _why = _read_scan_table(s, ctx, shared)
+            except Exception:  # noqa: BLE001 - an unreadable scan takes no part in a series
+                continue
+            if table is None or table.error:
+                continue
+            tpl = _scan_template(table.header_lines)
+            if tpl is None or not _is_energy_scan(tpl):
+                continue
+            if choice is None:
+                c = choose_channels(table, params=ctx.params, role=g.get("role", "sample"), bl15_selection=sel)
+                if not _formed(c):
+                    continue
+                choice = c
+            try:
+                sa = C.scan_arrays(table, choice, np)
+            except C.StepError:
+                continue
+            if C.unusable_reason(sa) or sa["energy"].size < int(ctx.params["merge"]["min_points"]):
+                continue
+            rows.append({"key": key, "template": tpl, "energy": sa["energy"], "mu": sa["mu"],
+                         "lo": float(sa["energy"][0]), "hi": float(sa["energy"][-1])})
+    series: dict = {}
+    of: dict = {}
+    by_tpl: dict = {}
+    for r in rows:
+        by_tpl.setdefault(r["template"], []).append(r)
+    for tpl in sorted(by_tpl):
+        members = sorted(by_tpl[tpl], key=lambda r: (r["lo"], r["hi"]))
+        clusters: list[list[dict]] = []
+        for r in members:  # overlapping energy ranges: one series (one edge)
+            if clusters and r["lo"] <= max(x["hi"] for x in clusters[-1]):
+                clusters[-1].append(r)
+            else:
+                clusters.append([r])
+        for cl in clusters:
+            lo, hi = min(x["lo"] for x in cl), max(x["hi"] for x in cl)
+            sid = f"{tpl[0]} {tpl[1]} {lo:.6g}-{hi:.6g} eV"
+            # the series' usual span (its median scan's): a few longer scans must not leave the usual ones out
+            usual = statistics.median([x["hi"] - x["lo"] for x in cl])
+            e0s = [v for v in (_find_e0(x["energy"], x["mu"], ctx.xafs) for x in cl
+                               if (x["hi"] - x["lo"]) >= C.SEL_COVERAGE_MIN * usual) if v is not None]
+            series[sid] = {"series_id": sid, "meaning": SERIES_MEANING, "command": f"{tpl[0]} {tpl[1]}",
+                           "range_eV": [lo, hi], "scans": len(cl),
+                           "scans_for_e0": len(e0s), "e0_eV": float(statistics.median(e0s)) if e0s else None,
+                           "e0_rule": "median of larch find_e0 over the series' scans covering "
+                                      f"{C.SEL_COVERAGE_MIN:.0%} of its median scan's span"}
+            for x in cl:
+                of[x["key"]] = sid
+    return {"series": series, "of": of}
+
+
+def _propose_scan_selection(group: Mapping, ctx: _Ctx, scans: Sequence[Mapping], used_entries: Sequence[dict],
+                            scans_data: Sequence[Mapping], header_of: Mapping[int, Sequence[str]],
+                            inputs: Sequence[dict], cal: Mapping, mode: str | None = None) -> dict | None:
+    """The group's scan-selection proposal (:func:`core.scan_selection`), shaped for the result: every listed input
+    with its proposal, reasons and sentences, named by file; the group's trend, change point, stable window, edge-step
+    observation and merged edge SNR. ``None`` only when it cannot be evaluated at all (it is then not said)."""
+    try:
+        return _propose_scan_selection_unguarded(group, ctx, scans, used_entries, scans_data, header_of, inputs, cal,
+                                                 mode=mode)
+    except Exception as exc:  # noqa: BLE001 - review M4: a proposal that cannot be made is said, never a failure
+        return _not_evaluated_selection(f"{type(exc).__name__}: {exc}"[:300])
+
+
+def _not_evaluated_selection(detail: str) -> dict:
+    return {"rule_id": C.SCAN_SELECTION_RULE_ID, "status": "not_evaluated", "detail": detail, "open": False,
+            "scans": [], "exclude_proposed": [], "needs_look": []}
+
+
+def _propose_scan_selection_unguarded(group: Mapping, ctx: _Ctx, scans: Sequence[Mapping],
+                                      used_entries: Sequence[dict], scans_data: Sequence[Mapping],
+                                      header_of: Mapping[int, Sequence[str]], inputs: Sequence[dict], cal: Mapping,
+                                      mode: str | None = None) -> dict | None:
+    np = ctx.np
+    if (getattr(ctx, "scan_series", None) or {}).get("error"):
+        return _not_evaluated_selection("the scan-template series pass failed (" + ctx.scan_series["error"]
+                                        + "), so no series E0 holds and nothing is proposed")
+    try:
+        run_of = {s.get("source_id"): s.get("run_key") for s in scans}
+        numbers, _ = B.input_scan_numbers(inputs, run_of)
+        num_of = {id(e): n for e, n in zip(inputs, numbers)}
+        used_nums = [num_of.get(id(e)) for e in used_entries]
+        by_number = (all(isinstance(n, int) for n in used_nums)
+                     and all(a < b for a, b in zip(used_nums, used_nums[1:])))
+        pos_of = {id(e): k + 1 for k, e in enumerate(inputs)}
+        evaluated, not_energy = [], {}
+        for e, sa in zip(used_entries, scans_data):
+            tpl = _scan_template(header_of.get(id(e)))
+            if not _is_energy_scan(tpl):
+                not_energy[id(e)] = tpl
+                continue
+            evaluated.append({"key": id(e), "number": num_of[id(e)] if by_number else pos_of[id(e)],
+                              "energy": sa["energy"], "mu": sa["mu"], "counts": sa.get("counts"), "i0": sa.get("i0"),
+                              "ring": sa.get("ring"), "mode": mode,
+                              "i0_nonpositive": sa["diagnostics"].get("i0_nonpositive"),
+                              "setup": _header_setup(header_of.get(id(e))), "seed": _scan_seed(e, ctx)})
+        by_key = {id(e): e for e in used_entries}
+        ser = getattr(ctx, "scan_series", None) or {}
+        keys = [ser.get("of", {}).get((by_key[x["key"]].get("source_id"), by_key[x["key"]].get("scan")))
+                for x in evaluated]
+        tally: dict = {}
+        for k in keys:
+            if k:
+                tally[k] = tally.get(k, 0) + 1
+        series, e0s, basis = None, None, None
+        if tally:
+            sid = max(sorted(tally), key=tally.get)
+            series = ser["series"].get(sid)
+            if series and series.get("e0_eV") is not None:
+                e0s, basis = float(series["e0_eV"]) + float(cal["outcome"].get("applied_shift_eV") or 0.0), "series"
+        if e0s is None:
+            # no SPEC template (another reader): the group's own scans are its series
+            vals = [v for v in (_find_e0(x["energy"], x["mu"], ctx.xafs) for x in evaluated) if v is not None]
+            if vals:
+                e0s, basis = float(statistics.median(vals)), "group"
+        if e0s is None:
+            return None
+        core = C.scan_selection(evaluated, e0s, np)
+    except Exception as exc:  # noqa: BLE001 - a proposal that cannot be made is said, never a processing failure
+        return _not_evaluated_selection(f"{type(exc).__name__}: {exc}"[:300])
+    got = {x["key"]: x for x in core.pop("scans")}
+    file_of_number = {}
+    per_scan = []
+    for e in inputs:
+        base = {"file": _file_name(e), "relative_path": e.get("relative_path"), "source_id": e.get("source_id"),
+                "scan": e.get("scan"), "exclude_as": exclusion_name(e, inputs)}
+        if id(e) in got:
+            x = got[id(e)]
+            file_of_number[x["number"]] = base["file"]
+            per_scan.append({**base, "time_order": x["number"], "proposal": x["proposal"], "reasons": x["reasons"],
+                             "said": x["said"], "metrics": x["metrics"]})
+        elif id(e) in not_energy:
+            tpl = not_energy[id(e)]
+            per_scan.append({**base, "proposal": NOT_EVALUATED, "reasons": ["not_an_energy_scan"],
+                             "said": [f"its #S line is `{tpl[0]} {tpl[1]}`, not an energy scan: it is never proposed"],
+                             "metrics": {}})
+        elif e.get("used"):
+            per_scan.append({**base, "proposal": NOT_EVALUATED, "reasons": ["too_few_points_to_evaluate"],
+                             "said": ["too few points to judge alone"], "metrics": {}})
+        else:
+            per_scan.append({**base, "proposal": LEFT_OUT, "reasons": [e.get("skip_reason") or "not_used"],
+                             "said": ["not in this merge"], "metrics": {}})
+    exclude = [x["exclude_as"] for x in per_scan if x["proposal"] == C.PROPOSAL_EXCLUDE]
+    look = [x["exclude_as"] for x in per_scan if x["proposal"] == C.PROPOSAL_LOOK]
+    window = core.get("stable_window")
+    return {
+        "rule_id": C.SCAN_SELECTION_RULE_ID,
+        # "not_evaluated" when no scan reaches the series window (nothing is proposed; ``detail`` says why)
+        "status": core.get("status") or "evaluated",
+        **({"detail": core["detail"]} if core.get("detail") else {}),
+        "constants": C.SCAN_SELECTION_CONSTANTS,
+        "e0_series_eV": core["e0_series_eV"],
+        "e0_basis": basis,
+        "series_meaning": SERIES_MEANING if basis == "series" else "the group's own scans (no SPEC scan template)",
+        "series_id": series.get("series_id") if (series and basis == "series") else None,
+        "time_order": "scan_numbers" if by_number else "input_order",
+        "scans": per_scan,
+        "trend": core.get("trend") or {},
+        "change_point": core.get("change_point") or {},
+        "evolving_metrics": core.get("evolving_metrics") or [],
+        "stable_window": [file_of_number.get(n, n) for n in window] if window else None,
+        "edge_step_change": core.get("edge_step_change"),
+        "group_observations": core.get("group_observations") or [],
+        "merge_snr": core.get("merge_snr"),
+        "chi2_nu_median": core.get("chi2_nu_median"),
+        "exclude_proposed": exclude,
+        "needs_look": look,
+        "open": bool(exclude or look),
+        # the params-file names already left out of this merge: an exclude_scans list must keep naming them
+        "already_excluded": [e["excluded_as"] for e in inputs if e.get("excluded_as")],
+    }
+
+
+def _scan_selection_statement(sel: Mapping, group_id: str) -> str | None:
+    """The one sentence a person reads: what is proposed, for which scan and why, what to look at, the group's
+    observations, and the exact ``exclude_scans`` snippet for the scans proposed for leaving out (``None`` when there
+    is nothing to say)."""
+    rows = sel.get("scans") or ()
+    exc = [x for x in rows if x["proposal"] == C.PROPOSAL_EXCLUDE]
+    look = [x for x in rows if x["proposal"] == C.PROPOSAL_LOOK]
+    obs = list(sel.get("group_observations") or ())
+    if not (exc or look or obs):
+        return None
+    merged = sum(1 for x in rows if x["proposal"] in (C.PROPOSAL_INCLUDE, C.PROPOSAL_LOOK, C.PROPOSAL_EXCLUDE))
+
+    def each(xs, shown=12):
+        out = "; ".join(f"{x['file']} ({', '.join(x['reasons'])}: {'; '.join(x['said'])})" for x in xs[:shown])
+        return out + (f"; and {len(xs) - shown} more" if len(xs) > shown else "")
+
+    said = (f"Scan selection ({C.SCAN_SELECTION_RULE_ID}; a PROPOSAL, nothing was left out of this merge): each of the "
+            f"{merged} merged scans was normalised alone with one parameter set for its "
+            f"{sel.get('series_meaning') or SERIES_MEANING} (E0 {sel['e0_series_eV']:.2f} eV) only to judge it; "
+            "the merge stays raw mu.")
+    if sel.get("stable_window"):
+        said += (f" The sample was still changing at first ({', '.join(sel.get('evolving_metrics') or ())}); the stable "
+                 f"scans are {', '.join(str(f) for f in sel['stable_window'])}.")
+    if exc:
+        said += f" Proposed for leaving out ({len(exc)}): {each(exc)}."
+    if look:
+        said += f" A person looks at ({len(look)}): {each(look)}."
+    if obs:
+        said += " Observed: " + " ".join(obs)
+    if exc:
+        said += (" The scientist confirms each proposal: " +
+                 exclude_hint(group_id, list(sel.get("already_excluded") or ()) + [x["exclude_as"] for x in exc]))
+    if exc or look:
+        said += (" While a proposal is open this result is approved only on its own (never in a bulk approval), and "
+                 "the approval's note records what was still open.")
+    return said
+
+
+def _attach_scan_selection(res: dict, sel: Mapping, group_id: str) -> None:
+    """After the run id: the proposal on the result (:data:`SCAN_SELECTION_KEY`), its sentence, and the review flag
+    when any proposal is open. GUARDED (review M4): a sentence that cannot be made leaves the proposal recorded as
+    ``not_evaluated`` with its reason, never a processing failure."""
+    try:
+        said = _scan_selection_statement(sel, group_id) if sel.get("status") == "evaluated" else None
+    except Exception as exc:  # noqa: BLE001 - review M4: the proposal is kept as not evaluated, never a failure
+        res[SCAN_SELECTION_KEY] = _not_evaluated_selection(f"the sentence failed: {type(exc).__name__}: {exc}"[:300])
+        return
+    res[SCAN_SELECTION_KEY] = sel
+    if said:
+        res["qc"].setdefault("statements", {})[SCAN_SELECTION_KEY] = said
+    if sel.get("open") and SCAN_SELECTION_FLAG not in res["review_flags"]:
+        res["review_flags"].append(SCAN_SELECTION_FLAG)
+
+
+def _cached_sha(ctx: _Ctx, path: Path) -> str:
+    """sha256 of a source file, once per run (review M5: the series pass and the group pass read the same files)."""
+    cache = getattr(ctx, "sha_cache", None)
+    if cache is None:
+        return sha256_file(path)
+    st = path.stat()
+    key = (str(path), st.st_size, st.st_mtime_ns)
+    if key not in cache:
+        cache[key] = sha256_file(path)
+    return cache[key]
+
+
+def _read_scan_table(s: Mapping, ctx: _Ctx, shared_sids: Mapping[Any, int]):
+    """``(table, None)`` for one listed scan, or ``(None, skip reason)`` when its file is missing or its bytes are not
+    the bundle's (``content_sha256``)."""
+    path = _resolve_source(ctx.root, s.get("relative_path") or "") if ctx.root else None
+    if path is None or not path.is_file():
+        return None, "source_file_not_found"
+    expected = (ctx.sources.get(s.get("source_id") or "") or {}).get("content_sha256")
+    if expected and _cached_sha(ctx, path) != expected:
+        return None, "source_hash_mismatch"
+    # r5d H1: one scan of a file of several `#S` blocks (several of the group's scans in one file, or the
+    # run's own SPEC acquisition file) is read at its own block; every other scan file is read as before
+    in_file = s.get("source_id") is not None and (
+        shared_sids.get(s.get("source_id"), 0) > 1
+        or s.get("source_id") == (ctx.runs_by_key.get(s.get("run_key")) or {}).get("acquisition_source_id"))
+    table = (read_scan_file(path, scan=s["scan_index"]) if ctx.scan_reader is read_scan_file and in_file
+             and isinstance(s.get("scan_index"), int) and not isinstance(s.get("scan_index"), bool)
+             else ctx.scan_reader(path))
+    return table, None
+
+
 def process_group(group: Mapping, ctx: _Ctx, athena_entry: Mapping | None = None, athena_versions: Sequence[Mapping] | None = None) -> list[dict]:
     np, params = ctx.np, ctx.params
     res = _base(group, "isaac_protocol")
@@ -1735,22 +2140,10 @@ def process_group(group: Mapping, ctx: _Ctx, athena_entry: Mapping | None = None
             excluded.append({"source_id": entry["source_id"], "relative_path": entry["relative_path"],
                              "scan": entry["scan"], "named_as": named})
             continue
-        path = _resolve_source(ctx.root, s.get("relative_path") or "") if ctx.root else None
-        if path is None or not path.is_file():
-            entry["skip_reason"] = "source_file_not_found"
+        table, why = _read_scan_table(s, ctx, shared_sids)
+        if table is None:
+            entry["skip_reason"] = why
             continue
-        expected = (ctx.sources.get(s.get("source_id") or "") or {}).get("content_sha256")
-        if expected and sha256_file(path) != expected:
-            entry["skip_reason"] = "source_hash_mismatch"
-            continue
-        # r5d H1: one scan of a file of several `#S` blocks (several of the group's scans in one file, or the
-        # run's own SPEC acquisition file) is read at its own block; every other scan file is read as before
-        in_file = s.get("source_id") is not None and (
-            shared_sids.get(s.get("source_id"), 0) > 1
-            or s.get("source_id") == (ctx.runs_by_key.get(s.get("run_key")) or {}).get("acquisition_source_id"))
-        table = (read_scan_file(path, scan=s["scan_index"]) if ctx.scan_reader is read_scan_file and in_file
-                 and isinstance(s.get("scan_index"), int) and not isinstance(s.get("scan_index"), bool)
-                 else ctx.scan_reader(path))
         entry["format"] = table.format_id
         entry["reader_notes"] = table.notes
         if table.error:
@@ -1858,6 +2251,11 @@ def process_group(group: Mapping, ctx: _Ctx, athena_entry: Mapping | None = None
     shifts = cal["outcome"]["per_scan_alignment_shifts_eV"] or [0.0] * len(scans_data)
     for sa, d in zip(scans_data, shifts):
         sa["energy"] = sa["energy"] + cal["outcome"]["applied_shift_eV"] + d
+    # THE SCAN-SELECTION PROPOSAL (C.SCAN_SELECTION_RULE_ID), before the merge grid: each scan normalised alone with the
+    # series' one parameter set, only to judge it. It changes nothing that is merged or hashed (merged.csv, run_id);
+    # it is attached to the result after the run id (:func:`_attach_scan_selection`)
+    selection = (_propose_scan_selection(group, ctx, scans, used_entries, scans_data, header_of, res["inputs"], cal,
+                                         mode=choice.mode) if SCAN_SELECTION_ENABLED else None)
 
     try:
         grid, ginfo = C.common_grid(scans_data, np)
@@ -2237,6 +2635,9 @@ def process_group(group: Mapping, ctx: _Ctx, athena_entry: Mapping | None = None
     if truncated:
         # c12-cal: the result names each short scan by its FILE; qc.json (hashed) keeps the sentence it was written with
         res["qc"]["statements"]["scans_truncated"] = _truncation_statement(ginfo, scans_data, [_file_name(e) for e in used_entries])
+    if selection is not None:
+        # after run_id: never in a hashed file (no id moves)
+        _attach_scan_selection(res, selection, group["group_id"])
     files = []
     for role, name in roles:
         p = gdir / name
@@ -2883,6 +3284,11 @@ def process_bundle(
     # r7 K3: reference channels ("  Ref <name>") are no sample merges: counted, never listed or hinted
     ref_channels = A.unmatched_reference_channels(all_groups, entries, tied=ties)
 
+    # THE SERIES PASS (scan selection): every group's energy scans, so a group's series E0 is the same whichever
+    # groups this call processes
+    if SCAN_SELECTION_ENABLED:
+        ctx.scan_series = run_series_pass(all_groups, ctx, out_dir, reuse=wanted is not None,
+                                          now=header["created_utc"])
     results, unread_results = [], []
     skipped = set(skip_group_ids or ())
     for g in all_groups:
@@ -2932,6 +3338,7 @@ def process_bundle(
                                                  "labels": [i["athena_label"] for i in ref_channels[:50]]}}
                if ref_channels else {}),
         },
+        **({SCAN_SERIES_KEY: _series_payload(ctx.scan_series)} if ctx.scan_series is not None else {}),
         "processing_results": results,
         "unread_acquisition_results": unread_results,
         "summary": summarize(results + unread_results),

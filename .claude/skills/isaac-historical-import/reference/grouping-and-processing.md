@@ -137,6 +137,38 @@ it finds one. Show per group, in words:
   `qc.statements.outlier_scans` with where it departs from the other scans and what merging it did ("…_003.dat
   departs … from 4985.0 to 5100.0 eV: its signal there is about 5% of theirs; … about 24% lower"): say it and ask
   whether the scan belongs in the merge, as for zeros;
+- **scan selection** (rule `isaac.xas.scan_selection_proposal.v0`; flag `scan_selection_proposed`,
+  `qc.statements.scan_selection`, the result's `scan_selection`): a PROPOSAL per merged scan, never a drop. Each scan
+  was normalised ALONE with the series' one parameter set (the series E0 is in the sentence) only to judge it; the
+  merge is still raw mu of every scan used, and normalised data are never merged. Per scan `proposal` is `include`,
+  `needs_look` or `exclude_proposed`, with `reasons` and `said` (a sentence each); `left_out` names a scan the merge
+  already does not take (its skip reason) and `not_evaluated` a motor scan (`not_an_energy_scan`), never proposed,
+  or every scan of a group none of whose scans reaches the series window (`series_window_not_reached`; status
+  `not_evaluated`: say that the rule could not judge these scans, and ask nothing).
+  The series is a *scan-template series (all samples measured with the same scan command)*: never call it one
+  sample's scans. Say the sentence, scan by scan, in its words, and ask the scientist about each scan. Every reason:
+  - proposed for leaving out: `incomplete_scan` (stops before E0+150 eV or covers under 95 % of the widest scan),
+    `before_stable_window` (the sample was still changing; the stable scans are named), `shape_out_of_trend` (its
+    shape differs and would move the merge at least its own noise), `many_artifacts` (3 or more visible in the merge);
+  - to look at: `lowers_merge_snr` (the scan is weaker — a smaller edge step or more noise — not wrong; never say it
+    should go), an artifact visible in the merge (`artifact_spike`, `artifact_diffraction_peak`, `artifact_dip`,
+    `artifact_beam_drop`), `beam_drop` (I0 under half its usual level), `excess_noise` (over 2 x counting noise),
+    `energy_shifted`, `too_noisy_to_evaluate` (edge under 2 x its per-point noise), `setup_differs_emiss` /
+    `setup_differs_filter`, `i0_nonpositive` (points with I0 <= 0), `normalization_failed`,
+    `still_evolving_no_stable_window` (the sample changes to the end; no stable scans), `two_scans_disagree`,
+    `odd_one_of_three`, `three_scans_change`;
+  - said with an `include`, ask nothing: `differs_below_merge_noise`, `artifact_*_below_merge_noise`,
+    `beam_dip_divided_out`;
+  - never proposed: `not_an_energy_scan`, `too_few_points_to_evaluate` (under 7 points), `series_window_not_reached`;
+    `left_out` carries the merge's own skip reason.
+  A `not_evaluated` proposal (`scan_selection.status`, with `detail`: the series pass or the sentence failed, or no
+  scan reaches the series window) proposes nothing: say the detail, ask nothing. After `process --group`,
+  `scan_selection_series.reused` says the series E0s came from the last full run. **An edge-step
+  change is an observation only** (`group_observations`, e.g. "edge step fell 60% … possible dissolution or
+  detachment of the sample"): say it, never offer to leave a scan out for it. Only on the scientist's word, use the
+  `exclude_scans` snippet the sentence gives (it keeps any scan already left out) and re-process the group (below);
+  the new result says what it proposes on the remaining scans. A result with proposals still open is approved only
+  on its own (a bulk approval refuses it), and the approval's note records what was open;
 - **when a scan ends early** (reason `scans_truncated`, flag `scan_range_truncated`; `scans_used` still
   counts it): say the sentence in `bundle show processing-result` → `qc.statements`, which names each file
   (`qc.json` keeps the source ids it was first written with): how many scans end early, which, the
@@ -455,7 +487,8 @@ exactly what changed; every changed value is recorded on the result. Never use i
 a threshold is the protocol's, not a fix.
 
 **Leaving a scan out of a merge**, only when the scientist says it does not belong (a dead scan, a lost beam,
-one scan's spike): the outlier, zero-signal and `edge_from_single_scan` sentences give the exact file,
+one scan's spike, a scan the scan-selection proposal names and the scientist confirms): the outlier, zero-signal,
+`edge_from_single_scan` and `scan_selection` sentences give the exact file,
 `{"exclude_scans": {"<group id>": ["<file name>"]}}` (a relative path or source id works too, and the sentence uses
 the relative path when a file name repeats across folders; `<file>#<scan>` for one scan of a multi-scan file; a
 name that left out more than one scan, or a group id that is no group, is said). Re-process that group with it as above: the new result lists the scan as skipped

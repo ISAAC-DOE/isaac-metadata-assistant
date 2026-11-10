@@ -154,7 +154,7 @@ outside the bundle, confirm it is the data they approved (all in one folder: pas
 section of `reference/grouping-and-processing.md`. Page results with
 `<isaac> bundle list <bundle> processing-results --limit 20`. For each group show the verdict in words,
 glitch flags (with `glitch_check_few_scans` or `glitch_points_on_edge`, say its sentence instead), skipped scans,
-agreement with their own Athena output, and the plot (open the PNG with Read and describe it). Ask approve / reject / needs changes.
+agreement with their own Athena output, and the plot (open the PNG with Read and describe it). Ask approve / reject / needs changes. **Scan selection is a proposal** (flag `scan_selection_proposed`, `qc.statements.scan_selection`): say which scans it proposes leaving out or looking at, and why, and ask about each; only on the scientist's word re-process with the `exclude_scans` snippet it gives, then ask about the new result. An edge-step change is an observation, never a reason to leave a scan out; the merge is always raw mu, never normalised data.
 
 - **Approval is the scientist's call.** A `warn` is theirs to accept. A `fail` for `edge_step_implausible`,
   `no_edge` or `post_edge_not_at_1` is never offered for approval: offer reject or `needs_changes`. When

@@ -34,7 +34,11 @@ def _f(x: Any) -> float | None:
 
 
 def scan_arrays(table: ScanTable, choice: ChannelChoice, np) -> dict:
-    """Energy-sorted, duplicate-merged, finite (energy, mu[, mu_ref]) for one scan + diagnostics."""
+    """Energy-sorted, duplicate-merged, finite (energy, mu[, mu_ref]) for one scan + diagnostics.
+
+    Also, for the scan-selection proposal only (:func:`scan_selection`; never written to a hashed file): ``counts``
+    (the raw chosen signal), ``i0`` and ``ring`` (the ring current, :data:`RING_CURRENT_COLUMNS`, or ``None``), on the
+    same points as ``energy``."""
     missing = [c for c in [choice.energy, *choice.signal_columns, choice.i0 if choice.mode != MODE_SIGNAL_ONLY else None, choice.transmission_after] if c and not table.has(c)]
     if missing:
         raise StepError("scan_lacks_chosen_columns", ",".join(missing))
@@ -73,25 +77,37 @@ def scan_arrays(table: ScanTable, choice: ChannelChoice, np) -> dict:
     # for it): a scan whose counts stop part-way (the beam lost) is merged as it is, and said (run.py)
     diag["signal_zero_points"] = int(np.sum(raw_signal == 0))
 
+    ring_col = next((c for c in RING_CURRENT_COLUMNS if table.has(c)), None)
+    ring = np.asarray(table.columns[ring_col], dtype=float) if ring_col else None
     steps = np.diff(E)
     diag["nonmonotonic_steps"] = int(np.sum(steps <= 0))
     order = np.argsort(E, kind="stable")
     E, mu = E[order], mu[order]
     raw_kept = raw_signal[order]
+    i0_kept = i0[order] if i0 is not None else None
+    ring_kept = ring[order] if ring is not None else None
     mu_ref = mu_ref[order] if mu_ref is not None else None
     finite = np.isfinite(E) & np.isfinite(mu)
     diag["nonfinite_dropped"] = int(np.sum(~finite))
     E, mu = E[finite], mu[finite]
     raw_kept = raw_kept[finite]
+    i0_kept = i0_kept[finite] if i0_kept is not None else None
+    ring_kept = ring_kept[finite] if ring_kept is not None else None
     mu_ref = mu_ref[finite] if mu_ref is not None else None
     key = np.round(E, 6)
     uniq, inverse, counts = np.unique(key, return_inverse=True, return_counts=True)
     diag["duplicate_energies_merged"] = int(np.sum(counts > 1))
     # per kept point: the signal is exactly zero there (a merged duplicate energy only when every reading is)
     signal_zero = raw_kept == 0
+    sig_counts = raw_kept
     if uniq.size != E.size:
         signal_zero = np.bincount(inverse, weights=(raw_kept != 0).astype(float), minlength=uniq.size) == 0
         mu = np.bincount(inverse, weights=mu) / counts
+        # summed over the readings of one energy (counts stay counts; I0 and the ring current likewise summed /
+        # averaged), so counts / I0 is still the merged mu
+        sig_counts = np.bincount(inverse, weights=np.nan_to_num(raw_kept))
+        i0_kept = np.bincount(inverse, weights=np.nan_to_num(i0_kept)) if i0_kept is not None else None
+        ring_kept = np.bincount(inverse, weights=np.nan_to_num(ring_kept)) / counts if ring_kept is not None else None
         if mu_ref is not None:
             ok = np.isfinite(mu_ref)
             num = np.bincount(inverse, weights=np.where(ok, mu_ref, 0.0))
@@ -99,7 +115,8 @@ def scan_arrays(table: ScanTable, choice: ChannelChoice, np) -> dict:
             mu_ref = np.where(den > 0, num / np.maximum(den, 1), np.nan)
         E = uniq
     diag["points_used"] = int(E.size)
-    return {"energy": E, "mu": mu, "mu_ref": mu_ref, "signal_zero": signal_zero, "diagnostics": diag}
+    return {"energy": E, "mu": mu, "mu_ref": mu_ref, "signal_zero": signal_zero, "diagnostics": diag,
+            "counts": sig_counts, "i0": i0_kept, "ring": ring_kept}
 
 
 #: A scan with fewer usable points than this is skipped.
@@ -910,3 +927,761 @@ def qc_verdict(metrics: Mapping, params: Mapping) -> tuple[str, list[str]]:
     if fail:
         return "fail", fail + warn
     return ("warn", warn) if warn else ("pass", [])
+
+
+# --- scan selection: a PROPOSAL per scan, never a drop ---------------------------------------------------------------
+#
+# ``isaac.xas.scan_selection_proposal.v0``. Rules from the beamline scientist (Angel, 9 Nov 2026):
+#
+# * normalised data are NEVER merged. Each scan is normalised ALONE, with ONE parameter set for the whole series (the
+#   series E0, the pre-edge ending at E0-30, a linear post-edge from E0+100 to the end), ONLY to judge it: trends,
+#   glitches, beam drops, diffraction peaks, errors. The merge stays RAW mu (:func:`merge` is unchanged);
+# * an intensity drop alone never excludes a scan: an edge-step change is a group OBSERVATION ("possible dissolution
+#   or detachment"), never a reason;
+# * every exclusion is a PROPOSAL the scientist confirms (``exclude_scans`` in a params file, then re-process).
+#
+# The thresholds are module constants, NOT protocol parameters: params.json is hashed into every result id, so they
+# live here and the rule id is listed in ``protocol.RULE_VERSIONS_SINCE_PROTOCOL_VERSION`` (rolling this out moves no
+# result id: merged.csv and run_id are unchanged).
+
+SCAN_SELECTION_RULE_ID = "isaac.xas.scan_selection_proposal.v0"
+#: proposals, in increasing strength
+PROPOSAL_INCLUDE = "include"
+PROPOSAL_LOOK = "needs_look"
+PROPOSAL_EXCLUDE = "exclude_proposed"
+#: a scan the rule cannot judge (no scan of its group reaches the series window): never a proposal
+PROPOSAL_NOT_EVALUATED = "not_evaluated"
+_PROPOSAL_ORDER = {PROPOSAL_INCLUDE: 0, PROPOSAL_LOOK: 1, PROPOSAL_EXCLUDE: 2}
+
+SEL_PRE2_REL_EV = -30.0          # the series pre-edge fit ends at E0-30 (protocol pre2)
+SEL_NORM1_REL_EV = 100.0         # the series post-edge fit starts at E0+100, linear, to the end of the scan
+SEL_XANES_WINDOW_EV = (-20.0, 80.0)  # shape comparison and artifact relevance, relative to the series E0
+SEL_MIN_POST_EDGE_EV = 50.0      # a scan reaches E0 + 100 + this (E0+150) to be normalised alone ("complete")
+SEL_COVERAGE_MIN = 0.95          # ...and covers this fraction of the group's widest scan
+SEL_EVAL_SNR_MIN = 2.0           # edge step / per-point post-edge noise under this: the scan alone cannot be judged
+SEL_BEAM_DROP_LOOK = 0.50        # I0 under half its usual level: a beam drop a person looks at
+SEL_BEAM_DROP_FRAC = 0.90        # I0 under 90% of its usual level (ring current divided out): a beam drop
+SEL_MANY_ARTIFACTS = 3           # this many merge-visible artifacts in one scan: propose leaving it out
+SEL_EXCESS_NOISE_LOOK = 2.0      # measured noise / counting-statistics noise
+SEL_ARTIFACT_Z = 6.0             # the deglitch point threshold
+SEL_ARTIFACT_MAX_WIDTH = 6       # points; a wider departure is shape, not an artifact
+SEL_VISIBLE_R = 1.0              # the bias a scan puts on the raw merge / that merge's own noise
+SEL_ALPHA = 0.01 / 3             # trend slope significance, Bonferroni over the 3 shape metrics
+SEL_FIRST_LAST_Z = 3.0           # first-vs-last difference in noise units
+#: the smallest change that matters (eV, eV, normalised height)
+SEL_FLOOR = {"delta_eV": 0.15, "wl_e_eV": 0.15, "wl_h": 0.03}
+SEL_SHAPE_METRICS = ("delta_eV", "wl_e_eV", "wl_h")
+SEL_CHI2_P = 1e-3                # a shape outlier's chi2/nu is above this p...
+SEL_CHI2_MEDIAN_FACTOR = 1.5     # ...and this many times the group median
+SEL_SHIFT_MIN_EV = 0.2           # energy_shifted: more than this...
+SEL_SHIFT_SPREAD_FACTOR = 4.0    # ...and this many robust spreads of the other scans' shifts...
+SEL_SHIFT_RESOLUTION_FRACTION = 1.0  # ...and this fraction of the median point spacing across the edge...
+SEL_SHIFT_RESOLUTION_WINDOW_EV = 10.0  # ...within E0 +- this (a shift the points cannot resolve is never said)
+#: a trend or step in the shift is a change of at least this fraction of that spacing (and the 0.15 eV floor)
+SEL_SHIFT_TREND_RESOLUTION_FRACTION = 0.5
+SEL_SNR_LOWERED = 0.98           # merged edge SNR with the scan under this fraction of it without: lowers_merge_snr
+SEL_EDGE_STEP_OBSERVED = 0.05    # an edge-step change of at least this fraction is said (an observation only)
+SEL_BOOTSTRAP = 40               # noise-injection replicas per scan (seeded by the scan's own content)
+#: header keys (``#P`` lines, ``key=value``) that must agree across a group's scans, with their tolerance
+SEL_SETUP_KEYS = (("emiss", 0.1), ("filter", 0.0))
+#: ring-current columns, first present wins: I0 is judged against it so a ring-current change is not a beam drop
+RING_CURRENT_COLUMNS = ("spear", "SPEAR", "ring_current", "RingCurrent", "Ring Current", "ring")
+
+SCAN_SELECTION_CONSTANTS = {
+    "pre2_rel_eV": SEL_PRE2_REL_EV, "norm1_rel_eV": SEL_NORM1_REL_EV, "nnorm": 1,
+    "xanes_window_eV": list(SEL_XANES_WINDOW_EV), "complete_min_post_e0_eV": SEL_NORM1_REL_EV + SEL_MIN_POST_EDGE_EV,
+    "coverage_min": SEL_COVERAGE_MIN, "eval_snr_min": SEL_EVAL_SNR_MIN, "excess_noise_look": SEL_EXCESS_NOISE_LOOK,
+    "artifact_z": SEL_ARTIFACT_Z, "artifact_max_width_points": SEL_ARTIFACT_MAX_WIDTH,
+    "beam_drop_fraction": SEL_BEAM_DROP_FRAC, "beam_drop_look_fraction": SEL_BEAM_DROP_LOOK,
+    "many_artifacts": SEL_MANY_ARTIFACTS, "visible_R": SEL_VISIBLE_R, "trend_alpha": SEL_ALPHA,
+    "first_last_z": SEL_FIRST_LAST_Z, "floors": dict(SEL_FLOOR), "chi2_p": SEL_CHI2_P,
+    "chi2_median_factor": SEL_CHI2_MEDIAN_FACTOR, "energy_shift_min_eV": SEL_SHIFT_MIN_EV,
+    "energy_shift_spread_factor": SEL_SHIFT_SPREAD_FACTOR,
+    "energy_shift_resolution_fraction": SEL_SHIFT_RESOLUTION_FRACTION,
+    "energy_shift_resolution_window_eV": SEL_SHIFT_RESOLUTION_WINDOW_EV,
+    "shift_trend_resolution_fraction": SEL_SHIFT_TREND_RESOLUTION_FRACTION, "merge_snr_lowered_fraction": SEL_SNR_LOWERED,
+    "edge_step_observed_fraction": SEL_EDGE_STEP_OBSERVED, "bootstrap": SEL_BOOTSTRAP,
+}
+
+
+def _stats():
+    from scipy import stats  # a dependency of xraylarch
+
+    return stats
+
+
+def _integer_counts(x, np) -> bool:
+    ok = np.isfinite(x)
+    return bool(ok.any() and not np.any(x[ok] < 0) and not np.any(np.abs(x[ok] - np.round(x[ok])) > 1e-6))
+
+
+def counting_noise(counts, i0, np, mode: str = "fluorescence"):
+    """Counting-statistics noise of mu, per detection mode, or ``None`` when the signal is not counts (a current, a
+    dead-time-corrected float): the scan's own neighbour scatter is used instead (:func:`_scan_metrics`).
+
+    * fluorescence, mu = N/I0 with INTEGER counts N: sqrt(N+1)/I0;
+    * transmission, mu = ln(I0/It) with BOTH It and I0 integer counts: sqrt(1/It + 1/I0) (each at least 1);
+    * any other mode: ``None``."""
+    if counts is None or i0 is None:
+        return None
+    c, d = np.asarray(counts, dtype=float), np.asarray(i0, dtype=float)
+    if not (np.isfinite(d).any() and not np.any(d[np.isfinite(d)] <= 0)) or not _integer_counts(c, np):
+        return None
+    if mode == "fluorescence":
+        return np.sqrt(np.maximum(c, 0) + 1.0) / d
+    if mode == "transmission" and _integer_counts(d, np):
+        return np.sqrt(1.0 / np.maximum(c, 1.0) + 1.0 / np.maximum(d, 1.0))
+    return None
+
+
+def neighbour_z(E, y, s, np):
+    """Each inner point's residual against the line through its two neighbours, in units of its expected sigma."""
+    wa = (E[2:] - E[1:-1]) / (E[2:] - E[:-2])
+    wb = 1 - wa
+    r = y[1:-1] - (wa * y[:-2] + wb * y[2:])
+    v = s[1:-1] ** 2 + (wa * s[:-2]) ** 2 + (wb * s[2:]) ** 2
+    return E[1:-1], r / np.sqrt(v)
+
+
+def robust_sigma(z, np) -> float | None:
+    z = z[np.isfinite(z)]
+    return float(1.4826 * np.median(np.abs(z - np.median(z)))) if z.size >= 5 else None
+
+
+def normalize_fixed(E, mu, e0s: float, np) -> dict | None:
+    """ONE fixed parameter set (evaluation only): a line through the pre-edge (second point to E0-30), a line through
+    the post-edge (E0+100 to the end), the step at E0. ``None`` without a positive step."""
+    pre = (E >= E[1] if E.size > 1 else E >= E[0]) & (E <= e0s + SEL_PRE2_REL_EV)
+    post = E >= e0s + SEL_NORM1_REL_EV
+    if pre.sum() >= 3:
+        pc = np.polyfit(E[pre], mu[pre], 1)
+    else:
+        pc = np.array([0.0, float(np.mean(mu[pre])) if pre.any() else float(mu[0])])
+    if post.sum() < 3:
+        return None
+    qc = np.polyfit(E[post], mu[post], 1)
+    step = float(np.polyval(qc, e0s) - np.polyval(pc, e0s))
+    if not step > 0:
+        return None
+    return {"norm": (mu - np.polyval(pc, E)) / step, "step": step}
+
+
+def white_line(E, n, e0s: float, np) -> dict | None:
+    """White-line energy and height (vertex of a quadratic through the top), and the energy at half step (the first
+    rising crossing of 0.5 below the white line)."""
+    sel = (E >= e0s - 2) & (E <= e0s + 15)
+    if sel.sum() < 5:
+        return None
+    e, y = E[sel], n[sel]
+    ys = np.convolve(y, np.ones(3) / 3, mode="same")
+    i = int(np.argmax(ys[1:-1])) + 1
+    near = np.abs(e - e[i]) <= 1.2
+    wl_e, wl_h = e[i], float(ys[i])
+    if near.sum() >= 4:
+        c = np.polyfit(e[near] - e[i], y[near], 2)
+        if c[0] < 0:
+            x0 = -c[1] / (2 * c[0])
+            if abs(x0) <= 1.2:
+                wl_e, wl_h = e[i] + x0, float(np.polyval(c, x0))
+    sel2 = (E >= e0s - 15) & (E <= wl_e)
+    e2, y2 = E[sel2], n[sel2]
+    half = None
+    for j in range(1, e2.size):
+        if y2[j - 1] < 0.5 <= y2[j]:
+            half = float(e2[j - 1] + (0.5 - y2[j - 1]) * (e2[j] - e2[j - 1]) / (y2[j] - y2[j - 1]))
+            break
+    return {"wl_e_eV": float(wl_e), "wl_h": wl_h, "e_half_eV": half}
+
+
+def _scan_metrics(sc: dict, e0s: float, span_ref: float, np) -> dict:
+    """One scan alone: completeness, noise (counting and excess), I0 health, its own normalisation with the series
+    parameters, edge SNR, white line, and their spreads by noise injection. Adds the working arrays to ``sc``."""
+    E, mu = sc["energy"], sc["mu"]
+    m = {"points": int(E.size), "E_first_eV": float(E[0]), "E_last_eV": float(E[-1]),
+         "coverage": float((E[-1] - E[0]) / span_ref) if span_ref else None,
+         **{k: (sc.get("setup") or {}).get(k) for k, _ in SEL_SETUP_KEYS}}
+    m["complete"] = bool(E[-1] >= e0s + SEL_NORM1_REL_EV + SEL_MIN_POST_EDGE_EV and (m["coverage"] or 0) >= SEL_COVERAGE_MIN)
+    sigP = counting_noise(sc.get("counts"), sc.get("i0"), np, mode=sc.get("mode") or "fluorescence")
+    if sigP is not None and E.size >= 7:
+        m["noise_model"] = "counting_statistics"
+        ez, z = neighbour_z(E, mu, sigP, np)
+        m["F_pre"] = robust_sigma(z[ez < e0s - 10], np)
+        m["F_post"] = robust_sigma(z[ez > e0s + 40], np)
+        sig = max(m["F_post"] or 1.0, 1.0) * sigP  # never claim less than counting noise
+    else:
+        # not integer counts: the noise is the scatter about the neighbour line itself (no excess-noise factor)
+        m["noise_model"] = "measured_scatter"
+        m["F_pre"] = m["F_post"] = None
+        ones = np.ones(E.size)
+        if E.size >= 7:
+            ez, z = neighbour_z(E, mu, ones, np)
+        else:
+            ez, z = E, np.full(E.size, np.nan)
+        s_post = robust_sigma(z[ez > e0s + 40], np) or robust_sigma(z, np) or 0.0
+        sig = ones * (s_post if s_post > 0 else max(float(np.std(mu)) * 1e-3, 1e-300))
+    sc["sig"] = sig
+    ring = sc.get("ring")
+    i0 = sc.get("i0")
+    if i0 is not None:
+        with np.errstate(invalid="ignore", divide="ignore"):
+            ratio = i0 / np.where(np.isfinite(ring) & (ring > 0), ring, 1.0) if ring is not None else i0.copy()
+        med = float(np.median(i0)) if i0.size else 0.0
+        m["i0_min_over_median"] = float(np.min(i0) / med) if med > 0 else None
+    else:
+        ratio = None
+        m["i0_min_over_median"] = None
+    sc["i0_ratio"] = ratio
+    m["i0_nonpositive"] = int(sc.get("i0_nonpositive") or 0)
+    if not m["complete"]:
+        return m
+    nm = normalize_fixed(E, mu, e0s, np)
+    if nm is None:
+        m["complete"] = False
+        m["normalization_failed"] = True
+        return m
+    sc["norm"], sc["step"] = nm["norm"], nm["step"]
+    sc["sig_norm"] = sig / nm["step"]
+    m["edge_step"] = nm["step"]
+    post = E >= e0s + SEL_NORM1_REL_EV
+    m["noise_post_mu"] = float(np.median(sig[post]))
+    m["edge_snr"] = float(nm["step"] / m["noise_post_mu"]) if m["noise_post_mu"] > 0 else None
+    m.update(white_line(E, nm["norm"], e0s, np) or {})
+    rng = np.random.default_rng(int(sc.get("seed") or 0))
+    reps: dict[str, list] = {k: [] for k in ("edge_step", "e_half_eV", "wl_e_eV", "wl_h")}
+    for _ in range(SEL_BOOTSTRAP):
+        nb = normalize_fixed(E, mu + rng.normal(0, sig), e0s, np)
+        if nb is None:
+            continue
+        reps["edge_step"].append(nb["step"])
+        f = white_line(E, nb["norm"], e0s, np) or {}
+        for k in ("e_half_eV", "wl_e_eV", "wl_h"):
+            if f.get(k) is not None:
+                reps[k].append(f[k])
+    for k, v in reps.items():
+        m[f"sd_{k}"] = float(np.std(v, ddof=1)) if len(v) > 5 else None
+    return m
+
+
+def _on_grid(sc: Mapping, grid, key: str, np):
+    y = np.interp(grid, sc["energy"], sc[key])
+    y[(grid < sc["energy"][0]) | (grid > sc["energy"][-1])] = np.nan
+    return y
+
+
+def shift_resolution(E, e0s: float, np) -> float:
+    """The smallest shift the scan's points can resolve (review HIGH 3): :data:`SEL_SHIFT_RESOLUTION_FRACTION` of the
+    median point spacing within E0 +- :data:`SEL_SHIFT_RESOLUTION_WINDOW_EV` (0 when fewer than 3 points are there).
+    ``energy_shifted`` needs a shift beyond it; a trend or step in the shift needs a change beyond
+    :data:`SEL_SHIFT_TREND_RESOLUTION_FRACTION` of it (and the 0.15 eV floor)."""
+    sel = np.abs(E - e0s) <= SEL_SHIFT_RESOLUTION_WINDOW_EV
+    d = np.diff(E[sel])
+    d = d[d > 0]
+    return float(SEL_SHIFT_RESOLUTION_FRACTION * np.median(d)) if d.size >= 2 else 0.0
+
+
+def _shift_fit(sc, grid, c, c_var, win, np):
+    """The shift delta minimising chi2 of the scan at E+delta against the consensus on ``win``; sigma from the chi2
+    curvature (scaled by chi2/nu when above 1). As the validated prototype has it.
+
+    KNOWN BIAS (review HIGH 3): the noise at E+delta is the noise INTERPOLATED, while a value interpolated between two
+    points scatters less than either, so a fractional shift fits slightly better than none: identical scans come out
+    up to about +-0.4 of the point spacing apart. It is bounded where it matters by :func:`shift_resolution` (no shift,
+    and no shift change, smaller than the points can resolve is said). Two repairs were measured on the real beamtime
+    the design was validated on and not taken: propagating the noise through the interpolation pinned shifts to whole
+    point spacings (26 of 666 proposals moved, the step-at-start group lost); shifting the consensus instead of the
+    scan (unbiased on synthetic scans) moved 16, and put two scans 0.45 eV off in white-line energy inside a stable
+    window."""
+    ds = np.arange(-2.0, 2.0001, 0.02)
+    chi = []
+    with np.errstate(invalid="ignore", divide="ignore"):
+        for d in ds:
+            y = np.interp(grid[win] + d, sc["energy"], sc["norm"])
+            s = np.interp(grid[win] + d, sc["energy"], sc["sig_norm"])
+            chi.append(np.nansum((y - c[win]) ** 2 / (s ** 2 + c_var[win])))
+    chi = np.array(chi)
+    i = int(np.argmin(chi))
+    lo, hi = max(i - 15, 0), min(i + 16, ds.size)  # +-0.3 eV: wider than the interpolation kinks
+    a = np.polyfit(ds[lo:hi], chi[lo:hi], 2)[0] if hi - lo >= 3 else 0
+    nu = max(int(win.sum()) - 1, 1)
+    chi_nu = float(chi[i] / nu)
+    sd = (1 / math.sqrt(a)) * math.sqrt(max(chi_nu, 1)) if a > 0 else None
+    return float(ds[i]), sd, chi_nu, nu
+
+
+def _consensus(members, grid, np):
+    """Each point's mean of the members' normalised curves, weighted as a RAW-mu merge weighs them (by edge step)."""
+    N = np.vstack([_on_grid(s, grid, "norm", np) for s in members])
+    S = np.vstack([_on_grid(s, grid, "sig_norm", np) for s in members])
+    with np.errstate(invalid="ignore", divide="ignore"):
+        w = np.array([s["step"] for s in members])[:, None] * np.isfinite(N)
+        c = np.nansum(np.nan_to_num(N) * w, axis=0) / np.sum(w, axis=0)
+        var = np.nansum((np.nan_to_num(S) * w) ** 2, axis=0) / np.sum(w, axis=0) ** 2
+    return c, var
+
+
+def _artifacts(sc, grid, c, c_var, delta, e0s, i0_profile, np) -> list[dict]:
+    """Clusters of points departing from the consensus by more than :data:`SEL_ARTIFACT_Z`, at most
+    :data:`SEL_ARTIFACT_MAX_WIDTH` points wide, quiet either side: a spike (one point), a diffraction peak (a positive
+    bump), a dip, or a beam drop (I0 under :data:`SEL_BEAM_DROP_FRAC` of its usual level there). A beam drop mu = If/I0
+    divides out is listed too (``beam_drop_divided_out``)."""
+    with np.errstate(invalid="ignore", divide="ignore"):
+        y = np.interp(grid + delta, sc["energy"], sc["norm"])
+        s = np.interp(grid + delta, sc["energy"], sc["sig_norm"])
+        inside = (grid + delta >= sc["energy"][0]) & (grid + delta <= sc["energy"][-1])
+        z = np.where(inside, (y - c) / np.sqrt(s ** 2 + c_var), 0.0)
+        z = np.nan_to_num(z, nan=0.0)
+        i0r = (np.interp(grid, sc["energy"], sc["i0_ratio"]) / i0_profile
+               if (i0_profile is not None and sc.get("i0_ratio") is not None) else None)
+    flag = np.abs(z) > SEL_ARTIFACT_Z
+    out, j = [], 0
+    while j < grid.size:
+        if not flag[j]:
+            j += 1
+            continue
+        k = j
+        while k + 1 < grid.size and flag[k + 1]:
+            k += 1
+        width = k - j + 1
+        quiet = np.abs(z[max(j - 3, 0):j]).max(initial=0) < 3 and np.abs(z[k + 1:k + 4]).max(initial=0) < 3
+        if width <= SEL_ARTIFACT_MAX_WIDTH and quiet:
+            seg = slice(j, k + 1)
+            amp = float(np.max(np.abs(y[seg] - c[seg])) * np.sign(np.sum(y[seg] - c[seg])))
+            drop = bool(i0r is not None and np.nanmin(i0r[max(j - 1, 0):k + 2]) < SEL_BEAM_DROP_FRAC)
+            kind = "beam_drop" if drop else ("spike" if width == 1 else ("diffraction_peak" if amp > 0 else "dip"))
+            out.append({"kind": kind, "E_eV": [float(grid[j]), float(grid[k])], "points": width,
+                        "amplitude_norm": amp, "max_abs_z": float(np.max(np.abs(z[seg]))),
+                        "in_xanes": bool(e0s + SEL_XANES_WINDOW_EV[0] <= grid[j] <= e0s + SEL_XANES_WINDOW_EV[1])})
+        j = k + 1
+    if i0r is not None:
+        low = np.flatnonzero(np.isfinite(i0r) & (i0r < SEL_BEAM_DROP_FRAC))
+        said = {e for a in out for e in range(grid.size) if a["E_eV"][0] <= grid[e] <= a["E_eV"][1]}
+        free = [int(i) for i in low if int(i) not in said]
+        if free:
+            out.append({"kind": "beam_drop_divided_out", "E_eV": [float(grid[free[0]]), float(grid[free[-1]])],
+                        "points": len(free), "min_i0_fraction": float(np.nanmin(i0r[free]))})
+    return out
+
+
+def trend_test(t, m, sd, np) -> dict | None:
+    """A weighted slope (inflated by excess scatter, Birge), its t-test, and the first-vs-last difference in units of
+    the random scatter. ``None`` under 4 values."""
+    stats = _stats()
+    t, m = np.asarray(t, float), np.asarray(m, float)
+    sd = np.asarray([x if (x and x > 0) else np.nan for x in sd], float)
+    ok = np.isfinite(t) & np.isfinite(m) & np.isfinite(sd)
+    t, m, sd = t[ok], m[ok], sd[ok]
+    n = t.size
+    if n < 4:
+        return None
+    w = 1 / sd ** 2
+    tb = np.sum(w * t) / np.sum(w)
+    Sxx = np.sum(w * (t - tb) ** 2)
+    if not Sxx > 0:
+        return None
+    b = np.sum(w * (t - tb) * (m - np.sum(w * m) / np.sum(w))) / Sxx
+    a = np.sum(w * m) / np.sum(w) - b * tb
+    chi_nu = float(np.sum(w * (m - a - b * t) ** 2) / (n - 2))
+    sb = math.sqrt(1 / Sxx) * math.sqrt(max(chi_nu, 1.0))
+    tstat = b / sb
+    p = float(2 * stats.t.sf(abs(tstat), n - 2))
+    d2 = float(np.mean(np.diff(m) ** 2) / 2)  # von Neumann successive-difference variance
+    s_rand = math.sqrt(max(float(np.mean(sd ** 2)), d2))
+    k = 2 if n >= 6 else 1
+    dfl = float(np.mean(m[-k:]) - np.mean(m[:k]))
+    z_fl = dfl / (s_rand * math.sqrt(2 / k)) if s_rand > 0 else 0.0
+    vn = float(np.sum(np.diff(m) ** 2) / np.sum((m - m.mean()) ** 2)) if np.ptp(m) > 0 else None
+    return {"n": int(n), "slope_per_scan": float(b), "t": float(tstat), "p": p, "birge": math.sqrt(max(chi_nu, 0)),
+            "drift": float(b * (t[-1] - t[0])), "first_last": dfl, "z_first_last": float(z_fl), "von_neumann": vn}
+
+
+def _evolving(tr, metric: str, floors: Mapping | None = None) -> bool:
+    """A SLOPE: significant, confirmed by first-vs-last, and larger than the physical floor."""
+    fl = (floors or SEL_FLOOR)[metric]
+    return bool(tr and tr["p"] < SEL_ALPHA and abs(tr["z_first_last"]) >= SEL_FIRST_LAST_Z
+                and abs(tr["drift"]) >= fl and abs(tr["first_last"]) >= fl)
+
+
+def _times(sub) -> list:
+    """ONE time axis everywhere (review LOW 8): each scan's ``number`` (its scan number: a gap is real time), else its
+    place."""
+    t = [s.get("number") for s in sub]
+    return t if all(isinstance(x, (int, float)) and not isinstance(x, bool) for x in t) else list(range(len(sub)))
+
+
+def trend_floors(E, e0s: float, np) -> dict:
+    """The physical floors, with the shift's raised to what the points can resolve (:func:`shift_resolution`)."""
+    res = shift_resolution(E, e0s, np)
+    return {**SEL_FLOOR, "delta_eV": max(SEL_FLOOR["delta_eV"], SEL_SHIFT_TREND_RESOLUTION_FRACTION * res)}
+
+
+def _sd_key(k: str) -> str:
+    return "sd_delta_eV" if k == "delta_eV" else f"sd_{k}"
+
+
+def change_point(m, sd, metric: str, np, floors: Mapping | None = None):
+    """A STEP at the start: the leading block (1..n-3 scans) against the rest, in pooled within-block scatter units,
+    Bonferroni over the splits and the shape metrics. ``(split, z, diff, p)`` or ``None``."""
+    stats = _stats()
+    m = np.asarray(m, float)
+    sd = np.asarray([x if (x and x > 0) else np.nan for x in sd], float)
+    n = m.size
+    if n < 4 or not np.isfinite(m).all() or not np.isfinite(sd).all():
+        return None
+    best = None
+    for s in range(1, n - 2):
+        a, b = m[:s], m[s:]
+        within = np.concatenate([a - a.mean(), b - b.mean()])
+        s_r = math.sqrt(max(float(np.sum(within ** 2) / max(n - 2, 1)), float(np.mean(sd ** 2))))
+        z = (a.mean() - b.mean()) / (s_r * math.sqrt(1 / s + 1 / (n - s)))
+        p = float(2 * stats.t.sf(abs(z), n - 2)) * (n - 3) * len(SEL_SHAPE_METRICS)
+        if p < 0.01 and abs(a.mean() - b.mean()) >= (floors or SEL_FLOOR)[metric] and (best is None or abs(z) > abs(best[1])):
+            best = (s, float(z), float(a.mean() - b.mean()), p)
+    return best
+
+
+def _unstable(sub, np, floors: Mapping | None = None) -> list[str]:
+    """The shape metrics in which a run of scans still changes: a slope, or a first-vs-last difference beyond noise
+    and the floor."""
+    bad = []
+    fls = floors or SEL_FLOOR
+    for k in SEL_SHAPE_METRICS:
+        v = [s["m"].get(k) for s in sub]
+        sd = [s["m"].get(_sd_key(k)) for s in sub]
+        if any(x is None for x in v) or any(not x for x in sd):
+            continue
+        v, sd = np.array(v, float), np.array(sd, float)
+        if len(sub) >= 4:
+            tr = trend_test(_times(sub), v, sd, np)
+            if tr and tr["p"] < SEL_ALPHA and abs(tr["drift"]) >= fls[k]:
+                bad.append(k)
+                continue
+        kk = 2 if len(sub) >= 6 else 1
+        d = float(v[-kk:].mean() - v[:kk].mean())
+        s_r = math.sqrt(max(float(np.mean(sd ** 2)), float(np.mean(np.diff(v) ** 2) / 2)))
+        if abs(d) >= fls[k] and s_r > 0 and abs(d) / (s_r * math.sqrt(2 / kk)) >= SEL_FIRST_LAST_Z:
+            bad.append(k)
+    return bad
+
+
+def detect_evolution(shape_ok, np, tr=None, floors: Mapping | None = None):
+    """``(evolving metrics, change points, start of the stable window or None)``: a slope OR a step at the start.
+    ``shape_ok`` is the scans in time order (each with its metrics ``m``)."""
+    if tr is None:
+        t = _times(shape_ok)
+        tr = {k: trend_test(t, [s["m"].get(k) for s in shape_ok], [s["m"].get(_sd_key(k)) for s in shape_ok], np)
+              for k in SEL_SHAPE_METRICS}
+    evo = [k for k in SEL_SHAPE_METRICS if _evolving(tr.get(k), k, floors)]
+    cps = {}
+    for k in SEL_SHAPE_METRICS:
+        cp = change_point([s["m"].get(k) for s in shape_ok], [s["m"].get(_sd_key(k)) for s in shape_ok], k, np, floors)
+        if cp and not _unstable(shape_ok[cp[0]:], np, floors):
+            cps[k] = {"leading_scans": cp[0], "z": cp[1], "diff": cp[2], "p_bonferroni": cp[3]}
+    evo = sorted(set(evo) | set(cps))
+    if not evo:
+        return evo, cps, None
+    # the window starts after the LATEST change point (every metric settled), else the first stable suffix
+    start = max((c["leading_scans"] for c in cps.values()), default=None)
+    if start is None or _unstable(shape_ok[start:], np, floors):
+        start = next((s0 for s0 in range(1, len(shape_ok) - 2) if not _unstable(shape_ok[s0:], np, floors)), None)
+    return evo, cps, start
+
+
+def _finite(obj):
+    """A JSON-safe copy: non-finite floats become ``None``, numpy scalars plain numbers."""
+    if isinstance(obj, dict):
+        return {k: _finite(v) for k, v in obj.items()}
+    if isinstance(obj, (list, tuple)):
+        return [_finite(v) for v in obj]
+    if obj is None or isinstance(obj, (bool, str, int)):
+        return obj
+    kind = getattr(getattr(obj, "dtype", None), "kind", "")
+    if kind == "b":
+        return bool(obj)
+    if kind in ("i", "u"):
+        return int(obj)
+    try:
+        v = float(obj)
+    except (TypeError, ValueError):
+        return obj
+    return v if math.isfinite(v) else None
+
+
+def scan_selection(scans: Sequence[Mapping], e0s: float, np) -> dict:
+    """THE PROPOSAL for one group's merge (:data:`SCAN_SELECTION_RULE_ID`). ``scans``: the group's energy scans in
+    time order, each ``{"key", "number", "energy", "mu", "counts", "i0", "ring", "i0_nonpositive", "setup", "seed"}``
+    (``number`` orders them in time; ``key`` is the caller's handle, returned as it came). ``e0s``: the SERIES E0 (one
+    parameter set for every scan of the series). Nothing is dropped and nothing is merged here: every scan gets
+    ``include`` | ``needs_look`` | ``exclude_proposed``, its reason codes, a sentence for each, and its metrics."""
+    stats = _stats()
+    work = []
+    for s in scans:
+        E = np.asarray(s["energy"], dtype=float)
+        if E.size < 7:
+            continue
+        sc = {**s, "energy": E, "mu": np.asarray(s["mu"], dtype=float)}
+        for k in ("counts", "i0", "ring"):
+            sc[k] = np.asarray(s[k], dtype=float) if s.get(k) is not None else None
+        work.append(sc)
+    out: dict = {"rule_id": SCAN_SELECTION_RULE_ID, "e0_series_eV": float(e0s), "scans_evaluated": len(work),
+                 "complete_scans": 0, "scans": [], "trend": {}, "change_point": {}, "evolving_metrics": [],
+                 "stable_window": None, "edge_step_change": None, "group_observations": [], "merge_snr": None}
+    if not work:
+        return _finite(out)
+    span = max(float(s["energy"][-1] - s["energy"][0]) for s in work)
+    for sc in work:
+        sc["m"] = _scan_metrics(sc, e0s, span, np)
+    full = [s for s in work if s["m"]["complete"]]
+    out["complete_scans"] = len(full)
+    dec = {id(s): {"proposal": PROPOSAL_INCLUDE, "reasons": [], "said": []} for s in work}
+    out["status"] = "evaluated"
+    if not full:
+        # NO scan reaches the series window (a XANES-only or calibration scan design): none can be judged with the
+        # series parameters, so none is proposed (proposing every scan of the group for leaving out says nothing)
+        out["status"] = "not_evaluated"
+        out["detail"] = (f"no scan of the group reaches {e0s + SEL_NORM1_REL_EV + SEL_MIN_POST_EDGE_EV:.1f} eV "
+                         f"(E0+{SEL_NORM1_REL_EV + SEL_MIN_POST_EDGE_EV:g}) with {SEL_COVERAGE_MIN:.0%} of the widest "
+                         "scan's range, so none can be normalised with the series parameters; nothing is proposed")
+        for s in work:
+            dec[id(s)] = {"proposal": PROPOSAL_NOT_EVALUATED, "reasons": ["series_window_not_reached"],
+                          "said": [out["detail"]]}
+
+    def say(s, prop, code, text):
+        d = dec[id(s)]
+        if _PROPOSAL_ORDER[prop] > _PROPOSAL_ORDER[d["proposal"]]:
+            d["proposal"] = prop
+        if code not in d["reasons"]:
+            d["reasons"].append(code)
+            d["said"].append(text)
+
+    for s in work if full else ():
+        m = s["m"]
+        if m.get("normalization_failed"):
+            say(s, PROPOSAL_LOOK, "normalization_failed",
+                "the series parameters give no positive edge step for this scan")
+        elif not m["complete"]:
+            say(s, PROPOSAL_EXCLUDE, "incomplete_scan",
+                f"stops at {m['E_last_eV']:.1f} eV after {m['points']} points (it must reach "
+                f"{e0s + SEL_NORM1_REL_EV + SEL_MIN_POST_EDGE_EV:.1f} eV and cover {SEL_COVERAGE_MIN:.0%} of the "
+                "group's widest scan); it cannot be normalised alone")
+
+    def result():
+        for s in work:
+            out["scans"].append({"key": s.get("key"), "number": s.get("number"), **dec[id(s)], "metrics": s["m"]})
+        inc = [s for s in full if dec[id(s)]["proposal"] == PROPOSAL_INCLUDE]
+        msnr: dict = {"proposed_scans": [s.get("number") for s in inc]}
+        if inc:
+            st = np.array([s["m"]["edge_step"] for s in inc])
+            sp = np.array([s["m"]["noise_post_mu"] for s in inc])
+            msnr["proposed"] = float(st.sum() / math.sqrt(np.sum(sp ** 2)))
+        if full:
+            st = np.array([s["m"]["edge_step"] for s in full])
+            sp = np.array([s["m"]["noise_post_mu"] for s in full])
+            msnr["all_complete"] = float(st.sum() / math.sqrt(np.sum(sp ** 2)))
+        out["merge_snr"] = msnr
+        return _finite(out)
+
+    if not full:
+        return result()
+    # setup consistency (emission energy, filter...)
+    for key, tol in SEL_SETUP_KEYS:
+        vals = [s["m"].get(key) for s in full if s["m"].get(key) is not None]
+        if vals:
+            mode = max(sorted(set(vals)), key=vals.count)
+            for s in full:
+                v = s["m"].get(key)
+                if v is not None and abs(v - mode) > tol:
+                    say(s, PROPOSAL_LOOK, f"setup_differs_{key}", f"{key} {v:g} where the group's other scans have {mode:g}")
+    for s in full:
+        if s["m"]["edge_snr"] is None or s["m"]["edge_snr"] < SEL_EVAL_SNR_MIN:
+            say(s, PROPOSAL_LOOK, "too_noisy_to_evaluate",
+                f"edge step only {s['m']['edge_snr'] or 0:.1f} x its per-point noise: alone it cannot be judged")
+        F = s["m"].get("F_post")
+        if F and F > SEL_EXCESS_NOISE_LOOK:
+            say(s, PROPOSAL_LOOK, "excess_noise",
+                f"noise {F:.1f} x what counting statistics give (bubbles, vibration or a detector problem?)")
+        if s["m"]["i0_nonpositive"]:
+            say(s, PROPOSAL_LOOK, "i0_nonpositive", f"{s['m']['i0_nonpositive']} points with I0 <= 0")
+    good = [s for s in full if dec[id(s)]["proposal"] != PROPOSAL_EXCLUDE]
+    grid = (good or full)[0]["energy"]
+    win = (grid >= e0s + SEL_XANES_WINDOW_EV[0]) & (grid <= e0s + SEL_XANES_WINDOW_EV[1])
+    i0_prof = None
+    if len(full) >= 2 and all(s.get("i0_ratio") is not None for s in full):
+        with warnings.catch_warnings(), np.errstate(invalid="ignore", divide="ignore"):
+            warnings.simplefilter("ignore", RuntimeWarning)
+            for s in full:
+                med = float(np.median(s["i0_ratio"]))
+                s["i0_ratio"] = s["i0_ratio"] / med if med > 0 else s["i0_ratio"] * np.nan
+            R = np.vstack([_on_grid({"energy": s["energy"], "r": s["i0_ratio"]}, grid, "r", np) for s in full])
+            i0_prof = np.nanmedian(R, axis=0)
+
+    def sig_merge(members):
+        return np.sqrt(np.nansum(np.vstack([_on_grid(o, grid, "sig", np) for o in members]) ** 2, axis=0))
+
+    def consistency(members_for_consensus, targets):
+        res = {}
+        for s in targets:
+            others = [o for o in members_for_consensus if o is not s]
+            if not others:
+                continue
+            c, c_var = _consensus(others, grid, np)
+            d, sd_d, chi_nu, nu = _shift_fit(s, grid, c, c_var, win & np.isfinite(c), np)
+            # the bias this scan puts on a RAW-mu merge, against that merge's own noise (unshifted: the merge does
+            # not align)
+            members = others + [s]
+            steps = np.array([o["step"] for o in members])
+            with np.errstate(invalid="ignore", divide="ignore"), warnings.catch_warnings():
+                warnings.simplefilter("ignore", RuntimeWarning)
+                dif = (_on_grid(s, grid, "norm", np) - c)[win]
+                sm = sig_merge(members)[win]
+                bias = s["step"] * dif / len(members)
+                R = float(np.sqrt(np.nanmean((bias / (sm / len(members))) ** 2)))
+            sig_post = np.array([o["m"]["noise_post_mu"] for o in members])
+            snr_with = steps.sum() / math.sqrt(np.sum(sig_post ** 2))
+            snr_without = steps[:-1].sum() / math.sqrt(np.sum(sig_post[:-1] ** 2))
+            res[id(s)] = {"delta_eV": d, "sd_delta_eV": sd_d, "chi2_nu_shifted": chi_nu, "nu": nu,
+                          "visible_bias_R": R, "merge_snr_with": float(snr_with),
+                          "merge_snr_without": float(snr_without),
+                          "artifacts": _artifacts(s, grid, c, c_var, d, e0s, i0_prof, np)}
+        return res
+
+    cons = consistency(good, good) if len(good) >= 2 else {}
+    for s in good:
+        if id(s) in cons:
+            s["m"].update({k: v for k, v in cons[id(s)].items() if k != "artifacts"})
+    # ---- trend and change point ----
+    shape_ok = [s for s in good if "delta_eV" in s["m"]]
+    good_w = shape_ok
+    if len(shape_ok) >= 4:
+        t = [s.get("number") for s in shape_ok]
+        tr = {k: trend_test(t, [s["m"].get(k) for s in shape_ok], [s["m"].get(_sd_key(k)) for s in shape_ok], np)
+              for k in ("delta_eV", "wl_e_eV", "wl_h", "e_half_eV", "edge_step")}
+        out["trend"] = tr
+        floors = trend_floors(grid, e0s, np)
+        out["floors"] = floors
+        evo, cps, start = detect_evolution(shape_ok, np, tr, floors)
+        out["change_point"] = cps
+        out["evolving_metrics"] = evo
+        if evo:
+            if start is not None:
+                win_scans = shape_ok[start:]
+                out["stable_window"] = [s.get("number") for s in win_scans]
+                for s in shape_ok[:start]:
+                    parts = [f"{k} {s['m'][k] - np.mean([w['m'][k] for w in win_scans]):+.3g} from the stable scans"
+                             for k in evo]
+                    say(s, PROPOSAL_EXCLUDE, "before_stable_window",
+                        "the sample was still changing (" + ", ".join(parts) + ")")
+                good_w = win_scans
+            else:
+                for s in shape_ok:
+                    say(s, PROPOSAL_LOOK, "still_evolving_no_stable_window",
+                        "the sample is still changing at the end of the series: " + ", ".join(evo))
+    # ---- shape outliers and artifacts, against the (stable) consensus ----
+    if len(good_w) >= 2:
+        cons2 = consistency(good_w, shape_ok)
+        chis = [cons2[id(s)]["chi2_nu_shifted"] for s in good_w if id(s) in cons2]
+        med = float(np.median(chis)) if chis else 1.0
+        out["chi2_nu_median"] = med
+        ds_w = np.array([cons2[id(w)]["delta_eV"] for w in good_w if id(w) in cons2])
+        spread = 1.4826 * float(np.median(np.abs(ds_w - np.median(ds_w)))) if ds_w.size >= 4 else 0.0
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore", RuntimeWarning)
+            noise_w = sig_merge(good_w)
+        for s in shape_ok:
+            r = cons2.get(id(s))
+            if not r:
+                continue
+            s["m"]["vs_stable"] = {k: v for k, v in r.items() if k != "artifacts"}
+            s["m"]["artifacts"] = r["artifacts"]
+            nu = r["nu"]
+            crit = max(float(stats.chi2.isf(SEL_CHI2_P, nu)) / nu, SEL_CHI2_MEDIAN_FACTOR * med)
+            if len(good_w) >= 4 and r["chi2_nu_shifted"] > crit:
+                if r["visible_bias_R"] >= SEL_VISIBLE_R:
+                    say(s, PROPOSAL_EXCLUDE, "shape_out_of_trend",
+                        f"shape differs (chi2/nu {r['chi2_nu_shifted']:.2f} vs group median {med:.2f}) and would move "
+                        f"the merge {r['visible_bias_R']:.1f} x its noise")
+                else:
+                    say(s, PROPOSAL_INCLUDE, "differs_below_merge_noise",
+                        f"shape differs (chi2/nu {r['chi2_nu_shifted']:.2f}) but would move the merge only "
+                        f"{r['visible_bias_R']:.2f} x its noise")
+            visible = 0
+            for a in r["artifacts"]:
+                if a["kind"] == "beam_drop_divided_out":
+                    txt = (f"I0 fell to {a['min_i0_fraction']:.0%} of its usual level at {a['E_eV'][0]:.1f}-"
+                           f"{a['E_eV'][1]:.1f} eV (ring current divided out); mu = If/I0 shows no departure there")
+                    if a["min_i0_fraction"] < SEL_BEAM_DROP_LOOK:
+                        say(s, PROPOSAL_LOOK, "beam_drop", txt)
+                    else:
+                        say(s, PROPOSAL_INCLUDE, "beam_dip_divided_out", txt)
+                    continue
+                at = float(np.interp(a["E_eV"][0], grid, np.nan_to_num(noise_w, nan=0.0)))
+                vis = (abs(a["amplitude_norm"]) * s["step"] / len(good_w) / (at / len(good_w))) if at > 0 else math.inf
+                a["visible_in_merge"] = float(vis) if math.isfinite(vis) else None
+                txt = (f"{a['kind']} at {a['E_eV'][0]:.1f}-{a['E_eV'][1]:.1f} eV ({a['points']} pt, "
+                       f"{a['amplitude_norm']:+.3f} of the edge step, z {a['max_abs_z']:.0f}); "
+                       f"{vis:.1f} x the merge's noise there")
+                if vis >= SEL_VISIBLE_R:
+                    visible += 1
+                    say(s, PROPOSAL_LOOK, f"artifact_{a['kind']}",
+                        txt + ("" if a["in_xanes"] else " (outside the XANES window)") + "; remove these points, or the scan")
+                else:
+                    say(s, PROPOSAL_INCLUDE, f"artifact_{a['kind']}_below_merge_noise", txt)
+            if visible >= SEL_MANY_ARTIFACTS:
+                say(s, PROPOSAL_EXCLUDE, "many_artifacts", f"{visible} artifacts each visible in the merge")
+            if r["merge_snr_with"] < r["merge_snr_without"] * SEL_SNR_LOWERED:
+                # a LOOK, never an exclusion (review HIGH 2): a scan with a smaller edge step (intensity alone) lowers
+                # the raw merge's SNR, and an intensity drop alone never excludes a scan
+                say(s, PROPOSAL_LOOK, "lowers_merge_snr",
+                    f"merged edge SNR {r['merge_snr_without']:.0f} without it, {r['merge_snr_with']:.0f} with it: this "
+                    "scan is weaker (a smaller edge step or more noise), not wrong; the scientist judges whether it "
+                    "belongs")
+            off = r["delta_eV"] - (float(np.median(ds_w)) if ds_w.size else 0.0)
+            lim = max(SEL_SHIFT_MIN_EV, 3 * (r["sd_delta_eV"] or 0), SEL_SHIFT_SPREAD_FACTOR * spread,
+                      shift_resolution(grid, e0s, np))
+            if len(good_w) >= 4 and abs(off) > lim and "before_stable_window" not in dec[id(s)]["reasons"]:
+                say(s, PROPOSAL_LOOK, "energy_shifted",
+                    f"{off:+.2f} eV from the other scans (their robust spread {spread:.2f} eV)")
+    # ---- two and three scans: pairwise only, honest about what cannot be told ----
+    if len(shape_ok) in (2, 3):
+        pair = []
+        for i, a in enumerate(shape_ok):
+            for b in shape_ok[i + 1:]:
+                zs = []
+                for k in ("e_half_eV", "wl_e_eV", "wl_h"):
+                    va, vb = a["m"].get(k), b["m"].get(k)
+                    sa, sb = a["m"].get(f"sd_{k}"), b["m"].get(f"sd_{k}")
+                    fl = SEL_FLOOR.get(k, SEL_FLOOR["wl_e_eV"])
+                    if None not in (va, vb, sa, sb) and sa > 0 and sb > 0:
+                        z = (vb - va) / math.hypot(sa, sb)
+                        if abs(z) >= SEL_FIRST_LAST_Z and abs(vb - va) >= fl:
+                            zs.append(f"{k} {vb - va:+.3g} ({z:+.1f} sigma)")
+                pair.append((a, b, zs))
+        bad = [p for p in pair if p[2]]
+        if len(shape_ok) == 2 and bad:
+            for s in shape_ok:
+                say(s, PROPOSAL_LOOK, "two_scans_disagree",
+                    "the two scans differ: " + "; ".join(bad[0][2]) + "; two scans cannot say which, or whether the "
+                    "sample changed")
+        if len(shape_ok) == 3 and bad:
+            odd = [s for s in shape_ok if all(s is p[0] or s is p[1] for p in bad)]
+            if len(bad) == 2 and len(odd) == 1:
+                say(odd[0], PROPOSAL_LOOK, "odd_one_of_three", "differs from the other two, which agree")
+            else:
+                for s in shape_ok:
+                    say(s, PROPOSAL_LOOK, "three_scans_change",
+                        "the three scans differ beyond noise; three scans cannot tell a trend from one bad scan")
+    # ---- intensity: an observation, never a reason ----
+    steps = [(s.get("number"), s["m"]["edge_step"]) for s in shape_ok]
+    if len(steps) >= 2:
+        first, last = steps[0][1], steps[-1][1]
+        ch = last / first - 1
+        tr_s = (out["trend"] or {}).get("edge_step")
+        out["edge_step_change"] = {"first": first, "last": last, "relative": ch,
+                                   "max_over_min": max(v for _, v in steps) / min(v for _, v in steps),
+                                   "trend_p": tr_s["p"] if tr_s else None}
+        if abs(ch) >= SEL_EDGE_STEP_OBSERVED:
+            out["group_observations"].append(
+                f"edge step {'fell' if ch < 0 else 'grew'} {abs(ch):.0%} from scan {steps[0][0]} to scan {steps[-1][0]} "
+                f"({first:.4g} -> {last:.4g})"
+                + (" - possible dissolution or detachment of the sample; a scientist judges" if ch < 0 else "")
+                + ". Not a reason to leave a scan out: the merge is raw mu.")
+    return result()
