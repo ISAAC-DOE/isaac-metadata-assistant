@@ -33,7 +33,7 @@ from isaac_api.local_import import records as R
 from isaac_api.local_import import suggestions as S
 
 from test_local_import_reader_ssrl_xdc import make_scan
-from test_local_import_reader_xes_tab import make_xes
+from test_local_import_reader_two_column import make_two
 from test_local_import_reader_xdi import make_xdi
 
 BY = "SYNTHETIC TEST"
@@ -49,7 +49,7 @@ def _run(argv, capsys):
 def _beamtime(root: Path, *, second_symbol: str | None = None, processed: bool = True) -> Path:
     bt = root / "SYN_beamtime"
     make_scan(bt / "SYN_run_A.001")
-    make_xes(bt / "SYN_cell.txt")
+    make_two(bt / "SYN_cell.txt")
     if processed:
         make_xdi(bt / "proc" / "SYN_cell.nor", fields=("Element.edge: K", "Element.symbol: Zz", *XDI_FIELDS))
     if second_symbol:

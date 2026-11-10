@@ -179,13 +179,30 @@ def _engine_po(label):
 
 
 def test_the_rule_without_an_import_one_number_names_no_electrode_and_a_run_without_scans_is_said():
-    runs = [_r("01_SYNpellet_f35", "run-001", 1), _r("07_02_SYN_x", "run-002", 7, scans=0)]
-    one, empty = _engine_po("01_SYNpellet_f35_0p2wtpc"), _engine_po("07_02_SYN_f10")
+    # the shape of the real IrOxBase 01_/02_ merges: one number, and the run's own words (SYNpellet, oldPellet, f35)
+    runs = [_r("01_SYNpellet_oldPellet_f35", "run-001", 1), _r("07_02_SYN_x", "run-002", 7, scans=0)]
+    one, empty = _engine_po("01_SYNpellet_oldPellet_f35_0p2wtpc"), _engine_po("07_02_SYN_f10")
     B.propose_processed_links([one, empty], runs)
     assert one["proposed_links"][0]["run_id"] == "run-001"  # neither name carries an electrode number
-    assert "neither name carries an electrode number" in one["proposed_links"][0]["assumption"]
+    assert ("neither name carries an electrode number, and they share the name word(s) SYNpellet, oldPellet, f35"
+            in one["proposed_links"][0]["assumption"])
     assert empty["proposed_links"] == [] and empty["link_note"]["code"] == "run_has_no_scans"
     assert empty["link_note"]["run_keys"] == ["k:07_02_SYN_x"]
+
+
+def test_one_number_and_no_shared_name_word_links_nothing():
+    """Review M3: ``01_IrO2_ref`` must not link to ``01_RuO2_pellet`` on the number alone."""
+    runs = [_r("01_SYNother_pellet", "run-001", 1)]
+    po = _engine_po("01_SYNoxide_ref")
+    B.propose_processed_links([po], runs)
+    assert po["proposed_links"] == []
+    assert po["link_note"]["code"] == "no_run_named_like_it" and po["link_note"]["match"] == "legacy_number"
+    assert po["link_note"]["run_keys"] == ["k:01_SYNother_pellet"] and "share no name word" in po["link_note"]["detail"]
+    # an electrode number is enough on its own: two numbers name the run, whatever the words
+    runs2 = [_r("01_02_SYNother_pellet", "run-001", 1)]
+    po2 = _engine_po("01_02_SYNoxide_ref")
+    B.propose_processed_links([po2], runs2)
+    assert po2["proposed_links"][0]["run_id"] == "run-001"
 
 
 def test_an_xdi_output_keeps_the_stem_rule_and_its_origin(b):
@@ -212,6 +229,99 @@ def test_the_validator_re_runs_the_rule_and_refuses_a_tampered_link_or_origin(b)
     po = _po(relabelled, RUN, "proc")
     po["files"][0]["processing_origin"] = B.engine_processing_origin()
     assert any("is not classified processed_spectrum" in e for e in B.validate_bundle(relabelled))
+
+
+def test_the_validator_refuses_a_relabelled_source_class_too(b):
+    """Review M2: the classification cannot be re-run without the file, so what the bundle holds is re-derived: an XDI
+    output whose origin AND source class are both relabelled still states its own header, which no headerless
+    processed spectrum can."""
+    bad = json.loads(json.dumps(b))
+    po = _po(bad, RUN, "proc")
+    f = po["files"][0]
+    f["processing_origin"] = B.engine_processing_origin()
+    next(s for s in bad["sources"] if s["source_id"] == f["source_id"])["classification"]["source_type"] = "processed_spectrum"
+    B.propose_processed_links(bad["processed_outputs"], bad["runs"])  # the forger re-runs the link rule as well
+    B.apply_derivations(bad)
+    errors = B.validate_bundle(bad)
+    assert any("states something about itself" in e for e in errors), errors
+    # and a quick merge whose file is swapped for another source is refused by path and sha256
+    swapped = json.loads(json.dumps(b))
+    sf = _po(swapped, "SYN_ave")["files"][0]
+    sf["sha256"] = "0" * 64
+    assert any("is not the file its source" in e for e in B.validate_bundle(swapped))
+
+
+def test_the_validator_re_derives_a_spec_runs_legacy_number_from_its_stem(b):
+    """Review M2: a forged legacy number would forge a link that the re-run rule then agrees with."""
+    bad = json.loads(json.dumps(b))
+    _run(bad, "32_03_SYN_after1500")["legacy_number"] = 33  # now 32_03_SYN names one run only
+    B.propose_processed_links(bad["processed_outputs"], bad["runs"])
+    B.apply_derivations(bad)
+    assert _po(bad, "32_03_SYN")["proposed_links"]  # the forged link the rule alone would accept
+    errors = B.validate_bundle(bad)
+    assert any("legacy_number 33 is not what its stem '32_03_SYN_after1500' states (32)" in e for e in errors), errors
+
+
+# --- only beside SPEC acquisitions (review H1) ------------------------------------------------------------------------
+
+
+def test_a_root_of_two_column_files_alone_keeps_its_runs_with_a_note(tmp_path, capsys):
+    from test_local_import_reader_two_column import make_two
+
+    bt = tmp_path / "SYN_other_facility"
+    make_two(bt / "SYN_sample_a.txt")
+    make_two(bt / "SYN_sample_b.txt")
+    out = tmp_path / "out"
+    b = _import(capsys, bt, out)
+    runs = [r for r in b["runs"] if r["source_type"] == "generic:two_column_v1"]
+    assert sorted(r["stem"] for r in runs) == ["SYN_sample_a", "SYN_sample_b"] and b["processed_outputs"] == []
+    for r in runs:
+        [note] = [a for a in r["other_relationships"]["anomalies"] if a["kind"] == B.ENGINE_PROCESSED_NOTE_KIND]
+        assert note["source_relative_path"] == r["scans"][0]["relative_path"] and "a scientist says" in note["detail"]
+    assert B.validate_bundle(b) == []
+    assert "quick merges" not in (out / "summary.md").read_text()
+    # an engine-classified output in such a root is refused: the validator re-derives the condition from the runs
+    forged = json.loads(json.dumps(b))
+    run = forged["runs"].pop()
+    forged["processed_outputs"].append({**_po_like(run, forged)})
+    assert any("applies only beside a SPEC acquisition run" in e for e in B.validate_bundle(forged))
+
+
+def _po_like(run, bundle):
+    sid = run["scans"][0]["source_id"]
+    src = next(s for s in bundle["sources"] if s["source_id"] == sid)
+    return {"processed_output_id": "po-00000000000000aa", "output_key": run["run_key"], "label": run["label"],
+            "directory": "", "role": "reference_result", "is_acquisition": False, "becomes_a_record": False,
+            "statement": "forged", "reader": {"reader_id": "two_column_reader_v1", "profile": "two_column_v1",
+                                              "profile_version": "1", "statements_total": 0, "statements_kept": 0},
+            "files": [{"source_id": sid, "relative_path": src["relative_path"], "sha256": src["content_sha256"],
+                       "size_bytes": src["size_bytes"], "extension": ".txt", "columns": [], "points": 3,
+                       "processing_origin": B.engine_processing_origin()}],
+            "states": {"processed_by": [], "element_symbol": [], "element_edge": [], "demeter_output_filetype": []},
+            "anomalies": [], "extended_context_entry_ids": [], "proposed_links": [],
+            "link_note": {"code": "no_run_named_like_it", "match": None, "run_keys": [],
+                          "detail": "Its name starts with no number, so no legacy number names a run; it stays unlinked."},
+            "value_state": "source_recorded"}
+
+
+def test_two_column_files_beside_spec_runs_are_outputs_even_unlinked(b):
+    spec = [r for r in b["runs"] if r["source_type"] == "spec_acquisition"]
+    assert spec and B.quick_merges_apply(b["runs"])
+    quick = [p for p in b["processed_outputs"] if B.is_engine_classified(p)]
+    assert len(quick) == 6 and len([p for p in quick if not p["proposed_links"]]) == 4
+    ave = _po(b, "SYN_ave")  # unlinked, still an output, never a run
+    assert ave["proposed_links"] == [] and not [r for r in b["runs"] if r["stem"] == "SYN_ave"]
+    assert not [r for r in b["runs"] if any(a.get("kind") == B.ENGINE_PROCESSED_NOTE_KIND
+                                            for a in (r["other_relationships"].get("anomalies") or ()))]
+    # a 1.11.0 import holding one of them as a run is refused (the condition re-derived from the stored runs)
+    bad = json.loads(json.dumps(b))
+    po = bad["processed_outputs"].pop(bad["processed_outputs"].index(_po(bad, "SYN_ave")))
+    f = po["files"][0]
+    bad["runs"].append({**_run(bad, RUN), "run_id": "run-999", "run_key": "two_column_v1:MERGE/SYN_ave", "stem": "SYN_ave",
+                        "label": "SYN_ave", "source_type": "generic:two_column_v1", "legacy_number": None,
+                        "scans": [{"source_id": f["source_id"], "relative_path": f["relative_path"], "scan_index": None}],
+                        "scan_count": 1, "candidate_ids": [], "conflict_ids": [], "data_quality_note_ids": []})
+    assert any("run run-999 is a file the engine classifies processed_spectrum" in e for e in B.validate_bundle(bad))
 
 
 def test_the_summary_says_what_the_quick_merges_are(built):
@@ -244,6 +354,11 @@ def test_a_1_10_0_bundle_still_validates_and_its_first_save_says_what_1_11_0_add
     assert saved["format_version"] == B.FORMAT_VERSION == "1.11.0"
     [u] = saved["format_upgrades"]
     assert u["from_format_version"] == "1.10.0" and B.CHANGES_ADDED_IN["1.11.0"] in u["statement"]
+    # review L5: the runs it still holds of the quick merges are named, and re-import is said to fix them
+    held = B.quick_merge_runs(saved)
+    assert len(held) == 6
+    assert f"{len(held)} of its runs ({', '.join(held[:5])}, ...) are files the engine reads as processed spectra" in u["statement"]
+    assert "re-import to keep them as processed outputs" in u["statement"]
     assert B.check_bundle(out) == []
 
 
@@ -282,8 +397,10 @@ def test_answers_to_the_quick_merge_runs_an_older_build_asked_about_are_reported
     src = _beamtime(tmp_path / "src")
     monkeypatch.setattr(B, "ENGINE_PROCESSED_SOURCE_TYPE", "no_such_class")
     old_dir = tmp_path / "old"
-    _import(capsys, src, old_dir)
+    old_b = _import(capsys, src, old_dir)
     monkeypatch.undo()
+    old_b["format_version"] = "1.10.0"  # what the older build labelled it
+    (old_dir / "bundle.json").write_bytes(B.encode(old_b))
     M.group(old_dir)
     old = M.load(old_dir)
     gone = {r["run_key"] for r in old["runs"] if r["source_type"] == "generic:two_column_v1"}

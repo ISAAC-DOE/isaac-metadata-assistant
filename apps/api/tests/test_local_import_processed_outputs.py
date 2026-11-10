@@ -21,7 +21,7 @@ from isaac_api.local_import import questions as Q
 
 from test_local_import_reader_mca import make_mca
 from test_local_import_reader_ssrl_xdc import make_scan
-from test_local_import_reader_xes_tab import make_xes
+from test_local_import_reader_two_column import make_two
 from test_local_import_reader_xdi import make_xdi
 
 DEMETER = "# XDI/1.0 Demeter/0.9.26"
@@ -33,9 +33,7 @@ def _acquisitions(root: Path) -> Path:
     make_scan(root / "bt" / "SYN_run_A.001")
     make_scan(root / "bt" / "SYN_run_A.002")
     make_mca(root / "mca" / "SYN_spec.mca")
-    # a no-index acquisition named SYN_cell (bundle 1.11.0: a headerless two-column .txt is now the engine's
-    # processed_spectrum, a processed output, so it can no longer stand in for an acquisition here)
-    make_mca(root / "two" / "SYN_cell.mca")
+    make_two(root / "two" / "SYN_cell.txt")
     return root
 
 
@@ -118,7 +116,7 @@ def test_its_header_statements_survive_as_processed_output_evidence_not_run_valu
 
 def test_genuine_acquisitions_are_identical_with_a_processed_output_beside_them(pair):
     a, b, _, _ = pair
-    assert {r["source_type"] for r in a["runs"]} >= {"generic:ssrl_xdc_v1", "generic:mca_v1"}
+    assert {r["source_type"] for r in a["runs"]} >= {"generic:ssrl_xdc_v1", "generic:mca_v1", "generic:two_column_v1"}
     for section in ("runs", "missing_values", "questions"):
         assert _by_path(b, b[section]) == _by_path(a, a[section]), section
     assert _by_path(b, [e for e in b["extended_context"] if e.get("run_id")]) == _by_path(a, [e for e in a["extended_context"] if e.get("run_id")])
@@ -161,8 +159,8 @@ def _po(b: dict, label: str) -> dict:
 
 def test_the_link_rule_proposes_only_on_an_exact_name_or_the_runs_own_scans(tmp_path, capsys):
     root = _acquisitions(tmp_path / "SYN_beamtime")  # SYN_run has scans 1 and 2; SYN_cell has one scan
-    make_xes(root / "dup" / "a" / "SYN_dup.txt")
-    make_xes(root / "dup" / "b" / "SYN_dup.txt")
+    make_two(root / "dup" / "a" / "SYN_dup.txt")
+    make_two(root / "dup" / "b" / "SYN_dup.txt")
     names = ("SYN_cell", "SYN_cell_1", "SYN_cell_500", "SYN_run_1-2", "SYN_run_2", "SYN_run_1-3", "SYN_run_3",
              "SYN_condA_cell", "SYN_cellx", "SYN_cell_a", "SYN_dup")
     for name in names:
@@ -242,7 +240,7 @@ def test_a_link_names_its_record_group_only_by_membership_and_a_forged_one_is_re
 def test_the_validator_refuses_a_processed_file_that_is_also_a_run_scan(pair):
     _, b, _, _ = pair
     bad = json.loads(json.dumps(b))
-    run = next(r for r in bad["runs"] if r["source_type"] == "generic:mca_v1")
+    run = next(r for r in bad["runs"] if r["source_type"] == "generic:two_column_v1")
     run["scans"].append({"source_id": None, "relative_path": PROC[0], "scan_index": None})
     assert any("is also a run's scan" in e for e in B.validate_bundle(bad))
 

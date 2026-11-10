@@ -758,14 +758,22 @@ group and questions.
 - **Origin** `isaac.processed_output.origin.engine_classification.v0` (`processing_origin.basis:
   engine_classification`; `bundle.ENGINE_ORIGIN_RULE_ID`): a file a generic reader read whose ENGINE classification
   (`sources[].classification.source_type`, `bl15.classify`: no header, every opening line two numbers) is
-  `processed_spectrum` is a processed output, never a run. The folder and the file name decide nothing: the same
-  file outside `MERGE/` is kept the same way. Every statement-derived origin field is empty or false (the file states
-  nothing about itself). The validator refuses an engine-classified origin whose source is not classified
-  `processed_spectrum`. `.mca` files are the engine's `detector_product` and are not touched.
+  `processed_spectrum` is a processed output, never a run — ONLY when the bundle also holds an engine SPEC acquisition
+  run (`bundle.quick_merges_apply`). A root of headerless two-column files alone (another facility's energy/mu
+  exports) keeps them as runs, each with the run anomaly `engine_reads_processed_spectrum` asking a scientist which it
+  is. The folder and the file name decide nothing: the same file outside `MERGE/` is kept the same way. Every
+  statement-derived origin field is empty or false (the file states nothing about itself). `.mca` files are the
+  engine's `detector_product` and are not touched. The validator re-derives the condition from the stored runs (an
+  engine-classified output without a SPEC run, or — in a bundle a 1.11.0 build imported — such a file kept as a run
+  beside SPEC runs, is refused) and re-derives what it can of the origin: the source is classified
+  `processed_spectrum`, is the same file (path, sha256), and the output states nothing a headerless file cannot. The
+  classification itself is not re-run: it reads the file's content, which a bundle does not hold.
 - **Link** `isaac.processed_output.link_by_legacy_number.v0` (`bundle.LEGACY_LINK_RULE_ID`, `match: legacy_number`),
   for these outputs ONLY (an XDI output keeps `link_by_run_stem.v0`, byte for byte). The whole-number tokens a name
-  starts with: the last is the electrode number and must equal the run's second token (both absent is equal); the
-  others are legacy numbers, matched to `runs[].legacy_number`. One legacy number and exactly one fitting run with
+  starts with: the last is the electrode number and must equal the run's second token (both absent is equal, and then
+  the two names must also share a word after the number, else `no_run_named_like_it`); the others are legacy numbers,
+  matched to `runs[].legacy_number`, which the validator re-derives from an engine run's stem
+  (`bl15.applicability.legacy_number_of`). One legacy number and exactly one fitting run with
   scans: a proposed link, whose `assumption` says what was read and how the rest of the names differ (`f10` /
   `filter10_again`; never deciding). Several legacy numbers (`43_44_04_…`): `link_note.code: spans_several_runs`
   with every fitting run, no link. Several fitting runs (a shared legacy number): `ambiguous`. One fitting run
@@ -782,7 +790,8 @@ group and questions.
   holding either rule. Nothing becomes newly writable; `processed_outputs` is required at 1.11.0 as at 1.2.0–1.10.0.
 - **The upgrade is disclosed**: the first write of an older bundle appends one `format_upgrades` entry whose
   statement includes `bundle.CHANGES_ADDED_IN["1.11.0"]`: a bundle imported before holds such files as runs until it
-  is re-imported. Answers given to questions about those runs do not carry over: `isaac bundle answers import`
+  is re-imported, and when it still holds any beside SPEC runs the statement names them (`bundle.quick_merge_runs`)
+  and says a re-import keeps them as processed outputs. Answers given to questions about those runs do not carry over: `isaac bundle answers import`
   reports each such row as `not_resolving` and applies nothing for it.
 
 ## 10. Exit codes (`isaac import` / `isaac bundle`)

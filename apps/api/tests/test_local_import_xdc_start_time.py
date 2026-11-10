@@ -35,7 +35,7 @@ from isaac_api.local_import import questions as Q
 from isaac_api.local_import import records as R
 
 from test_local_import_reader_ssrl_xdc import make_scan
-from test_local_import_reader_xes_tab import make_xes
+from test_local_import_reader_two_column import make_two
 from test_local_import_reader_xdi import make_xdi
 
 BY = "SYNTHETIC TEST"
@@ -166,7 +166,7 @@ def test_an_unparsed_or_weekday_mismatched_time_is_not_used(tmp_path):
 
 def test_other_generic_profiles_produce_no_start_time_candidate(tmp_path):
     src = tmp_path / "src"
-    make_xes(src / "SYN_cell.txt")
+    make_two(src / "SYN_cell.txt")
     make_xdi(src / "SYN_ref.xdi")
     out = tmp_path / "out"
     assert cli.main(["import", str(src), "--out", str(out)]) == 0

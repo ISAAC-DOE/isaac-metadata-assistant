@@ -241,8 +241,16 @@ _SCAN_SELECTION_SUFFIX = re.compile(r"^(?P<base>.+)_(?P<sel>\d+(?:-\d+)?)$")
 # is ``processed_spectrum`` is a processed output (basis ``engine_classification``), never a run. The folder it sits
 # in is context only: the same file anywhere else is classified, and kept, the same way. ``.mca`` files are the
 # engine's ``detector_product`` and are not touched by this rule.
+#
+# ONLY BESIDE SPEC ACQUISITIONS (review H1): the rule applies only when the bundle also holds an engine SPEC
+# acquisition run (:func:`quick_merges_apply`), the setting the quick merges were measured in. A root of headerless
+# two-column files alone (another facility's energy/mu exports) keeps them as runs, each with a note
+# (:data:`ENGINE_PROCESSED_NOTE_KIND`) saying the engine reads it as a processed spectrum and a scientist says which it
+# is. The validator re-derives the condition from the stored runs.
 ENGINE_ORIGIN_RULE_ID = "isaac.processed_output.origin.engine_classification.v0"
 ENGINE_PROCESSED_SOURCE_TYPE = "processed_spectrum"
+SPEC_ACQUISITION_SOURCE_TYPE = "spec_acquisition"
+ENGINE_PROCESSED_NOTE_KIND = "engine_reads_processed_spectrum"
 
 # ITS LINK RULE (``isaac.processed_output.link_by_legacy_number.v0``, :func:`_link_by_legacy_number`) — applied to
 # engine-classified outputs ONLY (an XDI output keeps :data:`LINK_RULE_ID`). The whole-number tokens a name STARTS with
@@ -456,6 +464,75 @@ def engine_processing_origin() -> dict:
         "has_demeter_output_filetype": False,
         "has_athena_fields": False,
     }
+
+
+def quick_merges_apply(runs: Sequence[Mapping]) -> bool:
+    """Whether :data:`ENGINE_ORIGIN_RULE_ID` applies: the runs include an engine SPEC acquisition."""
+    return any(r.get("source_type") == SPEC_ACQUISITION_SOURCE_TYPE for r in runs)
+
+
+def engine_processed_note(rel: str) -> dict:
+    """The note on a run kept although the engine reads its file as a processed spectrum (no SPEC run beside it)."""
+    return {
+        "kind": ENGINE_PROCESSED_NOTE_KIND,
+        "locator": None,
+        "detail": ("The engine reads this file as a processed spectrum (no header; every line two numbers). This import "
+                   "holds no SPEC acquisition beside it, so it is kept as a run: a scientist says whether it is a "
+                   "measurement or a processed result."),
+        "severity": "note",
+        "source_relative_path": rel,
+        "scan_index": None,
+    }
+
+
+def quick_merge_runs(bundle: Mapping) -> list[str]:
+    """Run ids of GENERIC runs every scan of which the engine classified ``processed_spectrum``, in a bundle that also
+    holds SPEC acquisition runs: what :data:`ENGINE_ORIGIN_RULE_ID` makes processed outputs. Non-empty only for a bundle
+    an older build imported (a 1.11.0 import holds none: the validator refuses one)."""
+    runs = bundle.get("runs") or ()
+    if not quick_merges_apply(runs):
+        return []
+    type_of = {s.get("source_id"): (s.get("classification") or {}).get("source_type") for s in bundle.get("sources") or ()}
+    return [r["run_id"] for r in runs if str(r.get("source_type") or "").startswith("generic:") and r.get("scans")
+            and all(type_of.get(s.get("source_id")) == ENGINE_PROCESSED_SOURCE_TYPE for s in r["scans"])]
+
+
+def _imported_by_at_least(bundle: Mapping, version: str) -> bool:
+    """True when a build of at least ``version`` imported this bundle: its version is that or later, and no
+    ``format_upgrades`` entry raised it from an earlier one (an upgrade keeps what the older import made)."""
+    at = _VERSION_ORDER.index(version)
+    stored = bundle.get("format_version")
+    if stored not in _VERSION_ORDER or _VERSION_ORDER.index(stored) < at:
+        return False
+    for u in bundle.get("format_upgrades") or ():
+        frm = u.get("from_format_version")
+        if frm not in _VERSION_ORDER or _VERSION_ORDER.index(frm) < at:
+            return False
+    return True
+
+
+def _engine_origin_errors(bundle: Mapping, po: Mapping, f: Mapping, source_of: Mapping) -> list[str]:
+    """What the validator can RE-DERIVE about a file kept by :data:`ENGINE_ORIGIN_RULE_ID` (review M2).
+
+    The classification itself cannot be re-run here: ``bl15.classify`` reads the file's opening lines, and a bundle
+    holds no file content (only its name, size and sha256), so the validator has nothing to classify. What it checks
+    instead is everything the bundle does hold: the source exists, is classified ``processed_spectrum``, is the SAME
+    file (path and sha256), and the processed output states nothing a headerless file could not (no statement, no
+    header literal, no extended-context entry) — an XDI output relabelled engine-classified fails on its statements."""
+    pid, rel = po.get("processed_output_id"), f.get("relative_path")
+    src = source_of.get(f.get("source_id")) if f.get("source_id") is not None else None
+    out = []
+    if src is None or (src.get("classification") or {}).get("source_type") != ENGINE_PROCESSED_SOURCE_TYPE:
+        out.append(f"consistency: processed output {pid} file {rel} is kept by {ENGINE_ORIGIN_RULE_ID} but its source is "
+                   f"not classified {ENGINE_PROCESSED_SOURCE_TYPE}")
+    elif src.get("relative_path") != rel or (f.get("sha256") and src.get("content_sha256") != f.get("sha256")):
+        out.append(f"consistency: processed output {pid} file {rel} is not the file its source {f.get('source_id')} records")
+    states = po.get("states") or {}
+    if (any(states.get(k) for k in states) or (po.get("reader") or {}).get("statements_total")
+            or po.get("extended_context_entry_ids")):
+        out.append(f"consistency: processed output {pid} is kept by {ENGINE_ORIGIN_RULE_ID} but states something about "
+                   "itself, which a headerless processed spectrum cannot")
+    return out
 
 
 def is_engine_classified(po: Mapping) -> bool:
@@ -786,6 +863,13 @@ def _rest_differs(output_name: str, run_stem: str) -> tuple[list[str], list[str]
     return [t for t in a if t and t not in b], [t for t in b if t and t not in a]
 
 
+def _shared_words(output_name: str, run_stem: str) -> list[str]:
+    """The words after the leading numbers that both names carry (order of the output's name)."""
+    a = str(output_name).split("_")[len(_leading_numbers(output_name)):]
+    b = set(str(run_stem).split("_")[len(_leading_numbers(run_stem)):])
+    return [t for t in dict.fromkeys(a) if t and t in b]
+
+
 def _link_by_legacy_number(po: dict, runs: Sequence[Mapping]) -> None:
     """:data:`LEGACY_LINK_RULE_ID` for ONE engine-classified processed output, in place. Proposes only."""
     name = str(po["label"])
@@ -834,6 +918,16 @@ def _link_by_legacy_number(po: dict, runs: Sequence[Mapping]) -> None:
             }
             return
         only_output, only_run = _rest_differs(name, run.get("stem") or "")
+        shared = _shared_words(name, run.get("stem") or "")
+        if electrode is None and not shared:
+            # review M3: one number names a run only beside a shared name word (``01_IrO2_ref`` is not ``01_RuO2_pellet``)
+            po["link_note"] = {
+                "code": "no_run_named_like_it", "match": "legacy_number", "run_keys": [run["run_key"]],
+                "detail": (f"Run {run['stem']} carries legacy number {n}, but neither name carries an electrode number and "
+                           "the two share no name word after the number, so the number alone links nothing; it stays "
+                           "unlinked."),
+            }
+            return
         differs = ("The rest of the two names agrees." if not (only_output or only_run) else
                    f"The rest of the two names differs (this output: {', '.join(only_output) or 'nothing more'}; the run: "
                    f"{', '.join(only_run) or 'nothing more'}); a name difference decides nothing.")
@@ -846,7 +940,8 @@ def _link_by_legacy_number(po: dict, runs: Sequence[Mapping]) -> None:
                 "scan_selection_basis": None,
                 "assumption": (f"linked by the leading numbers of its name alone: {n} is read as the run's legacy number"
                                + (f" and {electrode} as its electrode number (the run's second token)" if electrode is not None
-                                  else "; neither name carries an electrode number") + f". {differs}"),
+                                  else f"; neither name carries an electrode number, and they share the name word(s) "
+                                       f"{', '.join(shared)}") + f". {differs}"),
                 "run_id": run["run_id"],
                 "run_key": run["run_key"],
                 "run_stem": run["stem"],
@@ -4047,6 +4142,7 @@ def build_bundle(
         }
 
     generic_read: dict[str, int] = {}  # statements each generic run reader read per file (c8-b: the source's reader block)
+    beside_spec = quick_merges_apply(runs)  # the engine's runs only, so far
     if generic is not None:
         for claim in getattr(generic, "claims", None) or ():
             generic_claimed.add(claim["relative_path"])
@@ -4063,12 +4159,17 @@ def build_bundle(
                 if (g.role_hints or {}).get("kind") == PROCESSED_OUTPUT_KIND
             }
             origin = {p: o for p, (o, _) in judged.items()}
-            # 1.11.0 (ENGINE_ORIGIN_RULE_ID): a file the ENGINE classified as a processed spectrum is the scientists'
-            # processed output, whatever generic reader read it and wherever it sits
+            # 1.11.0 (ENGINE_ORIGIN_RULE_ID): beside the engine's SPEC acquisitions, a file the ENGINE classified as a
+            # processed spectrum is the scientists' processed output, whatever generic reader read it and wherever it
+            # sits; with no SPEC acquisition it stays a run, and the engine's reading is noted on it
+            engine_noted = []
             for sc in all_scans:
                 rel = sc["relative_path"]
                 if origin.get(rel) is None and (row_of.get(rel) or {}).get("source_type") == ENGINE_PROCESSED_SOURCE_TYPE:
-                    origin[rel] = engine_processing_origin()
+                    if beside_spec:
+                        origin[rel] = engine_processing_origin()
+                    else:
+                        engine_noted.append(engine_processed_note(rel))
             # a file whose line 1 names another application but whose fields mention
             # Athena/Demeter stays an acquisition; the disagreement is recorded on it
             disagreements = [
@@ -4183,7 +4284,8 @@ def build_bundle(
                     "note_rows": [],
                     "other_relationships": {
                         "companions": [c.get("relative_path") for c in g.companions if _safe_relative(c.get("relative_path"))],
-                        "anomalies": (disagreements + [a for a in g.anomalies if a.get("source_relative_path") not in processed_paths])[:50],
+                        "anomalies": (disagreements + engine_noted
+                                      + [a for a in g.anomalies if a.get("source_relative_path") not in processed_paths])[:50],
                         "header_differences": list(g.header_differences)[:50],
                     },
                     "candidate_ids": [],
@@ -5419,8 +5521,10 @@ def import_rules_missing(bundle: Mapping) -> list[tuple[str, str]]:
 
 
 def upgrade_statement(from_version: str | None, newly_writable: Iterable[str],
-                      rules_missing: Iterable[tuple[str, str]] = ()) -> str:
-    """THE ONE SENTENCE every surface prints about an upgrade of an older bundle."""
+                      rules_missing: Iterable[tuple[str, str]] = (), quick_merge_run_ids: Sequence[str] = ()) -> str:
+    """THE ONE SENTENCE every surface prints about an upgrade of an older bundle. ``quick_merge_run_ids``
+    (:func:`quick_merge_runs`): runs an older build made of the scientists' quick merges, which only a re-import
+    keeps as processed outputs (review L5)."""
     if list(newly_writable):
         text = (f"upgraded from {from_version}; fields this build can newly write have no answer slots on runs that "
                 "lacked a parsed value — re-import to get them")
@@ -5431,6 +5535,11 @@ def upgrade_statement(from_version: str | None, newly_writable: Iterable[str],
                  "none of its candidates — re-import to get them")
     for change in changes_since(from_version):
         text += f"; {change}"
+    ids = list(quick_merge_run_ids)
+    if ids:
+        text += (f"; {len(ids)} of its runs ({', '.join(ids[:5])}{', ...' if len(ids) > 5 else ''}) are files the engine "
+                 "reads as processed spectra beside SPEC acquisitions (the scientists' quick merges), kept as runs by the "
+                 "build that imported it — re-import to keep them as processed outputs")
     return text
 
 
@@ -5448,7 +5557,7 @@ def record_format_upgrade(bundle: dict, *, from_version: str | None, to_version:
         "upgraded_utc": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
         "decisions_before": int(decisions_before),
         "newly_writable_paths": newly,
-        "statement": upgrade_statement(from_version, newly, import_rules_missing(bundle)),
+        "statement": upgrade_statement(from_version, newly, import_rules_missing(bundle), quick_merge_runs(bundle)),
     }
     bundle.setdefault("format_upgrades", []).append(entry)
     return entry
@@ -5754,7 +5863,20 @@ def validate_bundle(bundle: Any, *, max_errors: int = 50, encoded: bytes | None 
     po_ids = _unique(bundle.get("processed_outputs") or [], "processed_output_id", "processed_output_id")
     run_scan_paths = {s.get("relative_path") for r in bundle["runs"] for s in r.get("scans") or ()}
     runs_by_id_v = {r["run_id"]: r for r in bundle["runs"]}
-    source_type_of = {s.get("source_id"): (s.get("classification") or {}).get("source_type") for s in bundle.get("sources") or ()}
+    source_of = {s.get("source_id"): s for s in bundle.get("sources") or ()}
+    # 1.11.0: an engine run's legacy number is re-derived from its own stem (bl15's rule), never trusted: the
+    # legacy-number link rule reads it, so a forged number would forge a link the re-run rule then agrees with
+    from ..bl15.applicability import legacy_number_of
+
+    for r in bundle["runs"]:
+        if not str(r.get("source_type") or "").startswith("generic:") and isinstance(r.get("stem"), str):
+            if r.get("legacy_number") != legacy_number_of(r["stem"]):
+                errors.append(f"consistency: run {r['run_id']} legacy_number {r.get('legacy_number')} is not what its stem "
+                              f"{r['stem']!r} states ({legacy_number_of(r['stem'])})")
+    if _imported_by_at_least(bundle, "1.11.0"):
+        for rid in quick_merge_runs(bundle):
+            errors.append(f"consistency: run {rid} is a file the engine classifies {ENGINE_PROCESSED_SOURCE_TYPE} beside "
+                          f"SPEC acquisition runs, which {ENGINE_ORIGIN_RULE_ID} keeps as a processed output, never a run")
     for po in bundle.get("processed_outputs") or ():
         pid = po["processed_output_id"]
         for f in po["files"]:
@@ -5764,11 +5886,11 @@ def validate_bundle(bundle: Any, *, max_errors: int = 50, encoded: bytes | None 
                 errors.append(f"paths: processed output {pid} has an absolute or escaping path")
             if f["relative_path"] in run_scan_paths:
                 errors.append(f"consistency: processed output {pid} file {f['relative_path']} is also a run's scan")
-            if (f.get("processing_origin") or {}).get("rule_id") == ENGINE_ORIGIN_RULE_ID and (
-                    (source_type_of.get(f["source_id"]) if f["source_id"] is not None else None) != ENGINE_PROCESSED_SOURCE_TYPE):
-                # the origin is the engine's classification, never a label: it must be what sources[] records
-                errors.append(f"consistency: processed output {pid} file {f['relative_path']} is kept by {ENGINE_ORIGIN_RULE_ID} "
-                              f"but its source is not classified {ENGINE_PROCESSED_SOURCE_TYPE}")
+            if (f.get("processing_origin") or {}).get("rule_id") == ENGINE_ORIGIN_RULE_ID:
+                errors.extend(_engine_origin_errors(bundle, po, f, source_of))
+        if is_engine_classified(po) and not quick_merges_apply(bundle["runs"]):
+            errors.append(f"consistency: processed output {pid} is kept by {ENGINE_ORIGIN_RULE_ID}, which applies only "
+                          "beside a SPEC acquisition run, and this bundle holds none")
         for link in po["proposed_links"]:
             if link["run_id"] not in run_ids or link["run_key"] not in run_keys:
                 errors.append(f"reference: processed output {pid} links to unknown run {link['run_id']}")
