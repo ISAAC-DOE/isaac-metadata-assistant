@@ -309,18 +309,24 @@ Rules from the beamline scientist (Angel, 9 Nov 2026), binding:
 * **Every exclusion is a proposal.** Nothing is left out by this rule: the scientist confirms with the params
   file's `exclude_scans` (§5, r4-a M6) and re-processes; the new result is the one approved.
 
-**Series.** Every energy scan of the bundle (every group's, once each) belongs to the series of its SPEC template
-(`#S` command and scanned motor, e.g. `gscan energy`) and overlapping energy range. The series E0 is the median
+**Series** — a *scan-template series (all samples measured with the same scan command)*, never one sample's
+scans. Every energy scan of the bundle (every group's, once each) belongs to the series of its SPEC template (`#S`
+command and scanned motor, e.g. `gscan energy`) and overlapping energy range. The series E0 is the median
 per-scan E0 (larch `find_e0`) of its scans covering at least 95 % of its median scan's span. Every scan of the
 series is normalised with ONE parameter set: E0 = the series E0 (plus the group's applied calibration shift), the
 pre-edge a line from the second point to E0−30, the post-edge a line from E0+100 to the end. A scan with no `#S`
 line (another reader) takes its group's own median E0. A motor scan (`ascan Sz`, `a2scan`, `loopscan`: the
-scanned motor is not `energy`) is `not_an_energy_scan`, never a proposal. Scans are in time order by their scan
-numbers (else their order in the group).
+scanned motor is not `energy`) is `not_an_energy_scan`, never a proposal. ONE time axis everywhere (trend,
+first-vs-last, stability): the scan numbers, so a gap is real time (else the scans' places in the group). The
+series pass is guarded: if it fails, every group's proposal is `not_evaluated` with the reason (processing never
+fails for it). Each source file is hashed once per run. A `--group` run reuses the series stored by the last
+processing run when its fingerprint (every source's bytes, every group's scans, the channel and merge parameters,
+the rule) is this run's, reads no other group's files for it, and says so (`scan_selection_series.reused`).
 
 **Per scan.** Completeness: it reaches E0+150 and covers ≥ 95 % of the group's widest scan (else
-`incomplete_scan`). Noise: for an integer-count signal, counting noise σ = √(N+1)/I0, and the excess-noise factor
-F = measured ÷ counting noise from the residuals against the line through each point's neighbours, pre-edge
+`incomplete_scan`). Noise: counting noise by detection mode — fluorescence μ = N/I0 with integer counts N:
+σ = √(N+1)/I0; transmission μ = ln(I0/It) with BOTH It and I0 integer counts: σ = √(1/It + 1/I0) — and the
+excess-noise factor F = measured ÷ counting noise from the residuals against the line through each point's neighbours, pre-edge
 (below E0−10) and post-edge (above E0+40); a signal that is not counts uses its own neighbour scatter (no F).
 Edge SNR = edge step ÷ post-edge noise per point. White-line energy and height (quadratic vertex), the energy at
 half step, and their spreads by 40 noise-injection replicas seeded by the scan's own bytes. Artifacts: clusters of
@@ -335,13 +341,21 @@ weighted slope (inflated by excess scatter) with a t-test at p < 0.01/3, confirm
 ≥ 3σ, and beyond physical floors (0.15 eV; 0.03 in height). A step-at-start change-point test (the leading block
 against the rest, multiplicity-corrected) catches a change that is a step, not a slope. The stable window is the
 scans after the latest change, with no trend left. Groups of 2–3 scans get pairwise tests only
-(`two_scans_disagree`, `odd_one_of_three`, `three_scans_change`: to look at).
+(`two_scans_disagree`, `odd_one_of_three`, `three_scans_change`: to look at). **Shift resolution** (review): the
+shift fit favours fractional shifts (identical scans come out up to ~0.4 of the point spacing apart), so a shift is
+never `energy_shifted` under one median point spacing within E0 ± 10 eV, and a trend or step in the shift needs a
+change of at least half of it (and 0.15 eV). Two repairs of the fit itself were measured on the validated beamtime
+and not taken: propagating the noise through the interpolation pinned shifts to whole spacings (26 of 666
+proposals moved, the step-at-start group lost); shifting the consensus instead of the scan moved 16 and put two
+scans 0.45 eV off in white-line energy inside a stable window.
 
 **Decision.** `exclude_proposed`: `incomplete_scan`, `before_stable_window`, `shape_out_of_trend` (χ²/ν above both
-its p = 10⁻³ value and 1.5 × the group median, AND R ≥ 1), `lowers_merge_snr` (the merged edge SNR is under 98 %
-of it without the scan), `many_artifacts` (≥ 3 visible in the merge). `needs_look`: an artifact with R ≥ 1,
+its p = 10⁻³ value and 1.5 × the group median, AND R ≥ 1), `many_artifacts` (≥ 3 visible in the merge).
+`needs_look`: `lowers_merge_snr` (the merged edge SNR is under 98 % of it without the scan: the scan is weaker —
+a smaller edge step or more noise — not wrong; review: a look, never an exclusion, as an intensity drop alone never
+excludes a scan), an artifact with R ≥ 1,
 `beam_drop` (I0 under 50 %), `excess_noise` (F > 2), `energy_shifted` (beyond max(0.2 eV, 3σ, 4 × the robust
-spread of the others)), `too_noisy_to_evaluate` (SNR < 2), `setup_differs_emiss` / `setup_differs_filter` (the
+spread of the others, one point spacing)), `too_noisy_to_evaluate` (SNR < 2), `setup_differs_emiss` / `setup_differs_filter` (the
 `#P` header), `i0_nonpositive`, `normalization_failed`, `still_evolving_no_stable_window`. Everything else is
 `include` (with `*_below_merge_noise` / `beam_dip_divided_out` said). An edge-step change of 5 % or more is said
 in `group_observations`. When NO scan of a group reaches the series window (a XANES-only or calibration-scan
@@ -361,12 +375,11 @@ byte-identical with the rule on or off. A bulk approval is refused while a propo
 (`mutations.BULK_APPROVE_REVIEW`); one approval records the open items in its note. The old `scan_to_scan_spread`
 warning (`qc.warn_scan_spread`) stays: retiring it moves ids, and it is deferred.
 
-**Measured** (one real BL15-2 Ir L3 HERFD beamtime, 90 sample groups, 666 scans): the branch's proposals match the
-validated prototype's on 664 of 666 scans; the two others are scans the merge already left out (a signal of zero
-at every point, too few points). Every `merged.csv` and `run_id` is byte-identical with the rule off.
-**Known limit, for review:** the per-scan shift is fitted with the noise INTERPOLATED, not propagated, so identical
-scans come out about ±0.4 of the point spacing apart (±0.06 eV there); propagating it changes 26 of those 666
-proposals, so it is kept as validated and named here.
+**Measured** (one real BL15-2 Ir L3 HERFD beamtime, 90 sample groups, 666 scans): the proposals match the
+validated prototype's on 662 of 666 scans; two are scans the merge already left out (a signal of zero at every
+point, too few points), and two the prototype proposed leaving out for `lowers_merge_snr` alone are now to look at.
+Every `merged.csv` and `run_id` is byte-identical with the rule off. On synthetic identical scans with 0.35 and
+0.5 eV steps across the edge, no scan is said shifted (before the resolution floor: 17 and 14 of 96).
 
 ## 6. Normalize
 

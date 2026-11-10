@@ -144,6 +144,48 @@ def test_a_drift_under_the_floor_is_not_flagged():
     assert [s["proposal"] for s in out["scans"]] == [C.PROPOSAL_INCLUDE] * 8
 
 
+def _coarse_grid(step):
+    return np.concatenate([np.arange(4900.0, 4955.0, 5.0), np.arange(4955.0, 4990.0, step),
+                           np.arange(4990.0, 5040.0, 1.0), np.arange(5040.0, 5251.0, 5.0)])
+
+
+@pytest.mark.parametrize("step", [0.35, 0.5])
+def test_identical_scans_on_a_coarse_grid_are_never_said_shifted(step):
+    """Review HIGH 3: the shift fit favours fractional shifts (up to ~0.4 of the point spacing); a shift, or a change
+    of shift, under the points' resolution is never said."""
+    grid = _coarse_grid(step)
+    assert C.shift_resolution(grid, E0, np) == pytest.approx(step, rel=0.05)
+    said = []
+    for g in range(12):
+        out = C.scan_selection(scan_dicts([counts(1000 * g + k, e=grid) for k in range(8)]), E0, np)
+        assert out["evolving_metrics"] == [], (g, out["change_point"])
+        said += [r for s in out["scans"] for r in s["reasons"]]
+        assert all(s["proposal"] == C.PROPOSAL_INCLUDE for s in out["scans"]), g
+    assert "energy_shifted" not in said
+
+
+def test_many_independent_stable_groups_almost_never_evolve():
+    """Review LOW 10: 100 independent stable groups, in time order: at most 1 % is said to evolve."""
+    flagged = 0
+    for g in range(100):
+        out = select([counts(5000 + 10 * g + k) for k in range(6)])
+        flagged += bool(out["evolving_metrics"])
+    assert flagged <= 1, flagged
+
+
+def test_a_four_scan_step_at_start():
+    """Four scans: a large step at the start (1.5 eV) is a change of state with a stable window; a 0.6 eV one is under
+    what the step test can call significant with 4 scans, and the scan is still said (energy_shifted), never silently
+    included."""
+    big = select([counts(140 + k, shift=1.5 if k == 0 else 0.0) for k in range(4)])
+    assert big["stable_window"] == [2, 3, 4], (big["change_point"], big["evolving_metrics"])
+    got = by_number(big)
+    assert got[1]["proposal"] == C.PROPOSAL_EXCLUDE and "before_stable_window" in got[1]["reasons"]
+    assert all(got[k]["proposal"] == C.PROPOSAL_INCLUDE for k in (2, 3, 4))
+    small = by_number(select([counts(140 + k, shift=0.6 if k == 0 else 0.0) for k in range(4)]))
+    assert small[1]["proposal"] == C.PROPOSAL_LOOK and "energy_shifted" in small[1]["reasons"]
+
+
 def test_random_order_false_positives_are_at_most_one_percent():
     rng = np.random.default_rng(7)
     flagged = trials = 0
@@ -245,14 +287,66 @@ def test_three_scans_the_odd_one_and_a_change():
     assert all("three_scans_change" in s["reasons"] for s in change["scans"])
 
 
-def test_a_scan_that_lowers_the_merged_snr_is_proposed_for_leaving_out():
+def test_a_scan_that_lowers_the_merged_snr_is_a_look_never_an_exclusion():
     cols = [counts(110 + k) for k in range(5)] + [counts(119, extra_noise=6.0)]
     out = select(cols)
     s6 = by_number(out)[6]
     vs = s6["metrics"]["vs_stable"]
     assert vs["merge_snr_with"] < vs["merge_snr_without"] * C.SEL_SNR_LOWERED
-    assert "lowers_merge_snr" in s6["reasons"] and s6["proposal"] == C.PROPOSAL_EXCLUDE
-    assert out["merge_snr"]["proposed"] > out["merge_snr"]["all_complete"]
+    assert "lowers_merge_snr" in s6["reasons"] and s6["proposal"] == C.PROPOSAL_LOOK
+    said = s6["said"][s6["reasons"].index("lowers_merge_snr")]
+    assert "weaker" in said and "not wrong" in said
+
+
+def test_a_30_percent_step_with_fixed_noise_and_the_same_shape_is_never_proposed_for_leaving_out():
+    """Review HIGH 2: an intensity drop alone never excludes a scan (fixed, non-counting noise: the weak scan lowers the
+    raw merge's SNR)."""
+    rng = np.random.default_rng(3)
+    scans = []
+    for k, scale in enumerate([1, 1, 1, 1, 1, 0.3]):
+        e = np.sort(GRID + rng.normal(0, JITTER_EV, GRID.size))
+        mu = (0.1 + 0.9 * shape(e)) * scale + rng.normal(0, 0.01, GRID.size)
+        scans.append({"key": k, "number": k + 1, "energy": e, "mu": mu, "counts": None, "i0": None, "ring": None,
+                      "i0_nonpositive": 0, "setup": {}, "seed": k})
+    out = C.scan_selection(scans, E0, np)
+    assert all(s["proposal"] != C.PROPOSAL_EXCLUDE for s in out["scans"])
+    weak = by_number(out)[6]
+    assert weak["metrics"]["noise_model"] == "measured_scatter"
+    assert weak["proposal"] in (C.PROPOSAL_INCLUDE, C.PROPOSAL_LOOK)
+
+
+# --- transmission (review HIGH 1) ------------------------------------------------------------------------------------
+
+
+def _transmission(seed, *, integer=True, i0=1.0e6):
+    rng = np.random.default_rng(seed)
+    e = np.sort(GRID + rng.normal(0, JITTER_EV, GRID.size))
+    mu = 0.3 + 1.5 * shape(e)
+    I0 = rng.poisson(np.full(e.size, i0)).astype(float)
+    It = rng.poisson(I0 * np.exp(-mu)).astype(float)
+    if not integer:
+        I0, It = I0 * 1.000001e-9, It * 1.000001e-9  # currents, not counts
+    return {"key": seed, "number": seed + 1, "energy": e, "mu": np.log(I0 / It), "counts": It, "i0": I0,
+            "ring": None, "i0_nonpositive": 0, "setup": {}, "seed": seed, "mode": "transmission"}
+
+
+def test_perfect_poisson_transmission_scans_have_an_excess_noise_factor_near_one():
+    out = C.scan_selection([_transmission(k) for k in range(6)], E0, np)
+    F = [s["metrics"]["F_post"] for s in out["scans"]]
+    assert {s["metrics"]["noise_model"] for s in out["scans"]} == {"counting_statistics"}
+    assert 0.8 < float(np.median(F)) < 1.25 and all(0.6 < f < 1.5 for f in F), F
+    assert all("excess_noise" not in s["reasons"] for s in out["scans"])
+    assert all(s["proposal"] == C.PROPOSAL_INCLUDE for s in out["scans"])
+
+
+def test_transmission_counting_noise_is_the_log_ratio_formula_and_only_for_counts():
+    it, i0 = np.array([100.0, 400.0]), np.array([1.0e4, 1.0e4])
+    got = C.counting_noise(it, i0, np, mode="transmission")
+    assert got == pytest.approx(np.sqrt(1 / it + 1 / i0))
+    assert C.counting_noise(it, i0 + 0.5, np, mode="transmission") is None  # I0 is not counts
+    assert C.counting_noise(it, i0, np, mode="signal_only") is None
+    out = C.scan_selection([_transmission(k, integer=False) for k in range(4)], E0, np)
+    assert {s["metrics"]["noise_model"] for s in out["scans"]} == {"measured_scatter"}
 
 
 def test_the_output_is_json_safe():
@@ -441,3 +535,84 @@ def test_a_bulk_approval_is_refused_while_proposals_are_open_and_one_approval_re
     note = next(d for d in M.load(bdir)["scientist_decisions"] if d["target"]["id"] == ids[0])["note"]
     assert "scan-selection proposals still open" in note and "(incomplete_scan)" in note
     assert M.scan_selection_note(other) is None
+
+
+# --- guards and the series pass (review M4, M5) ------------------------------------------------------------------------
+
+
+def test_a_failing_series_pass_is_recorded_and_never_fails_processing(tmp_path, monkeypatch):
+    T = _proc()
+    bdir, root, _ = _two_groups(tmp_path)
+
+    def boom(*a, **k):
+        raise RuntimeError("SYN injected failure")
+
+    monkeypatch.setattr(RUN, "scan_selection_series", boom)
+    payload = T.run_process(bdir, source_root=root)
+    assert "SYN injected failure" in payload[RUN.SCAN_SERIES_KEY]["error"]
+    for r in _by_stem(payload).values():
+        sel = r[RUN.SCAN_SELECTION_KEY]
+        assert sel["status"] == "not_evaluated" and "series pass failed" in sel["detail"]
+        assert RUN.SCAN_SELECTION_FLAG not in r["review_flags"] and r["qc"]["verdict"] in ("pass", "warn")
+
+
+def test_a_failing_proposal_or_sentence_is_recorded_and_never_fails_processing(tmp_path, monkeypatch):
+    T = _proc()
+    bdir, root, _ = _two_groups(tmp_path)
+    clean = {k: r["result_id"] for k, r in _by_stem(T.run_process(bdir, source_root=root)).items()}
+
+    def boom(*a, **k):
+        raise ValueError("SYN injected failure")
+
+    for target, mod in (("scan_selection", C), ("_scan_selection_statement", RUN)):
+        with monkeypatch.context() as m:
+            m.setattr(mod, target, boom)
+            got = _by_stem(T.run_process(bdir, source_root=root))
+        for k, r in got.items():
+            sel = r[RUN.SCAN_SELECTION_KEY]
+            assert sel["status"] == "not_evaluated" and "SYN injected failure" in sel["detail"], target
+            assert r["result_id"] == clean[k] and RUN.SCAN_SELECTION_FLAG not in r["review_flags"]
+
+
+def test_the_series_pass_hashes_no_file_again_and_a_group_run_reuses_the_stored_series(tmp_path, monkeypatch):
+    T = _proc()
+    calls: dict = {}
+    real = RUN.sha256_file
+
+    def counting(path):
+        calls[str(path)] = calls.get(str(path), 0) + 1
+        return real(path)
+
+    monkeypatch.setattr(RUN, "sha256_file", counting)
+    (tmp_path / "off").mkdir()
+    b_off, r_off, _ = _two_groups(tmp_path / "off")
+    with monkeypatch.context() as m:
+        m.setattr(RUN, "SCAN_SELECTION_ENABLED", False)
+        T.run_process(b_off, source_root=r_off)
+    off = {k.replace(str(r_off), ""): v for k, v in calls.items() if k.startswith(str(r_off))}
+    calls.clear()
+    bdir, root, _ = _two_groups(tmp_path)
+    first = T.run_process(bdir, source_root=root)
+    on = {k.replace(str(root), ""): v for k, v in calls.items() if k.startswith(str(root))}
+    assert on and on == off  # each source file hashed as often as without the feature: once by the merge's own read
+    assert first[RUN.SCAN_SERIES_KEY]["reused"] is False
+    gid = _by_stem(first)["01_SYN_ZZ1_dir"]["group_id"]
+    calls.clear()
+    again = T.run_process(bdir, source_root=root, group_ids=[gid])
+    ser = again[RUN.SCAN_SERIES_KEY]
+    assert ser["reused"] is True and "reused" in ser["statement"]
+    assert not any("02_SYN_ZZ2" in k for k in calls)  # no other group's file was read for the series
+    a0, a1 = _by_stem(first)["01_SYN_ZZ1_dir"], _by_stem(again)["01_SYN_ZZ1_dir"]
+    assert a1["result_id"] == a0["result_id"]
+    assert a1[RUN.SCAN_SELECTION_KEY]["e0_series_eV"] == a0[RUN.SCAN_SELECTION_KEY]["e0_series_eV"]
+    assert a1[RUN.SCAN_SELECTION_KEY]["exclude_proposed"] == a0[RUN.SCAN_SELECTION_KEY]["exclude_proposed"]
+
+
+def test_the_series_is_named_as_a_scan_template_series(tmp_path):
+    T = _proc()
+    bdir, root, _ = _two_groups(tmp_path)
+    payload = T.run_process(bdir, source_root=root)
+    assert payload[RUN.SCAN_SERIES_KEY]["meaning"] == RUN.SERIES_MEANING
+    a = _by_stem(payload)["01_SYN_ZZ1_dir"]
+    assert a[RUN.SCAN_SELECTION_KEY]["series_meaning"] == RUN.SERIES_MEANING
+    assert "scan-template series (all samples measured with the same scan command)" in a["qc"]["statements"]["scan_selection"]

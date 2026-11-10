@@ -145,13 +145,25 @@ it finds one. Show per group, in words:
   already does not take (its skip reason) and `not_evaluated` a motor scan (`not_an_energy_scan`), never proposed,
   or every scan of a group none of whose scans reaches the series window (`series_window_not_reached`; status
   `not_evaluated`: say that the rule could not judge these scans, and ask nothing).
-  Say the sentence, scan by scan, in its words, and ask the scientist about each scan proposed for leaving out
-  (`incomplete_scan`, `before_stable_window`: the sample was still changing and the stable scans are named;
-  `shape_out_of_trend`, `lowers_merge_snr`, `many_artifacts`) and each one to look at (an artifact visible in the
-  merge — `artifact_spike`, `artifact_diffraction_peak`, `artifact_dip`, `artifact_beam_drop` —, `beam_drop`: I0
-  under half its usual level, `excess_noise`, `energy_shifted`, `too_noisy_to_evaluate`, `setup_differs_*`,
-  `normalization_failed`, `two_scans_disagree`, `odd_one_of_three`, `three_scans_change`). Reasons ending
-  `_below_merge_noise` and `beam_dip_divided_out` are said for an `include`: say them, ask nothing. **An edge-step
+  The series is a *scan-template series (all samples measured with the same scan command)*: never call it one
+  sample's scans. Say the sentence, scan by scan, in its words, and ask the scientist about each scan. Every reason:
+  - proposed for leaving out: `incomplete_scan` (stops before E0+150 eV or covers under 95 % of the widest scan),
+    `before_stable_window` (the sample was still changing; the stable scans are named), `shape_out_of_trend` (its
+    shape differs and would move the merge at least its own noise), `many_artifacts` (3 or more visible in the merge);
+  - to look at: `lowers_merge_snr` (the scan is weaker — a smaller edge step or more noise — not wrong; never say it
+    should go), an artifact visible in the merge (`artifact_spike`, `artifact_diffraction_peak`, `artifact_dip`,
+    `artifact_beam_drop`), `beam_drop` (I0 under half its usual level), `excess_noise` (over 2 x counting noise),
+    `energy_shifted`, `too_noisy_to_evaluate` (edge under 2 x its per-point noise), `setup_differs_emiss` /
+    `setup_differs_filter`, `i0_nonpositive` (points with I0 <= 0), `normalization_failed`,
+    `still_evolving_no_stable_window` (the sample changes to the end; no stable scans), `two_scans_disagree`,
+    `odd_one_of_three`, `three_scans_change`;
+  - said with an `include`, ask nothing: `differs_below_merge_noise`, `artifact_*_below_merge_noise`,
+    `beam_dip_divided_out`;
+  - never proposed: `not_an_energy_scan`, `too_few_points_to_evaluate` (under 7 points), `series_window_not_reached`;
+    `left_out` carries the merge's own skip reason.
+  A `not_evaluated` proposal (`scan_selection.status`, with `detail`: the series pass or the sentence failed, or no
+  scan reaches the series window) proposes nothing: say the detail, ask nothing. After `process --group`,
+  `scan_selection_series.reused` says the series E0s came from the last full run. **An edge-step
   change is an observation only** (`group_observations`, e.g. "edge step fell 60% … possible dissolution or
   detachment of the sample"): say it, never offer to leave a scan out for it. Only on the scientist's word, use the
   `exclude_scans` snippet the sentence gives (it keeps any scan already left out) and re-process the group (below);
