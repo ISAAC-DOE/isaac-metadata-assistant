@@ -30,6 +30,15 @@ from isaac_api.local_import import readers
 from isaac_api.local_import.readers import ssrl_xdc as x
 
 from test_local_import_reader_ssrl_xdc import make_scan
+
+
+@pytest.fixture(autouse=True)
+def _vendored_schema_basis(monkeypatch, tmp_path):
+    """The pins below were made on the VENDORED schema basis (no portal validator installed, as in CI).
+    With the pinned validator installed, DEC-76 rightly stops asking for context.temperature_K, so the
+    question SET differs by those four per-run questions (ids stay stable). Pin the basis the pins used."""
+    monkeypatch.setenv("ISAAC_PORTAL_VALIDATOR_DIR", str(tmp_path / "no-validator"))
+    monkeypatch.setenv("ISAAC_PORTAL_VALIDATOR_PYTHON", str(tmp_path / "no-validator" / "python"))
 from test_local_import_reader_two_column import make_two
 
 V2 = "SSRL   EXAFS Data Collector 2.0"
