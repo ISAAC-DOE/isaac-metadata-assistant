@@ -27,7 +27,15 @@ import math
 import re
 from functools import lru_cache
 from pathlib import Path, PurePosixPath
-from typing import Any, Container, Iterable, Mapping, Sequence
+from typing import Any, Iterable, Mapping, Sequence
+
+from ..spec_file_scans import (  # re-exported: callers and tests use these names from this module
+    SPEC_ENERGY_SCAN_COMMANDS,
+    SPEC_FILE_SCANS_RULE_ID,
+    exported_copy_of as _exported_copy_of,
+    lists_in_file_scans,
+    spec_file_scans,
+)
 
 FORMAT_ID = "isaac.local-import-bundle"
 #: 1.2.0 (additive): ``processed_outputs[]`` — the scientists' own Athena/Demeter outputs,
@@ -521,49 +529,9 @@ def all_scan_numbers_known(numbers: Sequence[int | None]) -> bool:
 # grid) with at least one data row and a `#S` number used once in the file, listed as
 # `{relative_path: <the SPEC file>, scan_index: <its #S number>}`. Every other block is named and left out.
 
-#: The rule that lists a SPEC file's own `#S` blocks as its run's scans.
-SPEC_FILE_SCANS_RULE_ID = "spec_file_energy_scans_v1"
-#: A `#S` command that is an energy scan (its first word).
-SPEC_ENERGY_SCAN_COMMANDS = frozenset({"gscan"})
-_SPEC_S_LINE = re.compile(r"^#S[ \t]+(\S+)[ \t]*(.*)$")
-#: A `#S` number: ASCII digits only (``str.isdigit`` accepts ``²``, which ``int`` refuses).
-_ASCII_NUMBER = re.compile(r"[0-9]+")
-
-
-def spec_file_scans(text: str) -> tuple[list[int], list[dict]]:
-    """``(scan numbers, left out)`` of one SPEC file's own ``#S`` blocks (:data:`SPEC_FILE_SCANS_RULE_ID`).
-
-    A scan is an energy scan (:data:`SPEC_ENERGY_SCAN_COMMANDS`) with at least one data row whose ``#S``
-    number appears once. Each other block is in ``left out`` as ``{scan, command, why}``."""
-    blocks: list[dict] = []
-    for line in text.lstrip("﻿").splitlines():
-        m = _SPEC_S_LINE.match(line)
-        if m:
-            blocks.append({"literal": m.group(1), "command": m.group(2).strip(), "rows": 0})
-        elif blocks and line.strip() and not line.startswith("#"):
-            blocks[-1]["rows"] += 1
-    numbers = [int(b["literal"]) if _ASCII_NUMBER.fullmatch(b["literal"]) else None for b in blocks]
-    seen: dict[int, int] = {}
-    for n in numbers:
-        if n is not None:
-            seen[n] = seen.get(n, 0) + 1
-    scans: list[int] = []
-    left_out: list[dict] = []
-    for b, n in zip(blocks, numbers):
-        word = b["command"].split()[0] if b["command"] else ""
-        if n is None:
-            why = "its #S number is not a number"
-        elif seen[n] > 1:
-            why = "its #S number appears more than once in the file, so it names no single scan"
-        elif word not in SPEC_ENERGY_SCAN_COMMANDS:
-            why = f"not an energy scan ({word or 'no command'})"
-        elif not b["rows"]:
-            why = "no data rows"
-        else:
-            scans.append(n)
-            continue
-        left_out.append({"scan": b["literal"], "command": word or None, "why": why})
-    return scans, left_out
+# The splitter (`spec_file_scans`, the rule id, the energy-scan commands, the exported-copy test and the
+# source-type gate) lives in ONE module, `isaac_api.spec_file_scans`, so this rule and the HERFD selector's
+# inputs (`historical_import`) split a SPEC file into the same scans. Imported at the top of this module.
 
 
 def _spec_file_scan_rows(root: Path | None, row: Mapping | None) -> tuple[tuple[list[int], list[dict]] | None, str | None]:
@@ -591,22 +559,52 @@ def _spec_file_scan_rows(root: Path | None, row: Mapping | None) -> tuple[tuple[
     return spec_file_scans(text), None
 
 
-def _exported_copy_of(stem: str, stems: Container[str]) -> str | None:
-    """The run ``stem`` names an exported copy of (``SYN_A.dat`` beside a run ``SYN_A``: grouping's
-    ``exported_file_read_as_acquisition`` rule), else ``None``. Such a copy lists no in-file scans of its own."""
-    from .grouping import _EXPORT_EXT  # local: grouping imports bundle
+def _scan_dir_present_empty(root: Path | None, acquisition_path: str, stem: str) -> bool:
+    """True only when the run's `<stem>_dir` folder is SEEN and holds nothing but OS metadata files.
 
-    m = _EXPORT_EXT.match(str(stem or ""))
-    return m.group("base") if m and m.group("base") in stems and m.group("base") != stem else None
+    A folder import is looked at directly; a ZIP is looked at by its directory entries (re-deriving the
+    "compress this folder" wrapper the walk strips). A ZIP without directory entries, a ZIP inside the folder,
+    or anything that cannot be looked at answers False: the folder was not seen, so nothing is said about it."""
+    if root is None or not isinstance(acquisition_path, str) or "!/" in acquisition_path:
+        return False
+    import zipfile
+
+    from ..bl15 import archive
+    from ..bl15.relate import SCAN_DIR_SUFFIX
+
+    parent = acquisition_path.rsplit("/", 1)[0] if "/" in acquisition_path else ""
+    dir_rel = f"{parent + '/' if parent else ''}{stem}{SCAN_DIR_SUFFIX}"
+    try:
+        root = Path(root)
+        if root.is_dir():
+            folder = root / dir_rel
+            if folder.is_symlink() or not folder.is_dir():
+                return False
+            return not any(not archive.is_os_metadata(child.name) for child in folder.iterdir())
+        with zipfile.ZipFile(root) as zf:
+            infos = zf.infolist()
+    except Exception:  # never let a look at a folder stop the import
+        return False
+    names = [i.filename for i in infos]
+    files = [i.filename for i in infos if not i.is_dir() and not archive.is_os_metadata(i.filename)]
+    prefix = archive.common_root_prefix(files)
+    wanted = f"{prefix}/{dir_rel}/" if prefix else f"{dir_rel}/"
+    if wanted not in names:
+        return False
+    return not any(n.startswith(wanted) and not n.endswith("/") and not archive.is_os_metadata(n) for n in names)
 
 
-def spec_file_scans_statement(numbers: Sequence[int], left_out: Sequence[Mapping], why: str | None = None) -> str:
-    """What :data:`SPEC_FILE_SCANS_RULE_ID` did for one run, in words (``why``: its SPEC file was not read)."""
+def spec_file_scans_statement(numbers: Sequence[int], left_out: Sequence[Mapping], why: str | None = None, *,
+                              scan_dir_empty: bool = False) -> str:
+    """What :data:`SPEC_FILE_SCANS_RULE_ID` did for one run, in words (``why``: its SPEC file was not read;
+    ``scan_dir_empty``: its `<stem>_dir` folder exists and is empty)."""
+    lead = ("Its `<stem>_dir` folder exists but holds no scan file"
+            if scan_dir_empty else "No scan file was found in a `<stem>_dir` folder")
     if why:
-        return f"No scan file was found in a `<stem>_dir` folder, and its SPEC file was not read for its own scans: {why}."
-    said = (f"No scan file was found in a `<stem>_dir` folder, so this run's scans are the {len(numbers)} energy "
+        return f"{lead}, and its SPEC file was not read for its own scans: {why}."
+    said = (f"{lead}, so this run's scans are the {len(numbers)} energy "
             f"scan(s) inside its SPEC file: #S {', '.join(str(n) for n in numbers)}.") if numbers else (
-            "No scan file was found in a `<stem>_dir` folder, and its SPEC file holds no energy scan with data rows.")
+            f"{lead}, and its SPEC file holds no energy scan with data rows.")
     if left_out:
         said += " Left out: " + "; ".join(f"#S {x['scan']} ({x['why']})" for x in left_out[:20]) + (
             f"; and {len(left_out) - 20} more" if len(left_out) > 20 else "") + "."
@@ -3769,9 +3767,10 @@ def build_bundle(
             if isinstance(s, Mapping) and _safe_relative(s.get("path"))
         ]
         scan_count = u.scan_count
-        if (not scans and not scan_count and u.run_candidate and u.source_type == "spec_acquisition"
+        if (not scans and not scan_count and lists_in_file_scans(u.source_type, u.run_candidate)
                 and _safe_relative(u.acquisition_path) and u.acquisition_path in sid_of):
-            # r5d H1: no `<stem>_dir` scan file: the energy scans inside the SPEC file are the run's scans
+            # r5d H1: no `<stem>_dir` scan file: the energy scans inside the SPEC file are the run's scans. A
+            # standard or reference measurement (a reference pellet) is read the same way; an alignment file is not.
             copy_of = _exported_copy_of(u.stem, unit_stems)
             found, why = ((None, f"it is named like run {copy_of!r} plus a data-file extension, so it is read as that "
                                  "run's exported copy (its scans are not listed again)")
@@ -3784,12 +3783,14 @@ def build_bundle(
             else:
                 numbers, left_out = [], []
             if found is not None or spec_root is not None:
+                empty_dir = _scan_dir_present_empty(spec_root, u.acquisition_path, u.stem)
                 other["scans_in_spec_file"] = {
                     "rule_id": SPEC_FILE_SCANS_RULE_ID,
                     "scans": list(numbers),
                     "left_out": left_out[:50],
                     **({"why": why} if why else {}),
-                    "statement": spec_file_scans_statement(numbers, left_out, why),
+                    **({"scan_dir_present_empty": True} if empty_dir else {}),
+                    "statement": spec_file_scans_statement(numbers, left_out, why, scan_dir_empty=empty_dir),
                 }
         runs.append(
             {
