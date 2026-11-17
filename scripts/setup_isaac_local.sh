@@ -134,25 +134,44 @@ skill_state() {
 g() { git -C "$CHECKOUT" "$@"; }
 is_git_checkout() { [[ "$(g rev-parse --show-toplevel 2>/dev/null)" == "$(cd "$CHECKOUT" && pwd -P)" ]]; }
 
+# Ctrl-C, a TERM or a hang-up stops the script with the usual status (130, 143, 129). Set at the top
+# level so a shell waiting for `$(...)` stops too once that subshell has cleaned up.
+trap 'exit 130' INT; trap 'exit 143' TERM; trap 'exit 129' HUP
+
 # run "$@" for at most $1 seconds (macOS has no `timeout`); its exit status, or 124 when cut off.
-# The command runs in its OWN process group (job control on for that one start), and a timeout kills
-# the whole group, so a helper git started (ssh, a transport) is never left running.
+# The command runs in its OWN process group (job control on for that one start). A timeout, Ctrl-C, a
+# TERM or a hang-up kills the whole group, so a helper git started (ssh, a transport) is never left
+# running. "Cut off" is known from the watcher's own flag file, never guessed from an exit status.
+WT_PID=""; WT_WATCHER=""; WT_FLAGDIR=""
+_wt_stop() {   # $1: the exit status for the signal that arrived
+  [[ -n "$WT_WATCHER" ]] && kill "$WT_WATCHER" 2>/dev/null
+  if [[ -n "$WT_PID" ]]; then
+    kill -TERM -- "-$WT_PID" 2>/dev/null; sleep 0.2; kill -KILL -- "-$WT_PID" 2>/dev/null
+  fi
+  [[ -n "$WT_FLAGDIR" ]] && rm -rf "$WT_FLAGDIR"
+  exit "$1"
+}
 with_timeout() {
   local secs="$1"; shift
-  local pid watcher rc
+  local rc flag
+  WT_FLAGDIR="$(mktemp -d "${TMPDIR:-/tmp}/isaac-timeout.XXXXXX")" || return 1
+  flag="$WT_FLAGDIR/fired"
+  trap '_wt_stop 130' INT; trap '_wt_stop 143' TERM; trap '_wt_stop 129' HUP
   set -m
-  "$@" & pid=$!
+  "$@" & WT_PID=$!
   set +m
-  ( trap 'exit 0' TERM; n=0; while (( n < secs * 10 )); do sleep 0.1; kill -0 "$pid" 2>/dev/null || exit 0; n=$((n+1)); done
-    kill -TERM -- "-$pid" 2>/dev/null ) &
-  watcher=$!
-  wait "$pid" 2>/dev/null; rc=$?
-  if kill -0 "$watcher" 2>/dev/null; then kill "$watcher" 2>/dev/null; fi
-  wait "$watcher" 2>/dev/null
-  if (( rc == 143 || rc == 137 )); then
-    kill -KILL -- "-$pid" 2>/dev/null   # anything in the group that outlived the TERM
-    rc=124
-  fi
+  ( trap 'exit 0' TERM; n=0; while (( n < secs * 10 )); do sleep 0.1; kill -0 "$WT_PID" 2>/dev/null || exit 0; n=$((n+1)); done
+    : > "$flag"; kill -TERM -- "-$WT_PID" 2>/dev/null ) &
+  WT_WATCHER=$!
+  wait "$WT_PID" 2>/dev/null; rc=$?
+  if kill -0 "$WT_WATCHER" 2>/dev/null; then kill "$WT_WATCHER" 2>/dev/null; fi
+  wait "$WT_WATCHER" 2>/dev/null
+  # the group's leader has ended, however it ended: anything it left behind in its group goes too
+  kill -KILL -- "-$WT_PID" 2>/dev/null
+  [[ -e "$flag" ]] && rc=124
+  rm -rf "$WT_FLAGDIR"
+  WT_PID=""; WT_WATCHER=""; WT_FLAGDIR=""
+  trap 'exit 130' INT; trap 'exit 143' TERM; trap 'exit 129' HUP
   return $rc
 }
 
@@ -160,15 +179,20 @@ with_timeout() {
 plain_url() { printf '%s' "$1" | sed -E 's#^([a-zA-Z][a-zA-Z0-9+.-]*://)[^@/]*@#\1#'; }
 ORIGIN_URL=""
 FETCH_ERR=""     # why the last fetch failed: "timeout", "no_main" or "unreachable"
+USER_SSH=0       # 1 when the user's own ssh command (core.sshCommand, GIT_SSH_COMMAND, GIT_SSH) is used
 
 # The user's own ssh setup wins: only when neither GIT_SSH_COMMAND, GIT_SSH nor core.sshCommand is set
-# is ssh told not to prompt (BatchMode) and to give up connecting after a few seconds.
+# is ssh told not to prompt (BatchMode) and to give up connecting after a few seconds. With their own
+# command, a passphrase prompt cannot be shown (the fetch runs in the background), so a failure says so.
 fetch_main() {
   local err rc askpass=/usr/bin/true
   [[ -x "$askpass" ]] || askpass=/bin/true
   local -a env_add=(GIT_TERMINAL_PROMPT=0 "GIT_ASKPASS=$askpass" "SSH_ASKPASS=$askpass")
   if [[ -z "${GIT_SSH_COMMAND:-}" && -z "${GIT_SSH:-}" && -z "$(g config --get core.sshCommand 2>/dev/null)" ]]; then
+    USER_SSH=0
     env_add+=("GIT_SSH_COMMAND=ssh -o BatchMode=yes -o ConnectTimeout=$(( FETCH_TIMEOUT < 10 ? FETCH_TIMEOUT : 10 ))")
+  else
+    USER_SSH=1
   fi
   err="$(mktemp "${TMPDIR:-/tmp}/isaac-fetch.XXXXXX")" || return 1
   with_timeout "$FETCH_TIMEOUT" env "${env_add[@]}" git -C "$CHECKOUT" \
@@ -185,10 +209,12 @@ fetch_main() {
 
 # the fetch failure in plain words (after fetch_main failed)
 fetch_failure() {
+  local ssh_note=""
+  (( USER_SSH == 1 )) && ssh_note="; your own ssh command is used, and a passphrase prompt cannot be shown during the check: unlock your key first (ssh-add) or pass --offline"
   case "$FETCH_ERR" in
-    timeout) echo "GitHub did not answer within ${FETCH_TIMEOUT}s (origin: $(plain_url "$ORIGIN_URL"))" ;;
+    timeout) echo "GitHub did not answer within ${FETCH_TIMEOUT}s (origin: $(plain_url "$ORIGIN_URL"))$ssh_note" ;;
     no_main) echo "origin ($(plain_url "$ORIGIN_URL")) has no '$MAIN_BRANCH' branch to compare with (a fork or another repository?)" ;;
-    *) echo "could not reach GitHub (origin: $(plain_url "$ORIGIN_URL"); offline, or the address does not answer)" ;;
+    *) echo "could not reach GitHub (origin: $(plain_url "$ORIGIN_URL"); offline, or the address does not answer)$ssh_note" ;;
   esac
 }
 
@@ -218,17 +244,29 @@ update_refusal() {
   fi
 }
 
-# Paths the incoming commits ADD that already exist here as something git does not track (an
-# untracked or ignored file or folder, e.g. your data in examples/), or whose parent folder exists here
-# as a file: a fast-forward would replace or remove them, so --update refuses. NUL-separated, one per path.
+# Does git see something it does NOT track (untracked or ignored) at exactly this path, or inside it
+# when it is a folder? Asked of git, not of the filesystem, so a TRACKED file is never counted, even
+# under a case-folded name on a case-insensitive disk (an upstream Foo.txt -> foo.txt rename).
+untracked_at() {
+  [[ -n "$( { g ls-files --others --exclude-standard -- ":(literal)$1"
+              g ls-files --others --ignored --exclude-standard -- ":(literal)$1"; } 2>/dev/null | head -n 1)" ]]
+}
+
+# Paths the incoming commits ADD where this folder holds something git does not track: an untracked or
+# ignored file or folder at that exact path (e.g. your data in examples/), or an untracked/ignored FILE
+# where the update needs a folder. A fast-forward would replace or remove them, so --update refuses.
+# A tracked file that the update turns into a folder is git's own business, never counted.
+# NUL-separated, one per path.
 incoming_collisions() {
   local p d
   while IFS= read -r -d '' p; do
     [[ -n "$p" ]] || continue
-    if [[ -e "$CHECKOUT/$p" || -L "$CHECKOUT/$p" ]]; then printf '%s\0' "$p"; continue; fi
+    if untracked_at "$p"; then printf '%s\0' "$p"; continue; fi
     d="$(dirname "$p")"
     while [[ "$d" != "." && "$d" != "/" ]]; do
-      if [[ -L "$CHECKOUT/$d" || ( -e "$CHECKOUT/$d" && ! -d "$CHECKOUT/$d" ) ]]; then printf '%s\0' "$d"; break; fi
+      if [[ -L "$CHECKOUT/$d" || ( -e "$CHECKOUT/$d" && ! -d "$CHECKOUT/$d" ) ]] && untracked_at "$d"; then
+        printf '%s\0' "$d"; break
+      fi
       d="$(dirname "$d")"
     done
   done < <(g diff -z --name-only --no-renames --diff-filter=A HEAD "origin/$MAIN_BRANCH" 2>/dev/null)
@@ -255,17 +293,18 @@ update_state() {
   echo "[behind $behind commits] update check  this ISAAC folder is $behind updates behind GitHub's $MAIN_BRANCH ($(g rev-parse --short HEAD) here)$(origin_note). Update: scripts/setup_isaac_local.sh --update${why:+ (it would refuse now: $why)}"
 }
 
-# why --update must refuse because of files git does not track (empty when none); names no file, only
-# how many and in which top-level folders, because their names can be data
+# why --update must refuse because of files git does not track (empty when none). It names NO file:
+# only how many and in which top-level folders ("the top folder" for one at the root), because a
+# file's name can itself be data
 collision_refusal() {
   local n=0 tops="" p top
   while IFS= read -r -d '' p; do
-    n=$((n+1)); top="${p%%/*}"
-    [[ "$p" == */* ]] && top="$top/"
+    n=$((n+1))
+    if [[ "$p" == */* ]]; then top="${p%%/*}/"; else top="the top folder"; fi
     case ",$tops," in *",$top,"*) ;; *) tops="${tops:+$tops,}$top" ;; esac
   done < <(incoming_collisions)
   (( n == 0 )) && return
-  echo "the update would replace $n file(s) or folder(s) here that git does not track (in: ${tops//,/, }), which can be your own data. Move them out of the ISAAC folder first; to list them: git -C \"$CHECKOUT\" diff --name-only --diff-filter=A HEAD origin/$MAIN_BRANCH"
+  echo "the update adds its own files where this folder holds $n file(s) or folder(s) that git does not track (in: ${tops//,/, }); they can be your own data and would be replaced or removed. Move them out of the ISAAC folder first"
 }
 
 # --update: fast-forward to GitHub's main, then re-install the skill with the UPDATED script
@@ -347,14 +386,25 @@ if [[ $INSTALL_SKILL -eq 1 && $CHECK_ONLY -eq 0 ]]; then
     echo "Skill written to: $DEST/SKILL.md"
   else
     echo "== 4/4 Claude Code skill"
-    copy_failed() { echo "error: could not copy the skill into $SKILL_DIR ($1); the copy there is unchanged." >&2; exit 1; }
-    mkdir -p "$SKILL_DIR" || copy_failed "cannot make the folder"
-    TMP="$(mktemp -d "$SKILL_DIR/.${SKILL_NAME}.XXXXXX")" || copy_failed "cannot write there"
-    cp -R "$SRC/." "$TMP/" || { rm -rf "$TMP"; copy_failed "copy failed"; }   # a copy, never a link
-    chmod 755 "$TMP"
-    printf '%s\n' "$CHECKOUT" > "$TMP/checkout-path.txt"
-    rm -rf "$DEST"
-    mv "$TMP" "$DEST" || copy_failed "could not move it into place"
+    # Atomic: build the new copy in a temp folder, move the old copy aside, move the new one in, and put
+    # the old one back if that fails. Each message says what is true afterwards, never more.
+    copy_failed() { echo "error: could not copy the skill into $SKILL_DIR ($1)." >&2; exit 1; }
+    mkdir -p "$SKILL_DIR" || copy_failed "cannot make the folder; nothing there changed"
+    TMP="$(mktemp -d "$SKILL_DIR/.${SKILL_NAME}.XXXXXX")" || copy_failed "cannot write there; nothing there changed"
+    OLD="$TMP.old"
+    if ! { cp -R "$SRC/." "$TMP/" && chmod 755 "$TMP" && printf '%s\n' "$CHECKOUT" > "$TMP/checkout-path.txt"; }; then
+      rm -rf "$TMP"; copy_failed "the copy failed; the installed copy is unchanged"   # a copy, never a link
+    fi
+    if [[ -e "$DEST" || -L "$DEST" ]]; then
+      mv "$DEST" "$OLD" || { rm -rf "$TMP"; copy_failed "could not move the old copy aside; it is unchanged"; }
+    fi
+    if ! mv "$TMP" "$DEST"; then
+      rm -rf "$TMP"
+      if [[ ! -e "$OLD" ]]; then copy_failed "could not move the new copy into place; there was no old copy"
+      elif mv "$OLD" "$DEST"; then copy_failed "could not move the new copy into place; the old copy was put back"
+      else copy_failed "could not move the new copy into place, nor put the old one back: it is at $OLD"; fi
+    fi
+    rm -rf "$OLD"
     echo "Copied to $DEST"
     # the exact file to re-read (a refreshed skill is followed from this path, wherever --skill-dir put it)
     echo "Skill written to: $DEST/SKILL.md"

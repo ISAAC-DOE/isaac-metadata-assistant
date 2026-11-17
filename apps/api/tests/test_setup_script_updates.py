@@ -228,13 +228,61 @@ def test_update_refuses_to_replace_a_file_git_does_not_track(world, ignored):
     data = _ship_a_file_over_local_data(co, up, env, ignored=ignored)
     head = _git(co, "rev-parse", "HEAD", env=env)
     check = _run(co, env, "--check").stdout
-    assert "it would refuse now: the update would replace 1 file(s)" in _line(check, "[behind")
+    assert "it would refuse now: the update adds its own files where this folder holds 1 file(s)" in _line(check, "[behind")
     done = _run(co, env, "--update")
     assert done.returncode == 3, done.stdout + done.stderr
     assert "git does not track" in done.stderr and "(in: examples/)" in done.stderr and "Nothing was changed" in done.stderr
     assert "scan.xdi" not in done.stderr  # a data file's name is never printed, only its folder
     assert data.read_text() == "SYN scientist's own data, never in git\n"
     assert _git(co, "rev-parse", "HEAD", env=env) == head
+
+
+def test_a_root_level_collision_names_the_top_folder_not_the_file(world):
+    co, up, env = world
+    (co / "SYN_private_sample_name.dat").write_text("SYN scientist's own file\n")
+    _commit(up, "SYN_private_sample_name.dat", "SYN upstream file\n", env)
+    _git(up, "push", "-q", "origin", "main", env=env)
+    done = _run(co, env, "--update")
+    assert done.returncode == 3 and "(in: the top folder)" in done.stderr
+    assert "SYN_private_sample_name" not in done.stderr + done.stdout
+    assert "diff --name-only" not in done.stderr  # no command that would list every added path
+    assert (co / "SYN_private_sample_name.dat").read_text() == "SYN scientist's own file\n"
+
+
+def _case_insensitive(where: Path) -> bool:
+    probe = where / "SYN_Case_Probe"
+    probe.write_text("")
+    try:
+        return (where / "syn_case_probe").exists()
+    finally:
+        probe.unlink()
+
+
+def test_a_case_only_rename_upstream_is_not_refused(world, tmp_path):
+    co, up, env = world
+    if not _case_insensitive(tmp_path):
+        pytest.skip("needs a case-insensitive disk (the default on macOS)")
+    _commit(up, "SYN_Notes.txt", "SYN tracked\n", env)
+    _git(up, "push", "-q", "origin", "main", env=env)
+    _git(co, "pull", "-q", "--ff-only", env=env)
+    _git(up, "mv", "SYN_Notes.txt", "syn_notes.txt", env=env)
+    _git(up, "commit", "-q", "-m", "SYN case-only rename", env=env)
+    _git(up, "push", "-q", "origin", "main", env=env)
+    line = _line(_run(co, env, "--check").stdout, "[behind")
+    assert line and "it would refuse" not in line, line
+
+
+def test_a_tracked_file_that_becomes_a_folder_is_not_refused(world):
+    co, up, env = world
+    _commit(up, "SYN_layout", "SYN a file for now\n", env)
+    _git(up, "push", "-q", "origin", "main", env=env)
+    _git(co, "pull", "-q", "--ff-only", env=env)
+    _git(up, "rm", "-q", "SYN_layout", env=env)
+    _commit(up, "SYN_layout/inner.txt", "SYN now a folder\n", env)
+    _git(up, "push", "-q", "origin", "main", env=env)
+    done = _run(co, env, "--update")
+    assert done.returncode == 0, done.stdout + done.stderr
+    assert (co / "SYN_layout" / "inner.txt").read_text() == "SYN now a folder\n"
 
 
 def test_update_merges_with_no_overwrite_ignore():
@@ -298,9 +346,65 @@ def test_the_users_own_ssh_command_wins(world, tmp_path):
     env = {**env, "PATH": f"{bin_dir}:{env['PATH']}"}
     _git(co, "remote", "set-url", "origin", "ssh://syn.invalid/syn.git", env=env)
     _git(co, "config", "core.sshCommand", str(own), env=env)
-    _run(co, env, "--check")
+    out = _run(co, env, "--check").stdout
     assert own_log.exists() and "BatchMode" not in own_log.read_text()
     assert not plain_log.exists()
+    line = _line(out, "[skipped]")
+    assert "passphrase prompt cannot be shown" in line and "--offline" in line
+
+
+def _ext_env(env: dict, timeout: str) -> dict:
+    return {**env, "ISAAC_FETCH_TIMEOUT": timeout, "GIT_CONFIG_COUNT": "1", "GIT_CONFIG_KEY_0": "protocol.ext.allow",
+            "GIT_CONFIG_VALUE_0": "always"}
+
+
+def test_a_fetch_killed_by_something_else_is_not_called_a_timeout(world, tmp_path):
+    """git dying of a TERM it did not get from the watcher exits 143: that is not "did not answer"."""
+    co, _, env = world
+    killer = tmp_path / "syn-kill-parent"
+    killer.write_text("#!/bin/sh\nkill -TERM $PPID\nsleep 53.71\n")
+    killer.chmod(0o755)
+    env = _ext_env(env, "30")
+    _git(co, "remote", "set-url", "origin", f"ext::{killer}", env=env)
+    line = _line(_run(co, env, "--check").stdout, "[skipped]")
+    assert line.startswith("[skipped] update check  could not reach GitHub") and "did not answer" not in line
+    if shutil.which("pgrep"):
+        time.sleep(0.5)
+        assert not _alive("sleep 53.71"), "git's helper outlived git"
+
+
+@pytest.mark.skipif(shutil.which("pgrep") is None, reason="needs pgrep")
+@pytest.mark.parametrize("sig, status", [("SIGINT", 130), ("SIGTERM", 143), ("SIGHUP", 129)])
+def test_stopping_the_check_leaves_no_network_process(world, sig, status):
+    """Ctrl-C reaches the script's whole process group (as a terminal sends it), never the fetch's own group:
+    the script must kill that group itself, and stop with the usual status."""
+    import signal
+
+    co, _, env = world
+    marker = {"SIGINT": "71.13", "SIGTERM": "71.17", "SIGHUP": "71.19"}[sig]
+    env = _ext_env(env, "60")
+    _git(co, "remote", "set-url", "origin", f"ext::sleep {marker}", env=env)
+    proc = subprocess.Popen(["bash", str(co / "scripts" / "setup_isaac_local.sh"), "--check"], env=env,
+                            stdout=subprocess.PIPE, stderr=subprocess.PIPE, start_new_session=True)
+    try:
+        deadline = time.monotonic() + 20
+        while not _alive(f"sleep {marker}") and time.monotonic() < deadline:
+            time.sleep(0.1)
+        assert _alive(f"sleep {marker}"), "the fetch never started"
+        os.killpg(proc.pid, getattr(signal, sig))
+        proc.wait(timeout=15)
+    finally:
+        if proc.poll() is None:
+            os.killpg(proc.pid, signal.SIGKILL)
+            proc.wait()
+    assert proc.returncode == status
+    deadline = time.monotonic() + 5
+    while _alive(f"sleep {marker}") and time.monotonic() < deadline:
+        time.sleep(0.2)
+    leftover = _alive(f"sleep {marker}")
+    for pid in leftover:
+        os.kill(int(pid), signal.SIGKILL)
+    assert not leftover, f"{sig} left the fetch's helper running"
 
 
 def test_an_origin_without_main_is_said_plainly(world, tmp_path):
@@ -376,3 +480,21 @@ def test_refresh_never_removes_the_checkouts_own_skill(world):
     assert done.returncode == 0 and "this checkout's own copy" in done.stdout
     assert (own / "isaac-historical-import" / "SKILL.md").read_text() == "SYN skill v1\n"
     assert "[ok] skill at" in _run(co, env, "--check", "--offline", "--skill-dir", str(own)).stdout
+
+
+@pytest.mark.skipif(hasattr(os, "geteuid") and os.geteuid() == 0, reason="root reads an unreadable file")
+def test_a_failed_refresh_keeps_the_old_copy_and_leaves_no_temp_folder(world, tmp_path):
+    co, _, env = world
+    target = tmp_path / "skills"
+    assert _run(co, env, "--refresh-skill", "--skill-dir", str(target)).returncode == 0
+    (target / "isaac-historical-import" / "SKILL.md").write_text("SYN skill v0 (old)\n")
+    blocked = co / SKILL / "SYN_unreadable.md"
+    blocked.write_text("SYN\n")
+    blocked.chmod(0)
+    try:
+        done = _run(co, env, "--refresh-skill", "--skill-dir", str(target))
+    finally:
+        blocked.chmod(0o644)
+    assert done.returncode == 1 and "the installed copy is unchanged" in done.stderr
+    assert (target / "isaac-historical-import" / "SKILL.md").read_text() == "SYN skill v0 (old)\n"
+    assert sorted(p.name for p in target.iterdir()) == ["isaac-historical-import"]  # no temp or .old folder
