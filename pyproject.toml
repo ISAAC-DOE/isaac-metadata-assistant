@@ -11,6 +11,11 @@ dependencies = [
     "jsonschema>=4.21",
     "python-ulid>=2.0",
     "openpyxl>=3.1",
+    # IANA time-zone data shipped with ISAAC, so a zone name a scientist gives (including the
+    # IANA "backward" links such as US/Pacific or Asia/Calcutta) is recognised the same way on
+    # every machine. zoneinfo reads the operating system's database first and falls back to
+    # this package; newer Debian/Ubuntu move those links into a separate tzdata-legacy package.
+    "tzdata>=2024.1",
 ]
 
 [project.optional-dependencies]
