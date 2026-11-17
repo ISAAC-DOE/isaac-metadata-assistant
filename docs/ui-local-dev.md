@@ -169,8 +169,10 @@ shows real results, nothing is staged client-side.
    (Needs Attention / In Review / Ready to Export / Done). Empty on first run.
    Click **Run Synthetic Demo** or **New Record**.
 2. ~~**Load Materials** (`/load`)~~ — since 2026-11-16 `/load` redirects to My
-   Experiments. Start the **Guided Walkthrough** there; inside it, the worked example
-   runs `POST /api/demo/run`, and **Open the Worked Example** opens the record.
+   Experiments. Start the **Guided Walkthrough** there: it opens a worked-example
+   session (`POST /api/tutorial/sessions`), which holds the five example records, and
+   **Open the Worked Example** on the session bar opens the first of them. The site no
+   longer calls `POST /api/demo/run` (the endpoint is unchanged).
 3. **Review Record** (`/record/:id`) — the core workbench. Grouped draft
    fields on the left/main, each selectable to load its evidence
    (`source_file`, `locator`, `quote`) in the right panel above the

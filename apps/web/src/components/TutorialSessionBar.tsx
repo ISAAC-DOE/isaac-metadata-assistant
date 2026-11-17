@@ -99,10 +99,11 @@ export function TutorialSessionBar() {
           button that runs one: the label promised a record and delivered an on-ramp.
           (The walkthrough card still says "Not on this screen" if the current step's own
           control is elsewhere — true wherever the reader goes; it is not what this fixes.)
-          The id is the one `POST /api/demo/run` (draft_only) works on and the "Open the
-          Record" button that run ends in opens — `EXAMPLE_RECORD_IDS[0]`, the canonical
-          new-draft example — so this lands where the run would have. The bar exists only
-          while a session is open, so the record is in the scope every request carries.
+          The id is `EXAMPLE_RECORD_IDS[0]`, the canonical new-draft example the session
+          seeds when it opens (2026-11-16: the separate "Run the Worked Example" control
+          went with `/load`; it only ever reproduced this record byte for byte). The bar
+          exists only while a session is open, so the record is in the scope every
+          request carries.
         */}
         <button
           type="button"

@@ -780,7 +780,6 @@ export const LABELS = {
 
   // Actions
   actionRunDemo: 'Open the Worked Example',
-  actionRunDemoShort: 'Run the Worked Example',
   // The /load breadcrumb. NOT "New Record": nothing on that screen can create a
   // record — its second on-ramp is a permanent governance refusal — so the
   // breadcrumb names what the screen actually offers.
@@ -1616,7 +1615,7 @@ export const LABELS = {
   helpOnPageExport: 'A dry run: what would still refuse the export. Nothing is written here.',
   helpOnPageImports: 'How to import a past beamtime with the ISAAC skill in Claude Code.',
   helpOnPageStatistics: 'Workspace record counts and checks.',
-  helpOnPageSettings: "This deployment's integrations and developer tools.",
+  helpOnPageSettings: "This deployment's build details and integrations.",
   helpOnPageGovernance: 'Check a record file against the official schema, or browse it.',
   helpOnPageMemory: "A developer map of this project's own files and docs.",
   helpOnPageUnknown: 'This address matches no screen in ISAAC.',

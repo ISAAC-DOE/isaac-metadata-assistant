@@ -130,10 +130,12 @@ import { RecordVerification, useVerificationReport } from './RecordVerification'
  *     Technical Details region (runtime, record schema, Project Memory, API
  *     surface).
  *
- * NOTHING WAS DELETED AND NOTHING BECAME UNREACHABLE. Every section keeps its
- * heading, its id, its states, its copy and its tests; `?tab=build` is a real
- * deep link, and an unrecognised `?tab=` still falls back to `general`, so every
- * existing `/statistics` link resolves exactly where it did.
+ * ~~NOTHING WAS DELETED AND NOTHING BECAME UNREACHABLE … `?tab=build` is a real deep
+ * link~~ — since 2026-11-16 `build` is a developer tab, offered only with
+ * `VITE_ISAAC_DEV_TOOLS=1` (`lib/devTools.ts`); without it `?tab=build` falls back to
+ * `general` like any unrecognised value. Every section keeps its heading, id, states,
+ * copy and jsdom tests. The Historical Imports widget named above was removed the
+ * same day (nothing on the site creates an import session).
  *
  * WHY A TAB RATHER THAN A MOVE INTO SETTINGS. The instruction that prompted this
  * was *"move general ISAAC/engineering statistics to Advanced Settings if they
@@ -143,8 +145,9 @@ import { RecordVerification, useVerificationReport } from './RecordVerification'
  * would have added an EIGHTH Settings tab while the same direction asks Settings
  * to shed surface, and would have re-homed roughly forty assertions — including
  * several honesty guards — across two suites for no reader-visible gain over a
- * tab. `Settings → Overview → Advanced & Developer Surfaces` links to
- * `?tab=build`, so the Settings route into it exists.
+ * tab. ~~`Settings → Overview → Advanced & Developer Surfaces` links to
+ * `?tab=build`~~ — that link left with the Settings regroup; the tab is reached by
+ * its own tab button, with the developer flag.
  *
  * ── THE DENSITY RULE THIS FILE NOW FOLLOWS ─────────────────────────────────
  *
@@ -697,22 +700,9 @@ export function StatisticsPage() {
   const about = useFetch(() => track(api.getAbout()), []);
   const openapi = useFetch(() => track(api.getOpenApi()), []);
   const schema = useFetch(() => track(api.getSchema()), []);
-  /*
-   * THE SIXTH TRACKED READ, added 2026-09-15 with the Historical Imports
-   * figures — and it is TRACKED, unlike the verification read below.
-   *
-   * It is keyed on `scope` for the same reason the record read is: an import
-   * session belongs to a workspace, so leaving or entering a worked-example
-   * session changes the answer. The other four are properties of the BUILD and
-   * stay unkeyed.
-   *
-   * IT JOINS THE ROUND, which is what makes `Refresh` honest. The round's
-   * denominator has always been COUNTED rather than hard-coded (see `Round`),
-   * precisely so a read could be added without the "N of M reads failed"
-   * sentence going wrong — an untracked read would have left the page stamping
-   * `Last Read From the API` onto a figure that Refresh never re-read.
-   */
-  const imports = useFetch(() => track(api.listImports()), [scope]);
+  /* ~~THE SIXTH TRACKED READ, `GET /api/imports`~~ — removed 2026-11-16 with the
+     Historical Imports widget: nothing on the site creates an import session now
+     (historical import is the Claude Code skill's job), so it counted nothing. */
   /*
    * THE SEVENTH TRACKED READ, added 2026-09-18 with Workspace Activity (`ACT-004`).
    *
@@ -805,13 +795,12 @@ export function StatisticsPage() {
   function refreshAll() {
     if (refreshing) return;
     // Silent reloads: current data stays on screen, so the page does not blank
-    // and scroll position is kept. SEVEN GETs, no write, nothing else.
+    // and scroll position is kept. SIX GETs (seven until 2026-11-16), no write, nothing else.
     records.reloadSilent();
     graph.reloadSilent();
     about.reloadSilent();
     openapi.reloadSilent();
     schema.reloadSilent();
-    imports.reloadSilent();
     activity.reloadSilent();
     setRefreshing(true);
     setRefreshMessage('Refreshing — re-reading the API.');
@@ -823,7 +812,6 @@ export function StatisticsPage() {
     about.status === 'error' &&
     openapi.status === 'error' &&
     schema.status === 'error' &&
-    imports.status === 'error' &&
     activity.status === 'error';
 
   function retryAll() {
@@ -832,7 +820,6 @@ export function StatisticsPage() {
     about.reload();
     openapi.reload();
     schema.reload();
-    imports.reload();
     activity.reload();
   }
 
@@ -905,7 +892,6 @@ export function StatisticsPage() {
             <OverviewDashboard
               records={records}
               activity={activity}
-              imports={imports}
               activityDays={activityDays}
               onActivityDays={setActivityDays}
             />
@@ -1306,13 +1292,6 @@ function schemaSectionLabel(section: string): string {
 
 
 
-
-
-
-
-
-
-/* ---- Historical Imports ------------------------------------------------ */
 
 
 

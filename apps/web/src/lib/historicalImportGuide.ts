@@ -31,11 +31,13 @@ export const GUIDE_COPY = {
 
   installTitle: 'Install',
   installFolder: 'Get a copy of the ISAAC folder from your group, open Terminal in that folder, and run:',
-  installNote: 'It sets everything up inside that folder and adds the skill to Claude Code. It needs internet, and no administrator password.',
+  installNote:
+    'It sets up the ISAAC folder, and installs the skill for Claude Code and an offline portal checker. It needs internet, and no administrator password.',
   selftestLead: 'Then check it works, on made-up data:',
   selftestNote: 'You want to see “0 failed” at the end.',
   checkLead: 'To see what is installed, any time:',
-  updates: 'When an update is available, the skill tells you and installs it.',
+  updates:
+    'When the skill or your ISAAC folder is out of date, the skill tells you and updates it (it asks first before updating the ISAAC folder).',
 
   runTitle: 'Run it',
   runStart: 'In Terminal, go to the folder that holds your beamtime folder and start Claude Code:',
@@ -54,7 +56,7 @@ export const GUIDE_COPY = {
     { name: 'Checks and export', text: 'Each record is checked against the schema and the portal’s rules, and the ones that pass are written out.' },
   ],
 
-  dataTitle: 'What stays on your computer',
+  dataTitle: 'What stays on your computer, and what doesn’t',
   dataCaption: 'Where your data goes',
   dataRows: [
     { what: 'Your files', where: 'Read by ISAAC’s program on your computer.' },
@@ -84,14 +86,17 @@ export const GUIDE_COPY = {
   browserLink: 'Open Local Imports',
 
   troubleTitle: 'If something goes wrong',
-  troubleCaption: 'Common problems and their fixes',
-  /** `cmd` is shown as a command to copy; `text` as words. One or both, in that order. */
+  /** `text` is shown as words, then `cmd` as a command to copy. One or both. */
   trouble: [
     { what: 'ISAAC isn’t set up on this computer', cmd: 'scripts/setup_isaac_local.sh' },
     { what: 'The output folder isn’t empty, or is inside your data', text: 'Choose a new, empty folder outside your data.' },
     { what: 'The portal check is missing', cmd: 'scripts/install_portal_validator.sh' },
     { what: 'Curves and quality checks need an extra install', cmd: 'scripts/setup_isaac_local.sh --with-processing' },
-    { what: 'The skill says its instructions are out of date', cmd: 'scripts/setup_isaac_local.sh --install-skill', text: 'Then restart Claude Code.' },
+    {
+      what: 'The skill says its instructions are out of date',
+      text: 'Nothing to do: the skill updates itself and carries on. To update it by hand, run:',
+      cmd: 'scripts/setup_isaac_local.sh --install-skill',
+    },
   ] as readonly { what: string; cmd?: string; text?: string }[],
   troubleElse: 'For anything else, send the exact message to the ISAAC team.',
 } as const;

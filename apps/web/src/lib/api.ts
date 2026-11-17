@@ -39,7 +39,6 @@ import type {
   ApiConflictsResponse,
   ApiCsvPreview,
   ApiDemoResetResult,
-  ApiDemoRunResponse,
   ApiDiscardResult,
   ApiDraftResponse,
   ApiEvidenceClassification,
@@ -52,12 +51,6 @@ import type {
   ApiExtendedContextResponse,
   ApiGraphStatus,
   ApiHealth,
-  ApiImportAddedToExperiment,
-  ApiImportRuleRecorded,
-  ApiImportCandidateProposed,
-  ApiImportListResponse,
-  ApiImportSessionResponse,
-  ApiImportSourceCreated,
   ApiListIncomplete,
   ApiMemoryConceptResponse,
   ApiMemoryConceptsResponse,
@@ -2719,32 +2712,6 @@ export const api = {
     return getJson<{ records: RuntimeRecord[]; total: number }>(path);
   },
 
-  // S2 — run the synthetic pipeline; `draft_only` stops at the blockers.
-  //
-  // The backend now REFUSES (409 `demo_target_drifted`) rather than re-seeding
-  // over a canonical scenario a user has edited, and its refusal body names the
-  // reason and the scenario. `postJson` would have discarded that body —
-  // `httpError` never reads one — leaving the screen with a bare "Request failed
-  // (409)." and no way to tell a protective refusal from a broken backend. So
-  // the 409 body is attached to the thrown ApiError, exactly as `mutationError`
-  // does for the 412 stale-write payload; `mutationError` itself is deliberately
-  // untouched, since its 409 (export immutability) callers expect the plain
-  // shape. An HTML intercept is excluded: an edge sign-in page carries no
-  // refusal payload. Every other status keeps the previous behaviour.
-  async runDemo(mode: 'draft_only' | 'full' = 'draft_only'): Promise<ApiDemoRunResponse> {
-    const path = '/demo/run';
-    const res = await request(path, { method: 'POST', body: JSON.stringify({ mode }) });
-    if (res.ok) return readJson<ApiDemoRunResponse>(res, path);
-    const err = httpError(res, path);
-    if (err.htmlIntercept || res.status !== 409) throw err;
-    throw new ApiError(err.message, {
-      status: res.status,
-      path,
-      contentType: err.contentType,
-      body: await res.json().catch(() => undefined),
-    });
-  },
-
   // P26.0b / R1 — the guarded example-workspace reset. Preview (200) and ALL FOUR
   // safe refusals carry the SAME typed body, so — like blockUpload — we read the
   // JSON on those statuses instead of throwing:
@@ -3213,246 +3180,9 @@ export const api = {
   recordLocalDecision(name: string, input: LocalDecisionInput): Promise<ApiLocalDecisionRecorded> {
     return localPost<ApiLocalDecisionRecorded>(`/local-bundles/${enc(name)}/decisions`, definedOnly({ ...input }));
   },
-
-  listImports(): Promise<ApiImportListResponse> {
-    return getJson<ApiImportListResponse>('/imports');
-  },
-
-  getImport(importId: string): Promise<ApiImportSessionResponse> {
-    return getJson<ApiImportSessionResponse>(`/imports/${enc(importId)}`);
-  },
-
-  /**
-   * Start a session. `label` is omitted from the body when blank, for the reason
-   * `createExperiment` omits `description`: unfiled and `''` are the same thing
-   * and only one of them is a value.
-   */
-  createImport(label?: string): Promise<ApiImportSessionResponse> {
-    const trimmed = (label ?? '').trim();
-    return postJson<ApiImportSessionResponse>('/imports', trimmed ? { label: trimmed } : {});
-  },
-
-  async deleteImport(importId: string): Promise<void> {
-    const path = `/imports/${enc(importId)}`;
-    const res = await request(path, { method: 'DELETE' });
-    if (!res.ok) throw await mutationError(res, path);
-  },
-
-  /**
-   * Record ONE manifest entry. `kind` decides which fields are required, and
-   * this signature deliberately does not collapse the two: a `reference` needs a
-   * filename and a reference, a `synthetic_fixture` needs a fixture name, and a
-   * single loose shape would let a caller send half of each and be refused by the
-   * server for a reason the type could have prevented.
-   *
-   * `sha256` IS WHAT THE CALLER SAYS, and nothing computes one. The server checks
-   * the SHAPE and refuses a malformed digest with `malformed_sha256`; a caller
-   * must surface that rather than assuming the entry landed without it.
-   */
-  addImportSource(
-    importId: string,
-    input:
-      | {
-          kind: 'reference';
-          filename: string;
-          reference: string;
-          mediaType?: string;
-          sizeBytes?: number;
-          sha256?: string;
-        }
-      | {
-          kind: 'synthetic_fixture';
-          fixtureName: string;
-          mediaType?: string;
-          sizeBytes?: number;
-          sha256?: string;
-        }
-      /*
-       * A WHOLE FOLDER OR ARCHIVE, from the server's own allowlist. One bundle entry
-       * for the whole thing — the manifest stays ONE row while the parse walks 1,192
-       * files, which is why `MAX_SOURCES_PER_SESSION` is untouched at 500.
-       *
-       * `archiveName` reuses the `fixture_name` field on the wire: both kinds answer
-       * the same question — WHICH committed artifact, from an allowlist the server
-       * owns — and a fourth key would be a second place for a hydration path to look.
-       */
-      | {
-          kind: 'archive';
-          archiveName: string;
-          mediaType?: string;
-          sizeBytes?: number;
-          sha256?: string;
-        },
-  ): Promise<ApiImportSourceCreated> {
-    const body: Record<string, unknown> = { kind: input.kind };
-    if (input.kind === 'reference') {
-      body.filename = input.filename.trim();
-      body.reference = input.reference.trim();
-    } else if (input.kind === 'archive') {
-      body.fixture_name = input.archiveName;
-    } else {
-      body.fixture_name = input.fixtureName;
-    }
-    const mediaType = (input.mediaType ?? '').trim();
-    const sha256 = (input.sha256 ?? '').trim();
-    if (mediaType) body.media_type = mediaType;
-    if (input.sizeBytes !== undefined) body.size_bytes = input.sizeBytes;
-    if (sha256) body.sha256 = sha256;
-    return postJson<ApiImportSourceCreated>(`/imports/${enc(importId)}/sources`, body);
-  },
-
-  async removeImportSource(
-    importId: string,
-    sourceId: string,
-  ): Promise<ApiImportSessionResponse> {
-    const path = `/imports/${enc(importId)}/sources/${enc(sourceId)}`;
-    const res = await request(path, { method: 'DELETE' });
-    if (res.ok) return readJson<ApiImportSessionResponse>(res, path);
-    throw await mutationError(res, path);
-  },
-
-  parseImport(importId: string): Promise<ApiImportSessionResponse> {
-    return postJson<ApiImportSessionResponse>(`/imports/${enc(importId)}/parse`);
-  },
-
-  reconstructImport(importId: string): Promise<ApiImportSessionResponse> {
-    return postJson<ApiImportSessionResponse>(`/imports/${enc(importId)}/reconstruct`);
-  },
-
-  /**
-   * Send ONE candidate into review on ONE record, as an OPEN proposal.
-   *
-   * THE ONLY WAY ANYTHING FROM AN IMPORT REACHES A RECORD, and it writes no
-   * value: the record's fields are byte-identical afterwards. Accepting the
-   * proposal is `reviewProposal`, which needs a trusted human identity that no
-   * default-configured deployment establishes.
-   *
-   * `experimentVersion` IS THE RECORD'S, not the session's. Truthiness-guarded
-   * exactly as every other mutation here is: a blank must send NO header (→ a 428
-   * naming the missing precondition) rather than `If-Match: ""`, which is
-   * malformed (→ 400) and would report a client bug as a server disagreement.
-   *
-   * READ `deduplicated` BEFORE REPORTING WHAT HAPPENED. `true` means the record
-   * already held this proposal and nothing was minted.
-   */
-  async proposeImportCandidate(
-    importId: string,
-    candidateId: string,
-    opts: { experimentId: string; experimentVersion: string; runId?: string },
-  ): Promise<ApiImportCandidateProposed> {
-    const path = `/imports/${enc(importId)}/candidates/${enc(candidateId)}/propose`;
-    const body: Record<string, unknown> = { experiment_id: opts.experimentId };
-    if (opts.runId !== undefined) body.run_id = opts.runId;
-    const res = await request(path, {
-      method: 'POST',
-      body: JSON.stringify(body),
-      ...(opts.experimentVersion
-        ? { headers: { 'If-Match': `"${opts.experimentVersion}"` } }
-        : {}),
-    });
-    if (res.ok) return readJson<ApiImportCandidateProposed>(res, path);
-    throw await mutationError(res, path);
-  },
-
-  /**
-   * Send EVERY proposable candidate of one import into review on ONE record —
-   * `HIST-005`, the import workflow's sixth step.
-   *
-   * ONE REQUEST, NOT N. Looping `proposeImportCandidate` here would make one
-   * request per candidate, each with its own `If-Match`, each able to fail on its
-   * own — so a closed tab or a `412` partway through would leave the record
-   * holding part of an import with nothing able to say which part. The server
-   * writes every note and every proposal inside one record lock and one save.
-   *
-   * IT WRITES NO VALUE. Every row in `sent` is an OPEN proposal; the record's
-   * fields are byte-identical afterwards. Accepting one is `reviewProposal`,
-   * which needs a trusted human identity no default-configured deployment
-   * establishes.
-   *
-   * `runId` IS FOR THE CANDIDATES A RUN OWNS and is ignored for the ones the
-   * record owns — which is deliberately UNLIKE `proposeImportCandidate`, where a
-   * run given for a record-scoped target is refused. Omitting it when the import
-   * has a run-scoped candidate refuses the WHOLE batch (`422
-   * target_requires_a_run`) and writes nothing, rather than quietly sending the
-   * rest.
-   *
-   * `experimentVersion` IS THE RECORD'S, not the session's, truthiness-guarded
-   * exactly as every other mutation here is: a blank must send NO header (→ 428
-   * naming the missing precondition) rather than `If-Match: ""`, which is
-   * malformed (→ 400) and would report a client bug as a server disagreement.
-   *
-   * READ `counts` AND `already_sent` BEFORE REPORTING WHAT HAPPENED. A candidate
-   * the record already held is returned under `sent` with `already_sent: true`
-   * and minted nothing.
-   */
-  async addImportToExperiment(
-    importId: string,
-    opts: {
-      experimentId: string;
-      experimentVersion: string;
-      runId?: string;
-      /**
-       * Make one run per measurement (an archive import). Sent only when `true`:
-       * the server validates the type and never coerces, and omitting it keeps the
-       * pre-2026-09-22 behaviour byte-for-byte.
-       */
-      createRuns?: boolean;
-    },
-  ): Promise<ApiImportAddedToExperiment> {
-    const path = `/imports/${enc(importId)}/add-to-experiment`;
-    const body: Record<string, unknown> = { experiment_id: opts.experimentId };
-    if (opts.runId !== undefined) body.run_id = opts.runId;
-    if (opts.createRuns === true) body.create_runs = true;
-    const res = await request(path, {
-      method: 'POST',
-      body: JSON.stringify(body),
-      ...(opts.experimentVersion
-        ? { headers: { 'If-Match': `"${opts.experimentVersion}"` } }
-        : {}),
-    });
-    if (res.ok) return readJson<ApiImportAddedToExperiment>(res, path);
-    throw await mutationError(res, path);
-  },
-
-  /**
-   * Record ONE reviewed reading rule on an import (`POST /imports/{id}/rules`) and
-   * get the import back, re-read under it.
-   *
-   * A rule records how to READ sources — which convention applies to which runs,
-   * which of two disagreeing readings a scientist chose, which channel belongs to
-   * which element. It writes no value. `experiment` and `profile` scope store the
-   * rule on a RECORD, so they need that record's current version as `If-Match`;
-   * `import` scope needs none.
-   */
-  async recordImportRule(
-    importId: string,
-    rule: {
-      kind: 'profile_binding' | 'conflict_resolution' | 'signal_assignment';
-      scope: 'import' | 'experiment' | 'profile';
-      experimentId?: string;
-      experimentVersion?: string;
-      selector?: Record<string, unknown>;
-      body: Record<string, unknown>;
-      supersedes?: string;
-      derivedFrom?: string;
-    },
-  ): Promise<ApiImportRuleRecorded> {
-    const path = `/imports/${enc(importId)}/rules`;
-    const payload: Record<string, unknown> = { kind: rule.kind, scope: rule.scope, body: rule.body };
-    if (rule.experimentId) payload.experiment_id = rule.experimentId;
-    if (rule.selector && Object.keys(rule.selector).length > 0) payload.selector = rule.selector;
-    if (rule.supersedes) payload.supersedes = rule.supersedes;
-    if (rule.derivedFrom) payload.derived_from = rule.derivedFrom;
-    const res = await request(path, {
-      method: 'POST',
-      body: JSON.stringify(payload),
-      ...(rule.experimentVersion
-        ? { headers: { 'If-Match': `"${rule.experimentVersion}"` } }
-        : {}),
-    });
-    if (res.ok) return readJson<ApiImportRuleRecorded>(res, path);
-    throw await mutationError(res, path);
-  },
+  /* ~~The historical-import session client (`listImports` … `recordImportRule`)~~ —
+     removed 2026-11-16 with the in-browser import flow; nothing on the site calls
+     `/api/imports` now. The backend routes are unchanged. */
 } as const;
 
 /**

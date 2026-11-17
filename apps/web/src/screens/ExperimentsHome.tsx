@@ -862,12 +862,11 @@ function EmptyExperiments({
         </p>
       )}
 
-      {/* THE STANDALONE VALIDATOR, as a text link (2026-11-02). It checks a file a
-          reader already has; it is not a way to start an experiment, so it does not
-          get a card of the same weight as the three that are. */}
-      {/* HISTORICAL IMPORT, as a text link to its guide (2026-11-16): a past beamtime is
-          imported with the Claude Code skill on the scientist's own computer, not on this
-          page, so it is not a card of the same weight as the two ways to begin here. */}
+      {/* TWO TEXT LINKS under the two cards. HISTORICAL IMPORT (2026-11-16) goes to its
+          guide: a past beamtime is imported with the Claude Code skill on the scientist's
+          own computer, not on this page. THE STANDALONE VALIDATOR (2026-11-02) checks a
+          file a reader already has. Neither is a way to start an experiment here, so
+          neither gets a card of the same weight as the two that are. */}
       <p className="queue-empty-more">
         <Link className="btn btn-ghost queue-empty-link" to={ROUTES.imports}>
           {LABELS.actionImportPastBeamtime}

@@ -3132,24 +3132,8 @@ a.settings-jump-btn {
   box-shadow: var(--shadow-card);
 }
 
-/* ---- Load Materials (2026-10-12) ------------------------------------------
-   Two widgets under the page header. The grid is `.onramps` (runner.css), whose
-   auto-fit tracks are pinned by `responsive-layout-defects.test.ts`; the cards
-   are `components/Widget.tsx`. */
-.load-page {
-  max-width: 1040px;
-}
-.load-page .gov-banner {
-  margin-bottom: var(--space-lg);
-}
-.load-widget-cta {
-  align-self: flex-start;
-}
-/* In the info panel the refusal statement is ordinary info prose. */
-.load-page .onramps {
-  margin-top: 0;
-  align-items: start;
-}
+/* ~~---- Load Materials (2026-10-12) ----~~ — `.load-page`, `.load-widget-cta` and
+   `.load-page .onramps` removed 2026-11-16 with the page (`/load` redirects). */
 .helptip-panel .notfound-scope {
   margin: 0;
   font-size: inherit;

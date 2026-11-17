@@ -156,13 +156,14 @@ function GuidePage() {
         </Section>
 
         <Section id="hig-trouble" title={COPY.troubleTitle}>
-          <dl className="hig-trouble" aria-label={COPY.troubleCaption}>
+          {/* Named by the section's own heading; a `<dl>` takes no `aria-label`. */}
+          <dl className="hig-trouble">
             {COPY.trouble.map((row) => (
               <div className="hig-trouble-row" key={row.what}>
                 <dt>{row.what}</dt>
                 <dd>
-                  {row.cmd && cmd(row.cmd, `the command ${row.cmd}`)}
                   {row.text && <p>{row.text}</p>}
+                  {row.cmd && cmd(row.cmd, `the command ${row.cmd}`)}
                 </dd>
               </div>
             ))}

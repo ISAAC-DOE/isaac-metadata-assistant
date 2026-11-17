@@ -268,7 +268,7 @@ describe('A11Y — heading levels never skip a level or go backwards', () => {
       2 /* Kinds of Change */,
       2 /* Workflow */,
       2 /* Evidence Support */,
-      2 /* Historical Imports */,
+      // ~~2 /* Historical Imports */~~ — the widget was removed 2026-11-16.
     ]);
     assertMonotonic(found, 'Statistics page · Overview');
   });

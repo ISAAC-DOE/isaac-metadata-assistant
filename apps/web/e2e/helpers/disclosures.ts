@@ -178,9 +178,11 @@ export const PROSE_DISCLOSURES: Readonly<Record<string, number>> = Object.freeze
    it mounts the page panel and Historical Imports = 2 — the count is no longer
    scope-independent, by design. Build lost Platform Metrics: 6. The My Stats
    surface is retired while no personal source can return data. */
+/* 2026-11-16: the Historical Imports widget (and its panel) left Overview, so the
+   ordinary empty workspace mounts only the page panel (1) and the populated one 6. */
 export const WIDGET_INFO_PANELS: Readonly<Record<string, number>> = Object.freeze({
-  statistics: 2,
-  'statistics-example': 7,
+  statistics: 1,
+  'statistics-example': 6,
   // ~~'statistics-build': 6~~ — the surface retired 2026-11-16 (a developer tab now).
   /* Settings and Governance & Safety, MEASURED in Chromium on 2026-10-19 (the merge
      of #289 into the Settings branch), each read out of this helper's own failure

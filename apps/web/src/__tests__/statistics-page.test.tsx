@@ -24,7 +24,6 @@ import {
   graphStatusAvailable,
   graphStatusPreRegen,
   graphStatusUnavailable,
-  importListFixture,
   healthSynthetic,
   memoryConceptsAvailable,
   memoryFilesAvailable,
@@ -764,8 +763,8 @@ describe('Workspace at a Glance', () => {
    *
    * `Open Questions` is 5 + 0 + 0 + 0 + 2 = 7 over the five fixture rows (the
    * same total the Open Questions section states, transcribed from the fixture
-   * by hand per choice 2 at the head of this file), and `Historical Imports` is
-   * `importListFixture.total`.
+   * by hand per choice 2 at the head of this file). (~~`Historical Imports` is
+   * `importListFixture.total`~~ — the widget was removed 2026-11-16.)
    */
 
   /*
@@ -1248,7 +1247,8 @@ describe('the visual-first order', () => {
 
     const overview = renderStatistics(statisticsRoutes());
     await settled();
-    assertNoMeasurementInInfo(overview.container, 7);
+    // 6 since 2026-11-16: the Historical Imports widget and its info panel left.
+    assertNoMeasurementInInfo(overview.container, 6);
   });
 
   function assertNoMeasurementInInfo(container: HTMLElement, expected: number): void {
@@ -1431,7 +1431,7 @@ describe('loading', () => {
       ['Kinds of Change', 'Loading the kinds of change…'],
       ['Workflow', 'Loading the workflow…'],
       ['Evidence Support', 'Loading the evidence counts…'],
-      ['Historical Imports', 'Loading the import sessions…'],
+      // ~~['Historical Imports', …]~~ — the widget was removed 2026-11-16.
     ];
     for (const [region, label] of onOverview) {
       expect(within(regionOf(region)).getByText(label)).toBeInTheDocument();
@@ -1464,12 +1464,10 @@ describe('loading', () => {
 describe('partial failure — one dead source degrades only what reads it', () => {
   const dead: RouteEntry = { status: 500, body: { detail: 'synthetic failure' } };
 
-  it('runtime/records down — Activity, Imports and the whole Build tab still render', async () => {
+  it('runtime/records down — Activity and the whole Build tab still render', async () => {
     renderStatistics(statisticsRoutes({ records: dead }));
     await settled();
 
-    // The import figures read /api/imports, which is still alive.
-    expect(cardValue('Historical Imports', 'Import Sessions')).toBe('2');
     // No record figure is substituted for the ones that were not received.
     expect(screen.queryByText('Total Records')).toBeNull();
 
@@ -1494,30 +1492,8 @@ describe('partial failure — one dead source degrades only what reads it', () =
     expect(cardValue('Runtime', 'Runtime Mode')).toBe('Synthetic-Only');
   });
 
-  /*
-   * THE SIXTH SOURCE, ADDED WITH THE HISTORICAL IMPORTS FIGURES. It is the
-   * mirror of the case above and exists for the same reason: a new read must
-   * degrade only what reads it, and its tile must not print `0`.
-   */
-  it('imports down — every record figure still renders, and the tile states the absence', async () => {
-    renderStatistics(statisticsRoutes({ imports: dead }));
-    await settled();
-
-    expect(cardValue('Records', 'Total Records')).toBe(String(RECORD_COUNT));
-    /* ~~the `Historical Imports` TILE in the glance row reads `Not Available`~~
-       — the tile was a restatement of this widget's own headline and left with
-       the 2026-10-12 redesign. The property it carried survives in a stronger
-       form: with the source dead there is NO import headline at all, and in
-       particular no `0`, which would claim the workspace holds no session. */
-    const section = regionOf('Historical Imports');
-    expect(section.querySelectorAll('dl.stat-card')).toHaveLength(0);
-    expect(within(section).queryByText('0')).toBeNull();
-
-    // One alarm, at the widget that reads it, with the recourse.
-    expect(within(section).getAllByRole('alert')).toHaveLength(1);
-    expect(within(section).getByRole('button', { name: 'Retry' })).toBeInTheDocument();
-    expect(screen.getAllByRole('alert')).toHaveLength(1);
-  });
+  /* ~~imports down — every record figure still renders~~ — removed 2026-11-16 with the
+     Historical Imports widget and its `GET /api/imports` read. */
 
   it('about down — the record cards still render', async () => {
     renderStatistics(statisticsRoutes({ about: dead }));
@@ -1825,12 +1801,12 @@ describe('Refresh', () => {
        discriminator: the pre-fix page announced exactly this clean sentence with
        the CURRENT time, for a round in which a read had failed. */
     expect(live?.textContent).toMatch(
-      /^Refresh finished, but 1 of 7 reads failed — the figures shown were last read at /,
+      /^Refresh finished, but 1 of 6 reads failed — the figures shown were last read at /,
     );
     expect(live?.textContent).not.toMatch(/^Refresh finished\. The page last read the API at/);
 
     // Stated on SCREEN as well, not only to a screen reader.
-    expect(screen.getByText(/1 of 7 reads failed on the most recent attempt/)).toBeInTheDocument();
+    expect(screen.getByText(/1 of 6 reads failed on the most recent attempt/)).toBeInTheDocument();
     expect(
       screen.getByText(/either absent or older than the last-read time above/),
     ).toBeInTheDocument();
@@ -1851,8 +1827,8 @@ describe('Refresh', () => {
     expect(container.querySelector('p.sr-only[role="status"]')).toBe(live);
   });
 
-  it('a Refresh where ALL SEVEN reads fail leaves the timestamp at the last successful read', async () => {
-    const allSevenOnce = {
+  it('a Refresh where ALL SIX reads fail leaves the timestamp at the last successful read', async () => {
+    const allSixOnce = {
       'GET /api/runtime/records': firstCallOnly(statisticsRecordsBody),
       'GET /api/graph/status': firstCallOnly(graphStatusAvailable),
       'GET /api/about': firstCallOnly(aboutResponse),
@@ -1868,12 +1844,12 @@ describe('Refresh', () => {
          is the SEVENTH, added 2026-09-18 with `ACT-004`, and it is here for the
          same reason a third time: the round's denominator is COUNTED, so a read
          missing from this map would make the sentence below describe a smaller
-         round than the page actually ran. */
+         round than the page actually ran. `/api/imports` LEFT on 2026-11-16 with
+         the Historical Imports widget, so the round is six again. */
       'GET /api/schema': firstCallOnly(schemaBrowserFixture),
-      'GET /api/imports': firstCallOnly(importListFixture),
       'GET /api/activity/summary': firstCallOnly(activitySummaryFixture),
     };
-    const { container } = renderStatistics(allSevenOnce);
+    const { container } = renderStatistics(allSixOnce);
     await settled();
     const live = container.querySelector('p.sr-only[role="status"]');
     expect(live).not.toBeNull();
@@ -1893,7 +1869,7 @@ describe('Refresh', () => {
     await waitFor(() => expect(live?.textContent).toMatch(/^Refresh finished/));
 
     expect(live?.textContent).toMatch(
-      /^Refresh finished, but 7 of 7 reads failed — the figures shown were last read at /,
+      /^Refresh finished, but 6 of 6 reads failed — the figures shown were last read at /,
     );
     expect(live?.textContent).not.toContain('The page last read the API at');
 
@@ -1904,13 +1880,12 @@ describe('Refresh', () => {
     expect(metaLabel(container)).toBe('Last Read From the API');
 
     // Stated on screen, once, as information rather than as an alert.
-    expect(screen.getByText(/7 of 7 reads failed on the most recent attempt/)).toBeInTheDocument();
+    expect(screen.getByText(/6 of 6 reads failed on the most recent attempt/)).toBeInTheDocument();
     expect(screen.queryAllByRole('alert')).toHaveLength(0);
 
     // Every figure is still the one that was actually read, unchanged and
     // un-substituted — the page keeps its data instead of blanking.
     expect(cardValue('Records', 'Total Records')).toBe(String(RECORD_COUNT));
-    expect(cardValue('Historical Imports', 'Import Sessions')).toBe('2');
 
     // Still the same live region, with the failure note mounted above it.
     expect(container.querySelector('p.sr-only[role="status"]')).toBe(live);
@@ -1927,7 +1902,6 @@ describe('Refresh', () => {
       'GET /api/about': firstCallOnly(aboutResponse),
       'GET /api/openapi': firstCallOnly(openApiFixture),
       'GET /api/schema': firstCallOnly(schemaBrowserFixture),
-      'GET /api/imports': firstCallOnly(importListFixture),
       'GET /api/activity/summary': firstCallOnly(activitySummaryFixture),
     });
     await settled();
@@ -1935,7 +1909,7 @@ describe('Refresh', () => {
     await waitFor(() =>
       expect(
         build.container.querySelector('p.sr-only[role="status"]')?.textContent ?? '',
-      ).toMatch(/^Refresh finished, but 7 of 7 reads failed/),
+      ).toMatch(/^Refresh finished, but 6 of 6 reads failed/),
     );
     expect(cardValue('API Surface', 'Documented Operations')).toBe(OPERATION_COUNT);
     expect(figureValue('Project Memory', 'Source Graph Nodes')).toBe(String(graphStatusAvailable.node_count));
@@ -2049,19 +2023,11 @@ describe('privacy — nothing identifying reaches the DOM', () => {
       /session[\s_-]*(id|ids|token|tokens|key|keys|cookie|header)/i.test(text),
       'a credential-shaped session reference appeared',
     ).toBe(false);
-    /* ~~TWO homes — the Historical Imports section and the glance row's tile~~ —
-       ONE since 2026-10-12: the tile restated the import widget's own headline
-       and left with the redesign, so the exemption NARROWS to the one widget
-       that renders the noun. A narrower exemption is a stronger guard. */
-    const SESSION_NOUN_HOMES = 'section[aria-labelledby="stats-imports"]';
-    expect(
-      /\bsession/i.test(pageTextWithout(container, SESSION_NOUN_HOMES)),
-      '"session" appeared outside the one widget that renders the import-session noun',
-    ).toBe(false);
-    /* The negative control: the exemption is not vacuous — the noun really is
-       rendered in the exempted home, so an empty exclusion would be caught
-       rather than read as a clean pass. */
-    expect(/\bimport sessions?\b/i.test(textOf(regionOf('Historical Imports')))).toBe(true);
+    /* ~~TWO homes … ONE since 2026-10-12 (`section[aria-labelledby="stats-imports"]`)~~ —
+       NONE since 2026-11-16: the Historical Imports widget, the one place that rendered
+       the import-session noun, was removed. So the bare word is banned PAGE-WIDE again,
+       which is the strongest form this guard has had. */
+    expect(/\bsession/i.test(text), '"session" appeared on the Statistics page').toBe(false);
     expect(container.querySelector('.stats-keyed-figures')?.textContent).not.toMatch(/session/i);
 
     // No record content in the AGGREGATE sections: not a title, not an id, not
@@ -2186,13 +2152,12 @@ describe('the Overview dashboard', () => {
     expect([...counts].sort((a, b) => b - a)).not.toEqual(counts);
   });
 
-  it('Historical Imports: sessions by the furthest step each has reached', async () => {
-    renderStatistics(statisticsRoutes());
+  // ~~Historical Imports: sessions by the furthest step~~ — the widget was removed 2026-11-16.
+  it('renders no Historical Imports widget and reads no /api/imports (2026-11-16)', async () => {
+    const { calls } = renderStatistics(statisticsRoutes());
     await settled();
-    expect(cardValue('Historical Imports', 'Import Sessions')).toBe(String(importListFixture.total));
-    const rows = chartTableRows('Historical Imports', 'Import sessions by furthest step, out of 2');
-    expect(rows.reduce((sum, [, n]) => sum + Number(n), 0)).toBe(2);
-    expect(rows.map(([label]) => label).sort()).toEqual(['New Import', 'Reconstructed']);
+    expect(screen.queryByRole('region', { name: 'Historical Imports' })).toBeNull();
+    expect(calls.some((key) => key.includes('/api/imports'))).toBe(false);
   });
 
   it('offers two tabs, and an old My Stats link lands on Overview', async () => {
@@ -2239,7 +2204,8 @@ describe('the Overview dashboard', () => {
     }
     // No chart and no zero-filled row anywhere on the record side.
     expect(records.querySelector('figure.stats-chart')).toBeNull();
-    expect(regionOf('Historical Imports')).toBeTruthy();
+    // ~~Historical Imports still renders~~ — the widget was removed 2026-11-16.
+    expect(screen.queryByRole('region', { name: 'Historical Imports' })).toBeNull();
   });
 });
 
