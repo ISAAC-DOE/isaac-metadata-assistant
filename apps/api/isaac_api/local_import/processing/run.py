@@ -51,6 +51,7 @@ from . import _deps
 from . import athena as A
 from . import core as C
 from . import protocol as P
+from . import quick_merge as QM
 from .channels import MODE_TRANSMISSION, ChannelChoice, choose_channels, dead_candidates, needs_review_statement
 from . import reference as REF
 from .edges import edge_energy
@@ -2644,6 +2645,12 @@ def process_group(group: Mapping, ctx: _Ctx, athena_entry: Mapping | None = None
         if p.is_file():
             files.append({"role": role, "relative_path": PurePosixPath(p.relative_to(ctx.bundle_dir)).as_posix(), "sha256": sha256_file(p)})
     res["outputs"] = {"files": files, "e0_eV": nm["e0_eV"], "edge_step": step, "points": int(g2.size)}
+    # 1.11.0: the scientists' quick merges LINKED to this group (by the stored legacy-number link), compared as a rough
+    # reference; after run_id and outside every hashed file, so no id moves; never preferred, never truth
+    quick = QM.compare_group(group, ctx, grid_ok=g2, mean=mean, nm=nm, M=M, grid=grid, used_entries=used_entries,
+                             inputs=res["inputs"])
+    if quick:
+        res[QM.RESULT_KEY] = quick
 
     out = [res]
     if athena_entry is not None:

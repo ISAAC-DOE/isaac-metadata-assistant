@@ -79,8 +79,10 @@ def absorber_for_group(bundle: Mapping, group: Mapping) -> dict:
             continue
         linked += 1
         states = po.get("states") or {}
+        rule = links[0].get("rule_id") or "isaac.processed_output.link_by_run_stem.v0"
         extra = {"processed_output_id": po["processed_output_id"],
-                 "link": "proposed by name (isaac.processed_output.link_by_run_stem.v0), not confirmed"}
+                 "link": (f"proposed by legacy number ({rule}), not confirmed" if rule.endswith("link_by_legacy_number.v0")
+                          else f"proposed by name ({rule}), not confirmed")}
         # ONE processed output may hold several files (e.g. .nor and .xmu of one stem), each
         # with its own header: every statement is a witness, so two files that disagree show.
         for st in states.get("element_symbol") or ():

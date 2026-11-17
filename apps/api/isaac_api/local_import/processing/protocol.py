@@ -32,6 +32,7 @@ RULE_VERSIONS_SINCE_PROTOCOL_VERSION: dict[str, Any] = {
         "isaac.athena.match_by_name.v1",
         "isaac.athena.project_normalisation.v1",
         "isaac.athena.scientist_merge_label.v0",
+        "isaac.processed_output.quick_merge_compare.v0",
         "isaac.xas.calibration_overrides_stricter_only.v0",
         "isaac.xas.calibration_shift_size_confirmed.v0",
         "isaac.xas.edge_above_noise.v0",
