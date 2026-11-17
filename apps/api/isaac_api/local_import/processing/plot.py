@@ -2,8 +2,9 @@
 normalised result (+ the scientist's Athena normalisation when matched). matplotlib Agg.
 
 Each scan is named by its real scan number (``scan_labels``, from the caller), and the scan-selection proposal
-(``scan_proposals``) is marked: a scan proposed for leaving out is dashed, one to look at dash-dotted, each said in the
-legend. The proposals are NOT applied: the footnote (``merge_note``) says the merge is raw mu of every scan used. The
+(``scan_proposals``) is marked: a scan proposed for leaving out is dotted with triangle markers, one to look at
+dash-dotted, a flagged one dashed, each said in the legend. The kinds differ by dash pattern (and marker), not by colour
+alone. The proposals are NOT applied: the footnote (``merge_note``) says the merge is raw mu of every scan used. The
 PNG is never hashed into a run or result id."""
 
 from __future__ import annotations
@@ -17,16 +18,21 @@ NEEDS_LOOK = "needs_look"
 EXCLUDE_LABEL = "(proposed: leave out)"
 LOOK_LABEL = "(proposed: look at)"
 FLAGGED_LABEL = "(flagged)"
+#: The leave-out line: densely dotted (flagged is "--", a look is "-."), with a marker on every Nth-of-the-line point.
+EXCLUDE_DASH = (0, (1, 1.5))
+EXCLUDE_MARK_EVERY = 0.1  # matplotlib: a marker every 10% of the line's length, whatever the grid
 
 
 def scan_style(position: int, *, label: str | None, proposal: str | None, flagged: bool) -> tuple[str, dict]:
-    """``(legend label, line style)`` of one scan: plain, flagged (red dashed), proposed for leaving out (purple
-    dashed), proposed for a look (amber dash-dot). A scan both flagged and proposed carries both words."""
+    """``(legend label, line style)`` of one scan: plain (solid), flagged (red dashed), proposed for leaving out
+    (purple dotted with a downward-triangle marker), proposed for a look (amber dash-dot). The three marked kinds
+    differ by dash pattern (and the leave-out kind by marker), never by colour alone, so they stay apart in greyscale
+    and for a reader who does not see the colours. A scan both flagged and proposed carries both words."""
     name = label or f"scan position {position + 1}"
     style: dict = dict(lw=0.8, alpha=0.6)
     words = []
     if proposal == EXCLUDE_PROPOSED:
-        style.update(color="#7d3c98", ls="--", lw=1.3, alpha=0.95)
+        style.update(color="#7d3c98", ls=EXCLUDE_DASH, lw=1.4, alpha=0.95, marker="v", ms=4, markevery=EXCLUDE_MARK_EVERY)
         words.append(EXCLUDE_LABEL)
     elif proposal == NEEDS_LOOK:
         style.update(color="#b9770e", ls="-.", lw=1.3, alpha=0.95)

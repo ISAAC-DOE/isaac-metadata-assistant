@@ -1382,6 +1382,40 @@ _QUICK_MERGE_METRICS = ("rms_norm", "e0_delta_eV", "e0_isaac_eV", "e0_found_in_i
                         "edge_step_scientist", "overlap_points", "points")
 #: The proposals a scan-selection row can carry that ask the scientist something.
 _SEL_EXCLUDE, _SEL_LOOK, _SEL_INCLUDE = "exclude_proposed", "needs_look", "include"
+#: ``show processing-result``: how many items of a free list (observations, evolving metrics, assumptions, reasons, a
+#: list of file names) are printed, and how long one sentence may be (``--full`` prints all of each).
+LIST_ITEMS_SHOWN = 8
+TEXT_SHOWN = 400
+
+
+def _as_list(value: Any) -> list:
+    """A stored list as a list: ``None`` is empty, a lone value is one item. A malformed bundle never crashes ``show``
+    and a string is never split into its characters."""
+    if value is None:
+        return []
+    if isinstance(value, (list, tuple)):
+        return list(value)
+    return [value]
+
+
+def _bounded(items: Sequence, *, full: bool, cap: int = LIST_ITEMS_SHOWN) -> list:
+    """``items`` (each sentence cut at :data:`TEXT_SHOWN`), at most ``cap`` of them with a last item counting the
+    rest; everything with ``full``."""
+    items = list(items)
+    if full:
+        return items
+    out = [_short(x, TEXT_SHOWN) for x in items[:cap]]
+    if len(items) > cap:
+        out.append(f"... and {len(items) - cap} more (pass --full)")
+    return out
+
+
+def _selection_rows(r: Mapping) -> list[Mapping]:
+    """The rows of ``r``'s scan-selection proposal that are objects (a malformed row is left out, never a crash)."""
+    sel = r.get("scan_selection")
+    if not isinstance(sel, Mapping):
+        return []
+    return [x for x in _as_list(sel.get("scans")) if isinstance(x, Mapping)]
 
 
 def _selection_numbers(r: Mapping) -> list:
@@ -1389,9 +1423,13 @@ def _selection_numbers(r: Mapping) -> list:
     row's own ``scan``; ``None`` where no number is known."""
     from . import bundle as B
 
-    rows = list(((r.get("scan_selection") or {}).get("scans")) or ())
-    inputs = list(r.get("inputs") or ())
-    numbers = B.input_scan_numbers(inputs)[0] if len(inputs) == len(rows) else [None] * len(rows)
+    sel = r.get("scan_selection")
+    raw = _as_list(sel.get("scans")) if isinstance(sel, Mapping) else []
+    rows = _selection_rows(r)
+    inputs = [x for x in _as_list(r.get("inputs")) if isinstance(x, Mapping)]
+    # inputs pair with rows by position, so only when no row was malformed (else each row's own ``scan``)
+    numbers = (B.input_scan_numbers(inputs)[0] if len(inputs) == len(rows) == len(raw)
+               else [None] * len(rows))
     out = []
     for row, n in zip(rows, numbers):
         own = row.get("scan")
@@ -1399,11 +1437,15 @@ def _selection_numbers(r: Mapping) -> list:
     return out
 
 
-def _scans_named(nums: Sequence, files: Sequence[str]) -> str:
-    """Scans said by number ("1,3-4") when every one has a number and none repeats, else by file name."""
-    if nums and all(isinstance(n, int) for n in nums) and len(set(nums)) == len(nums):
+def _scans_named(nums: Sequence, files: Sequence[str], *, full: bool = False) -> str:
+    """Scans said by number ("1,3-4") when every one has a number and none repeats, else by file name: at most
+    :data:`LIST_ITEMS_SHOWN` names and a count of the rest, unless ``full``."""
+    if nums and all(isinstance(n, int) and not isinstance(n, bool) for n in nums) and len(set(nums)) == len(nums):
         return f"scan{'s' if len(nums) > 1 else ''} {_scan_ranges(nums)}"
-    return ", ".join(files)
+    files = list(files)
+    if full or len(files) <= LIST_ITEMS_SHOWN:
+        return ", ".join(files)
+    return ", ".join(files[:LIST_ITEMS_SHOWN]) + f", and {len(files) - LIST_ITEMS_SHOWN} more (pass --full)"
 
 
 def scan_selection_brief(r: Mapping) -> str | None:
@@ -1414,7 +1456,7 @@ def scan_selection_brief(r: Mapping) -> str | None:
         return None
     if sel.get("status") != "evaluated":
         return "not evaluated (nothing proposed)"
-    rows = list(sel.get("scans") or ())
+    rows = _selection_rows(r)
     nums = _selection_numbers(r)
     merged = [k for k, x in enumerate(rows) if x.get("proposal") in (_SEL_INCLUDE, _SEL_LOOK, _SEL_EXCLUDE)]
 
@@ -1438,10 +1480,10 @@ def quick_merge_agreement(r: Mapping) -> str | None:
     each linked merge's verdict, or ``None`` when none is linked."""
     from .processing.quick_merge import RESULT_KEY
 
-    qms = [q for q in r.get(RESULT_KEY) or () if isinstance(q, Mapping)]
+    qms = [q for q in _as_list(r.get(RESULT_KEY)) if isinstance(q, Mapping)]
     if not qms:
         return None
-    return ", ".join(str(q.get("verdict")) for q in qms[:QUICK_MERGES_SHOWN]) + (
+    return ", ".join(str(q.get("verdict") or "no verdict") for q in qms[:QUICK_MERGES_SHOWN]) + (
         f", and {len(qms) - QUICK_MERGES_SHOWN} more" if len(qms) > QUICK_MERGES_SHOWN else "") + " (rough reference)"
 
 
@@ -1452,7 +1494,7 @@ def _scan_selection_view(r: Mapping, *, full: bool = False) -> dict | None:
     sel = r.get("scan_selection")
     if not isinstance(sel, Mapping):
         return None
-    rows = list(sel.get("scans") or ())
+    rows = _selection_rows(r)
     nums = _selection_numbers(r)
     out: dict = {"rule_id": sel.get("rule_id"), "status": sel.get("status"),
                  **({"detail": sel["detail"]} if sel.get("detail") else {}),
@@ -1463,28 +1505,33 @@ def _scan_selection_view(r: Mapping, *, full: bool = False) -> dict | None:
         counts[str(x.get("proposal"))] = counts.get(str(x.get("proposal")), 0) + 1
     out["counts"] = counts
     of_file = {str(x.get("file")): n for x, n in zip(rows, nums)}
-    window = list(sel.get("stable_window") or ())
+    window = _as_list(sel.get("stable_window"))
     out["stable_window"] = (_scans_named([of_file.get(str(f), f if isinstance(f, int) else None) for f in window],
-                                         [str(f) for f in window]) if window else None)
+                                         [str(f) for f in window], full=full) if window else None)
     if sel.get("evolving_metrics"):
-        out["evolving_metrics"] = list(sel["evolving_metrics"])
-    out["observations"] = list(sel.get("group_observations") or ())  # the edge-step observation: never a reason
+        out["evolving_metrics"] = _bounded(_as_list(sel["evolving_metrics"]), full=full)
+    # the edge-step observation: never a reason
+    out["observations"] = _bounded(_as_list(sel.get("group_observations")), full=full)
     if full:
         out["edge_step_change"] = sel.get("edge_step_change")
         out["merge_snr"] = sel.get("merge_snr")
         out["change_point"] = sel.get("change_point")
 
     def row(x, n):
-        return {"scan": n, "file": x.get("file"), "proposal": x.get("proposal"), "reasons": list(x.get("reasons") or ()),
-                "said": "; ".join(str(s) for s in x.get("said") or ()),
+        said = "; ".join(str(s) for s in _as_list(x.get("said")))
+        return {"scan": n, "file": x.get("file"), "proposal": x.get("proposal"),
+                "reasons": _bounded(_as_list(x.get("reasons")), full=full),
+                "said": said if full else _short(said, TEXT_SHOWN),
                 **({"exclude_as": x.get("exclude_as")} if x.get("proposal") in (_SEL_EXCLUDE, _SEL_LOOK) else {}),
-                **({"metrics": _compact(x.get("metrics") or {})} if full else {})}
+                **({"metrics": _compact(x.get("metrics") if isinstance(x.get("metrics"), Mapping) else {})}
+                   if full else {})}
 
     rank = {_SEL_EXCLUDE: 0, _SEL_LOOK: 1}
     order = sorted(range(len(rows)), key=lambda k: (rank.get(rows[k].get("proposal"), 2), k))
     plain = [k for k in order if rows[k].get("proposal") == _SEL_INCLUDE and not rows[k].get("reasons")]
     shown = order if full else [k for k in order if k not in plain]
     if not full and plain:
+        # by number one range line ("scans 5,7-10"); by file name at most LIST_ITEMS_SHOWN names and a count
         out["included_without_remark"] = _scans_named([nums[k] for k in plain], [str(rows[k].get("file")) for k in plain])
     cap = len(shown) if full else SELECTION_ROWS_SHOWN
     out["scans"] = [row(rows[k], nums[k]) for k in sorted(shown[:cap])]
@@ -1501,22 +1548,22 @@ def _quick_merges_view(r: Mapping, *, full: bool = False) -> list | None:
     answer key): file, how it was matched, role, verdict, assumptions and the key metrics."""
     from .processing.quick_merge import RESULT_KEY
 
-    qms = [q for q in r.get(RESULT_KEY) or () if isinstance(q, Mapping)]
+    qms = [q for q in _as_list(r.get(RESULT_KEY)) if isinstance(q, Mapping)]
     if not qms:
         return None
-    rows = list(((r.get("scan_selection") or {}).get("scans")) or ())
+    rows = _selection_rows(r)
     of_file = {str(x.get("file")): n for x, n in zip(rows, _selection_numbers(r))}
     out = []
     for q in qms[: len(qms) if full else QUICK_MERGES_SHOWN]:
-        mb = q.get("matched_by") or {}
-        m = q.get("metrics") or {}
-        raw = q.get("raw_comparison") or {}
+        mb = q.get("matched_by") if isinstance(q.get("matched_by"), Mapping) else {}
+        m = q.get("metrics") if isinstance(q.get("metrics"), Mapping) else {}
+        raw = q.get("raw_comparison") if isinstance(q.get("raw_comparison"), Mapping) else {}
         view = {
             "processed_output_id": q.get("processed_output_id"), "file": q.get("relative_path"),
             "matched_by": {k: mb.get(k) for k in ("rule_id", "run_id", "status") if mb.get(k) is not None},
             "role": q.get("role"), "preferred_for_record": False, "treated_as_truth": False,
             "verdict": q.get("verdict"), **({"reason": q["reason"]} if q.get("reason") else {}),
-            "normalization": q.get("normalization"), "assumptions": list(q.get("assumptions") or ()),
+            "normalization": q.get("normalization"), "assumptions": _bounded(_as_list(q.get("assumptions")), full=full),
             "metrics": ({k: v for k, v in m.items() if not isinstance(v, (list, dict))} if full
                         else {k: m[k] for k in _QUICK_MERGE_METRICS if k in m}),
             **({"raw_comparison": {k: raw.get(k) for k in ("median_ratio_to_isaac_merged_mu", "relative_rms_residual")}}
@@ -1526,10 +1573,10 @@ def _quick_merges_view(r: Mapping, *, full: bool = False) -> list | None:
         }
         hint = q.get("scan_subset_hint")
         if isinstance(hint, Mapping):
-            left = [str(f) for f in hint.get("scans_not_in_it") or ()]
+            left = [str(f) for f in _as_list(hint.get("scans_not_in_it"))]
             view["scan_subset_hint"] = {
                 **{k: hint.get(k) for k in ("tried", "subsets_tried", "subsets_that_rebuild", "applied") if k in hint},
-                **({"scans_not_in_it": _scans_named([of_file.get(f) for f in left], left)} if left else {}),
+                **({"scans_not_in_it": _scans_named([of_file.get(f) for f in left], left, full=full)} if left else {}),
                 **({"statement": hint["statement"]} if hint.get("statement") else {}),
             }
         out.append(view)

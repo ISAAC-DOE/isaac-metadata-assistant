@@ -172,6 +172,60 @@ def test_scans_whose_numbers_repeat_are_named_by_file():
     assert FILE.format(3) in cli._row("processing-results", r)["scan_selection"]
 
 
+def test_show_bounds_every_free_list_and_full_prints_all():
+    """Observations, evolving metrics, assumptions, a by-file-name scan list and the subset hint are each bounded."""
+    r = _result()
+    sel_in = r["scan_selection"]
+    sel_in["group_observations"] = [f"SYN observation {k}" for k in range(30)]
+    sel_in["evolving_metrics"] = [f"syn_metric_{k}" for k in range(30)]
+    sel_in["scans"] += [_row(n, "include") for n in range(11, 60)]
+    r["inputs"] += [{"source_id": f"src-{n:03d}", "relative_path": f"SYN_ZZ9_dir/{FILE.format(n)}", "scan": 1, "used": True}
+                    for n in range(11, 60)]
+    for x, i in zip(sel_in["scans"], r["inputs"]):
+        x["scan"] = i["scan"] = 1  # numbers repeat: every list falls back to file names
+    sel_in["stable_window"] = [FILE.format(n) for n in range(5, 60)]
+    q = r["scientist_quick_merges"][0]
+    q["assumptions"] = [f"SYN assumption {k}" for k in range(30)]
+    q["scan_subset_hint"]["scans_not_in_it"] = [FILE.format(n) for n in range(5, 60)]
+    view = _view(r)
+    sel, qv = view["scan_selection"], view["scientist_quick_merges"][0]
+    cap = cli.LIST_ITEMS_SHOWN
+    assert len(sel["observations"]) == cap + 1 and sel["observations"][-1] == "... and 22 more (pass --full)"
+    assert len(sel["evolving_metrics"]) == cap + 1 and len(qv["assumptions"]) == cap + 1
+    for said in (sel["included_without_remark"], sel["stable_window"], qv["scan_subset_hint"]["scans_not_in_it"]):
+        assert said.count(".dat") == cap and "more (pass --full)" in said, said
+    assert len(json.dumps(view)) < 20000
+    full = _view(r, full=True)
+    assert len(full["scan_selection"]["observations"]) == 30 and len(full["scientist_quick_merges"][0]["assumptions"]) == 30
+    assert full["scan_selection"]["stable_window"].count(".dat") == 55
+
+
+def test_malformed_selection_rows_never_crash_show():
+    r = _result()
+    sel = r["scan_selection"]
+    sel["scans"] = [7, None, "SYN junk", *sel["scans"][:3], {"file": FILE.format(99), "reasons": "a lone string",
+                                                            "said": "one sentence", "metrics": 5}]
+    sel["group_observations"], sel["evolving_metrics"], sel["stable_window"] = "one SYN observation", 3, 5
+    r["scientist_quick_merges"][0].update(assumptions="one SYN assumption", metrics=[1, 2], matched_by="SYN")
+    r["scientist_quick_merges"][0]["scan_subset_hint"]["scans_not_in_it"] = 4
+    view = _view(r)
+    full = _view(r, full=True)
+    assert len(view["scan_selection"]["scans"]) == len(full["scan_selection"]["scans"]) == 4
+    assert view["scan_selection"]["observations"] == ["one SYN observation"]
+    last = [x for x in full["scan_selection"]["scans"] if x["file"] == FILE.format(99)][0]
+    assert last["reasons"] == ["a lone string"] and last["said"] == "one sentence" and last["metrics"] == {}
+    assert view["scientist_quick_merges"][0]["assumptions"] == ["one SYN assumption"]
+    cli._row("processing-results", r)
+    r["scan_selection"]["scans"] = "not a list"
+    assert _view(r)["scan_selection"]["scans"] == []
+
+
+def test_a_quick_merge_without_a_verdict_never_prints_none():
+    r = _result()
+    r["scientist_quick_merges"][0]["verdict"] = None
+    assert cli._row("processing-results", r)["quick_merge_agreement"] == "no verdict (rough reference)"
+
+
 def test_the_quick_merge_key_is_the_processing_modules():
     from isaac_api.local_import.processing import quick_merge as QM
 
@@ -185,12 +239,24 @@ def test_the_legend_marks_a_proposal_and_a_flag():
     from isaac_api.local_import.processing import plot as PL
 
     label, style = PL.scan_style(0, label="scan 1", proposal="exclude_proposed", flagged=False)
-    assert label == "scan 1 (proposed: leave out)" and style["ls"] == "--"
+    assert label == "scan 1 (proposed: leave out)" and style["ls"] == PL.EXCLUDE_DASH and style["marker"] == "v"
     label, style = PL.scan_style(1, label="scan 3", proposal="needs_look", flagged=True)
     assert label == "scan 3 (proposed: look at) (flagged)" and style["ls"] == "-."
     label, style = PL.scan_style(2, label="scan 5", proposal="include", flagged=False)
     assert label == "scan 5" and "ls" not in style
     assert PL.scan_style(3, label=None, proposal=None, flagged=False)[0] == "scan position 4"
+
+
+def test_each_marked_kind_differs_by_more_than_colour():
+    """Leave-out, look-at and flagged must stay apart in greyscale: each its own dash pattern or marker."""
+    from isaac_api.local_import.processing import plot as PL
+
+    kinds = {"leave out": PL.scan_style(0, label="s", proposal="exclude_proposed", flagged=False)[1],
+             "look at": PL.scan_style(0, label="s", proposal="needs_look", flagged=False)[1],
+             "flagged": PL.scan_style(0, label="s", proposal=None, flagged=True)[1],
+             "plain": PL.scan_style(0, label="s", proposal="include", flagged=False)[1]}
+    shapes = {k: (str(v.get("ls", "-")), v.get("marker")) for k, v in kinds.items()}
+    assert len(set(shapes.values())) == len(shapes), shapes
 
 
 def _proc_case(tmp_path):

@@ -176,7 +176,7 @@ it finds one. Show per group, in words:
   remark as a row (`scan` by its real number, `file`, `proposal`, `reasons`, `said`, and `exclude_as` for a scan
   proposed for leaving out or a look), and `included_without_remark` for the rest in one line. At most 20 rows
   (`scans_not_shown` counts the others); `--full` prints every row with its metrics, which you give only when asked.
-  The plot marks the same scans: dashed purple "(proposed: leave out)", dash-dot amber "(proposed: look at)", named
+  The plot marks the same scans: dotted purple with triangle markers "(proposed: leave out)", dash-dot amber "(proposed: look at)" (a flagged scan is dashed red), named
   by scan number; its footnote says the proposals are NOT applied and the merge is raw mu of every scan used;
 - **the scientists' quick beamtime merges** (rule `isaac.processed_output.quick_merge_compare.v0`; a two-column
   file the engine classified, e.g. in a `MERGE/` folder, linked to the group's run by its legacy number): a ROUGH
