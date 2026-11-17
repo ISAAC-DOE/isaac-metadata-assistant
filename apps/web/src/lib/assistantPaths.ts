@@ -222,7 +222,7 @@ export function classifyValidationPath(raw: unknown): ValidationLocation {
     // makes `!label.includes('$')` hold universally, and it downgrades nothing
     // reachable: every locator `official.py` emits is `$` itself or a dot-join of
     // ISAAC-schema property names and array indices, and no property name in
-    // `schema/isaac_record_v1.json` contains `$` or `.` (all 219 checked).
+    // `schema/isaac_record_v1.json` contains `$` or `.` (all 260 checked, 2026-11-16).
     return { kind: 'unknown', label: UNKNOWN_LOCATION_LABEL, technical };
   }
 

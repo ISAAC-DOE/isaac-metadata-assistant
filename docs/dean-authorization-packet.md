@@ -111,8 +111,9 @@ This did not exist when Q19 was drafted.
 
 ### The finding, with every number measured
 
-ISAAC's official validator has never enforced JSON Schema `format`. The vendored v1.05 schema declares
-`"format": "date-time"` in **six** places, **two of them required**:
+ISAAC's official validator has never enforced JSON Schema `format`. The vendored v1.05 schema declared
+`"format": "date-time"` in **six** places when this was written, **two of them required** (seven since the
+2026-11-16 re-vendoring, `DEC-95`: optional `system.session.started_utc` was added):
 
 | JSON path | required |
 |---|---|
@@ -123,7 +124,7 @@ ISAAC's official validator has never enforced JSON Schema `format`. The vendored
 | `timestamps.last_updated_utc` | no |
 | `context.electrochemistry.potential_vs_RHE.conversion.converted_utc` | no |
 
-All six accept `not-a-date`. Such a record passes validation, reaches export-ready, and is written
+All of them accept `not-a-date`. Such a record passes validation, reaches export-ready, and is written
 verbatim into an exported official record — the record's own `created_utc` reads `not-a-date`.
 
 **There are two independent causes, and fixing either alone changes nothing.** Measured as a 2×2 on

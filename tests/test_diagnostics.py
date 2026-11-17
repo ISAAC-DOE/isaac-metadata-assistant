@@ -1250,6 +1250,55 @@ def test_family_unique_items(minimal):
     assert diagnostic.pointer == "/tags"
 
 
+def _with_modulation(minimal: dict, **modulation) -> dict:
+    """`minimal` plus a `context.modulation` block. The numeric-bound keywords
+    (`minimum`, `maximum`, `exclusiveMinimum`) arrived with the 2026-11-16 schema
+    refresh to upstream `a1cb1c8`, and every one of them sits under
+    `context.modulation`, whose keys are all optional."""
+    record = copy.deepcopy(minimal)
+    record["context"] = {"environment": "ex_situ", "temperature_K": 298.0, "modulation": modulation}
+    return record
+
+
+def test_family_minimum(minimal):
+    assert diagnose(_with_modulation(minimal, n_cycles=1), ROOT).ok  # the bound itself is admitted
+    diagnostic = only(diagnose(_with_modulation(minimal, n_cycles=0), ROOT))
+    assert diagnostic.rule_family == "minimum"
+    assert diagnostic.pointer == "/context/modulation/n_cycles"
+
+
+def test_family_maximum(minimal):
+    assert diagnose(_with_modulation(minimal, duty_cycle=1), ROOT).ok
+    diagnostic = only(diagnose(_with_modulation(minimal, duty_cycle=1.5), ROOT))
+    assert diagnostic.rule_family == "maximum"
+    assert diagnostic.pointer == "/context/modulation/duty_cycle"
+
+
+def test_family_exclusive_minimum(minimal):
+    assert diagnose(_with_modulation(minimal, frequency_Hz=0.001), ROOT).ok
+    diagnostic = only(diagnose(_with_modulation(minimal, frequency_Hz=0), ROOT))
+    assert diagnostic.rule_family == "exclusiveMinimum"
+    assert diagnostic.pointer == "/context/modulation/frequency_Hz"
+
+
+def test_null_temperature_conditional_requires_not_reported(minimal):
+    """The two `context.allOf` conditionals the 2026-11-16 refresh added: a null
+    `temperature_K` requires `temperature_basis: not_reported`, and that basis
+    requires a null temperature. Reported as conditional, never as a plain rule."""
+    record = copy.deepcopy(minimal)
+    record["context"] = {"environment": "ex_situ", "temperature_K": None}
+    diagnostic = only(diagnose(record, ROOT))
+    assert diagnostic.rule_family == "required"
+    assert diagnostic.conditional is True
+    assert diagnostic.pointer == "/context/temperature_basis"
+    record["context"]["temperature_basis"] = "not_reported"
+    assert diagnose(record, ROOT).ok
+    record["context"]["temperature_K"] = 298.0
+    diagnostic = only(diagnose(record, ROOT))
+    assert diagnostic.conditional is True
+    assert diagnostic.pointer == "/context/temperature_K"
+
+
 def test_family_one_of_is_the_schemas_only_one_of(xanes):
     """The schema contains exactly one `oneOf`: `descriptors[].relative_to`."""
     assert _count_keywords()["oneOf"] == 1
@@ -1297,11 +1346,12 @@ def test_format_is_present_in_the_schema_but_not_enforced_by_this_validator():
 
     `official.load_official_validator` builds `Draft202012Validator(schema)`
     without a `format_checker`, so under JSON Schema 2020-12 `format` is an
-    annotation only. Six `format: date-time` declarations exist; none of them can
+    annotation only. Seven `format: date-time` declarations exist (six before the
+    2026-11-16 refresh added `system.session.started_utc`); none of them can
     produce a diagnostic. This layer must not add enforcement the truth path does
     not have.
     """
-    assert _count_keywords()["format"] == 6
+    assert _count_keywords()["format"] == 7
     record = minimal_valid_record()
     record["timestamps"]["created_utc"] = "definitely-not-a-timestamp"
     assert diagnose(record, ROOT).ok
@@ -1522,14 +1572,15 @@ def test_no_schema_property_name_needs_escaping():
                     collect(value)
 
     collect(SCHEMA)
-    # 219 = every distinct property name the vendored v1.05 schema declares,
+    # 260 = every distinct property name the vendored v1.05 schema declares,
     # counted by the walker directly above (properties/$defs keys, recursing
     # through items, combinators and if/then/else). It is pinned so a schema
     # refresh fails loudly here and forces this suite to be re-reviewed rather
     # than silently drifting. Independently corroborated: scripts/db_recon.py's
     # load_schema_vocabulary derives the same set by a different walk and also
-    # reports 219.
-    assert len(names) == 219
+    # reports 260. (219 for the July vendoring; re-measured by both walks after the
+    # 2026-11-16 refresh to upstream a1cb1c8, which added names and removed none.)
+    assert len(names) == 260
     offenders = [n for n in names if "~" in n or "/" in n]
     assert offenders == []
 
@@ -1708,23 +1759,30 @@ def _count_keywords() -> collections.Counter:
 
 
 def test_measured_keyword_counts_are_what_the_artifact_claims():
-    """Sanity floor: the counts this suite reasons about, measured live."""
+    """Sanity floor: the counts this suite reasons about, measured live.
+
+    Re-measured 2026-11-16 for the refresh to upstream `a1cb1c8` (July value in
+    the trailing comment where it moved); `tests/fixtures/diagnostics/
+    rule_family_coverage.json` was regenerated from the same walk."""
     counts = _count_keywords()
-    assert counts["if"] == 7
-    assert counts["then"] == 7
+    assert counts["if"] == 9  # 7: + the two context.allOf temperature rules
+    assert counts["then"] == 9  # 7
     assert counts["else"] == 0
     assert counts["oneOf"] == 1
-    assert counts["allOf"] == 2
+    assert counts["allOf"] == 3  # 2: + context.allOf
     assert counts["anyOf"] == 0
     assert counts["not"] == 1
-    assert counts["enum"] == 37
-    assert counts["const"] == 7
+    assert counts["enum"] == 41  # 37
+    assert counts["const"] == 9  # 7
     assert counts["pattern"] == 5
     assert counts["minItems"] == 1
-    assert counts["additionalProperties"] == 37
+    assert counts["additionalProperties"] == 47  # 37
     assert counts["dependentRequired"] == 0
     assert counts["minProperties"] == 0
-    assert counts["required"] == 37
+    assert counts["minimum"] == 4  # 0: all under context.modulation
+    assert counts["maximum"] == 1  # 0
+    assert counts["exclusiveMinimum"] == 2  # 0
+    assert counts["required"] == 43  # 37
     assert len(SCHEMA["required"]) == 6
     assert SCHEMA["required"] == ROOT_REQUIRED
 
@@ -1791,7 +1849,7 @@ def test_coverage_artifact_matches_the_authoritative_schema():
     for keyword, entry in artifact["rule_families_covered"].items():
         assert entry["covered"] is True, keyword
         check_tests(entry, keyword)
-    assert len(artifact["rule_families_covered"]) == 13
+    assert len(artifact["rule_families_covered"]) == 16  # 13 until the 2026-11-16 refresh added minimum, maximum, exclusiveMinimum
 
     for keyword, entry in artifact["present_but_not_enforceable"].items():
         assert entry["covered"] is False

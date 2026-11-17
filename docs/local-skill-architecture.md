@@ -63,13 +63,14 @@ synthetic `multi_operator_corpus` with decisions labelled `SYNTHETIC SELF-TEST (
 Per draft, `bundle validate` runs: draft no-guessing checks → export dry run (`isaac_records.export`)
 → the official schema and exactness check → the **offline upstream portal validator** pinned at
 `a1cb1c8` (isolated interpreter, `scripts/install_portal_validator.sh`). Every report names which
-schema each verdict used: the vendored v1.05 schema stays the website's authority, the pinned
+schema each verdict used: the vendored schema stays the website's authority, the pinned
 upstream schema is what the portal enforces and is the only one that gates (`validate_draft_file`).
+Since 2026-11-16 the vendored schema is the pinned commit's own document (`schema/PROVENANCE.md`),
+and `website_schema.same_as_local_export_target` reports whether the two sha256s match.
 The vendored result is reported as `website_schema`, and the `schema_drift` block in
-`validation/<group>.json` says where the two schemas differ; both are information, not a verdict, so a
-record with `blocked_by_schema_drift: true` (for example an unknown temperature, written as
-`temperature_K: null` + `temperature_basis: not_reported`) can still be `exportable`. Nothing is
-defaulted to pass. An
+`validation/<group>.json` says where the two schemas differ (normally nowhere now); both are
+information, not a verdict, so a record with `blocked_by_schema_drift: true` can still be
+`exportable`. Nothing is defaulted to pass. An
 absent or partly running portal check is `portal_check_unavailable` / `_degraded`, never a pass.
 Verdicts: `incomplete`, `invalid_official`, `portal_check_unavailable`,
 `portal_check_degraded`, `portal_hold`, `portal_reject`, `exportable`.

@@ -718,6 +718,24 @@ def validate_draft(draft: dict) -> DraftReport:
         if _block_uncited(report, where, block_evidence.get(key)):
             report.err(where, "contributor has no evidence; attribution must cite its source or be user-confirmed")
 
+    # `attribution.produced_by` (who PRODUCED the result) is a claim, and the schema
+    # vendored on 2026-11-16 is the first to declare it — before that, official validation
+    # refused it as an unknown key, which is what kept an unevidenced one out of a record.
+    # The block spelling carries no per-value evidence (`strip_evidence` drops nested
+    # `evidence` keys and there is no natural block key for it), so a value written there
+    # would export uncited. It is REFUSED rather than silently accepted; the field-envelope
+    # spelling (`fields["attribution.produced_by.group"]`, ...) is evidence-gated by
+    # `_check_envelope` like every other scalar, lands in the sidecar under its dotted path,
+    # and is what the local import already writes.
+    if isinstance(attribution, dict) and "produced_by" in attribution:
+        report.err(
+            "attribution.produced_by",
+            "who produced the result is a claim and must cite its source: write each value "
+            "as a field envelope (fields['attribution.produced_by.group'], "
+            "fields['attribution.produced_by.organization'], ...) with its evidence, not "
+            "inside the attribution block, which carries no per-value evidence",
+        )
+
     # Tags are user-authored grouping labels — authorship IS the confirmation, so they
     # are deliberately exempt from evidence coverage (no check here, by design).
 

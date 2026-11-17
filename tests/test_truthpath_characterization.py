@@ -3,8 +3,9 @@
 
 Read this first, because almost every assertion below pins a DEFECT:
 
-The vendored official schema declares ``"format": "date-time"`` at exactly six
-locations. ISAAC enforces NONE of them, and it would still enforce none of them
+The vendored official schema declares ``"format": "date-time"`` at exactly seven
+locations (six until the 2026-11-16 refresh to upstream ``a1cb1c8`` added
+``system.session.started_utc``). ISAAC enforces NONE of them, and it would still enforce none of them
 if someone "fixed" the obvious cause. There are TWO independent causes:
 
   Cause 1 (code)      ``src/isaac_records/official.py`` builds
@@ -37,7 +38,9 @@ EVERY TEST THAT ARMING ENFORCEMENT WILL BREAK. A fixer needs the whole list up
 front, because the fix is one change and the fallout is spread across three
 files. Measured by an independent reviewer who actually applied the full fix:
 
-  * this module — Part A (4 tests) and Part B (39 tests) — 43 in total;
+  * this module — Part A (4 tests) and Part B (45 tests) — 49 in total
+    (re-derived 2026-11-16 for seven locations: 7 x 6 bad values + 3 reproducers;
+    it was 39 and 43 at six locations);
   * ``apps/api/tests/test_corpus_mutation.py`` — the ``stayed_valid``
     assertions for ``created_utc``, which record the same leniency from the
     mutation-harness side. Its comment now states the SAME two-cause model as
@@ -89,6 +92,10 @@ def set_at(record: dict, parts: tuple, value) -> None:
     """Set a nested location addressed by dict keys and list indices."""
     node = record
     for part in parts[:-1]:
+        if isinstance(node, dict) and part not in node:
+            # An OPTIONAL object the example omits (``system.session``, whose keys are all
+            # optional): created empty, which is schema-valid, so only the mutated leaf is new.
+            node[part] = {}
         node = node[part]
     node[parts[-1]] = value
 
@@ -242,9 +249,9 @@ def test_the_two_causes_agree_that_enforcement_is_dead():
 # PART B — format characterization
 # =============================================================================
 
-#: (label, example file, address) for each of the six ``format: date-time``
+#: (label, example file, address) for each of the seven ``format: date-time``
 #: locations in schema/isaac_record_v1.json. Re-verified in
-#: ``test_the_schema_declares_exactly_these_six_date_time_locations``.
+#: ``test_the_schema_declares_exactly_these_seven_date_time_locations``.
 FORMAT_LOCATIONS = [
     ("timestamps.created_utc", XANES, ("timestamps", "created_utc")),
     ("timestamps.acquired_start_utc", XANES, ("timestamps", "acquired_start_utc")),
@@ -260,6 +267,9 @@ FORMAT_LOCATIONS = [
         XANES,
         ("descriptors", "outputs", 0, "generated_utc"),
     ),
+    # Added by the 2026-11-16 schema refresh. No public example sets `system.session`, so
+    # `set_at` creates the (all-optional) object around the mutated leaf.
+    ("system.session.started_utc", XANES, ("system", "session", "started_utc")),
 ]
 
 #: Strings that are NOT valid RFC3339 date-times. Every one is accepted today.
@@ -280,10 +290,11 @@ EXPECTED_FORMAT_POINTERS = {
     "/properties/context/properties/electrochemistry/properties/potential_vs_RHE"
     "/properties/conversion/properties/converted_utc",
     "/properties/descriptors/properties/outputs/items/properties/generated_utc",
+    "/properties/system/properties/session/properties/started_utc",
 }
 
 
-def test_the_schema_declares_exactly_these_six_date_time_locations():
+def test_the_schema_declares_exactly_these_seven_date_time_locations():
     """CURRENT BEHAVIOUR of the vendored schema (desired — this is upstream's
     design, not a defect). Re-derived here so Part B's table cannot silently
     drift away from the schema it claims to cover."""
@@ -304,7 +315,7 @@ def test_the_schema_declares_exactly_these_six_date_time_locations():
     walk(schema, "")
     assert set(found) == EXPECTED_FORMAT_POINTERS, sorted(found)
     assert set(found.values()) == {"date-time"}
-    assert len(FORMAT_LOCATIONS) == len(EXPECTED_FORMAT_POINTERS) == 6
+    assert len(FORMAT_LOCATIONS) == len(EXPECTED_FORMAT_POINTERS) == 7
 
 
 @pytest.mark.parametrize("label, example, address", FORMAT_LOCATIONS, ids=[x[0] for x in FORMAT_LOCATIONS])
@@ -312,14 +323,14 @@ def test_the_schema_declares_exactly_these_six_date_time_locations():
 def test_invalid_date_time_strings_are_accepted_at_every_format_location(label, example, address, bad):
     """PINS A DEFECT — this is NOT desired behaviour.
 
-    At all six ``format: date-time`` locations, a string that is not remotely a
+    At all seven ``format: date-time`` locations, a string that is not remotely a
     date-time validates against the official schema today, because no format
     checker is in play (Part A). ``created_utc`` and
     ``descriptors.outputs[].generated_utc`` are REQUIRED fields, and the schema's
     own description of ``generated_utc`` says placeholder strings are not
     allowed — the schema says so, and nothing enforces it.
 
-    When enforcement is armed these 36 cases must be inverted to assert
+    When enforcement is armed these 42 cases must be inverted to assert
     rejection, together with Part A and Part D.
     """
     record = load_example(example)
@@ -673,7 +684,7 @@ def test_the_rfc3339_helper_accepts_canonical_values(good):
 
 
 def collect_corpus_date_times() -> list[tuple[str, str, object]]:
-    """Every value sitting at a ``format: date-time`` location in the ten public
+    """Every value sitting at a ``format: date-time`` location in the fourteen public
     upstream examples, as (file, location, value)."""
     out: list[tuple[str, str, object]] = []
     for path in sorted(OFFICIAL.glob("*.json")):
@@ -695,12 +706,12 @@ def collect_corpus_date_times() -> list[tuple[str, str, object]]:
     return out
 
 
-def test_all_ten_public_examples_validate_today():
+def test_all_fourteen_public_examples_validate_today():
     """CURRENT BEHAVIOUR, and desired. The baseline that everything above
     mutates away from. (``tests/test_official.py`` asserts this per file; it is
     restated here so Part D's safety argument is self-contained.)"""
     examples = sorted(OFFICIAL.glob("*.json"))
-    assert len(examples) == 10
+    assert len(examples) == 14  # 10 until the 2026-11-16 re-vendoring at upstream a1cb1c8
     for path in examples:
         record = json.loads(path.read_text(encoding="utf-8"))
         report = validate_official(record, ROOT)
@@ -711,7 +722,7 @@ def test_every_public_corpus_date_time_is_canonical_rfc3339():
     """COMPATIBILITY EVIDENCE, not a characterization of ISAAC.
 
     Arming ``date-time`` enforcement would reject nothing in the public corpus:
-    every value at a ``format: date-time`` location in the ten upstream examples
+    every value at a ``format: date-time`` location in the fourteen upstream examples
     is already canonical RFC3339. That removes the "it might break the examples"
     objection to fixing both causes in Part A.
 
@@ -720,8 +731,8 @@ def test_every_public_corpus_date_time_is_canonical_rfc3339():
     must not read.
     """
     values = collect_corpus_date_times()
-    assert len(values) >= 31, (
-        f"expected at least the 31 date-time values measured in the committed "
+    assert len(values) >= 39, (  # 31 at ten examples; re-measured 39 at fourteen (2026-11-16)
+        f"expected at least the 39 date-time values measured in the committed "
         f"corpus, found {len(values)} — re-measure before trusting this evidence"
     )
     offenders = [(f, loc, v) for f, loc, v in values if not is_canonical_rfc3339(v)]
@@ -729,7 +740,7 @@ def test_every_public_corpus_date_time_is_canonical_rfc3339():
 
     # Non-vacuity: the collector really did reach several distinct locations.
     assert len({loc for _, loc, _ in values}) >= 5
-    assert len({f for f, _, _ in values}) == 10
+    assert len({f for f, _, _ in values}) == 14  # 10 before the 2026-11-16 re-vendoring
 
 
 def test_last_updated_utc_is_unexercised_by_the_public_corpus():

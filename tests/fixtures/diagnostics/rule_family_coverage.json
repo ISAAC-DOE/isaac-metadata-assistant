@@ -6,8 +6,8 @@
   "schema": {
     "path": "schema/isaac_record_v1.json",
     "version": "1.05",
-    "bytes": 57293,
-    "sha256": "e80bb7a7d18f3fadc581601447d1b6a72e859e428a46871b27eb04ceb3e5e9a3",
+    "bytes": 76177,
+    "sha256": "7e61cb0041b7537ae506ec8561c212e5d849868757f2d4741888ce3b24ef8c20",
     "root_required_field_count": 6,
     "root_required_fields": [
       "isaac_record_version",
@@ -22,48 +22,48 @@
   "keyword_position_counts": {
     "$dynamicRef": 0,
     "$ref": 0,
-    "additionalProperties": 37,
-    "allOf": 2,
+    "additionalProperties": 47,
+    "allOf": 3,
     "anyOf": 0,
-    "const": 7,
+    "const": 9,
     "contains": 0,
     "dependentRequired": 0,
     "dependentSchemas": 0,
-    "description": 102,
+    "description": 140,
     "else": 0,
-    "enum": 37,
+    "enum": 41,
     "exclusiveMaximum": 0,
-    "exclusiveMinimum": 0,
-    "format": 6,
-    "if": 7,
-    "items": 19,
+    "exclusiveMinimum": 2,
+    "format": 7,
+    "if": 9,
+    "items": 23,
     "maxItems": 1,
     "maxLength": 1,
     "maxProperties": 0,
-    "maximum": 0,
+    "maximum": 1,
     "minItems": 1,
     "minLength": 1,
     "minProperties": 0,
-    "minimum": 0,
+    "minimum": 4,
     "multipleOf": 0,
     "not": 1,
     "oneOf": 1,
     "pattern": 5,
     "patternProperties": 0,
     "prefixItems": 0,
-    "properties": 68,
+    "properties": 83,
     "propertyNames": 0,
-    "required": 37,
-    "then": 7,
+    "required": 43,
+    "then": 9,
     "title": 1,
-    "type": 297,
+    "type": 360,
     "unevaluatedItems": 0,
     "unevaluatedProperties": 0,
     "uniqueItems": 1
   },
   "rule_families_covered": {
     "additionalProperties": {
-      "schema_occurrences": 37,
+      "schema_occurrences": 47,
       "covered": true,
       "coverable": true,
       "covering_tests": [
@@ -71,7 +71,7 @@
       ]
     },
     "const": {
-      "schema_occurrences": 7,
+      "schema_occurrences": 9,
       "covered": true,
       "coverable": true,
       "covering_tests": [
@@ -79,12 +79,20 @@
       ]
     },
     "enum": {
-      "schema_occurrences": 37,
+      "schema_occurrences": 41,
       "covered": true,
       "coverable": true,
       "covering_tests": [
         "test_family_enum",
         "test_empty_string_is_invalid_where_an_enum_constrains_it"
+      ]
+    },
+    "exclusiveMinimum": {
+      "schema_occurrences": 2,
+      "covered": true,
+      "coverable": true,
+      "covering_tests": [
+        "test_family_exclusive_minimum"
       ]
     },
     "maxItems": {
@@ -103,6 +111,14 @@
         "test_family_max_length"
       ]
     },
+    "maximum": {
+      "schema_occurrences": 1,
+      "covered": true,
+      "coverable": true,
+      "covering_tests": [
+        "test_family_maximum"
+      ]
+    },
     "minItems": {
       "schema_occurrences": 1,
       "covered": true,
@@ -118,6 +134,14 @@
       "coverable": true,
       "covering_tests": [
         "test_family_min_length"
+      ]
+    },
+    "minimum": {
+      "schema_occurrences": 4,
+      "covered": true,
+      "coverable": true,
+      "covering_tests": [
+        "test_family_minimum"
       ]
     },
     "not": {
@@ -146,7 +170,7 @@
       ]
     },
     "required": {
-      "schema_occurrences": 37,
+      "schema_occurrences": 43,
       "covered": true,
       "coverable": true,
       "covering_tests": [
@@ -158,7 +182,7 @@
       ]
     },
     "type": {
-      "schema_occurrences": 297,
+      "schema_occurrences": 360,
       "covered": true,
       "coverable": true,
       "covering_tests": [
@@ -177,10 +201,10 @@
   },
   "present_but_not_enforceable": {
     "format": {
-      "schema_occurrences": 6,
+      "schema_occurrences": 7,
       "covered": false,
       "coverable": false,
-      "reason": "JSON Schema 2020-12 makes `format` an annotation. official.load_official_validator builds Draft202012Validator(schema) with no format_checker, so none of the 6 `format: date-time` declarations can produce an error. This layer must not add enforcement the truth path does not have.",
+      "reason": "JSON Schema 2020-12 makes `format` an annotation. official.load_official_validator builds Draft202012Validator(schema) with no format_checker, so none of the 7 `format: date-time` declarations can produce an error. This layer must not add enforcement the truth path does not have.",
       "covering_tests": [
         "test_format_is_present_in_the_schema_but_not_enforced_by_this_validator"
       ]
@@ -188,29 +212,29 @@
   },
   "applicators_never_a_rule_family": {
     "properties": {
-      "schema_occurrences": 68,
+      "schema_occurrences": 83,
       "reported_as_rule_family": false,
       "reason": "descends into named subschemas; errors are reported under the failing inner keyword"
     },
     "items": {
-      "schema_occurrences": 19,
+      "schema_occurrences": 23,
       "reported_as_rule_family": false,
       "reason": "descends into array-item subschemas; errors are reported under the failing inner keyword"
     },
     "allOf": {
-      "schema_occurrences": 2,
+      "schema_occurrences": 3,
       "reported_as_rule_family": false,
       "reason": "unconditional composition; errors are reported under the failing inner keyword and are NOT marked conditional"
     },
     "if": {
-      "schema_occurrences": 7,
+      "schema_occurrences": 9,
       "reported_as_rule_family": false,
       "reason": "guard only; a failing `if` is suppressed, and `then`/`else` errors are reported under the failing inner keyword"
     }
   },
   "conditional_keywords": {
     "if": {
-      "schema_occurrences": 7,
+      "schema_occurrences": 9,
       "covered": true,
       "coverable": true,
       "covered_via": "Diagnostic.conditional",
@@ -219,18 +243,20 @@
         "test_performance_galvanostatic_requires_current_setpoint",
         "test_performance_domain_requires_control_mode",
         "test_conditional_flag_matches_the_schema_pointer_for_every_diagnostic",
-        "test_allof_alone_is_not_conditional"
+        "test_allof_alone_is_not_conditional",
+        "test_null_temperature_conditional_requires_not_reported"
       ]
     },
     "then": {
-      "schema_occurrences": 7,
+      "schema_occurrences": 9,
       "covered": true,
       "coverable": true,
       "covered_via": "Diagnostic.conditional / Diagnostic.schema_pointer",
       "covering_tests": [
         "test_plain_and_conditional_requirements_differ_only_in_schema_pointer",
         "test_duplicate_conditional_branches_collapse_to_one_diagnostic",
-        "test_dropping_record_type_also_trips_the_evidence_conditional"
+        "test_dropping_record_type_also_trips_the_evidence_conditional",
+        "test_null_temperature_conditional_requires_not_reported"
       ]
     },
     "else": {
@@ -284,31 +310,13 @@
       "coverable": false,
       "reason": "absent from the authoritative schema; no record can trigger it"
     },
-    "exclusiveMinimum": {
-      "schema_occurrences": 0,
-      "covered": false,
-      "coverable": false,
-      "reason": "absent from the authoritative schema; no record can trigger it"
-    },
     "maxProperties": {
       "schema_occurrences": 0,
       "covered": false,
       "coverable": false,
       "reason": "absent from the authoritative schema; no record can trigger it"
     },
-    "maximum": {
-      "schema_occurrences": 0,
-      "covered": false,
-      "coverable": false,
-      "reason": "absent from the authoritative schema; no record can trigger it"
-    },
     "minProperties": {
-      "schema_occurrences": 0,
-      "covered": false,
-      "coverable": false,
-      "reason": "absent from the authoritative schema; no record can trigger it"
-    },
-    "minimum": {
       "schema_occurrences": 0,
       "covered": false,
       "coverable": false,
@@ -353,9 +361,10 @@
   },
   "notes": [
     "Three families the authorizing brief called out as empty are confirmed empty: anyOf=0, dependentRequired=0, minProperties=0. No coverage is claimed for them.",
-    "`else`=0 as well; the schema's 7 conditionals are all if/then with no else branch.",
-    "The schema measures 57293 bytes, not the 31372 stated in the authorizing brief. Every keyword count in that brief is confirmed correct.",
+    "`else`=0 as well; the schema's 9 conditionals are all if/then with no else branch (7 until the 2026-11-16 refresh added the two `context.allOf` temperature rules).",
+    "The schema measured 57293 bytes when this ledger was first written (the July vendoring), not the 31372 stated in the authorizing brief; it measures 76177 bytes since the 2026-11-16 re-vendoring at upstream a1cb1c8.",
     "The brief also stated the schema has no `title` anywhere; it has exactly one, the root schema's own title. No PROPERTY has a title, so label derivation still has nothing to reuse.",
-    "`format` is the one keyword present in the schema yet structurally unable to produce a diagnostic; see present_but_not_enforceable."
+    "`format` is the one keyword present in the schema yet structurally unable to produce a diagnostic; see present_but_not_enforceable.",
+    "2026-11-16 refresh to upstream a1cb1c8: `minimum` (4), `maximum` (1) and `exclusiveMinimum` (2), all under context.modulation, moved from absent_from_schema to rule_families_covered with a covering test each (13 -> 16 families). Every other count was re-measured, not edited by hand."
   ]
 }

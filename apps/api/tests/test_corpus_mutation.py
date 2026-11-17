@@ -1,6 +1,6 @@
 """Tests for the deterministic mutation-testing harness.
 
-The corpus is ``tests/fixtures/official/*.json`` — ten example records copied
+The corpus is ``tests/fixtures/official/*.json`` — fourteen example records copied
 verbatim from the PUBLIC upstream ``ISAAC-DOE/isaac-ai-ready-record`` repository
 (provenance: ``schema/PROVENANCE.md``). Nothing here touches a database, a
 network, or any real experimental artifact.
@@ -64,8 +64,8 @@ def report(harness) -> dict:
 # --------------------------------------------------------------------------
 
 
-def test_corpus_is_the_ten_public_upstream_examples(corpus):
-    assert len(corpus) == 10
+def test_corpus_is_the_fourteen_public_upstream_examples(corpus):
+    assert len(corpus) == 14  # 10 until the 2026-11-16 re-vendoring at upstream a1cb1c8
     # Spans more than one domain and record type, so the conditional branches of
     # the schema are actually reachable.
     assert {r["record_domain"] for r in corpus} >= {
@@ -305,14 +305,14 @@ def test_full_sweep_report(report, harness):
     assert len(report["schema_fingerprint"]) == 64
 
     assert report["corpus"] == {
-        "records_scanned": 10,
-        "records_passing_baseline": 10,
+        "records_scanned": 14,
+        "records_passing_baseline": 14,
         "records_failing_baseline": 0,
     }
 
     mutations = report["mutations"]
     assert mutations["operators_defined"] == harness.operators_defined
-    assert mutations["trials_attempted"] == 10 * harness.operators_defined
+    assert mutations["trials_attempted"] == 14 * harness.operators_defined
     assert mutations["trials_applicable"] > 1000
     assert (
         mutations["trials_applicable"] + mutations["trials_skipped_not_applicable"]

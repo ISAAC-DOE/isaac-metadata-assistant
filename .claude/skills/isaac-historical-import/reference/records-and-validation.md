@@ -80,13 +80,14 @@ When a scientist asks "what should this record hold?", answer from the upstream 
 | `exportable` | "Passes every check." | export |
 
 `validation/<group>.json` also has a `website_schema` result and a `schema_drift` block: how the
-record fares against the website's older schema (vendored v1.05, July) beside the pinned portal
-schema. Both are for information only and gate nothing; the verdict comes from the portal schema and
-the portal check. An unknown temperature is the usual case: the record says `temperature_K: null`
-with `temperature_basis: not_reported`, which the portal accepts and v1.05 does not. The drift text
-then says so, and that this does not block the local export; `blocked_by_schema_drift: true` is about
-the website schema only: the record can still be `exportable`. Tell the scientist so in plain words. The temperature stays an optional question if
-they know it; never press for one to clear this note, and never default one.
+record fares against the website's vendored schema beside the pinned portal schema. The website now
+vendors the same document the portal pins (`website_schema.same_as_local_export_target: true`), so
+both normally agree and `schema_drift` lists nothing. Both are for information only and gate
+nothing; the verdict comes from the portal schema and the portal check. If `blocked_by_schema_drift`
+is ever `true`, it is about the website schema only: the record can still be `exportable`. Tell the
+scientist so in plain words. An unknown temperature is written `temperature_K: null` with
+`temperature_basis: not_reported`, which both accept. The temperature stays an optional question if
+they know it; never press for one, and never default one.
 
 `pending_vocabulary` names a field still missing because the scientist's word waits on a vocabulary proposal
 (`propose-terms`). When the group is exportable, its statement adds "this does not block export; the record is

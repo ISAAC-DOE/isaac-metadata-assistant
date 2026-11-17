@@ -265,7 +265,7 @@
         "ok": false,
         "error_count": 1,
         "first_error_path": "system.technique",
-        "first_error_message": "'XANES' is not one of ['XAS', 'HERFD-XAS', 'XES', 'RIXS', 'XPS', 'XRF', 'XRD', 'SAXS', 'WAXS', 'PDF', 'neutron_reflectometry', 'neutron_diffraction', 'SANS', 'cyclic_voltammetry', 'chronoamperometry', 'chronopotentiometry', 'EIS', 'linear_sweep_voltammetry', 'TEM', 'SEM', 'AFM', 'STM', 'DFT', 'ab_initio_MD', 'classical_MD', 'kinetic_monte_carlo', 'microkinetic_modeling', 'machine_learning_potential', 'GC', 'HPLC', 'ICP_MS', 'ICP_OES', 'NMR', 'mass_spectrometry', 'FTIR', 'Raman', 'UV_Vis']",
+        "first_error_message": "'XANES' is not one of ['XAS', 'HERFD-XAS', 'XES', 'RIXS', 'XPS', 'XRF', 'XRD', 'SAXS', 'WAXS', 'PDF', 'neutron_reflectometry', 'neutron_diffraction', 'SANS', 'cyclic_voltammetry', 'chronoamperometry', 'chronopotentiometry', 'EIS', 'linear_sweep_voltammetry', 'galvanostatic_cycling', 'TEM', 'SEM', 'AFM', 'STM', 'SECM', 'atom_probe_tomography', 'DFT', 'ab_initio_MD', 'classical_MD', 'kinetic_monte_carlo', 'microkinetic_modeling', 'machine_learning_potential', 'GC', 'HPLC', 'ICP_MS', 'ICP_OES', 'NMR', 'EPR', 'mass_spectrometry', 'FTIR', 'Raman', 'UV_Vis', 'TGA', 'chemisorption', 'physisorption', 'catalytic_reactor_test']",
         "advisory_warnings": [
           "NO_LINKS"
         ],
@@ -289,7 +289,7 @@
         "ok": false,
         "error_count": 1,
         "first_error_path": "context.temperature_K",
-        "first_error_message": "'297.5' is not of type 'number'",
+        "first_error_message": "'297.5' is not of type 'number', 'null'",
         "advisory_warnings": [
           "NO_LINKS"
         ],

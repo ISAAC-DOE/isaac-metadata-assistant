@@ -137,7 +137,7 @@ as verified.
 Manual sequence: [`docs/krish-manual-verification-checklist.md`](../../krish-manual-verification-checklist.md).
 QA files: `qa/validator-upload-package/`; the archive is
 `qa/validator-upload-package/isaac-validator-qa-files.zip`, sha256
-`daee2ebc7bfa9dc0abbb167f575b02ab2477f384c38bcacbff63f1b124a66d04`, 66823 bytes.
+`8a287641352c1f65e9c38d957b68efa959d5599c9ebc490b64e4f6b67fe7075a`, 66893 bytes.
 
 *(That digest was `71c23034…` when this closure record was written, then `8a2d4948…`.
 The first rebuild removed a machine-specific absolute path from the shipped

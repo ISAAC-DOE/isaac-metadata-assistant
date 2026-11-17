@@ -278,9 +278,9 @@ for f in "$RECORDS"/*.json; do
   [[ -f "${f%.json}.evidence.json" ]] || BADREC=$((BADREC+1))
   "$PY" -c 'import json,sys; json.load(open(sys.argv[1]))' "$f" 2>/dev/null || BADREC=$((BADREC+1))
 done
-# (Exported records are checked against the PINNED PORTAL schema, not the vendored website schema:
-# DEC-76. The vendored v1.05 schema forbids fields the portal requires, so `isaac validate --official`
-# on an exported record is expected to disagree and is deliberately not asserted here.)
+# (Exported records are checked against the PINNED PORTAL schema: DEC-76. Since DEC-95 (2026-11-16)
+# the vendored website schema is that same document, and the self-test records pass
+# `isaac validate --official` too; the export gate above is still the portal check.)
 if [[ "$BADREC" -eq 0 ]]; then report PASS "exported records are well formed" "each is JSON and has an evidence file"; else report FAIL "exported records are well formed" "$BADREC problems"; fi
 if [[ "$EXPORTABLE" -eq 0 ]]; then
   BLOCKER="$("$PY" - "$BUNDLE" <<'PYEND'

@@ -1527,9 +1527,10 @@ def allowed_values(path: str | None) -> list | None:
     off the vocabulary list for its path. At the pinned commit every such list equals the pinned schema's
     ``enum`` where it has one (a test pins this against the installed validator), so the list is the
     pinned vocabulary's entry for ``path`` and, for a path the vocabulary has none for, the vendored
-    schema's ``enum`` (which equals the pinned schema's there). The vendored v1.05 schema alone is the
-    WEBSITE's schema, reported for information only: its narrower lists (no ``EPR`` technique, no
-    ``not_reported`` cell type) gate nothing a local export writes."""
+    schema's ``enum`` (which equals the pinned schema's there). The vendored schema is the WEBSITE's
+    schema, reported for information only; since 2026-11-16 it is the pinned commit's own document, so
+    its lists are the pinned schema's (before that, the July copy lacked ``EPR`` and the
+    ``not_reported`` cell type)."""
     if not path:
         return None
     vocab = _pinned_vocabulary()
@@ -1551,7 +1552,20 @@ def _list_moved_paths() -> frozenset[str]:
         enum = node.get("enum") if isinstance(node, Mapping) else None
         if not isinstance(enum, list) or list(enum) != allowed_values(path):
             out.add(path)
+    # The comparison above is against TODAY's vendored enum. A bundle written by an older build was
+    # judged against the vendored enum OF ITS DAY, and the 2026-11-16 re-vendoring (to the portal's
+    # pinned commit, ``schema/PROVENANCE.md``) widened two enums so they now equal the pinned lists.
+    # Without this, a stored ``EPR`` an older build left ineligible stopped being recognised as a
+    # list move and was reported as an INVALID bundle instead of a STALE one. Listing a path here only
+    # makes :func:`allowed_list_rederivations` re-check it; a value whose stored eligibility already
+    # agrees with this build is never reported.
+    out |= _ENUMS_WIDENED_BY_THE_2026_11_16_REVENDORING
     return frozenset(out)
+
+
+#: Paths whose vendored ``enum`` the 2026-11-16 re-vendoring widened (``system.technique`` +8 values,
+#: ``context.electrochemistry.cell_type`` + ``not_reported``): an older build's list for them was narrower.
+_ENUMS_WIDENED_BY_THE_2026_11_16_REVENDORING = frozenset({"system.technique", "context.electrochemistry.cell_type"})
 
 
 def allowed_list_rederivations(bundle: Mapping) -> list[dict]:
@@ -1586,7 +1600,7 @@ def allowed_list_rederivations(bundle: Mapping) -> list[dict]:
                         "value_state": STATE_SCIENTIST_CONFIRMED, "eligible_before": before, "eligible_now": now,
                         "decision_id": (d or {}).get("decision_id"),
                         "reason": (f"this build checks {path} against the list the export is validated against (the "
-                                   "portal's pinned vocabulary), not the website schema's narrower one: "
+                                   "portal's pinned vocabulary), not an older build's narrower list: "
                                    + (f"{value!r} is on it, eligible now" if now else
                                       f"{value!r} is not on it, not eligible now — answer the field again with one of "
                                       "its allowed values"))[:600]})
@@ -2675,7 +2689,8 @@ def _writable_paths() -> frozenset[str]:
 
 #: DEC-76: the local export targets the schema the PORTAL enforces (upstream, pinned), so
 #: the fields that schema adds and a scientist must supply are answerable here too. These
-#: are NOT website write paths; the website's vendored v1.05 schema does not declare them.
+#: are NOT website write paths (the website has no route that writes them; since 2026-11-16 its
+#: vendored schema, the same pinned document, declares them).
 #: ``path -> scope``.
 UPSTREAM_TARGET_FIELDS: Mapping[str, str] = {
     "attribution.produced_by.group": "record",
@@ -2683,7 +2698,7 @@ UPSTREAM_TARGET_FIELDS: Mapping[str, str] = {
     "context.reaction.drive": "run",
     "context.reaction.catalysis": "run",
 }
-#: Fields BOTH schemas declare (vendored v1.05 and the pinned portal schema) that the website
+#: Fields BOTH schemas declare (vendored and the pinned portal schema) that the website
 #: has no write route for, and that a beamtime's documents often state: answerable locally so
 #: a scientist's answer (or a cited AI reading of their notes) has a target. ``path -> scope``.
 #: ``electrolyte`` is an object requiring ``name`` AND ``concentration_M``: a record with one

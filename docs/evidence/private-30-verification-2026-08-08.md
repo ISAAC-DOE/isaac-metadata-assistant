@@ -169,7 +169,7 @@ category by elimination) was armed throughout and simply had no input.
 
 **One row is asserted, not measured, and saying so is the point of this table.**
 `export_gating_unchanged` is a fixed literal in the report builder
-(`apps/api/isaac_api/verification.py:1200`). Its backing is real but static: this module
+(`apps/api/isaac_api/verification.py:1212`). Its backing is real but static: this module
 imports nothing from the export path and writes nothing, and a test asserts that
 import-absence mechanically. That is a good guarantee — but it is a property of the code,
 established in CI, **not a measurement taken during this run**, and it would not notice a
@@ -338,7 +338,7 @@ not all checked. This section states, for every condition, one of three verdicts
 | # | Condition | Verdict | Basis |
 |---|---|---|---|
 | C19 | The official validator is unchanged | **measured per-run** | runtime probe of the loaded validator (`verification.py:1194`), so it would flip on the running deployment rather than only in a unit test |
-| C20 | Export gating is unchanged | **not measured — asserted** | a fixed literal at `verification.py:1200`, backed by a mechanical import-absence test in CI. **Already disclosed in §3**, which explains why the distinction matters; repeated here so the twenty-condition walk does not appear to add a measurement it does not have |
+| C20 | Export gating is unchanged | **not measured — asserted** | a fixed literal at `verification.py:1212`, backed by a mechanical import-absence test in CI. **Already disclosed in §3**, which explains why the distinction matters; repeated here so the twenty-condition walk does not appear to add a measurement it does not have |
 
 ### Summary of the walk
 

@@ -25,7 +25,7 @@
  *    its declared JSON type, whether it is closed with an enum, and which values that
  *    enum admits — through `GET /api/schema`, the existing read-only route that
  *    serves the same document `official.py` validates against. **NOTHING here
- *    transcribes an enum.** `system.technique` has 37 values; a copy of them in
+ *    transcribes an enum.** `system.technique` has 45 values; a copy of them in
  *    TypeScript would be a second expression of the schema's vocabulary, free to drift
  *    from the document `CLAUDE.md` §1 makes the authority, and it would go stale
  *    silently on a schema refresh. `contributorRoleOptions` reads the four contributor

@@ -345,10 +345,13 @@
             "chronopotentiometry",
             "EIS",
             "linear_sweep_voltammetry",
+            "galvanostatic_cycling",
             "TEM",
             "SEM",
             "AFM",
             "STM",
+            "SECM",
+            "atom_probe_tomography",
             "DFT",
             "ab_initio_MD",
             "classical_MD",
@@ -360,10 +363,15 @@
             "ICP_MS",
             "ICP_OES",
             "NMR",
+            "EPR",
             "mass_spectrometry",
             "FTIR",
             "Raman",
-            "UV_Vis"
+            "UV_Vis",
+            "TGA",
+            "chemisorption",
+            "physisorption",
+            "catalytic_reactor_test"
           ],
           "description": "Primary technique or computational method used to produce this record."
         },
@@ -416,11 +424,34 @@
             "notes": {
               "type": "string"
             }
-          }
+          },
+          "description": "The hardware that made a measurement. A calculation has no instrument: its code is computation.method.code and the computer it ran on is system.facility (facility_name, organization, cluster)."
         },
         "configuration": {
           "type": "object",
           "description": "THE designated open extension namespace: instrument/station/beamline-specific configuration that does not generalize across facilities (slits, pass energies, GC columns, channel IDs, logbook fields...). Anything that DOES generalize belongs in a schema field \u2014 request one."
+        },
+        "session": {
+          "type": "object",
+          "additionalProperties": false,
+          "description": "The measurement SITTING this record came from: one continuous period under one calibration, on one instrument. Two records from the same session share calibration, drift and setup, so they are not independent confirmations of each other however separately they are stored. Optional. For a COMPUTED record the analogous shared cause is the calculational setup, which already lives in computation.method (code, code_version, functional_name, pseudopotential) - do not duplicate it here.",
+          "properties": {
+            "session_id": {
+              "type": "string",
+              "description": "Stable identifier for the sitting. Any scheme; it only has to be consistent within a lab."
+            },
+            "started_utc": {
+              "type": "string",
+              "format": "date-time"
+            },
+            "calibration_ref": {
+              "type": "string",
+              "description": "Identifier of the calibration in force during the session."
+            },
+            "notes": {
+              "type": "string"
+            }
+          }
         }
       },
       "additionalProperties": false
@@ -442,7 +473,51 @@
           ]
         },
         "temperature_K": {
-          "type": "number"
+          "type": [
+            "number",
+            "null"
+          ],
+          "description": "Temperature of the sample during the measurement or calculation, in K. null only when the source does not state it, with temperature_basis 'not_reported'; never a default."
+        },
+        "temperature_basis": {
+          "type": "string",
+          "enum": [
+            "stated",
+            "room_temperature",
+            "not_reported"
+          ],
+          "description": "Where temperature_K comes from: 'stated' (the source or instrument gives the number), 'room_temperature' (the source says room temperature without a number: 298.15 K), 'not_reported' (the source does not say: temperature_K is null)."
+        },
+        "reaction": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "name",
+            "drive",
+            "catalysis"
+          ],
+          "description": "The chemical transformation this record is about, for any kind of chemistry: electrocatalysis, thermal catalysis, photocatalysis, homogeneous or enzymatic catalysis. The one home of the reaction; context.electrochemistry.reaction is deprecated. Required on performance records (MISSING_REACTION).",
+          "properties": {
+            "name": {
+              "type": "string",
+              "description": "Controlled token for the transformation (vocabulary context.reaction.name), e.g. CO2RR, OER, HOR, NH3_synthesis, CO_oxidation, methanol_synthesis, propane_dehydrogenation, hydroformylation. The token names WHAT is transformed; `drive` says what drives it, so photocatalytic CO2 reduction is CO2RR with drive photochemical. A new reaction is added through a vocabulary proposal; tokens are never invented in a record."
+            },
+            "drive": {
+              "type": "string",
+              "description": "What drives the reaction: electrochemical (an applied potential or current), thermal (temperature), photochemical (light), photoelectrochemical (light plus an applied bias), plasma, mechanochemical, biochemical."
+            },
+            "catalysis": {
+              "type": "string",
+              "description": "Where the catalyst is relative to the reactants: heterogeneous (a solid catalyst, electrodes included), homogeneous (a dissolved molecular catalyst), enzymatic, or uncatalyzed."
+            },
+            "equation": {
+              "type": "string",
+              "description": "Balanced overall equation, e.g. 'N2 + 3 H2 -> 2 NH3'. Optional; give it when the token alone does not fix the stoichiometry or the products."
+            },
+            "notes": {
+              "type": "string"
+            }
+          }
         },
         "electrochemistry": {
           "type": "object",
@@ -465,7 +540,8 @@
                 "None",
                 "NO3RR",
                 "urea_synthesis"
-              ]
+              ],
+              "description": "DEPRECATED: the reaction lives in context.reaction {name, drive, catalysis}. Accepted so stored records keep validating; when present it must equal context.reaction.name (REACTION_MISMATCH)."
             },
             "cell_type": {
               "type": "string",
@@ -479,7 +555,8 @@
                 "zero_gap_cell",
                 "coin_cell",
                 "three_electrode",
-                "scanning_droplet_cell"
+                "scanning_droplet_cell",
+                "not_reported"
               ]
             },
             "control_mode": {
@@ -917,9 +994,183 @@
               ]
             }
           }
+        },
+        "modulation": {
+          "type": "object",
+          "additionalProperties": false,
+          "description": "A control variable DRIVEN PERIODICALLY rather than held constant, and what the reported descriptors mean relative to that driving. This is deliberately not tied to one technique: the same structure covers a modulated electrode potential, a temperature programme, chopped or pulsed illumination, pulsed reactant dosing, a modulated pressure or flow, and modulation-excitation spectroscopy. If a record carries this block, its steady-state-looking setpoints elsewhere describe a LEVEL of the drive, not the condition of the whole measurement. Optional; omit it entirely for a static experiment.",
+          "properties": {
+            "driven_variable": {
+              "type": "string",
+              "description": "Which control variable is being driven. Use the canonical list in the controlled vocabulary (context.modulation_driven_variables): potential, current, temperature, pressure, illumination, reactant_concentration, flow_rate, magnetic_field, electric_field, strain, pH."
+            },
+            "waveform": {
+              "type": "string",
+              "enum": [
+                "square",
+                "pulse_train",
+                "sine",
+                "triangle",
+                "sawtooth",
+                "step",
+                "ramp",
+                "arbitrary"
+              ]
+            },
+            "frequency_Hz": {
+              "type": "number",
+              "exclusiveMinimum": 0
+            },
+            "period_s": {
+              "type": "number",
+              "exclusiveMinimum": 0,
+              "description": "Alternative to frequency_Hz. Give one or the other, not both."
+            },
+            "duty_cycle": {
+              "type": "number",
+              "minimum": 0,
+              "maximum": 1,
+              "description": "Fraction of each cycle spent at the first level."
+            },
+            "levels": {
+              "type": "array",
+              "description": "The values the driven variable alternates between, in order, each with its unit and optionally how long it is held. Two entries for a square wave; more for a multi-step programme.",
+              "items": {
+                "type": "object",
+                "additionalProperties": false,
+                "properties": {
+                  "value": {
+                    "type": "number"
+                  },
+                  "unit": {
+                    "type": "string"
+                  },
+                  "hold_s": {
+                    "type": "number",
+                    "minimum": 0
+                  },
+                  "label": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "value",
+                  "unit"
+                ]
+              }
+            },
+            "amplitude": {
+              "type": "object",
+              "additionalProperties": false,
+              "description": "Peak-to-peak unless stated otherwise in `notes`.",
+              "properties": {
+                "value": {
+                  "type": "number"
+                },
+                "unit": {
+                  "type": "string"
+                }
+              }
+            },
+            "mean": {
+              "type": "object",
+              "additionalProperties": false,
+              "description": "Time-average of the driven variable over a cycle.",
+              "properties": {
+                "value": {
+                  "type": "number"
+                },
+                "unit": {
+                  "type": "string"
+                }
+              }
+            },
+            "n_cycles": {
+              "type": "integer",
+              "minimum": 1
+            },
+            "descriptors_represent": {
+              "type": "string",
+              "enum": [
+                "cycle_averaged",
+                "phase_resolved",
+                "at_a_single_level",
+                "transient",
+                "unspecified"
+              ],
+              "description": "THE LOAD-BEARING FIELD. What do this record's descriptors report, relative to the driving? `cycle_averaged` \u2014 averaged over whole cycles, which is a DIFFERENT QUANTITY from the same descriptor measured under a static condition and must not be compared to one without saying so. `phase_resolved` \u2014 resolved within the cycle (see `phase_deg`). `at_a_single_level` \u2014 measured while held at one level, so it is a static value obtained inside a driven experiment. `transient` \u2014 during the excursion itself. Declare it; `unspecified` is honest but limits what a consumer may do with the record."
+            },
+            "phase_deg": {
+              "type": "number",
+              "description": "For phase_resolved descriptors, the phase within the cycle."
+            },
+            "settling": {
+              "type": "object",
+              "additionalProperties": false,
+              "description": "Whether the system reached a periodic steady state before data were taken.",
+              "properties": {
+                "reached_periodic_steady_state": {
+                  "type": "boolean"
+                },
+                "equilibration_cycles": {
+                  "type": "integer",
+                  "minimum": 0
+                },
+                "basis": {
+                  "type": "string"
+                }
+              }
+            },
+            "notes": {
+              "type": "string"
+            }
+          }
         }
       },
-      "additionalProperties": false
+      "additionalProperties": false,
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "temperature_K": {
+                "type": "null"
+              }
+            },
+            "required": [
+              "temperature_K"
+            ]
+          },
+          "then": {
+            "properties": {
+              "temperature_basis": {
+                "const": "not_reported"
+              }
+            },
+            "required": [
+              "temperature_basis"
+            ]
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "temperature_basis": {
+                "const": "not_reported"
+              }
+            },
+            "required": [
+              "temperature_basis"
+            ]
+          },
+          "then": {
+            "properties": {
+              "temperature_K": {
+                "type": "null"
+              }
+            }
+          }
+        }
+      ]
     },
     "measurement": {
       "type": "object",
@@ -1206,7 +1457,13 @@
           },
           "citation": {
             "type": "object",
-            "description": "Bibliographic metadata for literature-derived assets (authors, title, journal, year, volume, pages, doi)."
+            "description": "Bibliographic metadata for literature-derived assets (authors, title, journal, year, volume, pages, doi).",
+            "properties": {
+              "relation": {
+                "type": "string",
+                "description": "How this publication relates to the record (controlled vocabulary assets.citation.relation): 'source' when the record's numbers were taken from it, its figures, tables, supplementary information or data repository (the record is then source_type literature); 'reports_this_work' when it reports the same measurement or calculation and the numbers come from the producer's own data; 'reference' for related work. Required on every cited publication of a record that is not source_type literature or database."
+              }
+            }
           },
           "caption_verbatim": {
             "type": "string",
@@ -1230,6 +1487,33 @@
               "number",
               "string"
             ]
+          },
+          "database_entry": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "database",
+              "entry_id"
+            ],
+            "description": "The database entry a source_type database record was taken from. The asset uri opens the entry, or its collection when the database has no page per entry.",
+            "properties": {
+              "database": {
+                "type": "string",
+                "description": "Name of the database."
+              },
+              "entry_id": {
+                "type": "string",
+                "description": "The database's own identifier for this entry."
+              },
+              "collection": {
+                "type": "string",
+                "description": "The dataset or publication inside the database the entry belongs to, when the database groups entries."
+              },
+              "version": {
+                "type": "string",
+                "description": "Database release or version, when the database versions its entries."
+              }
+            }
           }
         },
         "additionalProperties": false
@@ -1364,7 +1648,7 @@
                     "at": {
                       "type": "object",
                       "additionalProperties": false,
-                      "description": "Operating point within a series. Sample identity, operating potential, electrolyte, and cell type all live in their canonical slots \u2014 never as 'at' keys.",
+                      "description": "The condition at which this value holds, as numbers with the unit in the key. Two kinds: (1) a coordinate inside a series (time_s, temperature_K, pressure_bar, a partial pressure or concentration); (2) a READ-OUT point on a sweep (current_density_mA_cm2, current_density_ECSA_mA_cm2, potential_V_RHE), e.g. the overpotential needed to reach 10 mA/cm2 or the mass activity at 0.9 V_RHE, allowed only when context.electrochemistry.control_mode is potentiodynamic (validator AT_READOUT_WITHOUT_SWEEP). Conditions never go into the descriptor NAME (CONDITION_IN_DESCRIPTOR_NAME). The operating point of a record held at one potential or one current, sample identity, electrolyte and cell type live in their canonical slots in context and sample, never as 'at' keys.",
                       "properties": {
                         "temperature_K": {
                           "type": "number"
@@ -1383,6 +1667,18 @@
                         },
                         "glyoxal_concentration_mM": {
                           "type": "number"
+                        },
+                        "current_density_mA_cm2": {
+                          "type": "number",
+                          "description": "Read-out current density, normalized to the geometric electrode area, at which the value was read off a sweep (e.g. the overpotential needed to reach 10 mA/cm2). Signed by the IUPAC convention of ADR-001: negative for cathodic reactions. Not a galvanostatic setpoint; that is context.electrochemistry.current_setpoint_mA_cm2."
+                        },
+                        "current_density_ECSA_mA_cm2": {
+                          "type": "number",
+                          "description": "As current_density_mA_cm2, but normalized to the electrochemically active surface area."
+                        },
+                        "potential_V_RHE": {
+                          "type": "number",
+                          "description": "Read-out potential on the RHE scale at which the value was read off a sweep (e.g. mass activity at 0.9 V_RHE). Not the operating potential of a potentiostatic record; that is context.electrochemistry.potential_setpoint_V and potential_vs_RHE."
                         }
                       }
                     },
@@ -1410,6 +1706,13 @@
                           }
                         }
                       ]
+                    },
+                    "aggregates": {
+                      "type": "array",
+                      "items": {
+                        "type": "string"
+                      },
+                      "description": "Names of other descriptors IN THIS SAME OUTPUT BLOCK that this descriptor aggregates. Declaring it does two things arithmetically: the aggregate is left out of any closure sum so it is not double-counted alongside its own members, and where the members are also present their sum is checked against this value. Use it for any total, subtotal or grouped quantity. A record's own declaration takes precedence over the shared table in descriptors.aggregate_descriptors."
                     }
                   },
                   "additionalProperties": false
@@ -1431,6 +1734,37 @@
               },
               "method": {
                 "type": "string"
+              },
+              "completeness": {
+                "type": "object",
+                "additionalProperties": false,
+                "description": "Does this block report ALL the components that make up its total, or only some? Optional, and only meaningful for descriptor sets that are shares of a known whole (a product distribution, a selectivity slate, a phase or composition breakdown). Declaring an incomplete set is NOT an admission of a bad measurement: minor and hard-to-detect species are routinely not quantified, and a slate summing to 0.85 with that stated is better evidence than one summing to 0.85 in silence. What a machine cannot do is tell an undeclared gap from a measurement that failed to balance.",
+                "properties": {
+                  "quantified": {
+                    "type": "string",
+                    "enum": [
+                      "all_components",
+                      "major_components_only",
+                      "partial",
+                      "unknown"
+                    ],
+                    "description": "all_components = the set is intended to be exhaustive; major_components_only = minor/trace species were not quantified; partial = a known subset only; unknown = not established."
+                  },
+                  "unquantified": {
+                    "type": "array",
+                    "items": {
+                      "type": "string"
+                    },
+                    "description": "Components known or expected to be present but not quantified, named where possible (e.g. 'liquid products', 'C3+', 'carbonate crossover'). Naming them is what makes the gap re-usable."
+                  },
+                  "expected_total": {
+                    "type": "number",
+                    "description": "The whole these components are shares of, in the same units as their values. Defaults to 1.0 for fractions."
+                  },
+                  "notes": {
+                    "type": "string"
+                  }
+                }
               }
             },
             "additionalProperties": false
@@ -1569,7 +1903,7 @@
             },
             "code": {
               "type": "string",
-              "description": "Simulation code name (e.g. 'VASP', 'Quantum ESPRESSO', 'JDFTx', 'CP2K', 'GPAW')."
+              "description": "The code that produced the result, and the only place a record states it. A workflow that chains codes names them in order, joined by ' + '. 'not_reported' when the source does not state it."
             },
             "code_version": {
               "type": "string",
@@ -1742,6 +2076,29 @@
               "notes": {
                 "type": "string"
               }
+            }
+          }
+        },
+        "produced_by": {
+          "type": "object",
+          "additionalProperties": false,
+          "description": "Who PRODUCED the result, as distinct from who deposited the record. Applies to a measurement, a calculation or a curation pass alike. Two results from the same group share method culture and systematic practice; two from different groups do not. `uploaded_by` cannot stand in for this - a curator depositing a hundred records from twenty groups is one uploader and twenty sources.",
+          "properties": {
+            "group": {
+              "type": "string",
+              "description": "Research group, team or collaboration that produced the result. Write a PI's group as the PI's name as printed in the byline followed by 'group' ('Edward H. Sargent group'; two PIs: 'David Sinton and Edward H. Sargent groups'); a facility team, center or collaboration by its own name ('JCAP high-throughput experimentation', 'SUNCAT'). The same producer must be written the same way in every record, because the discovery engine matches it exactly."
+            },
+            "organization": {
+              "type": "string"
+            },
+            "people": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            },
+            "contact": {
+              "type": "string"
             }
           }
         }

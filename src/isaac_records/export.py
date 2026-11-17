@@ -127,6 +127,42 @@ def _enforce_server_owned_invariant(record: dict) -> None:
             del record[block_key]
 
 
+def _write_not_reported_temperature(record: dict, draft: dict) -> None:
+    """Write ``context.temperature_K: null`` when, and only when, the record states
+    ``context.temperature_basis: "not_reported"`` and carries no ``temperature_K`` at all.
+
+    The schema vendored on 2026-11-16 REQUIRES ``context.temperature_K`` and makes it
+    ``number | null``, with a ``context.allOf`` rule tying the two together: null only with
+    basis ``not_reported``, and basis ``not_reported`` only with null. The ``fields`` loop
+    skips a null or ``status: missing`` envelope, so without this a draft whose evidenced
+    answer is "the source does not state the temperature" exported a record with NO
+    ``temperature_K`` and was refused for a missing required property — reporting the
+    stated absence as an unanswered question.
+
+    This is the schema's own rule, not a guess: null asserts no value, and it is written only
+    for the one basis that means "not stated". Nothing is defaulted. A draft that holds a
+    number AND ``not_reported`` keeps its number, and official validation refuses the
+    contradiction; a null temperature WITHOUT that basis is never written here, so the
+    schema still refuses it (or reports the missing property) exactly as before.
+
+    AN OPEN QUESTION STAYS OPEN (review of #323, LOW 1). The null is written only when the
+    draft's own ``context.temperature_K`` envelope is absent or ``status: missing``. A
+    ``needs_confirmation`` (or any other) envelope is a question nobody has answered, and an
+    evidenced basis elsewhere must not close it: the record then has no ``temperature_K`` and
+    the schema refuses the export for the missing required property."""
+    context = record.get("context")
+    if not isinstance(context, dict):
+        return
+    env = (draft.get("fields") or {}).get("context.temperature_K")
+    if env is not None and not (isinstance(env, dict) and env.get("status") == "missing"):
+        return
+    if context.get("temperature_basis") == "not_reported" and "temperature_K" not in context:
+        # A copy, not an in-place write: under the whole-block spelling
+        # (`fields["context"] = {"value": {...}}`) `record["context"]` IS the draft's own dict,
+        # and `transform` must stay side-effect free (see `_enforce_server_owned_invariant`).
+        record["context"] = {**context, "temperature_K": None}
+
+
 def transform(draft: dict, *, record_id: str | None = None, now: str | None = None) -> dict:
     """Build the official-shape record from a draft (no validation here)."""
     now = now or _now_iso()
@@ -189,7 +225,19 @@ def transform(draft: dict, *, record_id: str | None = None, now: str | None = No
     if draft.get("links") is not None:
         record["links"] = strip_evidence(draft["links"])
     if draft.get("attribution"):
-        record["attribution"] = strip_evidence(draft["attribution"])
+        block = strip_evidence(draft["attribution"])
+        existing = record.get("attribution")
+        # MERGE, NOT REPLACE, since the 2026-11-16 schema declares `attribution.produced_by`:
+        # the `fields` loop above writes `attribution.produced_by.*` envelopes into
+        # `record["attribution"]`, and assigning the block over it silently DROPPED them from
+        # any draft that also carried contributors. Block keys win on a collision, which is
+        # the previous behaviour for every key the block holds. (`validate_draft` refuses
+        # `produced_by` inside the block, so the two spellings do not meet there.)
+        if isinstance(existing, dict) and isinstance(block, dict):
+            record["attribution"] = {**existing, **block}
+        else:
+            record["attribution"] = block
+    _write_not_reported_temperature(record, draft)
     if draft.get("tags"):
         record["tags"] = list(draft["tags"])
 
@@ -273,6 +321,18 @@ def export_draft(
     now: str | None = None,
 ) -> ExportResult:
     draft_report = validate_draft(draft)
+    # AN OPEN QUESTION IS NEVER EXPORTED (CLAUDE.md §5). `validate_draft` accepts a
+    # `needs_confirmation` envelope (it is a legitimate DRAFT state), and `transform` writes
+    # every non-null value regardless of status, so an unconfirmed, unevidenced value went
+    # into an official record. Refused here, at export only, so drafts in progress are
+    # reported exactly as before. Predates the 2026-11-16 schema re-vendoring.
+    for path, env in (draft.get("fields") or {}).items() if isinstance(draft.get("fields"), dict) else ():
+        if isinstance(env, dict) and env.get("status") == "needs_confirmation":
+            draft_report.err(
+                f"fields.{path}",
+                "status 'needs_confirmation' is an open question: confirm the value with its "
+                "evidence, or mark it missing, before export",
+            )
     if record_id is not None and not is_record_id(record_id):
         # The message must NOT quote `^[0-9A-Z]{26}$` as the rule it applied. That was
         # the old text, and it was false in the one case that matters most: for

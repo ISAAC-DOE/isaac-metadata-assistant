@@ -106,10 +106,11 @@ rules before using real data (`docs/local-first-data-flows.md`). The skill asks 
 - **Spot checks are not verification.** Claude's independent reading covers a sample of key facts;
   the summary says how many.
 - **Names are not verified.** Decisions are recorded as `local_unverified`.
-- **Two schemas.** Records are checked against the schema the portal uses. The ISAAC website's
-  older July (v1.05) schema cannot hold some of what the portal needs, for example "temperature not
-  reported" or who produced the data. The checks report that for information only: an unknown
-  temperature does not stop a record from being exported, and no temperature is guessed.
+- **One schema.** Records are checked against the schema the portal uses, and from this release on
+  the ISAAC website validates against the same document (the same upstream commit). A hosted
+  website still serves its older schema until it is redeployed with this release. It can say "temperature not
+  reported" and who produced the data. An unknown temperature does not stop a record from being
+  exported, and no temperature is guessed.
 - **Readers.** Built in: Beamline 15 SPEC scans and macros, SSRL EXAFS Data Collector text scans,
   Athena/Demeter exports, XDI files, XES tab files, PyMca MCA files, simple two-column text, Larch
   session (`.larix`) files and Igor (`.pxp`) experiments, and nested ZIPs. Other formats are listed as

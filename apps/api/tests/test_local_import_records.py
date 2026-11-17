@@ -520,23 +520,60 @@ def test_vendored_upstream_drift_is_reported(bdir):
     _decide_everything(bdir)
     R.build_records(bdir)
     draft = json.loads((bdir / "drafts" / "g1.draft.json").read_text())
-    demands = [{"code": "PRODUCED_BY_MISSING", "path": "attribution/produced_by", "message": "state who produced it"}]
+    # A demand for a field the vendored schema does NOT declare, under a parent that forbids
+    # unknown keys, is reported as drift. (Until 2026-11-16 this used `attribution.produced_by`,
+    # which the July vendoring lacked; the re-vendored schema at the portal's commit declares
+    # it, so a synthetic undeclared key stands in for a future upstream addition.)
+    demands = [{"code": "SYNTHETIC_MISSING", "path": "attribution/SYNTHETIC_undeclared", "message": "state it"}]
     report = R.validate_draft_file(draft, run_portal=_portal("reject", errors=demands))
     assert report["verdict"] == "portal_reject"  # DEC-76: drift is reported, the portal gates
-    assert report["schema_drift"]["portal_requires_undeclared_fields"][0]["path"] == "attribution.produced_by"
+    assert report["schema_drift"]["portal_requires_undeclared_fields"][0]["path"] == "attribution.SYNTHETIC_undeclared"
 
 
-def test_the_unknown_temperature_drift_is_named(monkeypatch):
-    """Upstream allows temperature_K null + temperature_basis not_reported; vendored does not."""
-    upstream = json.loads((REPO_ROOT / "schema" / "isaac_record_v1.json").read_text())
-    ctx = upstream["properties"]["context"]
-    ctx["properties"]["temperature_K"] = {"type": ["number", "null"]}
-    ctx["properties"]["temperature_basis"] = {"enum": ["stated", "room_temperature", "not_reported"]}
-    record = {"isaac_record_version": "1.05", "record_id": "0" * 26, "record_type": "evidence",
-              "record_domain": "characterization", "source_type": "facility",
-              "timestamps": {"created_utc": "2026-10-28T00:00:00Z"}, "context": {"environment": "ex_situ"}}
-    drift = R.schema_drift(record, upstream)
+def test_a_portal_demand_for_a_declared_field_is_not_drift(bdir):
+    """`attribution.produced_by` is declared by the vendored schema since the 2026-11-16 re-vendoring at
+    the portal's pinned commit, so the portal asking for it is an ordinary missing value, not drift."""
+    _decide_everything(bdir)
+    R.build_records(bdir)
+    draft = json.loads((bdir / "drafts" / "g1.draft.json").read_text())
+    demands = [{"code": "PRODUCED_BY_MISSING", "path": "attribution/produced_by", "message": "state who produced it"}]
+    report = R.validate_draft_file(draft, run_portal=_portal("reject", errors=demands))
+    assert report["verdict"] == "portal_reject"
+    assert "portal_requires_undeclared_fields" not in report["schema_drift"]
+
+
+_UNKNOWN_TEMPERATURE_RECORD = {
+    "isaac_record_version": "1.05", "record_id": "0" * 26, "record_type": "evidence",
+    "record_domain": "characterization", "source_type": "facility",
+    "timestamps": {"created_utc": "2026-10-28T00:00:00Z"}, "context": {"environment": "ex_situ"}}
+
+
+def test_the_unknown_temperature_drift_is_named(monkeypatch, tmp_path):
+    """Upstream allows temperature_K null + temperature_basis not_reported; a vendored schema that
+    requires a number and has no basis (the July vendoring did) does not, and the drift names it.
+
+    The vendored schema is the portal's own document since 2026-11-16, so the narrower one is built
+    here from it: the mechanism stays tested for a future refresh in which the two differ again."""
+    schema = json.loads((REPO_ROOT / "schema" / "isaac_record_v1.json").read_text())
+    narrowed = json.loads(json.dumps(schema))
+    ctx = narrowed["properties"]["context"]
+    ctx["properties"]["temperature_K"] = {"type": "number"}
+    ctx["properties"].pop("temperature_basis")
+    ctx.pop("allOf", None)
+    (tmp_path / "schema").mkdir()
+    (tmp_path / "schema" / "isaac_record_v1.json").write_text(json.dumps(narrowed))
+    monkeypatch.setattr(R, "_repo_root", lambda: tmp_path)
+    drift = R.schema_drift(dict(_UNKNOWN_TEMPERATURE_RECORD), schema)
     assert drift["blocked_by_schema_drift"] is True and "temperature_basis" in drift["temperature"]
+
+
+def test_no_unknown_temperature_drift_when_both_schemas_are_one_document():
+    """With the vendored schema re-vendored at the portal's pinned commit (2026-11-16), both sides
+    accept `temperature_K: null` + `not_reported`: no temperature note, and no drift from it."""
+    schema = json.loads((REPO_ROOT / "schema" / "isaac_record_v1.json").read_text())
+    drift = R.schema_drift(dict(_UNKNOWN_TEMPERATURE_RECORD), schema)
+    assert "temperature" not in drift
+    assert drift["vendored_only"] == [] and drift["upstream_only"] == []
 
 
 # --- upload dry run -------------------------------------------------------------------------------------

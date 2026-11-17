@@ -17,11 +17,13 @@ is listed — nothing is defaulted, no temperature is assumed.
 
 ``isaac bundle validate`` — per draft: ``validate_draft`` → export DRY RUN through
 ``isaac_records.export.export_draft`` (writes nothing) → ``validate_official`` +
-``check_exactness`` (vendored v1.05) → the OFFLINE upstream portal check
+``check_exactness`` (vendored schema) → the OFFLINE upstream portal check
 (:mod:`.portal`). Every error and warning is kept verbatim in
 ``validation/<group_id>.json`` with a plain-English summary. A disagreement between the
 vendored and upstream schemas is reported as ``blocked_by_schema_drift`` — "blocked" for the WEBSITE's
-vendored v1.05 schema only, which gates nothing here (the verdict is the portal schema's and the portal's).
+vendored schema only, which gates nothing here (the verdict is the portal schema's and the portal's).
+Since 2026-11-16 the vendored schema IS the pinned commit's document (``schema/PROVENANCE.md``), so
+the comparison normally finds no drift; it stays so a later refresh of either side is visible.
 
 ``isaac bundle export`` — writes ``<ULID>.json`` + ``<ULID>.evidence.json`` ONLY for a
 record that passes official validation AND whose portal outcome is ``publish``.
@@ -2098,7 +2100,7 @@ def _schema_error_keys(errors: Sequence[tuple[str, str]]) -> set[tuple[str, str]
 
 def _portal_demands_undeclared(portal_check: Mapping | None) -> list[dict]:
     """Portal errors naming a field the VENDORED schema does not declare under a parent
-    that forbids unknown keys — a requirement no v1.05 record can ever satisfy."""
+    that forbids unknown keys — a requirement no record exported through the vendored schema can satisfy."""
     out = []
     result = (portal_check or {}).get("result") or {}
     for err in result.get("errors") or ():
@@ -2114,7 +2116,7 @@ def _portal_demands_undeclared(portal_check: Mapping | None) -> list[dict]:
                     "path": path,
                     "portal_code": err.get("code"),
                     "explanation": (
-                        f"The upstream portal requires {path}; vendored v1.05 does not declare it "
+                        f"The upstream portal requires {path}; the vendored schema does not declare it "
                         "and forbids unknown keys there, so no record exported through the "
                         "vendored schema can satisfy both."
                     ),
@@ -2125,8 +2127,10 @@ def _portal_demands_undeclared(portal_check: Mapping | None) -> list[dict]:
 
 def schema_drift(record: Mapping, upstream: Mapping | None, portal_check: Mapping | None = None) -> dict:
     """Vendored-vs-upstream disagreement about THIS record, both directions, plus the
-    one known shape of drift: an unknown temperature (upstream: ``temperature_K: null`` +
-    ``temperature_basis: not_reported``; vendored: a number is required, no basis field)."""
+    one shape of drift that arose before 2026-11-16, when the vendored schema was the July
+    document: an unknown temperature (upstream: ``temperature_K: null`` +
+    ``temperature_basis: not_reported``; July: a number is required, no basis field). Both
+    sides now come from the same commit, so this normally reports nothing."""
     from jsonschema import Draft202012Validator
     from isaac_records.official import validate_official
 
@@ -2162,7 +2166,7 @@ def schema_drift(record: Mapping, upstream: Mapping | None, portal_check: Mappin
             out["temperature"] = (
                 "The temperature is unknown. The portal's pinned schema, which the local export validates "
                 "against, accepts temperature_K: null with temperature_basis: not_reported, and the record "
-                "says that; the website's older vendored v1.05 schema requires a number and has no "
+                "says that; the website's vendored schema requires a number or has no "
                 "temperature_basis. This does NOT block the local export: it only means the record does not "
                 "pass the website schema, which is reported for information. Nothing is defaulted; a "
                 "temperature a scientist states satisfies both."
@@ -2181,9 +2185,12 @@ def compose_record(draft: Mapping, composition: Mapping | None, *, record_id: st
 
     Reuses the truth plane's own functions — ``isaac_records.export.transform`` and
     ``isaac_records.export.set_path`` — and does not edit them. ``export_draft`` is NOT
-    used: its ``transform`` drops every null field, so it cannot write the upstream
-    schema's ``temperature_K: null`` (with ``temperature_basis: not_reported``); that one
-    shape is applied here from the composition's ``record_overrides`` after ``transform``.
+    used: when this was written its ``transform`` dropped every null field, so it could not
+    write the upstream schema's ``temperature_K: null`` (with ``temperature_basis:
+    not_reported``); that one shape is applied here from the composition's
+    ``record_overrides`` after ``transform``. Since 2026-11-16 ``transform`` writes that same
+    null itself when the draft states the ``not_reported`` basis (the schema's own
+    ``context.allOf`` rule), so for such a draft the override is a no-op; it is kept as is.
     """
     from isaac_records.export import set_path, transform
 
@@ -2218,15 +2225,31 @@ def schemas_used(where: Mapping) -> dict:
             "schema_sha256": _sha256(Path(where["dir"]) / "schema" / "isaac_record_v1.json"),
             "gates": ["official schema", "exactness", "portal validate_record_full"],
         }
+    website_sha = _sha256(_repo_root() / "schema" / "isaac_record_v1.json")
     return {
         "local_export_target": target,
         "website_schema": {
-            "source": "vendored schema/isaac_record_v1.json (v1.05, July)",
-            "schema_sha256": _sha256(_repo_root() / "schema" / "isaac_record_v1.json"),
+            "source": "vendored schema/isaac_record_v1.json",
+            "schema_sha256": website_sha,
+            # Measured, never assumed: None when the pinned clone is not installed to compare with.
+            "same_as_local_export_target": (
+                None if target is None or not target["schema_sha256"] else website_sha == target["schema_sha256"]
+            ),
             "gates": [],
             "statement": "Reported for information only. It does not gate the local export, and nothing here is claimed valid for the website.",
         },
     }
+
+
+def _website_schema_label(used: Mapping) -> str:
+    """How the summary names the website schema: whether it is the SAME document the portal pins is
+    read from the two sha256s ``schemas_used`` computed, never stated from memory."""
+    same = (used.get("website_schema") or {}).get("same_as_local_export_target")
+    if same is True:
+        return "Website schema (vendored, the same document as the portal-target schema)"
+    if same is False:
+        return "Website schema (vendored, a different document from the portal-target schema)"
+    return "Website schema (vendored)"
 
 
 def validate_draft_file(draft: Mapping, *, run_portal, composition: Mapping | None = None) -> dict:
@@ -2234,7 +2257,7 @@ def validate_draft_file(draft: Mapping, *, run_portal, composition: Mapping | No
 
     Gating (DEC-76): ISAAC's own ``validate_official`` and ``check_exactness`` with
     ``root`` = the pinned upstream clone, plus the offline portal check. The vendored
-    v1.05 result is computed and reported as ``website_schema`` and gates nothing."""
+    schema's result is computed and reported as ``website_schema`` and gates nothing."""
     from isaac_records.draft_validator import validate_draft
     from isaac_records.exactness import check_exactness
     from isaac_records.official import validate_official
@@ -2298,7 +2321,7 @@ def validate_draft_file(draft: Mapping, *, run_portal, composition: Mapping | No
             if portal_check.get("status") == "ran"
             else f"Upstream portal check: not run — {portal_check.get('reason')}. This is not a pass."
         ),
-        f"Website schema (vendored v1.05, July), for information only: {'pass' if website.ok else 'FAIL'} ({len(website.errors)} error(s)). Not claimed valid for the website.",
+        f"{_website_schema_label(used)}, for information only: {'pass' if website.ok else 'FAIL'} ({len(website.errors)} error(s)). Not claimed valid for the website.",
         "This is NOT an official record until `isaac bundle export` writes one, and nothing has been uploaded.",
     ]
     return {
@@ -2313,7 +2336,7 @@ def validate_draft_file(draft: Mapping, *, run_portal, composition: Mapping | No
         "processing_blocked": blocked,
         "composition": {
             "reused": ["isaac_records.export.transform", "isaac_records.export.set_path", "isaac_records.export.build_sidecar"],
-            "not_used": "isaac_records.export.export_draft (its transform drops null fields, so it cannot write temperature_K: null)",
+            "not_used": "isaac_records.export.export_draft (chosen when its transform could not write temperature_K: null; see compose_record)",
             "record_overrides": dict((composition or {}).get("record_overrides") or {}),
         },
         "official_validation": (

@@ -4375,7 +4375,21 @@ _DISCLOSED_TRUTH_PATH_CHANGES: dict[str, str] = {
         "`validator == 'pattern'` filter DISCARDED such findings silently — nothing in "
         "the vendored schema sits there today, so no export verdict moves, but the "
         "module promised refresh-proof coverage and did not have it. Covered by "
-        "tests/test_schema_string_gate_exactness.py. Delete this entry once landed."
+        "tests/test_schema_string_gate_exactness.py. Delete this entry once landed. "
+        "ALSO, 2026-11-16 (branch feat/vendor-portal-schema, approved by the project owner), "
+        "two changes the re-vendored schema made necessary: (1) `transform` MERGES the "
+        "attribution block into what the fields loop wrote instead of replacing it, which "
+        "silently dropped `attribution.produced_by.*` envelopes from a draft that also had "
+        "contributors; (2) `transform` writes `context.temperature_K: null` ONLY when the "
+        "record states `temperature_basis: not_reported` and has no temperature_K (the "
+        "schema's own context.allOf rule; previously such a draft was refused for a missing "
+        "required property). A null without that basis is never written. Exported records "
+        "change only for drafts carrying the new fields. Covered by "
+        "tests/test_portal_schema_fields.py. ALSO (a defect that predates this branch, found "
+        "by its review): `export_draft` refuses any field envelope whose status is "
+        "`needs_confirmation`; `transform` wrote such a value, with no evidence, into the "
+        "official record. `validate_draft` is unchanged, so drafts in progress report as "
+        "before."
     ),
     "src/isaac_records/cli.py": (
         "`isaac validate --official` now also runs `exactness.check_exactness`, prints "
@@ -4560,7 +4574,38 @@ _DISCLOSED_TRUTH_PATH_CHANGES: dict[str, str] = {
         "each disabling ONE guard by exact substitution; all 20 killed. Four SURVIVED "
         "the first run (the nested position, the preserved prose, the non-string "
         "question, the non-string locator) and tests were added for each, which is the "
-        "only reason the number means anything. Delete this entry once landed."
+        "only reason the number means anything. Delete this entry once landed. "
+        "ALSO, 2026-11-16 (branch feat/vendor-portal-schema, approved by the project owner): "
+        "`attribution.produced_by` inside the attribution BLOCK is refused, because the "
+        "re-vendored schema declares it and the block carries no per-value evidence; the "
+        "field-envelope spelling is evidence-gated as before. Covered by "
+        "tests/test_portal_schema_fields.py."
+    ),
+    "schema/isaac_record_v1.json": (
+        "2026-11-16, approved by the project owner: re-vendored VERBATIM from upstream "
+        "ISAAC-DOE/isaac-ai-ready-record at a1cb1c8, the commit the portal check pins "
+        "(local_import/portal.PINNED_COMMIT). Same isaac_record_version (1.05); a strict "
+        "superset of the July copy (no path removed; produced_by, temperature_basis, "
+        "context.modulation, system.session ... added; temperature_K may be null with "
+        "basis not_reported; cell_type gains not_reported; technique 37 -> 45). Every "
+        "record valid before stays valid. Covered by tests/test_official.py (14 upstream "
+        "examples) and tests/test_portal_schema_fields.py. Delete once landed."
+    ),
+    "schema/PROVENANCE.md": (
+        "2026-11-16: records the re-vendoring above (commit, blob id, date, why, and how "
+        "byte-identity with upstream was checked). Delete once landed."
+    ),
+    "src/isaac_records/audit.py": (
+        "2026-11-16, with the re-vendored schema: `attribution.produced_by` leaves are now "
+        "coverage targets (the whole `attribution` subtree was excluded, which would have "
+        "audited an uncited produced_by at full coverage; contributors and uploaded_by stay "
+        "excluded), and a NULL leaf is not a target (a null asserts no value; the schema now "
+        "requires temperature_K: null with basis not_reported, which was reported uncovered "
+        "forever). After review of #323: the two list fields the schema added with no block "
+        "target (produced_by.people, context.modulation.levels) are targets at their own "
+        "path, and a whole-object produced_by envelope covers its leaves. Coverage reporting "
+        "only; validation verdicts unchanged. Covered by tests/test_portal_schema_fields.py. "
+        "Delete once landed."
     ),
 }
 

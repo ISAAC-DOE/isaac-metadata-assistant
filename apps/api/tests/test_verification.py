@@ -48,7 +48,8 @@ def report() -> dict:
 
 
 def test_the_corpus_is_the_public_upstream_example_set():
-    """Ten records, and they must be the vendored public examples.
+    """Fourteen records (ten before the 2026-11-16 re-vendoring at upstream
+    `a1cb1c8`), and they must be the vendored public examples.
 
     `schema/PROVENANCE.md` records these as copied verbatim from the upstream
     `examples/` directory. That provenance is the entire reason this report
@@ -56,7 +57,7 @@ def test_the_corpus_is_the_public_upstream_example_set():
     change in the authorization argument.
     """
     records = load_public_corpus(ROOT)
-    assert len(records) == 10, f"expected the ten upstream examples, got {len(records)}"
+    assert len(records) == 14, f"expected the fourteen upstream examples, got {len(records)}"
     assert all(isinstance(r, dict) for r in records)
 
 
@@ -555,7 +556,7 @@ def test_official_validator_unchanged_is_a_runtime_measurement():
 
 
 def test_the_official_validator_still_passes_every_upstream_example(report):
-    assert report["official_validation"]["passing"] == 10
+    assert report["official_validation"]["passing"] == 14  # 10 before the 2026-11-16 re-vendoring
     assert report["official_validation"]["failing"] == 0
 
 
@@ -579,7 +580,7 @@ def test_the_mutation_sweep_found_no_unexpected_outcome(report):
 def test_metadata_is_honest_about_which_corpus_ran(report):
     meta = report["metadata"]
     assert meta["verification_mode"] == PUBLIC_REFERENCE
-    assert meta["corpus_size"] == 10
+    assert meta["corpus_size"] == 14  # 10 before the 2026-11-16 re-vendoring
     assert meta["duration_ms"] > 0
     assert meta["generated_at"].endswith("Z")
 

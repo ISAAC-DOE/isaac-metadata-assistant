@@ -75,7 +75,8 @@ the category taxonomy used in the authorizing plan.
 * **G — unknown / additional fields.** An unknown key inserted at the root and
   at every declared object location. The expectation is **read off the schema
   per location**: ``additionalProperties: false`` ⇒ invalid; anything else ⇒
-  valid. The vendored v1.05 schema is closed in 37 places and open in ~14, so
+  valid. The vendored v1.05 schema is closed in 47 places (37 before the 2026-11-16
+  refresh) and open in others, so
   both branches are genuinely exercised.
 * **L — multiple simultaneous mutations.** Bounded, representative
   combinations, **not** the full product. The bound is stated at
