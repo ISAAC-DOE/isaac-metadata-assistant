@@ -1991,7 +1991,9 @@ describe('plain words on the questions page (2026-11-17, owner: “reads like an
     fireEvent.change(screen.getByLabelText(COPY.yourName), { target: { value: 'Synthetic Scientist' } });
     fireEvent.change(within(card).getByLabelText('Your answer'), { target: { value: 'SYN powder' } });
     fireEvent.click(within(card).getByRole('button', { name: COPY.answer }));
-    expect(await within(card).findByText(COPY.chooseScope)).toBeInTheDocument();
+    // the reason said is this card's own: never "the groups' own files suggest different values" (re-review 2)
+    expect(await within(card).findByText(COPY.chooseScopeUnrecorded)).toBeInTheDocument();
+    expect(within(card).queryByText(COPY.chooseScope)).toBeNull();
     expect(posts).toHaveLength(0);
   });
 
@@ -2014,6 +2016,33 @@ describe('plain words on the questions page (2026-11-17, owner: “reads like an
     ]);
     for (const w of warnings) expect(w.closest('details')).toBeNull();
     for (const r of within(card).getAllByRole('radio')) expect(r).not.toBeChecked();
+    // Answer without a scope says why no scope was chosen: the answers differ, not the files (re-review 2)
+    fireEvent.change(screen.getByLabelText(COPY.yourName), { target: { value: 'Synthetic Scientist' } });
+    fireEvent.change(within(card).getByLabelText('Your answer'), { target: { value: 'in_situ' } });
+    fireEvent.click(within(card).getByRole('button', { name: COPY.answer }));
+    expect(await within(card).findByText(COPY.chooseScopeAnswersDiffer)).toBeInTheDocument();
+    expect(within(card).queryByText(COPY.chooseScope)).toBeNull();
+  });
+
+  it('a start time asked again after the clock’s zone changed is never asked to confirm, and says why beside the title (re-review 1)', async () => {
+    const zoneAgainQ = question({
+      question_id: 'Q-zoneagain1', kind: 'confirm_value', blocking: false, tier: 3, scope: 'group:g1',
+      target_field_path: 'timestamps.acquired_start_utc', reason: 'clock_zone_changed_after_confirmation',
+      text: 'The instrument clock’s time zone changed after start time cand-1 was confirmed, so that confirmation no longer counts, and under the zone now recorded its local time is not a single instant (ambiguous or nonexistent): there is nothing to confirm. Correct it with the UTC start.',
+      applies_to: { groups: 1, runs: 1, targets: 1 }, targets: [{ kind: 'candidate', id: 'cand-1' }],
+      per_scope_targets: { 'group:g1': ['cand-1'] },
+      display: display({ answer_kind: 'confirm_value', targets_without_a_value: 1,
+        scopes: [{ scope: 'group:g1', kind: 'group', group_id: 'g1', label: 'Record group g1', target_count: 1, run_names: ['SYN_run_A'] }] }),
+    });
+    stubPage([zoneAgainQ]);
+    renderAt(ROUTES.localImportBundle('synthetic-beamtime'));
+    const heading = await screen.findByRole('heading', { name: /^When did the measurement start\? .*nothing to confirm\. Give it in UTC\.$/ });
+    const card = heading.closest('li') as HTMLElement;
+    const warning = within(card).getByTestId('li-question-warning');
+    expect(warning).toHaveTextContent('time zone was changed after this was confirmed, so that confirmation no longer counts');
+    // on the card itself, not behind its Details (an optional question's section may itself be a disclosure)
+    expect(warning.closest('li')).toBe(card);
+    expect(warning.closest('[data-testid="li-question-details"]')).toBeNull();
   });
 
   it('a merged card of disagreements counts groups, not questions, and each row is its own question (review 3)', async () => {

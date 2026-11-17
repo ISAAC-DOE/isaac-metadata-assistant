@@ -115,11 +115,21 @@ function allowedOf(q: LocalQuestion): readonly unknown[] | null {
 export function confirmShape(q: LocalQuestion): 'no_value' | 'unfit' | 'value' {
   if (q.no_value) return 'no_value';
   const total = q.targets.length;
-  const without = q.targets_without_a_value ?? 0;
+  const without = withoutValue(q);
   const unfit = q.targets_with_an_unfit_value ?? 0;
+  if (total > 0 && without >= total) return 'no_value';
   if (total > 0 && unfit > 0 && without + unfit >= total) return 'unfit';
   return 'value';
 }
+
+/** How many of a confirm question's targets carry no value: the question's own count, else the one the page's
+ *  server counts for every confirm question (`display.targets_without_a_value`). */
+function withoutValue(q: LocalQuestion): number {
+  return q.targets_without_a_value ?? q.display.targets_without_a_value ?? 0;
+}
+
+/** A confirmed value asked again because the instrument clock's time zone changed after it was confirmed. */
+const CLOCK_ZONE_CHANGED = 'clock_zone_changed_after_confirmation';
 
 const ORDINALS = ['first', 'second', 'third', 'fourth', 'fifth', 'sixth', 'seventh', 'eighth', 'ninth', 'tenth'];
 
@@ -159,6 +169,13 @@ export function plainQuestion(q: LocalQuestion): string | null {
       // nothing is asked of an informational one: the server's own words say so ("For information only: …")
       if (!path || q.informational) return null;
       const shape = confirmShape(q);
+      if (q.reason === CLOCK_ZONE_CHANGED) {
+        // the server: under the zone now recorded the local time is no single instant, "nothing to confirm"
+        return shape === 'value'
+          ? `Is the ${fieldNoun(path)} right under the time zone now recorded?`
+          : `${fieldAsk(path)} Under the clock’s time zone now recorded, the time in your files is not a single ` +
+              'moment, so there is nothing to confirm. Give it in UTC.';
+      }
       if (shape === 'no_value') return `${fieldAsk(path, allowedOf(q))} Your files mention it, but not as a value a record can hold.`;
       if (shape === 'unfit') return `${fieldAsk(path, allowedOf(q))} The value read from your files does not fit this field.`;
       return `Is the ${fieldNoun(path)} read from your files right?`;
@@ -359,9 +376,15 @@ export function questionWarnings(q: LocalQuestion): string[] {
         `the record: ${parts.join('; ')}${more}. Answer again with a value the record can take.`,
     );
   }
+  if (q.reason === CLOCK_ZONE_CHANGED) {
+    out.push(
+      'The instrument clock’s time zone was changed after this was confirmed, so that confirmation no longer counts.' +
+        (confirmShape(q) === 'value' ? ' Confirm it again, or correct it.' : ''),
+    );
+  }
   if (q.kind === 'confirm_value' && !q.informational && confirmShape(q) === 'value') {
     const total = q.targets.length;
-    const without = q.targets_without_a_value ?? 0;
+    const without = withoutValue(q);
     const unfit = q.targets_with_an_unfit_value ?? 0;
     if (without > 0) {
       out.push(

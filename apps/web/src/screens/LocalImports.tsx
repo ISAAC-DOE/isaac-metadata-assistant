@@ -1835,7 +1835,14 @@ function QuestionCard({
       return;
     }
     if (how.scope === undefined && how.scopes === undefined && multi && scopeMode === null) {
-      say(COPY.chooseScope);
+      // the reason no scope was chosen for the person, said as it is (never another case's reason)
+      say(
+        q.partition === 'sample=unrecorded'
+          ? COPY.chooseScopeUnrecorded
+          : q.answers_differ === true
+            ? COPY.chooseScopeAnswersDiffer
+            : COPY.chooseScope,
+      );
       return;
     }
     if (how.scope === undefined && how.scopes === undefined && multi && scopeMode === 'one' && !chosen) {

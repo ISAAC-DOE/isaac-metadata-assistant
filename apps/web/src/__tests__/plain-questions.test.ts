@@ -258,3 +258,30 @@ describe('a merged card counts groups and tells its rows apart (review 3)', () =
     expect(clusterRowLabels(cluster, () => 'SYN_run_A')).toEqual(['SYN_run_A: same (1 of 2)', 'SYN_run_A: same (2 of 2)']);
   });
 });
+
+describe('a start time asked again after the clock’s time zone changed (re-review 1)', () => {
+  const base = {
+    kind: 'confirm_value', scope: 'group:g1', target_field_path: 'timestamps.acquired_start_utc', blocking: false, tier: 3,
+    reason: 'clock_zone_changed_after_confirmation',
+  };
+  it('no single instant under the new zone: never asked to confirm, and the zone change is said beside the title', () => {
+    // the server sets neither no_value nor a target count on it: the page's server counts the targets with no value
+    const none = q({ ...base, targets: [{ kind: 'candidate', id: 'cand-1' }], display: { ...q({}).display, targets_without_a_value: 1 } });
+    expect(confirmShape(none)).toBe('no_value');
+    expect(plainQuestion(none)).toBe(
+      'When did the measurement start? Under the clock’s time zone now recorded, the time in your files is not a single moment, so there is nothing to confirm. Give it in UTC.',
+    );
+    expect(plainQuestion(none)).not.toMatch(/read from your files right/);
+    expect(questionWarnings(none)).toEqual([
+      'The instrument clock’s time zone was changed after this was confirmed, so that confirmation no longer counts.',
+    ]);
+  });
+
+  it('a start under the new zone: asked again, with the zone change said beside the title', () => {
+    const valued = q({ ...base, targets: [{ kind: 'candidate', id: 'cand-1' }], display: { ...q({}).display, targets_without_a_value: 0 } });
+    expect(plainQuestion(valued)).toBe('Is the start time right under the time zone now recorded?');
+    expect(questionWarnings(valued)).toEqual([
+      'The instrument clock’s time zone was changed after this was confirmed, so that confirmation no longer counts. Confirm it again, or correct it.',
+    ]);
+  });
+});

@@ -1020,6 +1020,12 @@ def describe_question(bundle: Mapping, q: Mapping, *, folder: str,
         "text": page_words(q.get("text")),
         "why": page_words(q.get("why")),
         **({"conflict": cf_said} if (cf_said := _conflict_said(q, conflicts)) else {}),
+        # 2026-11-17 re-review: how many of a confirm question's targets carry NO value, counted here for every confirm
+        # question (the start times asked again after a clock-zone change carry no `targets_without_a_value` of their
+        # own), so the page never asks to confirm a value that is not there. Additive; the question is unchanged.
+        **({"targets_without_a_value": sum(1 for t in targets if t.get("kind") == "candidate"
+                                           and (cands.get(t.get("id")) or {}).get("value") is None)}
+           if kind == "confirm_value" else {}),
     }, shown
 
 
@@ -1282,13 +1288,17 @@ def unique_group_names(bundle: Mapping) -> dict[str, str]:
             f = folders[g]
             out[g] = f"{f}/{name}" if f and seen[f] == 1 else f"{name} (group {_short_id(g, gids)})"
     # a name made unique above may still equal another group's own name (a stem that reads "day1/scan_001" cannot,
-    # as a stem holds no "/", but one that reads "scan_001 (group …)" could): the id settles it
-    counts = Counter(out.values())
+    # as a stem holds no "/", but one that reads "scan_001 (group …)" could): the id settles it, pass after pass
+    # until no two names are alike. It ends: the short ids are unique among all groups, so the names alike in one
+    # pass all differ after it, and each pass makes a still-clashing name longer than any it can clash with in the end.
     every = sorted(out)
-    for g in every:
-        if counts[out[g]] > 1:
+    while True:
+        counts = Counter(out.values())
+        clashing = [g for g in every if counts[out[g]] > 1]
+        if not clashing:
+            return out
+        for g in clashing:
             out[g] = f"{out[g]} (group {_short_id(g, every)})"
-    return out
 
 
 #: How many of the scientist's unmatched Athena merges the progress block lists (the rest are counted).

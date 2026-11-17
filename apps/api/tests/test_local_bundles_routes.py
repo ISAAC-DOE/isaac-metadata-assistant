@@ -957,3 +957,28 @@ def test_a_disagreement_question_carries_its_own_subject(client):
         assert said["conflict_id"] == q["targets"][0]["id"]
         assert said["kind"] and isinstance(said["readings"], list) and said["readings"]
     assert all("conflict" not in q["display"] for q in qs if q["kind"] != "resolve_conflict")
+
+
+def test_group_names_stay_unique_when_a_stem_reads_like_a_tie_breaker():
+    """2026-11-17 re-review (LOW): one tie-breaking pass could leave two names alike when a stem itself reads like a
+    name already made unique ("x (group aaaaaa)"). The tie-breaker runs until no two names are alike."""
+    b = _named_bundle([("rg-cccccc33", "x (group aaaaaa)", "f"), ("rg-aaaaaa11", "x", "same"),
+                       ("rg-bbbbbb22", "x", "same"), ("rg-dddddd44", "x (group aaaaaa) (group aaaaaa)", "f")])
+    names = LB.unique_group_names(b)
+    assert len(set(names.values())) == len(names), names
+    assert names == LB.unique_group_names(b), "deterministic"
+
+
+def test_every_confirm_question_says_how_many_of_its_targets_carry_no_value(client, root):
+    """2026-11-17 re-review: a start time asked again after a clock-zone change carries no ``targets_without_a_value``
+    of its own, so the page asked to confirm a value that is not there. ``display.targets_without_a_value`` is counted
+    for every confirm question from its own candidates (additive)."""
+    data = json.loads((root / "alpha" / "bundle.json").read_text(encoding="utf-8"))
+    value_of = {c["candidate_id"]: c.get("value") for c in data["candidates"]}
+    qs = client.get("/api/local-bundles/alpha/questions").json()["questions"]
+    confirm = [q for q in qs if q["kind"] == "confirm_value"]
+    assert confirm, "the synthetic bundle has confirm questions"
+    for q in confirm:
+        want = sum(1 for t in q["targets"] if t["kind"] == "candidate" and value_of.get(t["id"]) is None)
+        assert q["display"]["targets_without_a_value"] == want
+    assert all("targets_without_a_value" not in q["display"] for q in qs if q["kind"] != "confirm_value")

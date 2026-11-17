@@ -284,6 +284,9 @@ export interface LocalQuestionDisplay {
   /** The beamtime question that fills this field for every record (`covered_by`), by id and its own words; the id
    *  is null when it is no question ("an answered beamtime value"). */
   covered_by?: { question_id: string | null; text: string };
+  /** A confirm question: how many of its targets carry no value, counted by the page's server for every confirm
+   *  question (a start time asked again after a clock-zone change has no `targets_without_a_value` of its own). */
+  targets_without_a_value?: number;
   /** A disagreement question's own conflict: its kind, subject and readings, as the bundle states them. */
   conflict?: { conflict_id: string; kind: string | null; subject: string | null; readings: string[] };
   /** The question and its reason as the page says them: the command line's sentences, less its own instructions. */
@@ -341,6 +344,8 @@ export interface LocalQuestion {
   targets_with_an_unfit_value?: number;
   /** No answer here can reach a record: shown, never answered. */
   informational?: boolean;
+  /** Why a question is asked again, as a code (e.g. `clock_zone_changed_after_confirmation`). */
+  reason?: string;
   /** A per-group start-time question the beamtime-wide one (`stated_utc_start_times`) answers at once; it stays
    *  answerable on its own. */
   answered_at_once_by?: string;
@@ -778,6 +783,10 @@ export const LOCAL_IMPORTS_COPY = {
     'The questions could not be read again, so what you see may not include it. Reload the page to read them.',
   chooseScope:
     'Choose whether this answer is for every group or for one group: the groups’ own files suggest different values.',
+  chooseScopeUnrecorded:
+    'Choose whether this answer is for every group or for one group: the files of these groups name no sample, so they may be different samples.',
+  chooseScopeAnswersDiffer:
+    'Choose whether this answer is for every group or for one group: answers already given for this field in other groups differ.',
   suggestionsDiffer:
     'The groups’ own files suggest different values. Nothing is chosen for you: answer group by group below, or choose one answer for every group.',
   perGroupTitle: 'Group by Group',
