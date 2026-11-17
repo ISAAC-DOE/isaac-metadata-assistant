@@ -626,7 +626,7 @@ const STATES: readonly VisualState[] = [
   },
   {
     id: 'settings',
-    what: 'Settings → Overview — Data, This Build, Guided Walkthrough',
+    what: 'Settings → Overview — Data, Version, Guided Walkthrough',
     async reach({ page, app }) {
       await app.goto('/settings');
       await settled(page);
@@ -634,7 +634,8 @@ const STATES: readonly VisualState[] = [
          This spec keeps its OWN readiness gate rather than reading
          `e2e/surfaces.ts`, so the rename is applied here too — the surface
          catalog and this are the two copies of that gate. */
-      const heading = page.getByRole('heading', { name: 'This Build' });
+      /* `This Build` -> `Version`, 2026-11-17 (owner's direction: plain pages). */
+      const heading = page.getByRole('heading', { name: 'Version' });
       await expect(heading).toBeVisible({ timeout: 20_000 });
       return heading;
     },
@@ -683,7 +684,8 @@ const STATES: readonly VisualState[] = [
          Configuration" heading~~ was retired 2026-11-02 (owner's direction). */
       const heading = page.getByRole('region', { name: 'Connect Your Agent' }).first();
       await expect(
-        heading.getByText('Not set up on this server. An administrator connects it in the deployment settings.'),
+        /* 2026-11-17: the plain line (owner's direction); the reference is not rendered. */
+        heading.getByText('Agent connections are not set up for this site.'),
       ).toBeVisible({ timeout: 20_000 });
       await expect(heading).toBeVisible({ timeout: 20_000 });
       return heading;
@@ -950,12 +952,12 @@ const STATES: readonly VisualState[] = [
      * dropped, and its own sub-line says nothing here is a field value.
      */
     id: 'record-unmapped-notes',
-    what: 'Record → Unmapped Notes — captured content with no confident schema home, kept rather than forced',
+    what: 'Record → Notes Not Yet in a Field — captured content with no confident schema home, kept rather than forced',
     async reach({ page, app }) {
       // 2026-09-22: the notes queue moved from Capture to the focused Proposals view.
       await app.gotoExample(`/record/${SEED.partial}?view=proposals`);
       await settled(page);
-      const heading = page.getByRole('heading', { name: 'Unmapped Notes' }).first();
+      const heading = page.getByRole('heading', { name: 'Notes Not Yet in a Field' }).first();
       await expect(heading).toBeVisible({ timeout: 20_000 });
       return heading;
     },

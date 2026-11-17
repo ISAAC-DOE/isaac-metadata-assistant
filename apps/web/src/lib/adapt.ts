@@ -684,7 +684,7 @@ const KIND_CONTEXT: Record<string, string> = {
   asset:
     'An asset can only be cited once it carries a hash. Paste the sha256 you have for it.',
   series:
-    'No example is available for this record. Paste the reduction product’s series JSON, or leave it missing.',
+    'No example is available for this record. Paste your processed spectrum, run the ISAAC skill to process it, or leave it missing.',
   descriptor:
     'No example is available for this record. Enter the descriptor you measured, or leave it missing.',
 };

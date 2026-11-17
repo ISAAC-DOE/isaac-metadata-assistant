@@ -789,9 +789,8 @@ _BLOCKER_REFUSALS: dict[str, tuple[str, str]] = {
     ),
     "series": (
         NEEDS_USER_INPUT,
-        "The reduced spectrum's data points exist only in the reduction product. "
-        "The record names the file but does not contain its values, so the series "
-        "must come from you.",
+        "The processed spectrum's data points live in your processed file, not in "
+        "the record, so the series must come from you.",
     ),
     "qc": (
         NOT_INFERABLE,

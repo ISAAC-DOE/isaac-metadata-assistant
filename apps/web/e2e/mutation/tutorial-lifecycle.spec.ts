@@ -97,7 +97,7 @@ test.describe('worked-example session lifecycle', () => {
     // direction is required, the fact the old sentence hid is required, and the
     // false sentence is forbidden.
     await expect(dialog.locator('.reset-disclosure')).toContainText(
-      /the ordinary workspace is not in this scope/i
+      /own work is not part of this walkthrough/i
     );
     await expect(dialog.locator('.reset-disclosure')).toContainText(/so they are what is reset/i);
     await expect(dialog.locator('.reset-disclosure')).not.toContainText(

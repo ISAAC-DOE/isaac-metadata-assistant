@@ -169,7 +169,7 @@ describe('AssistantPanel is subordinate and never renders a verdict', () => {
     await openAssistantCatalogWhenReady(container);
     fireEvent.click(getByText('Is it valid?'));
     expect(container.textContent).not.toMatch(/\bPASS\b/);
-    expect(container.textContent).toMatch(/truth question/i);
+    expect(container.textContent).toMatch(/decided by ISAAC’s checks/i);
   });
 });
 

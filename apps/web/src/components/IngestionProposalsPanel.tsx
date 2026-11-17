@@ -465,12 +465,10 @@ export function acceptUnavailableReason(
   const recordScoped = served.recordScopedTargetFieldPaths;
   if (proposal.run_id !== null && proposal.current_target_digest === null) {
     return (
-      'The current content at this proposal’s target could not be read, so accepting it ' +
-      'is withheld: there is nothing for the acceptance precondition to check against. ' +
-      'For a proposal that names a run, the reachable cause is that the run is no ' +
-      'longer on this record — a removed run keeps its id, it is never reissued, and ' +
-      'the proposal is not re-aimed at another, because that would be inferring which ' +
-      'run was meant. It can still be withdrawn.'
+      'The value this proposal would replace could not be read, so accepting it is ' +
+      'withheld. Usually that means its run is no longer on this record. It is not ' +
+      're-aimed at another run, because that would be guessing which run was meant. It ' +
+      'can still be withdrawn.'
     );
   }
   if (!Array.isArray(targets) || targets.length === 0) return null;
@@ -641,17 +639,16 @@ function reviewRefusalCopy(err: unknown, action: ApiProposalReviewAction): strin
   }
   if (code === 'target_run_removed') {
     return (
-      'The run this proposal names no longer exists on this record, so there is nothing ' +
-      'to write the value to. It is not re-aimed at another run — a removed run keeps ' +
-      'its id and it is never reissued. Nothing was written; the proposal can still be ' +
-      'withdrawn.'
+      'The run this proposal names is no longer on this record, so there is nothing to ' +
+      'write the value to. It is not re-aimed at another run, because that would be ' +
+      'guessing. Nothing was written; the proposal can still be withdrawn.'
     );
   }
   if (code === 'target_scope_mismatch') {
     return (
-      'This proposal names a scope the write route for its field path does not serve, so ' +
-      'the value is not written somewhere other than where the proposal says it belongs. ' +
-      'Nothing was written; the proposal stays readable and can be withdrawn.'
+      'This proposal points at a place this field cannot be written to, and ISAAC will ' +
+      'not write it anywhere else. Nothing was written; the proposal stays readable and ' +
+      'can be withdrawn.'
     );
   }
   if (code === 'proposal_not_open') {
@@ -671,15 +668,14 @@ function reviewRefusalCopy(err: unknown, action: ApiProposalReviewAction): strin
   }
   if (code === 'no_write_path_for_field') {
     return (
-      'The write route that owns this field path refused it, so nothing was written. ' +
-      'That is a limitation of this application and not a statement about the official ' +
-      'ISAAC schema.'
+      'ISAAC cannot write this field from a proposal yet, so nothing was written. That ' +
+      'is a limit of this app, not of the official ISAAC schema.'
     );
   }
   if (statusOf(err) === 428) {
     return (
-      'This section does not currently hold the record’s version, so the request was ' +
-      'not made and nothing was written. Reload this section and try again.'
+      'This section has not loaded the record’s current version, so nothing was sent ' +
+      'and nothing was written. Reload this section and try again.'
     );
   }
   const verb =
@@ -958,18 +954,18 @@ export function IngestionProposalsPanel({
           state uses it as its primary action's destination ("Review N Proposals"
           scrolls here and focuses it), exactly the pattern skip-links use.
         */}
+        {/* "Ingestion Proposals" until 2026-11-17 — the owner's plain-language pass. */}
         <h2 className="proposals-title" id="ingestion-proposals-heading" tabIndex={-1}>
-          Ingestion Proposals
+          Suggestions
         </h2>
         {/* One line, and the full account one `?` away (DEC-35). */}
         <p className="proposals-sub">
-          Stored suggestions about one field each.{' '}
-          <HelpTip subject="Ingestion Proposals">
+          Values suggested for a field, waiting for you to review.{' '}
+          <HelpTip subject="Suggestions">
             <span>
-              Each proposal is a value, the field path it is for, and the rule that
-              produced it. A proposal is not a field value or evidence, even once
-              accepted. Rejecting, superseding and withdrawing are states, and the note
-              behind a proposal survives all of them.
+              Each suggestion is one value for one field, with where it came from. It is
+              not part of the record until you accept it. If you reject, replace or
+              withdraw it, the note it came from stays on the record.
             </span>
           </HelpTip>
         </p>
@@ -2307,7 +2303,7 @@ function ProposalsBrowser({
       )}
 
       {list.status === 'loading' && (
-        <LoadingPanel label="Loading this record's ingestion proposals…" />
+        <LoadingPanel label="Loading this record's suggestions…" />
       )}
       {list.status === 'error' && (
         <BackendDown error={list.error} onRetry={() => reload(false)} />
@@ -2546,7 +2542,7 @@ function EmptyProposals({
           <span>
             A proposal is a value suggested for a field, waiting for your review. One is
             created three ways: finishing a transcript capture adds one for each value it
-            can store, proposing a value from a note in Unmapped Notes adds one, and a
+            can store, proposing a value from a note in Notes Not Yet in a Field adds one, and a
             connected AI agent can propose one from a note it cites. Nothing is inferred
             from this record&rsquo;s contents on its own.
           </span>
@@ -3455,14 +3451,14 @@ function TargetState({
     <p className="proposal-target-state">
       {stale === null
         ? proposal.run_id !== null
-          ? 'Whether the value at this field path has changed CANNOT BE ANSWERED: the run this proposal names is no longer on this record. That is not the same as “nothing changed”.'
-          : 'Whether the value at this field path has changed CANNOT BE ANSWERED: this record’s content at it could not be read. That is not the same as “nothing changed”.'
+          ? 'Whether this field has changed cannot be told: the run this proposal names is no longer on this record. That is not the same as “nothing changed”.'
+          : 'Whether this field has changed cannot be told: its current value could not be read. That is not the same as “nothing changed”.'
         : stale
-          ? 'As of this read, the value at this field path had CHANGED since this proposal was made, and accepting is refused while that is so — nothing would be written.' +
+          ? 'This field has changed since this proposal was made, so accepting is refused for now — nothing would be written.' +
             (acceptOffered
-              ? ' Accept is still offered because this was read a moment ago and the value at the target can move back; the server decides, and it says so if it refuses.'
+              ? ' Accept is still offered because the value can change back; ISAAC checks again when you accept, and says so if it refuses.'
               : '')
-          : 'As of this read, the value at this field path was unchanged since this proposal was made.'}
+          : 'This field has not changed since this proposal was made.'}
     </p>
   );
 }
@@ -3502,8 +3498,8 @@ function AcceptanceRecord({ proposal }: { proposal: ApiProposal }) {
       <p className="proposal-acceptance-line">
         {proposal.still_current === null
           ? proposal.run_id !== null
-            ? 'Whether the record still holds what this acceptance wrote CANNOT BE ANSWERED: the run this proposal names is no longer on this record. That is not the same as “it still holds it”.'
-            : 'Whether the record still holds what this acceptance wrote CANNOT BE ANSWERED: the content at its field path could not be read back. That is not the same as “it still holds it”.'
+            ? 'Whether the record still holds what this acceptance wrote cannot be told: the run this proposal names is no longer on this record. That is not the same as “it still holds it”.'
+            : 'Whether the record still holds what this acceptance wrote cannot be told: the field could not be read back. That is not the same as “it still holds it”.'
           : proposal.still_current
             ? 'As of this read, the record still held what this acceptance wrote.'
             : 'As of this read, the record NO LONGER held what this acceptance wrote — it has been changed since.'}

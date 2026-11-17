@@ -1,0 +1,28 @@
+/*
+ * TechnicalDetails — a quiet, borderless `Disclosure` for exact technical text.
+ * See `TechnicalDetails.tsx`. Tokens only.
+ */
+.disclosure.technical-details {
+  border: 0;
+  background: transparent;
+  align-self: flex-start;
+  max-width: 100%;
+}
+.disclosure.technical-details > .disclosure-trigger {
+  width: auto;
+  min-height: 24px;
+  padding: var(--space-2xs) var(--space-xs);
+  font-size: var(--font-size-meta);
+  font-weight: var(--font-weight-medium);
+  color: var(--text-secondary);
+}
+.disclosure.technical-details > .disclosure-body {
+  padding: var(--space-2xs) var(--space-xs) var(--space-xs);
+  border-top: 0;
+  font-size: var(--font-size-meta);
+  color: var(--text-secondary);
+  overflow-wrap: anywhere;
+}
+.technical-details-raw code {
+  overflow-wrap: anywhere;
+}

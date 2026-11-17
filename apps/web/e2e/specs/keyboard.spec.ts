@@ -244,7 +244,8 @@ test('@interaction the unavailable API-key action is a stated state, not a disab
   await app.goto('/settings?tab=api');
   // 2026-11-02: the state is one plain line (the heading and its caveat retired).
   await expect(
-    page.getByText('API keys are not set up on this server. An administrator configures access in the deployment settings.').first(),
+    // 2026-11-17: the plain line (owner's direction: plain pages).
+    page.getByText('API keys are not set up for this site.').first(),
   ).toBeVisible();
   // …and no control pretends otherwise: no Create button at all, disabled or not.
   await expect(page.getByRole('button', { name: /Create API Key/i })).toHaveCount(0);

@@ -300,7 +300,7 @@ describe('M1 · Guided Completion backend-down branch has exactly one h1', () =>
       </MemoryRouter>,
     );
     // Wait for the backend-down state to render (unique title).
-    await view.findByText('Backend Not Running');
+    await view.findByText('ISAAC Is Not Running');
     expect(view.container.querySelectorAll('h1')).toHaveLength(1);
   });
 });

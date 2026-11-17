@@ -463,7 +463,7 @@ export function RecordWorkbench() {
           {settled.recordAbsent && settled.title !== null ? settled.title : LABELS.screenReview}
         </h1>
         {bundle.status === 'loading' ? (
-          <LoadingPanel label="Loading the record from the ISAAC API…" />
+          <LoadingPanel label="Loading the record…" />
         ) : (
           <BackendDown error={bundle.error} onRetry={bundle.reload} />
         )}
@@ -2142,7 +2142,7 @@ function RecordGraphView({ id }: { id: string }) {
   const readInScope = useRef(currentScope);
 
   if (bundle.status === 'loading') {
-    return <LoadingPanel label="Loading this experiment's graph from the ISAAC API…" />;
+    return <LoadingPanel label="Loading this experiment's graph…" />;
   }
   if (bundle.status !== 'data') {
     return <BackendDown error={bundle.error} onRetry={bundle.reload} />;

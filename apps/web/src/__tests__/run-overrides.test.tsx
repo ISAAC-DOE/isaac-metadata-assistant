@@ -794,7 +794,7 @@ describe('a refused write', () => {
     await attempt(MATERIAL, { status: 422, body: 'not json at all' });
     await waitFor(() =>
       expect(rowFor(MATERIAL).textContent).toMatch(
-        /this build could not read its reason\. Nothing was written/,
+        /did not say why\. Nothing was written/,
       ),
     );
     expect(outcome()).toBe('');

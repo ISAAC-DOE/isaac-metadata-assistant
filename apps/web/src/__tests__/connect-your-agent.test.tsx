@@ -30,7 +30,7 @@
 import { existsSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 
-import { describe, it, expect, afterEach, vi } from 'vitest';
+import { describe, it, expect, afterEach, beforeEach, vi } from 'vitest';
 import { render, screen, within, cleanup, fireEvent, act, waitFor } from '@testing-library/react';
 import { MemoryRouter } from 'react-router-dom';
 
@@ -67,9 +67,22 @@ import {
   openApiFixture,
 } from '../test/apiFixtures';
 
+/*
+ * THE DEVELOPER FLAG IS ON FOR THIS FILE (2026-11-17). In an ordinary build the
+ * unconfigured widget is ONE state line and nothing else (owner's direction: plain
+ * pages); the reference — capabilities, permissions, setup steps, companion — renders
+ * only with `VITE_ISAAC_DEV_TOOLS=1` or once an address is published. Every sweep
+ * below therefore runs over the FULL reference, as before, and the ordinary build is
+ * pinned on its own in "Connect Your Agent — an ordinary build, unconfigured".
+ */
+beforeEach(() => {
+  vi.stubEnv('VITE_ISAAC_DEV_TOOLS', '1');
+});
+
 afterEach(() => {
   cleanup();
   vi.unstubAllGlobals();
+  vi.unstubAllEnvs();
   __resetHealthCache();
 });
 
@@ -230,12 +243,45 @@ describe('Connect Your Agent — the unconfigured state', () => {
    * line — what an administrator sets up — instead of "Requires Organization
    * Configuration" plus two paragraphs of reasons. It still overstates nothing.
    */
-  it('states the unconfigured state as one plain line about who sets it up', async () => {
+  /* 2026-11-17 (owner's direction: plain pages): ~~"…about who sets it up"
+     (`/administrator/`)~~ — the line is now one idea in the scientist's words. */
+  it('states the unconfigured state as one plain line', async () => {
     const { container } = await renderPanel();
     await screen.findByText(MCP_CONNECT_COPY.stateLine);
     expect(norm(visibleText(container))).toContain(norm(MCP_CONNECT_COPY.stateLine));
-    expect(MCP_CONNECT_COPY.stateLine).toMatch(/administrator/i);
-    expect(MCP_CONNECT_COPY.stateLine).not.toMatch(/\bconnected\b|coming soon|available soon/i);
+    expect(MCP_CONNECT_COPY.stateLine).toMatch(/not set up/i);
+    expect(MCP_CONNECT_COPY.stateLine).not.toMatch(/\bconnected\b|coming soon|available soon|\byet\b/i);
+  });
+});
+
+describe('Connect Your Agent — an ordinary build, unconfigured (2026-11-17)', () => {
+  it('shows the one state line and nothing else — no disclosure, no reference text', async () => {
+    vi.stubEnv('VITE_ISAAC_DEV_TOOLS', '');
+    const { container } = await renderPanel();
+    const widget = screen.getByRole('region', { name: TAB_LABEL });
+    expect(within(widget).getByRole('status').textContent).toBe(MCP_CONNECT_COPY.stateLine);
+    expect(within(widget).queryByRole('button', { name: MCP_WIDGET_COPY.detailsSummary })).toBeNull();
+    // Not rendered at all — not merely hidden.
+    const text = visibleText(container);
+    for (const absent of [
+      MCP_CONNECT_COPY.neverSubmitHeading,
+      MCP_CONNECT_COPY.canDoHeading,
+      MCP_CONNECT_COPY.permissionsHeading,
+      MCP_CONNECT_COPY.setupHeading,
+      MCP_CAPABILITIES_ALLOWED[0].detail,
+      MCP_SETUP_STEPS[0].detail,
+    ]) {
+      expect(text, absent).not.toContain(absent);
+    }
+    expect(container.querySelectorAll('h3')).toHaveLength(0);
+    // The ratchets still hold over what is left.
+    expect(text).not.toMatch(/\bconnected\b/i);
+  });
+
+  it('a published address still brings the reference, flag or not', async () => {
+    vi.stubEnv('VITE_ISAAC_DEV_TOOLS', '');
+    await renderPanel('isaac-agent.invalid/mcp');
+    expect(screen.getByRole('button', { name: MCP_WIDGET_COPY.detailsSummary })).toBeInTheDocument();
   });
 
   it('conveys the state as text inside a live region, not as colour', async () => {
@@ -1548,11 +1594,13 @@ describe('the write permission describes the reach it actually has', () => {
        phrase overstated it in both directions: `_seed_for_new_run` deliberately does
        NOT carry the six `system.configuration.*` fields (whether two runs may differ
        in detector model is an open scientific question, and copying them would answer
-       it), and the earlier parenthetical named only three of the six things that DO
-       carry. Both are now stated, including the cost of the omission. */
+       it). ~~Both are now stated, including the cost of the omission
+       (`/do NOT move/`, `/dropped from a record exported per run/`)~~ — the six-field
+       paragraph was cut 2026-11-17 (owner's direction: plain pages); "most" is the
+       half that stays required, so the row never claims the first run inherits
+       everything. */
     expect(add!.detail).toMatch(/carries across most of what/i);
-    expect(add!.detail).toMatch(/do NOT move/);
-    expect(add!.detail).toMatch(/dropped from a record exported per run/i);
+    expect(add!.detail).not.toMatch(/carries across (everything|all of)/i);
   });
 
   it('M7 — the withheld set is named by its members, not by a category two of them are not in', () => {
@@ -1571,16 +1619,31 @@ describe('the write permission describes the reach it actually has', () => {
      */
     const add = MCP_CAPABILITIES_ALLOWED.find((c) => c.id === 'add-run');
     expect(add, 'the add-run capability row is gone; re-read this test').toBeDefined();
-    expect(add!.detail).not.toMatch(/The instrument and detector settings do NOT move/);
-    for (const named of [/detector model/i, /monochromator/i, /spectrometer/i, /scan count/i]) {
-      expect(add!.detail).toMatch(named);
+    // The undercounting category phrase never returns.
+    expect(add!.detail).not.toMatch(/instrument and detector settings/i);
+    /* 2026-11-17: the six-field paragraph was cut (owner's direction: plain pages), so
+       the row names no withheld set. The rule is now conditional and still enforced:
+       IF the row ever says some fields are withheld again, it names all six. */
+    if (/do not move|not carried|withheld|dropped from a record/i.test(add!.detail)) {
+      for (const named of [
+        /detector model/i,
+        /monochromator/i,
+        /spectrometer/i,
+        /scan count/i,
+        /proposal and session identifiers/i,
+      ]) {
+        expect(add!.detail).toMatch(named);
+      }
+      expect(add!.detail).toMatch(/\bsix\b/i);
     }
-    // The two that are NOT instrument settings, named as such.
-    expect(add!.detail).toMatch(/proposal and session identifiers/i);
-    expect(add!.detail).toMatch(/administrative rather than instrument settings/i);
-    // The count is stated, so a future edit that drops one is visible.
-    expect(add!.detail).toMatch(/Six fields do NOT move/);
-    expect(add!.detail).toMatch(/all six are dropped/i);
+    // Polarity: the conditional fires on the paragraph that was cut, and that paragraph
+    // satisfied it — so the rule is live, not vacuous.
+    const CUT =
+      'Six fields do NOT move — the detector model, monochromator crystal, spectrometer ' +
+      'geometry and scan count, and also the proposal and session identifiers.';
+    expect(/do not move|not carried|withheld|dropped from a record/i.test(CUT)).toBe(true);
+    const UNDERCOUNT = 'The instrument and detector settings do NOT move.';
+    expect(UNDERCOUNT).toMatch(/instrument and detector settings/i);
   });
 
   it('I2 — the check-run row names all three gates, so none is reached by elimination', () => {

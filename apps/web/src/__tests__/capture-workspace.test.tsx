@@ -90,8 +90,8 @@ describe('Capture Home opens focused views', () => {
     renderAt('?view=capture');
     await screen.findByRole('heading', { name: CAPTURE_COPY.intakeHeading });
     expect(screen.queryByRole('textbox', { name: 'Transcript' })).toBeNull();
-    expect(screen.queryByRole('heading', { name: 'Unmapped Notes' })).toBeNull();
-    expect(screen.queryByRole('heading', { name: 'Ingestion Proposals' })).toBeNull();
+    expect(screen.queryByRole('heading', { name: 'Notes Not Yet in a Field' })).toBeNull();
+    expect(screen.queryByRole('heading', { name: 'Suggestions' })).toBeNull();
   });
 
   it('Start Writing opens the Write view: one task, the map beside it, and a way back', async () => {
@@ -251,8 +251,8 @@ describe('proposal review is ONE focused destination', () => {
       if (el === null) throw new Error('no proposals workspace');
       return el;
     });
-    const proposals = await within(panel).findByRole('heading', { name: 'Ingestion Proposals' });
-    const notes = await within(panel).findByRole('heading', { name: 'Unmapped Notes' });
+    const proposals = await within(panel).findByRole('heading', { name: 'Suggestions' });
+    const notes = await within(panel).findByRole('heading', { name: 'Notes Not Yet in a Field' });
     expect(proposals.compareDocumentPosition(notes) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
     expect(within(panel).getByRole('complementary', { name: 'Record Map' })).toBeTruthy();
   });

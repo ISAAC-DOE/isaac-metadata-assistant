@@ -279,14 +279,14 @@ export const SUB_RESOURCE_LABELS: Readonly<Record<string, string>> = {
   // anywhere: a path exists exactly while some experiment names it.
   folder: 'which folder this is in',
   ingestion: 'a CSV comparison',
-  notes: 'the unmapped notes',
+  notes: 'the notes not yet in a field',
   pending: 'the missing fields',
   // The three `/proposals…` operations. "the ingestion proposals" is the product's own
   // heading for this section (`IngestionProposalsPanel`), in the register `notes`
   // already uses for "the unmapped notes"; `proposals` alone is the wire segment and,
   // taken bare, reads as this application's OTHER proposal — the assistant's staged,
   // in-session one — which is a different thing entirely.
-  proposals: 'the ingestion proposals',
+  proposals: 'the suggestions',
   // `GET .../provenance`. "Where the values came from" is the product's phrasing
   // for this axis (`lib/provenance.ts`: origin and review state, two separate
   // answers); `provenance` is the wire segment and never reaches a scientist.
@@ -516,9 +516,9 @@ export function downCopy(
       kind: 'example_workspace_ended',
       title: 'Worked Example Not Open',
       lines: [
-        'This id belongs to one of the five built-in worked-example records. Those records exist only inside a worked-example walkthrough, and this browser tab is not in one — so this id names nothing in the workspace you are viewing.',
-        'A worked-example workspace is reachable only from the tab that opened it, and it is temporary: when that walkthrough ends the ISAAC API discards it, along with anything answered or exported inside it. If one is still open in another tab, carry on there — this page cannot reach it.',
-        `Starting the walkthrough again from ${LABELS.navSettings} → ${LABELS.settingsTabHelp} opens a fresh worked-example workspace with new copies of these five records — a new start, not a way back into an earlier one.`,
+        'This link points to one of the five built-in worked-example records. They exist only inside the guided walkthrough, and this browser tab is not in one.',
+        'If the walkthrough is still open in another tab, carry on there — this page cannot reach it. When a walkthrough ends, its examples are discarded, along with anything answered or exported inside it.',
+        `Starting the walkthrough again from ${LABELS.navSettings} → ${LABELS.settingsTabHelp} gives you fresh copies of the five examples. It is a new start, not a way back into an earlier one.`,
       ],
       showRunCommand: false,
       offerReload: false,
@@ -531,9 +531,7 @@ export function downCopy(
       kind: 'not_found',
       title: 'Record Not Found',
       lines: [
-        hosted
-          ? 'This experiment id is not in the workspace — it may not have been created yet.'
-          : 'This experiment id is not in the local workspace — it may not have been created yet.',
+        'This experiment is not in your workspace. It may not have been created yet.',
       ],
       showRunCommand: false,
       offerReload: false,
@@ -607,9 +605,9 @@ export function downCopy(
          * untested code.
          */
         subResource !== undefined
-          ? `The ISAAC API answered HTTP 404 for a read of ${subResourceLabel(subResource)} under this experiment id.`
-          : 'The ISAAC API answered HTTP 404 for a read of one part of this experiment.',
-        'The request read one part of an experiment rather than the experiment itself, so this 404 does not establish that the experiment is missing — and this page does not claim it is.',
+          ? `ISAAC could not find ${subResourceLabel(subResource)} for this experiment.`
+          : 'ISAAC could not find one part of this experiment.',
+        'That does not mean the experiment is missing.',
       ],
       showRunCommand: false,
       offerReload: false,
@@ -689,7 +687,7 @@ export function downCopy(
       kind: 'path_not_found',
       title: 'Not Found',
       lines: [
-        'The ISAAC API answered HTTP 404 for this request.',
+        'ISAAC could not find what this page asked for.',
       ],
       showRunCommand: false,
       offerReload: false,
@@ -701,10 +699,12 @@ export function downCopy(
     // Each first line states the signal actually observed, not a shared guess.
     const cause =
       error?.htmlIntercept === true
-        ? 'A sign-in page was returned in place of the ISAAC API, so the request never reached it. That happens when a session has ended.'
+        ? 'A sign-in page came back instead of ISAAC. That happens when a session has ended.'
         : status === 401
-          ? 'The ISAAC API rejected this request as unauthenticated (HTTP 401). The sign-in session is no longer valid.'
-          : 'The ISAAC API refused this request as unauthorized (HTTP 403). The sign-in session is no longer permitted to read it.';
+          ? // a 401 says no accepted sign-in came with the request, not why (never signed in, ended, or refused)
+            'You need to sign in to see this.'
+          : // a 403 says this account may not read it, not that it once could
+            'Your account doesn’t have access to this.';
     return {
       kind: 'auth',
       title: 'Sign-In Required',
@@ -721,9 +721,9 @@ export function downCopy(
   if (!hosted) {
     return {
       kind: 'local',
-      title: 'Backend Not Running',
+      title: 'ISAAC Is Not Running',
       lines: [
-        'The local ISAAC API is not responding. Start the backend, then retry:',
+        'ISAAC is not running on this computer. Start it with this command, then try again:',
       ],
       showRunCommand: true,
       offerReload: false,
@@ -740,7 +740,7 @@ export function downCopy(
       kind: 'http_error',
       title: 'ISAAC Returned an Error',
       lines: [
-        `The ISAAC API was reached but answered with HTTP ${status}.`,
+        'ISAAC is running but could not complete this request.',
         ...(serverSaid !== undefined ? [serverSaid] : []),
       ],
       showRunCommand: false,
@@ -753,8 +753,8 @@ export function downCopy(
     kind: 'unreachable',
     title: 'ISAAC Is Not Responding',
     lines: [
-      'The ISAAC API could not be reached. This page cannot tell which of two causes applies: the sign-in session may have ended, or the service may be temporarily unavailable.',
-      'Reload the page — that restores the session if it had ended, and is harmless if it had not.',
+      'ISAAC could not be reached. Your sign-in may have ended, or the service may be briefly unavailable. This page cannot tell which.',
+      'Reloading the page signs you in again if your session ended, and does no harm if it did not.',
     ],
     showRunCommand: false,
     offerReload: true,
@@ -906,7 +906,7 @@ function currentRoute(): string {
  *  the control in a compact footer can state it in that surface's own info panel
  *  instead (`showNote={false}`) without authoring it a second time. */
 export const COPY_DIAGNOSTICS_NOTE =
-  'Copies this build’s version, route, viewport and Project Memory provenance as text you can paste into a bug report.';
+  'Copies the app version and details about this page, to paste into a bug report.';
 
 export function CopyDiagnostics({
   build,

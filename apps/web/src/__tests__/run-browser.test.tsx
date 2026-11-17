@@ -1159,7 +1159,7 @@ describe('Focus Run', () => {
     expect(alert.textContent).toContain('not-a-run-id');
     // The non-404 branch names what the server said, and the count still refuses
     // to claim a run is being viewed.
-    expect(alert.textContent).toMatch(/The server said:/);
+    expect(alert.textContent).toMatch(/ISAAC said:/);
     expect(countText()).toBe('No run with that id · 20 runs in this record');
   });
 

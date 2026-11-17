@@ -110,7 +110,7 @@ describe('a primary 503 is the error it is, never "Record Not Found"', () => {
     // Returned an Error" (its `http_error` branch). Either way it is the PRIMARY
     // read's error — measured on the current code, a secondary 404 won the race and
     // this screen claimed "Record Not Found" about a record whose read had failed.
-    expect(await screen.findByRole('heading', { name: 'Backend Not Running', level: 2 })).toBeTruthy();
+    expect(await screen.findByRole('heading', { name: 'ISAAC Is Not Running', level: 2 })).toBeTruthy();
     expect(screen.queryByRole('heading', { name: 'Record Not Found' })).toBeNull();
     expect(document.title).not.toMatch(/^Record Not Found/);
   });

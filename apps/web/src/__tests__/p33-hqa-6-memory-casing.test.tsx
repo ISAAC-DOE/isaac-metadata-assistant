@@ -134,7 +134,7 @@ describe('P33 HQA#7 — no duplicate availability state where a chip owns it', (
     expect(stmts.length).toBe(1);
     // … by the PAGE, not the assistant …
     expect(stmts[0].el.closest('.assistant')).toBeNull();
-    expect(stmts[0].el.getAttribute('aria-label')).toMatch(/memory plane, advisory only/i);
+    expect(stmts[0].el.getAttribute('aria-label')).toMatch(/never decides whether a record is valid/i);
     // … and therefore in exactly ONE wording (no second, differently-worded
     // accessible name for the same axis).
     expect(new Set(stmts.map((s) => s.wording)).size).toBe(1);
@@ -156,7 +156,7 @@ describe('P33 HQA#7 — no duplicate availability state where a chip owns it', (
     const stmts = axisStatements(container);
     expect(stmts.length).toBe(1);
     expect(stmts[0].el.closest('.assistant')).toBeNull();
-    expect(stmts[0].el.getAttribute('aria-label')).toMatch(/memory plane, advisory only/i);
+    expect(stmts[0].el.getAttribute('aria-label')).toMatch(/never decides whether a record is valid/i);
     expect(new Set(stmts.map((s) => s.wording)).size).toBe(1);
     expect(container.textContent).not.toMatch(/memory: (un)?available/i);
   });

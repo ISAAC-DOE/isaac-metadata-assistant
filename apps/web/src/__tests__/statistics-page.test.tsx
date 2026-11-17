@@ -1309,7 +1309,7 @@ describe('the visual-first order', () => {
     await settled();
 
     // The page clock, still in the meta row above the tab panel body.
-    expect(metaLabel(container)).toBe('Last Read From the API');
+    expect(metaLabel(container)).toBe('Last Updated');
 
     // The report clock, in Record Verification — and each half stated exactly
     // once, so two rows cannot disagree with each other. Since 2026-10-18 the
@@ -1331,7 +1331,7 @@ describe('the visual-first order', () => {
     expect(pageText(container.querySelector('.stats-meta') as HTMLElement)).not.toMatch(
       /Report (Generated|Age)/,
     );
-    expect(pageText(verification)).not.toMatch(/Last Read From the API/);
+    expect(pageText(verification)).not.toMatch(/Last Updated/);
   });
 });
 
@@ -1439,7 +1439,7 @@ describe('loading', () => {
     // No figure is shown while none has been received.
     expect(screen.queryByText('Total Records')).toBeNull();
     // The meta row states that a read is in progress rather than inventing a time.
-    expect(screen.getByText('Reading From the API')).toBeInTheDocument();
+    expect(screen.getByText('Loading Figures')).toBeInTheDocument();
 
     await settled();
     expect(cardValue('Records', 'Total Records')).toBe(String(RECORD_COUNT));
@@ -1456,7 +1456,7 @@ describe('loading', () => {
     for (const [region, label] of onBuild) {
       expect(within(regionOf(region)).getByText(label)).toBeInTheDocument();
     }
-    expect(screen.getByText('Reading From the API')).toBeInTheDocument();
+    expect(screen.getByText('Loading Figures')).toBeInTheDocument();
     await settled();
   });
 });
@@ -1766,7 +1766,7 @@ describe('Refresh', () => {
     // The SAME region's text changed — nothing new mounted to say it.
     await waitFor(() => expect(live?.textContent).toMatch(/^Refresh finished\./));
     expect(container.querySelector('p.sr-only[role="status"]')).toBe(live);
-    expect(live?.textContent).toContain('last read the API at');
+    expect(live?.textContent).toContain('Figures last updated at');
   });
 
   /*
@@ -1801,20 +1801,20 @@ describe('Refresh', () => {
        discriminator: the pre-fix page announced exactly this clean sentence with
        the CURRENT time, for a round in which a read had failed. */
     expect(live?.textContent).toMatch(
-      /^Refresh finished, but 1 of 6 reads failed — the figures shown were last read at /,
+      /^Refresh finished, but 1 of 6 updates failed — the figures shown were last updated at /,
     );
-    expect(live?.textContent).not.toMatch(/^Refresh finished\. The page last read the API at/);
+    expect(live?.textContent).not.toMatch(/^Refresh finished\. Figures last updated at/);
 
     // Stated on SCREEN as well, not only to a screen reader.
-    expect(screen.getByText(/1 of 6 reads failed on the most recent attempt/)).toBeInTheDocument();
+    expect(screen.getByText(/1 of 6 updates failed on the most recent attempt/)).toBeInTheDocument();
     expect(
-      screen.getByText(/either absent or older than the last-read time above/),
+      screen.getByText(/either missing or older than the time above/),
     ).toBeInTheDocument();
 
     /* The timestamp still comes from a read that returned: the label is the one
        reserved for a real reading, and its value cannot be later than the moment
        the round finished settling. */
-    expect(metaLabel(container)).toBe('Last Read From the API');
+    expect(metaLabel(container)).toBe('Last Updated');
     expect(new Date(metaTime(container).dateTime).getTime()).toBeLessThanOrEqual(Date.now());
 
     // The stale figure is still the one on screen — kept, disclosed, not blanked.
@@ -1869,18 +1869,18 @@ describe('Refresh', () => {
     await waitFor(() => expect(live?.textContent).toMatch(/^Refresh finished/));
 
     expect(live?.textContent).toMatch(
-      /^Refresh finished, but 6 of 6 reads failed — the figures shown were last read at /,
+      /^Refresh finished, but 6 of 6 updates failed — the figures shown were last updated at /,
     );
-    expect(live?.textContent).not.toContain('The page last read the API at');
+    expect(live?.textContent).not.toContain('Figures last updated at');
 
     // The clock did not move: the same instant as the load, and strictly earlier
     // than the moment Refresh was pressed.
     expect(metaTime(container).dateTime).toBe(loadedAt);
     expect(new Date(loadedAt).getTime()).toBeLessThan(clickedAt);
-    expect(metaLabel(container)).toBe('Last Read From the API');
+    expect(metaLabel(container)).toBe('Last Updated');
 
     // Stated on screen, once, as information rather than as an alert.
-    expect(screen.getByText(/6 of 6 reads failed on the most recent attempt/)).toBeInTheDocument();
+    expect(screen.getByText(/6 of 6 updates failed on the most recent attempt/)).toBeInTheDocument();
     expect(screen.queryAllByRole('alert')).toHaveLength(0);
 
     // Every figure is still the one that was actually read, unchanged and
@@ -1909,7 +1909,7 @@ describe('Refresh', () => {
     await waitFor(() =>
       expect(
         build.container.querySelector('p.sr-only[role="status"]')?.textContent ?? '',
-      ).toMatch(/^Refresh finished, but 6 of 6 reads failed/),
+      ).toMatch(/^Refresh finished, but 6 of 6 updates failed/),
     );
     expect(cardValue('API Surface', 'Documented Operations')).toBe(OPERATION_COUNT);
     expect(figureValue('Project Memory', 'Source Graph Nodes')).toBe(String(graphStatusAvailable.node_count));

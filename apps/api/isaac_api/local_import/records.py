@@ -3470,18 +3470,30 @@ def _portal_warnings_in_index(records_dir: Path, record_ids: set[str]) -> list[d
     return [{**r, "records": len(r["records"])} for r in sorted(seen.values(), key=lambda r: (-len(r["records"]), str(r["code"])))]
 
 
+def first_member_runs(bundle: Mapping) -> dict[str, Mapping]:
+    """``{group_id: run}``: each record group's first member run (a run kept as context only when the group has no
+    other), the run :func:`group_labels` names it by. Read tolerantly: a malformed run or group is skipped, never
+    raised on (2026-11-17: a run with no ``run_id`` raised ``KeyError`` here and failed the progress page)."""
+    runs = {r.get("run_key"): r for r in bundle.get("runs") or () if isinstance(r, Mapping) and r.get("run_key")}
+    context = B.context_run_ids(bundle)
+    out: dict[str, Mapping] = {}
+    for g in bundle.get("record_groups") or ():
+        gid = g.get("group_id") if isinstance(g, Mapping) else None
+        if not isinstance(gid, str):
+            continue
+        members = [runs[k] for k in g.get("member_run_keys") or () if k in runs]
+        first = next((r for r in members if r.get("run_id") not in context), members[0] if members else None)
+        if first is not None:
+            out[gid] = first
+    return out
+
+
 def group_labels(bundle: Mapping) -> dict[str, str]:
     """r7 J6: ``{group_id: label}``: a short name a scientist knows each group by, its first member file (a run's
-    stem; a run kept as context only when the group has no other). Said on export and dry-run rows."""
-    runs = {r["run_key"]: r for r in bundle.get("runs") or ()}
-    context = B.context_run_ids(bundle)
-    out: dict[str, str] = {}
-    for g in bundle.get("record_groups") or ():
-        members = [runs[k] for k in g.get("member_run_keys") or () if k in runs]
-        first = next((r for r in members if r["run_id"] not in context), members[0] if members else None)
-        if first is not None:
-            out[g["group_id"]] = str(first.get("stem") or first["run_id"])
-    return out
+    stem; a run kept as context only when the group has no other). Said on export and dry-run rows. A first run with
+    neither a stem nor a run id is named for what is known: the group it is in."""
+    return {gid: str(first.get("stem") or first.get("run_id") or f"group {gid}")
+            for gid, first in first_member_runs(bundle).items()}
 
 
 def _label(labels: Mapping[str, str], key: str) -> dict:

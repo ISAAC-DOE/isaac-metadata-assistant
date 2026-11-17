@@ -321,8 +321,8 @@ describe('P26.0b · Reset Worked Example — preview (non-mutating) & disclosure
      * addresses `scope_root(session_id)`), the fact the old sentence hid (those rows
      * ARE what gets reset), and the forbidding of the false sentence itself.
      */
-    expect(text).toMatch(/the ordinary workspace is not in this scope/);
-    expect(text).toMatch(/this control cannot reach it/);
+    expect(text).toMatch(/own work is not part of this walkthrough/);
+    expect(text).toMatch(/this reset cannot reach it/);
     expect(text).toMatch(/rows on my experiments are this walkthrough/);
     expect(text).toMatch(/so they are what is reset/);
     expect(text).not.toMatch(/nothing in my experiments is in this scope/);

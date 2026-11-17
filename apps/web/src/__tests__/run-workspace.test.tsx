@@ -2506,7 +2506,7 @@ describe('Check Run', () => {
     const result = await within(card).findByRole('region', { name: 'Check result' });
     expect(within(result).getByText('Blocking · 1')).toBeInTheDocument();
     expect(
-      within(result).getByText('The server reported an unrecognised finding.'),
+      within(result).getByText('ISAAC reported a problem this page cannot describe.'),
     ).toBeInTheDocument();
   });
 });

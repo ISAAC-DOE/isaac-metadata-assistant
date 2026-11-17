@@ -390,9 +390,9 @@ test.describe('two scientists, one record, end to end', () => {
      * assertion in step 7 depends on no navigation happening after this point.
      */
     await switchWorkspace(page, 'proposals');
-    const proposals = page.getByRole('region', { name: 'Ingestion Proposals' });
+    const proposals = page.getByRole('region', { name: 'Suggestions' });
     await expect(
-      page.getByRole('heading', { name: 'Ingestion Proposals' }),
+      page.getByRole('heading', { name: 'Suggestions' }),
       'step 5: the review surface is on this screen'
     ).toBeVisible();
     await expect(
@@ -795,7 +795,7 @@ test.describe('two scientists, one record, end to end', () => {
     await expect(
       throwawayCard.locator('.proposal-target-state'),
       'step 13: the stale card tells the reader the value moved'
-    ).toContainText(/CHANGED since this proposal was made/, { timeout: DISCOVERY_DEADLINE });
+    ).toContainText(/has changed since this proposal was made/, { timeout: DISCOVERY_DEADLINE });
     // WITHDRAWN, NOT DELETED — which is the only recovery there is, per the note above.
     const withdrawn = await server.review(id, throwaway.proposal_id, {
       action: 'withdraw',
@@ -977,7 +977,7 @@ test.describe('two scientists, one record, end to end', () => {
     ).toBe('filesystem');
 
     await page.reload();
-    await expect(page.getByRole('heading', { name: 'Ingestion Proposals' })).toBeVisible();
+    await expect(page.getByRole('heading', { name: 'Suggestions' })).toBeVisible();
     await expect(
       cardInState(page, runTarget.path, 'Accepted'),
       'step 18: the accepted proposal survives'

@@ -169,7 +169,7 @@ test('measure the change feed poller: cadence, pause, event cost and backoff', a
      so the wait below would hang for its full timeout rather than fail. */
   // 2026-09-22: the proposals panel moved from Capture to `?view=proposals`.
   await page.goto(`/record/${TARGET}?view=proposals`);
-  await expect(page.getByRole('heading', { name: 'Ingestion Proposals' })).toBeVisible({
+  await expect(page.getByRole('heading', { name: 'Suggestions' })).toBeVisible({
     timeout: 180_000,
   });
   await expect(page.locator('.proposals-count')).not.toBeEmpty({ timeout: 180_000 });

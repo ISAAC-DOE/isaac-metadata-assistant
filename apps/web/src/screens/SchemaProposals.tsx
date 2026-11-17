@@ -1416,10 +1416,10 @@ function whyNotFileable(vocabulary: ApiSchemaVocabulary, d: LocalTermDraft): str
     return 'The draft in the file does not match its own field and term, so it is not filed from here.';
   }
   if (portalSectionFor(vocabulary, d.category) === null) {
-    return `The vocabulary on this server has no portal term list ${d.category}, so the portal would refuse a new term for it.`;
+    return `ISAAC's current vocabulary has no portal term list ${d.category}, so the portal would refuse a new term for it.`;
   }
   if (!canProposeTerm(vocabulary, d.category, d.term)) {
-    return 'The vocabulary on this server would refuse this term now: the list may already hold it, or the term is not one word. The file was written against an earlier list.';
+    return 'ISAAC’s current vocabulary would refuse this term: the list may already hold it, or the term is not one word. The file was written against an earlier list.';
   }
   if (d.count === null || d.count < 1) {
     return 'The drafts file gives no count for this term, so there is nothing to say how often it was read.';
@@ -2314,12 +2314,12 @@ function PortalActions({ proposalId }: { proposalId: string }) {
   const destination = where
     ? where.restSupported
       ? 'Paste it into the ISAAC portal.'
-      : "The portal's web endpoint takes new terms only: enter this in the portal's Ontology Editor (its Propose a Change form), using these fields."
+      : "The portal takes only new terms this way: enter this in the portal's Ontology Editor (its Propose a Change form), using these fields."
     : null;
   return (
     <span className="sp-portal">
       <button type="button" className="btn btn-action" onClick={copy} disabled={busy}>
-        <Copy size={14} strokeWidth={2} aria-hidden="true" /> Copy Portal Payload
+        <Copy size={14} strokeWidth={2} aria-hidden="true" /> Copy for the Portal
       </button>
       <button type="button" className="btn btn-action" onClick={download} disabled={busy}>
         <Download size={14} strokeWidth={2} aria-hidden="true" /> Download JSON
@@ -2327,7 +2327,7 @@ function PortalActions({ proposalId }: { proposalId: string }) {
       <span className="sp-portal-status" role="status">
         {state.kind === 'copied' && `Copied. ${destination}`}
         {state.kind === 'downloaded' && `Downloaded. ${destination}`}
-        {state.kind === 'failed' && 'The portal payload could not be prepared. Nothing was copied.'}
+        {state.kind === 'failed' && 'The text for the portal could not be prepared. Nothing was copied.'}
         {state.kind === 'manual' && 'Your browser did not allow copying. Select the text below and copy it.'}
       </span>
       {where && where.notes.length > 0 && (
@@ -2342,7 +2342,7 @@ function PortalActions({ proposalId }: { proposalId: string }) {
           className="input input-mono sp-textarea"
           readOnly
           rows={8}
-          aria-label="Portal payload"
+          aria-label="Text for the portal"
           value={state.text}
           onFocus={(e) => e.currentTarget.select()}
         />

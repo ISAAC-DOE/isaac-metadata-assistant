@@ -18,7 +18,6 @@ import {
 import {
   ABOUT_RESPONSE_FIELDS,
   API_ACCESS_COPY,
-  NO_GUESSING,
   REPO_DOCS,
   SETTINGS_SOURCE_ENDPOINTS,
   dataRows,
@@ -553,7 +552,7 @@ describe('Settings — deep-linkable tabs (?tab=)', () => {
    * would pass with the reader parked two widgets away from what they clicked.
    */
   it.each([
-    ['about', 'overview', 'This Build'],
+    ['about', 'overview', 'Version'],
     ['privacy', 'overview', 'Data'],
     ['help', 'overview', 'Guided Walkthrough'],
     ['api', 'integrations', 'API Access'],
@@ -870,37 +869,59 @@ describe('Settings — Overview', () => {
  *   · `?tab=about` → Overview, scrolled to This Build.
  */
 describe('Settings — This Build and Technical Details (was About)', () => {
-  it('This Build shows its Build rows, with Runtime one press away in a disclosure', async () => {
+  /*
+   * 2026-11-17 (owner's direction: Settings must not read like an engineer wrote it).
+   * ~~"This Build shows its Build rows, with Runtime one press away"~~: the widget is
+   * now "Version" — the version and schema visible, and every one of the seven facts,
+   * the clock legend and Copy Diagnostics inside ONE closed Technical Details
+   * disclosure. ~~"Core isaac_records · fixed for this build"~~ and ~~"Build Commit ·
+   * read per request · not set"~~ are no longer shown by default.
+   */
+  it('Version shows the version and schema, and folds every fact into one closed Technical Details', async () => {
     stubFetchRoutes(fullRoutes());
     const { container } = renderSettings();
     expect(await screen.findByText('0.1.0')).toBeInTheDocument();
-    const build = screen.getByRole('region', { name: 'This Build' });
-    const labelsIn = (el: Element) =>
-      Array.from(el.querySelectorAll(':scope > dl .settings-figure-label, :scope > .settings-figure .settings-figure-label')).map(
-        (l) => l.textContent,
-      );
-    // The app's chevron `Disclosure`, not a native `<details>` (2026-11-02).
-    const runtime = build.querySelector('.disclosure.settings-runtime') as HTMLElement;
-    expect(runtime).not.toBeNull();
-    expect(build.querySelector('details.settings-runtime')).toBeNull();
-    const trigger = runtime.querySelector('.disclosure-trigger') as HTMLButtonElement;
+    const build = screen.getByRole('region', { name: 'Version' });
+    expect(screen.queryByRole('region', { name: 'This Build' })).toBeNull();
+    // The app's chevron `Disclosure`, not a native `<details>`.
+    const details = build.querySelector('.disclosure.settings-build-details') as HTMLElement;
+    expect(details).not.toBeNull();
+    expect(build.querySelector('details')).toBeNull();
+    const trigger = details.querySelector('.disclosure-trigger') as HTMLButtonElement;
     expect(trigger).toHaveAttribute('aria-expanded', 'false');
-    expect(trigger.textContent).toBe('Runtime');
-    expect(runtime.querySelector('.disclosure-body')).toHaveAttribute('hidden');
-    expect(Array.from(runtime.querySelectorAll('.settings-figure-label')).map((l) => l.textContent)).toEqual([
+    expect(trigger.textContent).toBe('Technical Details');
+    const body = details.querySelector('.disclosure-body') as HTMLElement;
+    expect(body).toHaveAttribute('hidden');
+    // ONE disclosure: the retired Runtime one is gone, and nothing sits beside it.
+    expect(build.querySelector('.settings-runtime')).toBeNull();
+    expect(build.querySelectorAll('.disclosure')).toHaveLength(1);
+    expect(Array.from(body.querySelectorAll('.settings-figure-label')).map((l) => l.textContent)).toEqual([
+      'App Version',
+      'Build Commit',
+      'Record Schema',
+      'Core',
       'Runtime Mode',
       'Data Regime',
       'Persistence',
     ]);
-    const buildRows = Array.from(build.querySelectorAll('.settings-figure-label'))
-      .filter((l) => !runtime.contains(l))
-      .map((l) => l.textContent);
-    expect(buildRows).toEqual(['App Version', 'Build Commit', 'Record Schema', 'Core']);
-    // No in-widget view switch any more.
+    // Nothing technical outside it: every figure, the legend and Copy Diagnostics are in.
+    for (const figure of Array.from(build.querySelectorAll('.settings-figure'))) {
+      expect(body.contains(figure)).toBe(true);
+    }
+    expect(body.textContent).toMatch(/The clock marks a value read live from the server/);
+    expect(body.querySelector('button')?.textContent).toMatch(/Copy Diagnostics/);
+    expect(build.querySelector('.widget-foot')).toBeNull();
+    // No info toggle either: nothing about the build is said outside the disclosure.
+    expect(build.querySelector('.widget-info')).toBeNull();
     expect(build.querySelector('.widget-views')).toBeNull();
-    expect(labelsIn).toBeTypeOf('function');
     expect(build.querySelector('.widget-headline .widget-figure')?.textContent).toBe('ISAAC 0.1.0');
     expect(build.querySelector('.widget-headline .widget-figure-unit')?.textContent).toBe('Schema v1.05');
+    // What a reader sees by default is the headline and the disclosure row — no
+    // "Core", no "read per request", no "fixed for this build".
+    const shown = (build.textContent ?? '').replace(body.textContent ?? '', '');
+    expect(shown).not.toMatch(/\bCore\b|read per request|fixed for this build|Build Commit/);
+    fireEvent.click(trigger);
+    expect(body).not.toHaveAttribute('hidden');
     expect(container.querySelectorAll('.settings-figure')).toHaveLength(7);
   });
 
@@ -944,19 +965,18 @@ describe('Settings — This Build and Technical Details (was About)', () => {
     expect(within(technical).getByText(/not served as pages by this app/i)).toBeInTheDocument();
   });
 
-  it('This Build keeps the provenance legend and the no-guessing principle behind its info toggle', async () => {
+  /* ~~"This Build keeps the provenance legend and the no-guessing principle behind its
+     info toggle"~~ — 2026-11-17: the legend moved into Technical Details (asserted
+     above) and the info toggle went; the no-guessing principle is Help's "No guessing"
+     section. The retired caveats stay banned over the whole widget. */
+  it('Version carries none of the retired caveats, open or closed', async () => {
     stubFetchRoutes(fullRoutes());
     renderSettings();
     await screen.findByText('0.1.0');
-    const build = screen.getByRole('region', { name: 'This Build' });
-    const info = build.querySelector('.widget-info') as HTMLElement;
-    expect(info).toHaveAttribute('hidden');
-    expect(info.textContent).toMatch(/marked with the clock is read per request/i);
-    expect(info.textContent).toContain(NO_GUESSING.text);
-    // The retired caveats are gone.
-    expect(info.textContent).not.toMatch(/no user-adjustable settings|this screen computes none|truth plane/i);
-    fireEvent.click(within(build).getByRole('button', { name: 'About This Build' }));
-    expect(info).not.toHaveAttribute('hidden');
+    const build = screen.getByRole('region', { name: 'Version' });
+    expect(build.textContent).not.toMatch(
+      /no user-adjustable settings|this screen computes none|truth plane|read per request/i,
+    );
   });
 
   it('renders an honest "not set" state when no build commit was injected (never fabricates one)', async () => {

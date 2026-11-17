@@ -604,6 +604,9 @@ describe('the two mounts', () => {
         <SettingsPage />
       </MemoryRouter>,
     );
+    /* 2026-11-17: Copy Diagnostics sits inside Version's closed Technical Details
+       disclosure (owner's direction: plain pages) — reachable, one press away. */
+    fireEvent.click(await view.findByRole('button', { name: 'Technical Details' }));
     const button = await view.findByRole('button', { name: /Copy Diagnostics/ });
     expect(button).toBeInTheDocument();
     // Never the error state — this mount exists precisely so the report is
@@ -626,6 +629,7 @@ describe('the two mounts', () => {
         <SettingsPage />
       </MemoryRouter>,
     );
+    fireEvent.click(await view.findByRole('button', { name: 'Technical Details' }));
     const button = await view.findByRole('button', { name: /Copy Diagnostics/ });
     vi.stubGlobal('navigator', { ...navigator, clipboard: { writeText }, onLine: true });
     fireEvent.click(button);
@@ -683,8 +687,9 @@ describe('hosted truthfulness — the four record loading labels', () => {
   /*
    * These four labels read "…from the local backend…" on every build, including
    * the SLAC-hosted deployment, where the backend is not the reader's machine.
-   * They now name the thing being talked to (the ISAAC API) and stop claiming
-   * where it runs — a fact the frontend cannot observe either way.
+   * They now say only what is loading (2026-11-17: the "from the ISAAC API" tail
+   * was dropped as jargon) and claim nothing about where it runs — a fact the
+   * frontend cannot observe either way.
    *
    * `stubFetchDown` makes every request fail, which is the cheapest way to hold a
    * screen in its LOADING branch for one synchronous assertion; the down state is
@@ -693,22 +698,22 @@ describe('hosted truthfulness — the four record loading labels', () => {
   const CASES: { route: string; label: string; down: string }[] = [
     {
       route: '/record/demo',
-      label: 'Loading the record from the ISAAC API…',
+      label: 'Loading the record…',
       down: 'ISAAC Is Not Responding',
     },
     {
       route: '/record/demo/complete',
-      label: 'Loading the blockers from the ISAAC API…',
+      label: 'Loading the open questions…',
       down: 'ISAAC Is Not Responding',
     },
     {
       route: '/record/demo/evidence',
-      label: 'Loading the evidence trail from the ISAAC API…',
+      label: 'Loading the evidence trail…',
       down: 'ISAAC Is Not Responding',
     },
     {
       route: '/record/demo/export',
-      label: 'Loading validation, coverage and advisory from the ISAAC API…',
+      label: 'Loading the export checks…',
       down: 'ISAAC Is Not Responding',
     },
   ];

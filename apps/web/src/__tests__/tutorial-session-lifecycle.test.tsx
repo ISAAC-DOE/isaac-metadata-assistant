@@ -172,7 +172,7 @@ describe('worked-example bar — what it may claim', () => {
     // reaches them (`_experiment_dirs` enumerates one root and skips `_`-prefixed
     // entries), and the reader is told plainly which scope the screens are showing.
     expect(copy).toMatch(/belong to this walkthrough only/i);
-    expect(copy).toMatch(/no request made outside it reaches them/i);
+    expect(copy).toMatch(/Nothing outside it can reach them/i);
     expect(copy).toMatch(/My Experiments included/i);
     expect(copy).toMatch(/discarded when the walkthrough ends/i);
     /*
@@ -1235,7 +1235,7 @@ describe('worked-example session — the boot window after a reload', () => {
     // neither belongs on a screen that has successfully read an empty list.
     expect(view.queryByText('Record Not Found')).toBeNull();
     expect(view.queryByText('Not Found')).toBeNull();
-    expect(view.container.textContent).not.toMatch(/experiment id is not in the/i);
+    expect(view.container.textContent).not.toMatch(/experiment is not in your workspace/i);
 
     // The reader is told what happened to their walkthrough, and nothing was
     // re-minted or marked complete behind them.

@@ -102,13 +102,15 @@ export function mcpDeploymentState(endpoint: string | null): McpDeploymentState 
  * (`connect-your-agent.test.tsx`).
  */
 export const MCP_CONNECT_COPY = {
-  stateLine:
-    'Not set up on this server. An administrator connects it in the deployment settings.',
+  /* 2026-11-17 (owner's direction: plain pages): ~~'Not set up on this server. An
+     administrator connects it in the deployment settings.'~~ — one idea, the
+     scientist's words. Still the `unmounted` posture only (`mcpStateLine`). */
+  stateLine: 'Agent connections are not set up for this site.',
   /* While `/api/health` has not answered: says what is happening, claims nothing. */
-  stateLineChecking: 'Checking how this server accepts agent connections…',
+  stateLineChecking: 'Checking whether agents can connect to this site…',
   /* Absent block, a failed read, `null` or a posture this client does not know:
      the server has not said, so neither does this line. */
-  stateLineUnreported: 'This server has not reported whether its agent interface is set up.',
+  stateLineUnreported: 'This site has not said whether agent connections are set up.',
   stateLinePublished: 'This deployment publishes an address for its agent interface:',
   neverSubmitHeading: 'No Agent Can Submit a Record',
   neverSubmitDetail:
@@ -203,11 +205,16 @@ export const MCP_CAPABILITIES_ALLOWED: readonly McpCapability[] = [
      * The reason for withholding is unchanged and still honest — the contract assigns
      * the whole namespace to neither level, and guessing would be the unevidenced
      * inference `CLAUDE.md` §5 forbids — so what changes is the naming, not the rule.
+     *
+     * 2026-11-17 — THE SIX-FIELD PARAGRAPH WAS CUT at the owner's direction (plain
+     * pages). The row now names NO withheld set, so M7's undercount cannot recur, and
+     * it still says "most", so it does not claim the first run inherits everything.
+     * `connect-your-agent.test.tsx` keeps both halves and bans the category phrase.
      */
     id: 'add-run',
     action: 'Add a run',
     detail:
-      'Add one measurement condition to a record. The first run carries across most of what the record already holds — its spectrum, QC verdict, descriptors, asset hashes, conditions and acquisition times move onto the run, because that is where an exported record reads them from. Six fields do NOT move — the detector model, monochromator crystal, spectrometer geometry and scan count, and also the proposal and session identifiers, which are administrative rather than instrument settings. Whether two runs of one experiment may legitimately differ in any of them is an open question this application has no answer to, and copying them would answer it by accident; the cost is that all six are dropped from a record exported per run. Every run after the first starts empty: nothing is copied from one run to another, because that would assert two runs measured the same thing. No value is ever invented.',
+      'Add one measurement condition to a record. The first run carries across most of what the record already holds. Every run after the first starts empty. No value is ever invented.',
     tools: ['isaac_create_run'],
   },
   {

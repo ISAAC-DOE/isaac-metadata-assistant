@@ -360,7 +360,7 @@ describe('the record description panel', () => {
     await open();
     // AND THE PANEL IS ON THAT BRANCH: the fallback disclosure is the sentence it prints
     // when the server has not spoken the contract, and it must not be on screen here.
-    expect(screen.queryByText(/did not say which fields it accepts a value at/i)).toBeNull();
+    expect(screen.queryByText(/did not say which fields can be filled in here/i)).toBeNull();
   });
 
   it('labels every control and keeps the status region mounted', async () => {

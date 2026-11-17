@@ -72,7 +72,8 @@ const BEHIND_THE_DISCLOSURE = [
   'What each step checks',
   'Where values come from',
   'Three separate signals',
-  'Three gates on export',
+  // ~~'Three gates on export'~~ — 2026-11-17, plain words (owner's direction).
+  'Three checks before export',
   'Where evidence lives',
 ];
 
@@ -97,7 +98,8 @@ describe('UX-021b · Help is three top-level items', () => {
     expect(top.slice(1, 3)).toEqual(STAYS_OPEN);
     // Named rather than matched loosely: the summary has to say what is behind
     // it, or the reduction hides the claims instead of deferring them.
-    expect(top[3]).toBe('How values, signals and gates work');
+    // ~~'How values, signals and gates work'~~ — 2026-11-17, plain words.
+    expect(top[3]).toBe('How values and checks work');
     expect(top[4]).toBe('Guided Walkthrough');
     // The retired section does not come back under either of its names.
     expect(top).not.toContain('Synthetic workspace');
@@ -161,7 +163,7 @@ describe('UX-021b · Help is three top-level items', () => {
     // were retired 2026-11-02).
     expect(values!.textContent).toMatch(/because a person put it there/i);
     const gates = [...container.querySelectorAll('.help-section')].find(
-      (el) => el.querySelector('h3')?.textContent === 'Three gates on export',
+      (el) => el.querySelector('h3')?.textContent === 'Three checks before export',
     );
     expect(gates!.textContent).toMatch(/Export runs three checks/);
   });

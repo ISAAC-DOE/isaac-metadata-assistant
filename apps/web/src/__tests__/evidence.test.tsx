@@ -140,7 +140,7 @@ describe('S5 · Evidence & File Preview (live)', () => {
     const wrapper = chip.parentElement!;
     expect(wrapper.classList.contains('graph-chip')).toBe(true);
     expect(wrapper.classList.contains('graph-unavailable')).toBe(true);
-    expect(getByLabelText(/memory plane, advisory only/i)).toBe(wrapper);
+    expect(getByLabelText(/never decides whether a record is valid/i)).toBe(wrapper);
     // the assistant is mounted here but does NOT duplicate the axis
     expect(container.querySelector('.assistant')).not.toBeNull();
     expect(container.querySelector('.assistant .assistant-memory')).toBeNull();
@@ -238,7 +238,7 @@ describe('S5 · grounded assistant (P25.5) — subordinate, guided-only, LLM-fre
   it('does NOT render an assistant panel when the backend is down', async () => {
     stubFetchDown();
     const { container, findByText } = renderAt('/record/demo/evidence');
-    await findByText('Backend Not Running');
+    await findByText('ISAAC Is Not Running');
     expect(container.querySelector('.assistant')).toBeNull();
   });
 });
@@ -258,7 +258,7 @@ describe('GraphStatusChip shows the availability axis, never implies validation'
       // P33 S3 (D7): single Title-Case state text node (no "Memory:" colon form);
       // the memory-plane framing now lives in the accessible name, not a redundant label.
       expect(getByText(label)).toBeInTheDocument();
-      expect(getByLabelText(/memory plane, advisory only/i)).toBeInTheDocument();
+      expect(getByLabelText(/never decides whether a record is valid/i)).toBeInTheDocument();
       // never a verdict / validity claim on the memory plane
       expect(container.textContent).not.toMatch(/\b(PASS|FAIL|valid|invalid)\b/i);
       unmount();

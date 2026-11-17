@@ -271,7 +271,7 @@ describe('Review N Proposals moves focus into the REAL Ingestion Proposals headi
 
     // Confirm the real panel's heading exists ahead of time, exactly as
     // `IngestionProposalsPanel.tsx` renders it — an `id` and a `tabIndex={-1}`.
-    const heading = await screen.findByRole('heading', { name: /ingestion proposals/i });
+    const heading = await screen.findByRole('heading', { name: /^suggestions$/i });
     expect(heading.id).toBe('ingestion-proposals-heading');
     expect(heading).toHaveAttribute('tabindex', '-1');
     expect(document.activeElement).not.toBe(heading);

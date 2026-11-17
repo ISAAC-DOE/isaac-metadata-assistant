@@ -46,7 +46,7 @@ export function ShapeMismatchNotice({
             <code className="mono shape-mismatch-path">{f.path}</code>{' '}
             <span className="shape-mismatch-message">
               {f.message}
-              {f.message_truncated && ' … (message shortened by the server)'}
+              {f.message_truncated && ' … (message shortened)'}
             </span>
           </li>
         ))}

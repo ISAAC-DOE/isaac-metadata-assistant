@@ -1,8 +1,9 @@
 import { describe, it, expect, afterEach, beforeEach, vi } from 'vitest';
-import { render, screen, fireEvent, within, waitFor } from '@testing-library/react';
+import { render, screen, fireEvent, within, waitFor, act } from '@testing-library/react';
 import { MemoryRouter } from 'react-router-dom';
 
 import { SettingsPage } from '../screens/SettingsPage';
+import { ApiKeysPanel } from '../screens/settings/ApiKeys';
 import {
   PURPOSE_DISCLOSURE_MIN_CHARS,
   isBoundaryCaveat,
@@ -286,10 +287,13 @@ describe('Settings → API Access — an honest state', () => {
     );
   });
 
-  it('the state line says who sets access up, and overstates nothing', () => {
-    expect(API_ACCESS_COPY.stateLine).toMatch(/not set up on this server/i);
-    expect(API_ACCESS_COPY.stateLine).toMatch(/administrator/i);
-    expect(API_ACCESS_COPY.stateLine).not.toMatch(/\bconnected\b|coming soon|available soon|enabled/i);
+  /* 2026-11-17 (owner's direction: plain pages): ~~"…says who sets access up"
+     (`/not set up on this server/`, `/administrator/`)~~ — one plain idea now. */
+  it('the state line is one plain idea, and overstates nothing', () => {
+    expect(API_ACCESS_COPY.stateLine).toMatch(/not set up for this site/i);
+    expect(API_ACCESS_COPY.stateLine).not.toMatch(
+      /\bconnected\b|coming soon|available soon|enabled|\byet\b/i,
+    );
   });
 
   it('none of the retired standing caveats comes back', async () => {
@@ -3358,20 +3362,46 @@ describe('Settings → API Access without the developer flag (2026-11-16)', () =
     vi.stubEnv('VITE_ISAAC_DEV_TOOLS', '');
   });
 
-  it('the agent guide names the contract, never a tab that is not there, and offers no explorer jump', async () => {
-    const connect = await openGuide();
+  /* 2026-11-17 (owner's direction: plain pages): an ordinary build shows API Access
+     as ONE line and nothing else. ~~Quick Start and Program an Agent behind "Setup and
+     Reference"~~ are a developer's reference and render only with the flag — NOT
+     RENDERED here, not merely hidden. */
+  it('is the one state line and nothing else — the guide is not rendered', async () => {
+    stubFetchRoutes(routes());
+    renderSettings(ROUTES.settingsTab('api'));
+    const widget = keysRegion();
+    await act(async () => {
+      await new Promise((r) => setTimeout(r, 0));
+    });
+    expect(widget.querySelector('.widget-headline .settings-state-line')?.textContent).toBe(
+      API_ACCESS_COPY.stateLine,
+    );
+    expect(within(widget).queryByRole('button', { name: 'Setup and Reference' })).toBeNull();
+    expect(widget.querySelector('.widget-details')).toBeNull();
+    const text = norm(widget.textContent ?? '');
+    expect(text).toBe(norm(`API Access${API_ACCESS_COPY.stateLine}`));
+    expect(text).not.toMatch(/Quick Start|Program an Agent|\$ISAAC_API_CREDENTIAL/);
+    expect(norm(document.body.textContent ?? '')).not.toMatch(/Endpoint Explorer/);
+    expect(screen.queryByRole('tab', { name: 'Advanced' })).toBeNull();
+  });
+
+  /* The guide's no-explorer branch is still real code (a caller may ask for the guide
+     without the explorer), so it is held by rendering the widget with the guide on. */
+  it('with the guide asked for and no explorer, it names the contract, never a tab that is not there', async () => {
+    render(
+      <MemoryRouter future={{ v7_startTransition: true, v7_relativeSplatPath: true }}>
+        <ApiKeysPanel state={{ status: 'data', data: openApiFixture } as never} withGuide />
+      </MemoryRouter>,
+    );
+    openView('Quick Start');
+    expect(screen.queryByRole('button', { name: /Browse Every Endpoint/ })).toBeNull();
+    expect(screen.getByRole('button', { name: 'Program an Agent' })).toBeInTheDocument();
+    const connect = document.querySelector('.api-connect-bare') as HTMLElement;
     const text = norm(connect.textContent ?? '');
     expect(text).toMatch(/Start from this app's own contract, GET \/api\/openapi\./);
     expect(text).toMatch(/exactly as the contract lists them/);
     expect(text).not.toMatch(/Endpoint Explorer|under Advanced/);
     expect(within(connect).queryByRole('button', { name: 'Open the Endpoint Explorer' })).toBeNull();
-    expect(screen.queryByRole('tab', { name: 'Advanced' })).toBeNull();
-  });
-
-  it('Quick Start offers Program an Agent and no Browse Every Endpoint', async () => {
-    await openApiAccess();
-    expect(screen.queryByRole('button', { name: /Browse Every Endpoint/ })).toBeNull();
-    expect(screen.getByRole('button', { name: 'Program an Agent' })).toBeInTheDocument();
     expect(norm(document.body.textContent ?? '')).not.toMatch(/Endpoint Explorer/);
   });
 });

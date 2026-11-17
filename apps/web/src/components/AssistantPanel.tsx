@@ -347,7 +347,7 @@ const FOLLOWUPS_EYEBROW_ID = 'assistant-followups-eyebrow';
 // The safe replacement rendered whenever a would-be verdict string reaches the
 // panel — the assistant explains and routes; it never states PASS/FAIL.
 const VERDICT_ROUTE_TEXT =
-  'That is a truth question — open the Validate surface for the deterministic verdict.';
+  'Whether a record passes is decided by ISAAC’s checks. The Validate step shows the result.';
 
 // P34.2 — the accessible in-flight label announced in the single live region
 // while a read-only grounded query is resolving.
@@ -448,7 +448,7 @@ function withTimeout<T>(p: Promise<T>, ms: number): Promise<T> {
 // distinguishable by ICON + TEXT, never color alone (project a11y rule).
 const KIND_META: Record<MessageKind, { label: string; Icon: LucideIcon; className: string }> = {
   'deterministic-result': {
-    label: 'From Deterministic Checks',
+    label: 'From ISAAC’s Checks',
     Icon: Shield,
     className: 'kind-badge-deterministic',
   },
@@ -2636,11 +2636,10 @@ function NavSourceChip({ label, to }: { label: string; to: string }) {
  */
 const NAV_ACTION_COPY: Record<AssistantActionKind, { head: string; note: string }> = {
   'open-validator': {
-    head: 'Deterministic Schema Check',
+    head: 'ISAAC’s Format Check',
     note:
-      'The deterministic schema check runs on its own surface — Governance & Safety → Validator. ' +
-      'Opening it takes you there and does nothing else: no field is written, no check is run, and ' +
-      'no validation result changes.',
+      'The format check has its own page, Governance & Safety → Validator. Opening it only takes ' +
+      'you there: no field is written and no check is run.',
   },
 };
 

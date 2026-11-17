@@ -728,7 +728,7 @@ describe('the record screen resolves a bare ?proposal= to the workspace that can
 
     /* The panel is MOUNTED — which is the thing a bare `?proposal=` used not to
        achieve — and it has resolved the id against the window it was served. */
-    await screen.findByRole('heading', { name: 'Ingestion Proposals' });
+    await screen.findByRole('heading', { name: 'Suggestions' });
     await waitFor(() => expect(noticeText()).not.toBeNull());
     expect(noticeText()).toContain(LINKED);
   });
@@ -740,7 +740,7 @@ describe('the record screen resolves a bare ?proposal= to the workspace that can
        a URL carrying both must keep landing exactly where it landed. The
        proposal parameter is not lost — it survives on the address. */
     await screen.findByRole('heading', { name: 'Runs' });
-    expect(screen.queryByRole('heading', { name: 'Ingestion Proposals' })).toBeNull();
+    expect(screen.queryByRole('heading', { name: 'Suggestions' })).toBeNull();
   });
 
   it('a link minted by ROUTES.recordProposal (`view=capture&proposal=`) opens Proposals too', async () => {
@@ -748,7 +748,7 @@ describe('the record screen resolves a bare ?proposal= to the workspace that can
     // (`mcp/links.py::proposal_link`) — names `view=capture`. Capture Home no
     // longer mounts the panel, so the address must reach the view that does.
     renderAt(ROUTES.recordProposal(EXP, LINKED));
-    await screen.findByRole('heading', { name: 'Ingestion Proposals' });
+    await screen.findByRole('heading', { name: 'Suggestions' });
     await waitFor(() => expect(noticeText()).not.toBeNull());
     expect(noticeText()).toContain(LINKED);
   });
@@ -758,6 +758,6 @@ describe('the record screen resolves a bare ?proposal= to the workspace that can
     /* ~~`findByRole('link', { name: 'Record Fields' })`~~ — that rail row left on
        2026-09-22 (N2); the Record Fields workspace is what renders. */
     await screen.findByRole('region', { name: 'Record Fields workspace' });
-    expect(screen.queryByRole('heading', { name: 'Ingestion Proposals' })).toBeNull();
+    expect(screen.queryByRole('heading', { name: 'Suggestions' })).toBeNull();
   });
 });
