@@ -18,21 +18,19 @@
   "system": {
     "domain": "computational",
     "technique": "DFT",
-    "instrument": {
-      "instrument_type": "simulation_engine",
-      "instrument_name": "VASP_Standard",
-      "vendor_or_project": "VASP"
-    },
     "configuration": {
-      "code_version": "6.4.1",
       "compute_architecture": "GPU"
     }
   },
   "context": {
     "environment": "in_silico",
     "temperature_K": 0,
+    "reaction": {
+      "name": "CORR",
+      "drive": "electrochemical",
+      "catalysis": "heterogeneous"
+    },
     "electrochemistry": {
-      "reaction": "CORR",
       "potential_setpoint_V": -1.6,
       "potential_scale": "SHE"
     },
@@ -58,7 +56,9 @@
       "convergence": {
         "energy_eV": 1e-05,
         "force_eV_per_A": 0.03
-      }
+      },
+      "code": "VASP",
+      "code_version": "6.4.1"
     },
     "slab_model": {
       "surface_facet": "111",
@@ -98,14 +98,19 @@
       "asset_id": "xu_reference",
       "content_role": "auxiliary_reference",
       "uri": "https://doi.org/10.1002/advs.202520469",
-      "sha256": "0000000000000000000000000000000000000000000000000000000000000000",
-      "media_type": "text/html"
+      "sha256": "not_available_literature_source",
+      "media_type": "text/html",
+      "citation": {
+        "doi": "10.1002/advs.202520469",
+        "relation": "reference"
+      },
+      "notes": "The experiment these calculations model (Cu-Ag stripe electrodes); the calculations are not from this paper."
     },
     {
       "asset_id": "vasp_incar",
       "content_role": "workflow_recipe",
       "uri": "repo://isaac-workflows/vasp_neb/cuag111_occo/INCAR",
-      "sha256": "0000000000000000000000000000000000000000000000000000000000000000",
+      "sha256": "not_available",
       "media_type": "text/plain"
     }
   ],

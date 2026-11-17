@@ -114,7 +114,7 @@ def test_the_public_mode_needs_no_datastore_at_all():
     )
     assert report["status"] == "ok"
     assert report["metadata"]["verification_mode"] == PUBLIC_REFERENCE
-    assert report["metadata"]["corpus_size"] == 10
+    assert report["metadata"]["corpus_size"] == 14  # 10 before the 2026-11-16 re-vendoring at upstream a1cb1c8
 
 
 def test_the_datastore_mode_reads_only_the_approved_provider(

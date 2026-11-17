@@ -373,7 +373,7 @@ def test_a_value_the_schema_does_not_allow_is_refused_and_nothing_is_written(
 def test_the_refusal_names_every_offending_field_and_the_schemas_own_values(client):
     """`allowed` is the schema's list, whole, for both fields — not a pointer elsewhere.
 
-    Echoing all 37 techniques is the decision the implementation argues for: the values
+    Echoing all 45 techniques (37 before the 2026-11-16 schema refresh) is the decision the implementation argues for: the values
     are the schema's own published vocabulary (already served by ``GET /api/schema``),
     they are bounded and cannot grow with caller input, and a refusal a client must act
     on should say what to send rather than only what not to.
@@ -394,7 +394,7 @@ def test_the_refusal_names_every_offending_field_and_the_schemas_own_values(clie
     system = _schema()["properties"]["system"]["properties"]
     assert body["allowed"]["system.domain"] == system["domain"]["enum"]
     assert body["allowed"]["system.technique"] == system["technique"]["enum"]
-    assert len(body["allowed"]["system.technique"]) == 37
+    assert len(body["allowed"]["system.technique"]) == 45  # 37 before the 2026-11-16 refresh to upstream a1cb1c8
 
     assert "also-nope" not in json.dumps(body)
 

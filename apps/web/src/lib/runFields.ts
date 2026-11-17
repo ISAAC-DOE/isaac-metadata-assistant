@@ -216,7 +216,7 @@ export const RUN_FIELDS: readonly RunFieldSpec[] = [
     group: 'electrochemistry',
     // schema/isaac_record_v1.json → properties.context.properties.electrochemistry
     // .properties.cell_type.enum
-    options: ['flow_cell', 'microfluidic_flow_cell', 'h_cell', 'beaker_cell', 'gde_cell', 'mea_cell', 'zero_gap_cell', 'coin_cell', 'three_electrode', 'scanning_droplet_cell'],
+    options: ['flow_cell', 'microfluidic_flow_cell', 'h_cell', 'beaker_cell', 'gde_cell', 'mea_cell', 'zero_gap_cell', 'coin_cell', 'three_electrode', 'scanning_droplet_cell', 'not_reported'],
   },
 ] as const;
 

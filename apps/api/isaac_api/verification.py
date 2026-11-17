@@ -608,8 +608,20 @@ def _leak_scan(
     _, declared = _introspect_root(Path(root))
     scanned = dict(payload)
     scanned["limitations"] = []
-    leaves = _string_leaves(scanned)
-    candidates = _corpus_strings(records, declared) - _authored_strings()
+    authored = _authored_strings()
+    # A leaf that IS one of this module's own authored constants carries nothing
+    # record-derived, so a corpus value that merely occurs INSIDE it is a word
+    # collision, not a disclosure — the same reasoning that subtracts authored
+    # strings from the candidates, applied to the other side of the `in`.
+    # Measured 2026-11-16 when the public corpus grew to fourteen upstream
+    # examples: the record value `reference` (`assets[].citation.relation`) is a
+    # substring of the authored mode word `public_reference`, and the scan reported
+    # a leak that was the module's own vocabulary. Only EXACT authored leaves are
+    # exempt; any other leaf is still scanned in full, and the planted-canary
+    # negative control (`test_the_leak_scan_actually_catches_a_planted_value`)
+    # still fires.
+    leaves = tuple(leaf for leaf in _string_leaves(scanned) if leaf not in authored)
+    candidates = _corpus_strings(records, declared) - authored
     return not any(
         value in leaf for value in candidates for leaf in leaves
     )

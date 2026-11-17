@@ -27,8 +27,12 @@
   "context": {
     "environment": "in_situ",
     "temperature_K": 353.15,
+    "reaction": {
+      "name": "water_splitting",
+      "drive": "electrochemical",
+      "catalysis": "heterogeneous"
+    },
     "electrochemistry": {
-      "reaction": "water_splitting",
       "cell_type": "mea_cell",
       "control_mode": "galvanostatic",
       "current_setpoint_mA_cm2": 1000.0,
@@ -37,7 +41,18 @@
         "value_V": null,
         "rhe_basis": "not_applicable"
       }
+    },
+    "transport": {
+      "feed": {
+        "phase": "liquid",
+        "composition": "deionized water",
+        "notes": "Fed to the anode; the cathode is not fed."
+      }
     }
+  },
+  "system": {
+    "domain": "experimental",
+    "technique": "chronopotentiometry"
   },
   "measurement": {
     "series": [
@@ -127,7 +142,22 @@
       }
     ]
   },
-  "assets": [],
+  "assets": [
+    {
+      "asset_id": "source_paper",
+      "content_role": "documentation",
+      "uri": "https://doi.org/10.0000/example-electrolyzer-durability",
+      "sha256": "not_available_literature_source",
+      "media_type": "text/html",
+      "citation": {
+        "authors": "Example, A.; Example, B.",
+        "title": "Example: 1000 h durability of a PEM water electrolyzer (template citation)",
+        "journal": "Example Journal",
+        "year": 2026,
+        "doi": "10.0000/example-electrolyzer-durability"
+      }
+    }
+  ],
   "links": [],
   "attribution": {
     "contributors": [
@@ -135,6 +165,12 @@
         "name": "Source authors",
         "role": "data_owner"
       }
-    ]
+    ],
+    "produced_by": {
+      "group": "Example electrolyzer group",
+      "people": [
+        "Example Author"
+      ]
+    }
   }
 }

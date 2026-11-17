@@ -170,6 +170,9 @@ def test_an_older_builds_eligibility_under_the_website_list_is_rederived_and_log
     tech = next(c for c in bundle["candidates"] if c["target_field_path"] == "system.technique" and c["run_id"] is None)
     form = next(m for m in bundle["missing_values"] if m["target_field_path"] == "sample.sample_form")
     vendored = {p: list((B._schema_node(p) or {}).get("enum") or []) or None for p in ("system.technique", "sample.sample_form")}
+    # The older build read the JULY vendored enum, which lacked EPR (and seven other techniques the
+    # 2026-11-16 re-vendoring at the portal's commit added). Emulate that list, not today's vendored one.
+    vendored["system.technique"] = [t for t in vendored["system.technique"] if t != "EPR"]
     real = B.allowed_values
     monkeypatch.setattr(B, "allowed_values", lambda p: vendored[p] if p in vendored else real(p))
     _clear_caches()

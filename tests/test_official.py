@@ -26,8 +26,8 @@ def test_official_examples_validate(path):
     assert report.ok, report.render()
 
 
-def test_ten_examples_present():
-    assert len(EXAMPLES) == 10
+def test_fourteen_examples_present():
+    assert len(EXAMPLES) == 14  # 10 until the 2026-11-16 re-vendoring at upstream a1cb1c8
 
 
 @pytest.fixture

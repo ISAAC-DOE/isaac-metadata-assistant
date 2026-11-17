@@ -89,7 +89,7 @@ def _record_enum_fields() -> Mapping[str, tuple]:
     and ``test_system_enum_fields.py`` re-derives that rather than asserting it, so a
     schema refresh that adds a fourth is visible instead of silent.
 
-    Transcribing the 37 techniques instead would put a second copy of the schema's
+    Transcribing the 45 techniques (37 before the 2026-11-16 schema refresh) instead would put a second copy of the schema's
     vocabulary in this file, free to drift from the document ``CLAUDE.md`` §1 makes the
     authority. Reading it means the gate FOLLOWS a schema refresh.
 

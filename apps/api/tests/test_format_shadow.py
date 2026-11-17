@@ -23,7 +23,7 @@ message entirely — and the only way to *know* it was discarded is to push a
 distinctive sentinel through every format-declaring field and assert it comes
 out nowhere.
 
-The corpus is ``tests/fixtures/official/*.json`` — ten example records copied
+The corpus is ``tests/fixtures/official/*.json`` — fourteen example records copied
 verbatim from the PUBLIC upstream ``ISAAC-DOE/isaac-ai-ready-record`` repository
 (provenance: ``schema/PROVENANCE.md``). Nothing here touches a database, a
 network, or any real experimental artifact.
@@ -59,15 +59,19 @@ def load(name: str) -> dict:
 def set_at(record: dict, address: tuple, value) -> None:
     node = record
     for part in address[:-1]:
+        if isinstance(node, dict) and part not in node:
+            # An OPTIONAL object the example omits (``system.session``, whose keys are all
+            # optional): created empty, which is schema-valid, so only the mutated leaf is new.
+            node[part] = {}
         node = node[part]
     node[address[-1]] = value
 
 
-#: The six ``format: date-time`` locations, as (label, example file, address).
+#: The seven ``format: date-time`` locations, as (label, example file, address).
 #: Mirrors ``FORMAT_LOCATIONS`` in ``tests/test_truthpath_characterization.py``
 #: on purpose: if the two ever disagree, one of them is lying about the schema.
 #: Re-derived against the schema in
-#: :func:`test_declared_format_paths_are_the_six_the_schema_declares`.
+#: :func:`test_declared_format_paths_are_the_seven_the_schema_declares`.
 FORMAT_LOCATIONS = [
     ("timestamps.created_utc", XANES, ("timestamps", "created_utc")),
     ("timestamps.acquired_start_utc", XANES, ("timestamps", "acquired_start_utc")),
@@ -83,6 +87,9 @@ FORMAT_LOCATIONS = [
         XANES,
         ("descriptors", "outputs", 0, "generated_utc"),
     ),
+    # Added by the 2026-11-16 schema refresh to upstream a1cb1c8. No public example sets
+    # `system.session`, so `set_at` creates the (all-optional) object around the leaf.
+    ("system.session.started_utc", XANES, ("system", "session", "started_utc")),
 ]
 
 EXPECTED_FORMAT_POINTERS = {
@@ -93,6 +100,7 @@ EXPECTED_FORMAT_POINTERS = {
     "/properties/context/properties/electrochemistry/properties/potential_vs_RHE"
     "/properties/conversion/properties/converted_utc",
     "/properties/descriptors/properties/outputs/items/properties/generated_utc",
+    "/properties/system/properties/session/properties/started_utc",
 }
 
 
@@ -355,17 +363,17 @@ def test_the_two_date_checkers_in_this_repo_disagree_in_exactly_two_places():
 # =============================================================================
 
 
-def test_declared_format_paths_are_the_six_the_schema_declares():
-    """The six locations are DERIVED from the schema, never written down.
+def test_declared_format_paths_are_the_seven_the_schema_declares():
+    """The seven locations (six before the 2026-11-16 refresh) are DERIVED from the schema, never written down.
 
     Same expectation set as
-    ``tests/test_truthpath_characterization.py::test_the_schema_declares_exactly_these_six_date_time_locations``.
+    ``tests/test_truthpath_characterization.py::test_the_schema_declares_exactly_these_seven_date_time_locations``.
     Two independent walks of the same file must agree; if they stop agreeing,
     one walk is wrong.
     """
     paths = fs.declared_format_paths(REPO_ROOT)
     assert set(paths) == EXPECTED_FORMAT_POINTERS
-    assert len(paths) == 6
+    assert len(paths) == 7
     assert list(paths) == sorted(paths), "the order must be a property of the schema"
 
 
@@ -385,7 +393,7 @@ def test_every_format_the_schema_declares_is_actually_implemented_by_the_shadow(
     """DRIFT GUARD. It is about the future, not about present coverage.
 
     Measured today: the vendored schema declares exactly ONE format name,
-    ``date-time``, at six sites, and the shadow implements exactly that one. So
+    ``date-time``, at seven sites, and the shadow implements exactly that one. So
     this passes trivially right now — which is the point. It is placed here to
     fail LOUDLY the first time a schema refresh introduces a second format name.
 
@@ -461,10 +469,10 @@ def test_the_format_drift_guard_would_actually_fire(monkeypatch):
 # =============================================================================
 
 
-def test_all_ten_public_examples_pass_the_shadow():
+def test_all_fourteen_public_examples_pass_the_shadow():
     """COMPATIBILITY EVIDENCE, restated from the shadow's side.
 
-    Every value at a ``format: date-time`` location in the ten public upstream
+    Every value at a ``format: date-time`` location in the fourteen public upstream
     examples is already canonical RFC3339, so arming enforcement would reject
     nothing in the public corpus. That is the evidence Part D of the truth-path
     characterization module assembles; here it is measured end-to-end through
@@ -475,7 +483,7 @@ def test_all_ten_public_examples_pass_the_shadow():
     and must not read.
     """
     examples = sorted(FIXTURE_DIR.glob("*.json"))
-    assert len(examples) == 10
+    assert len(examples) == 14  # 10 until the 2026-11-16 re-vendoring at upstream a1cb1c8
     for path in examples:
         record = json.loads(path.read_text(encoding="utf-8"))
         result = fs.shadow_validate(record, REPO_ROOT)
@@ -488,7 +496,7 @@ def test_all_ten_public_examples_pass_the_shadow():
 )
 @pytest.mark.parametrize("bad", BAD_DATE_TIMES[:8], ids=[repr(b) for b in BAD_DATE_TIMES[:8]])
 def test_the_shadow_sees_what_the_official_validator_does_not(label, example, address, bad):
-    """THE POINT OF THE WHOLE MODULE, at all six locations.
+    """THE POINT OF THE WHOLE MODULE, at all seven locations.
 
     The official validator accepts every one of these strings — that is the
     defect ``tests/test_truthpath_characterization.py`` Part B pins, and this
@@ -711,7 +719,7 @@ def test_a_sentinel_in_every_format_field_appears_nowhere_in_the_result():
     value that cannot come from anywhere else through every format-declaring
     field and assert it comes out nowhere.
 
-    Two example files are needed because the six locations do not all exist in
+    Two example files are needed because the seven locations do not all exist in
     one record: ``converted_utc`` is under the electrochemistry block.
     """
     for example in (XANES, CO2RR):

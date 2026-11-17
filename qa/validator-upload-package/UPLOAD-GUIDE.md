@@ -170,7 +170,7 @@ controlled list only admits the parent technique, XAS.
 - **Expected upload outcome:** loads normally.
 - **Expected validation state:** **FAIL**, 1 error.
 - **Expected visible issue:** one row at path `context.temperature_K` reading
-  `'297.5' is not of type 'number'`.
+  `'297.5' is not of type 'number', 'null'`.
 - **Expected export availability:** **Export blocked.**
 - **Repair action:** remove the quotation marks around the temperature so it reads
   `"temperature_K": 297.5`.
@@ -201,7 +201,7 @@ rejected. That is deliberate, and it is why new fields have to be requested rath
 - **Expected validation state:** **FAIL**, **3** errors.
 - **Expected visible issue:** three rows, one of each kind, listed in path order:
   - `$` — `'record_domain' is a required property`
-  - `context.temperature_K` — `'ambient' is not of type 'number'`
+  - `context.temperature_K` — `'ambient' is not of type 'number', 'null'`
   - `system.instrument` — `Additional properties are not allowed ('serial_number' was unexpected)`
 - **Expected export availability:** **Export blocked**, and the card should say *3 errors*, not 1.
 - **Repair action:** all three: add `"record_domain": "characterization",` at the top level; replace
