@@ -1,4 +1,4 @@
-import { describe, it, expect, afterEach, vi } from 'vitest';
+import { describe, it, expect, afterEach, beforeEach, vi } from 'vitest';
 import { cleanup, render, screen, fireEvent, waitFor, within, act } from '@testing-library/react';
 import { MemoryRouter, Route, Routes, useNavigate } from 'react-router-dom';
 
@@ -119,6 +119,20 @@ const METHOD_BARS: [string, string][] = [
 const UNAVAILABLE = 'Not Available';
 
 // --- harness ------------------------------------------------------------------
+
+
+/*
+ * THE DEVELOPER FLAG IS ON FOR THIS FILE (2026-11-16). It covers Statistics' Build & Verification tab, which a
+ * build shows only with `VITE_ISAAC_DEV_TOOLS=1` (`lib/devTools.ts`). What a build
+ * WITHOUT the flag shows — no such tab, and where its old `?tab=` lands — is pinned in
+ * `dev-tools-flag.test.tsx`.
+ */
+beforeEach(() => {
+  vi.stubEnv('VITE_ISAAC_DEV_TOOLS', '1');
+});
+afterEach(() => {
+  vi.unstubAllEnvs();
+});
 
 afterEach(() => {
   vi.unstubAllGlobals();

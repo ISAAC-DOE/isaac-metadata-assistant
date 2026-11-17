@@ -42,6 +42,7 @@ import {
 import { diagnosticsAppFrom, diagnosticsMemoryFrom } from '../lib/diagnostics';
 import type { ApiAboutResponse, ApiGraphStatus, ApiOpenApiResponse } from '../lib/types';
 import { ApiExplorerPanel } from './settings/ApiDocs';
+import { devToolsEnabled } from '../lib/devTools';
 import { ApiKeysPanel } from './settings/ApiKeys';
 import { ConnectYourAgentPanel } from './settings/ConnectYourAgent';
 import { HelpAndTutorialPanel } from './settings/HelpAndTutorial';
@@ -149,13 +150,16 @@ type OpenApiState = ReturnType<typeof useFetch<ApiOpenApiResponse>>;
 type GraphStatusState = ReturnType<typeof useFetch<ApiGraphStatus>>;
 
 export function SettingsPage() {
+  /* ADVANCED IS A DEVELOPER TAB (2026-11-16): the Endpoint Explorer and the Project
+     Memory link are offered only with `VITE_ISAAC_DEV_TOOLS=1` (`lib/devTools.ts`). */
+  const devTools = devToolsEnabled();
   const [searchParams, setSearchParams] = useSearchParams();
   const location = useLocation();
   const {
     tab: activeTab,
     widget: aliasWidget,
     focus: focusWidget,
-  } = resolveSettingsTab(searchParams.get(SETTINGS_TAB_PARAM));
+  } = resolveSettingsTab(searchParams.get(SETTINGS_TAB_PARAM), { advanced: devTools });
 
   const about = useFetch(() => api.getAbout(), []);
   const openapi = useFetch(() => api.getOpenApi(), []);
@@ -230,7 +234,11 @@ export function SettingsPage() {
             API access."~~ — dropped 2026-10-18 (re-review): the four tab labels
             directly beneath it say the same thing, and the eyebrow names the page. */}
 
-        <SettingsSectionTabs active={activeTab} onSelect={setActiveTab} />
+        <SettingsSectionTabs
+          tabs={devTools ? SETTINGS_TABS : SETTINGS_TABS.filter((tab) => tab.id !== 'advanced')}
+          active={activeTab}
+          onSelect={setActiveTab}
+        />
       </div>
 
       <div
@@ -242,7 +250,7 @@ export function SettingsPage() {
       >
         {activeTab === 'overview' && <OverviewTab state={about} graphStatus={graphStatus} />}
         {activeTab === 'integrations' && (
-          <IntegrationsTab state={openapi} onOpenExplorer={openExplorer} />
+          <IntegrationsTab state={openapi} onOpenExplorer={devTools ? openExplorer : undefined} />
         )}
         {activeTab === 'advanced' && (
           <AdvancedTab state={openapi} about={about} explorerOpen={explorerOpen} />
@@ -255,9 +263,12 @@ export function SettingsPage() {
 // --- the page tabs (same contract as GovernancePage / ProjectMemory) --------
 
 function SettingsSectionTabs({
+  tabs,
   active,
   onSelect,
 }: {
+  /** The tabs this build offers (`advanced` only with the developer flag). */
+  tabs: readonly (typeof SETTINGS_TABS)[number][];
   active: SettingsTabId;
   onSelect: (tab: SettingsTabId) => void;
 }) {
@@ -282,17 +293,17 @@ function SettingsSectionTabs({
   function onKeyDown(e: ReactKeyboardEvent<HTMLButtonElement>, index: number) {
     let nextIndex: number | null = null;
     if (e.key === 'ArrowRight' || e.key === 'ArrowDown') {
-      nextIndex = (index + 1) % SETTINGS_TABS.length;
+      nextIndex = (index + 1) % tabs.length;
     } else if (e.key === 'ArrowLeft' || e.key === 'ArrowUp') {
-      nextIndex = (index - 1 + SETTINGS_TABS.length) % SETTINGS_TABS.length;
+      nextIndex = (index - 1 + tabs.length) % tabs.length;
     } else if (e.key === 'Home') {
       nextIndex = 0;
     } else if (e.key === 'End') {
-      nextIndex = SETTINGS_TABS.length - 1;
+      nextIndex = tabs.length - 1;
     }
     if (nextIndex === null) return;
     e.preventDefault();
-    const next = SETTINGS_TABS[nextIndex];
+    const next = tabs[nextIndex];
     onSelect(next.id);
     (document.getElementById(tabId(next.id)) as HTMLButtonElement | null)?.focus();
   }
@@ -307,7 +318,7 @@ function SettingsSectionTabs({
          tablist, because that is what the step is actually describing. */
       data-tutorial-anchor={TUTORIAL_ANCHORS.settingsSections}
     >
-      {SETTINGS_TABS.map((tab, i) => {
+      {tabs.map((tab, i) => {
         const selected = active === tab.id;
         return (
           <button
@@ -597,7 +608,8 @@ function IntegrationsTab({
   onOpenExplorer,
 }: {
   state: OpenApiState;
-  onOpenExplorer: () => void;
+  /** Absent without the developer flag: there is no Endpoint Explorer to jump to. */
+  onOpenExplorer?: () => void;
 }) {
   return (
     <div className="settings-grid settings-grid-integrations">

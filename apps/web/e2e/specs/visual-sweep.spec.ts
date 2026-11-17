@@ -652,20 +652,8 @@ const STATES: readonly VisualState[] = [
     // both). The Guided Walkthrough widget IS this state.
     frame: ({ page }) => page.locator('section.settings-widget-walkthrough'),
   },
-  {
-    id: 'endpoint-explorer',
-    what: 'Settings → Advanced → Endpoint Explorer (via ?tab=explorer) — the OpenAPI browser, master + detail',
-    async reach({ page, app }) {
-      await app.goto('/settings?tab=explorer');
-      // The DETAIL pane, not the group list: the list heading renders first and
-      // the detail mounts from a follow-up fetch (see `surfaces.ts`).
-      await expect(page.getByRole('heading', { name: /\/api\/about/ })).toBeVisible({ timeout: 20_000 });
-      await settled(page);
-      const heading = page.getByRole('heading', { name: 'Endpoint Explorer' }).first();
-      await expect(heading).toBeVisible();
-      return heading;
-    },
-  },
+  // ~~`endpoint-explorer`~~ — retired 2026-11-16: Settings → Advanced is a developer tab
+  // behind `VITE_ISAAC_DEV_TOOLS=1`, which this suite's build does not set.
   {
     /*
      * NEW. Connect Your Agent shipped after this sweep was written.

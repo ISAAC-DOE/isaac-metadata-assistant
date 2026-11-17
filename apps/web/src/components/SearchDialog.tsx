@@ -29,6 +29,7 @@ import { searchShortcutHint } from '../lib/platform';
 import type { TriageIntent, TriageResult } from '../lib/crossRecordTriage';
 import type { ApiSearchMatch, ApiSearchResponse } from '../lib/types';
 import { useWorkspaceScope } from '../lib/workspaceScope';
+import { devToolsEnabled } from '../lib/devTools';
 
 /**
  * The four cross-record triage intents, each with its display label and the
@@ -132,6 +133,8 @@ function ResultRow({ label, match, onSelect, context }: ResultRowProps) {
 
 export function SearchDialog() {
   const navigate = useNavigate();
+  /* Project Memory leads only with the developer flag (see `SearchResults`). */
+  const withMemory = devToolsEnabled();
 
   const [open, setOpen] = useState(false);
   const [query, setQuery] = useState('');
@@ -362,7 +365,7 @@ export function SearchDialog() {
               <h2 id={titleId} className="artifact-modal-title">
                 Search
               </h2>
-              <span className="artifact-modal-sub">records and memory leads</span>
+              <span className="artifact-modal-sub">{withMemory ? 'records and memory leads' : 'records'}</span>
             </div>
 
             <div className="search-input-wrap">
@@ -373,8 +376,8 @@ export function SearchDialog() {
                 className="search-input"
                 autoComplete="off"
                 spellCheck={false}
-                aria-label="Search experiments and project memory"
-                placeholder="Search experiments and project memory…"
+                aria-label={withMemory ? 'Search experiments and project memory' : 'Search experiments'}
+                placeholder={withMemory ? 'Search experiments and project memory…' : 'Search experiments…'}
                 value={query}
                 onChange={(e) => setQuery(e.target.value)}
               />
@@ -395,7 +398,9 @@ export function SearchDialog() {
 
               {normalized.length === 0 && (
                 <p className="search-hint">
-                  Type to search workspace records and project-memory leads.
+                  {withMemory
+                    ? 'Type to search workspace records and project-memory leads.'
+                    : 'Type to search workspace records.'}
                 </p>
               )}
 
@@ -561,14 +566,16 @@ interface SearchResultsProps {
 
 function SearchResults({ data, wsHeadId, memHeadId, onSelect }: SearchResultsProps) {
   const { workspace, memory } = data;
+  /* Project Memory leads open `/memory`, a developer tool (2026-11-16): shown only with
+     `VITE_ISAAC_DEV_TOOLS=1`. Without it the dialog searches the workspace alone. */
+  const withMemory = devToolsEnabled();
 
   // Grand-empty: a valid query that matched nothing in EITHER available group.
   // Honest — never a fabricated row.
   const grandEmpty =
     workspace.available &&
-    memory.available &&
     workspace.results.length === 0 &&
-    memory.results.length === 0;
+    (!withMemory || (memory.available && memory.results.length === 0));
 
   if (grandEmpty) {
     return <p className="search-empty">No matches for “{data.query}”.</p>;
@@ -603,6 +610,7 @@ function SearchResults({ data, wsHeadId, memHeadId, onSelect }: SearchResultsPro
 
       {/* Project Memory — advisory leads, visually distinct, never merged with
           truth and never verdict-colored. */}
+      {withMemory && (
       <section className="search-group search-group-memory" aria-labelledby={memHeadId}>
         {/* The plane label reads "Project Memory" but is rendered as two styled
             word-spans, so the heading is never a single text node that would
@@ -637,6 +645,7 @@ function SearchResults({ data, wsHeadId, memHeadId, onSelect }: SearchResultsPro
           </p>
         )}
       </section>
+      )}
     </div>
   );
 }

@@ -91,7 +91,10 @@ function axisStatements(root: ParentNode): { el: Element; wording: string }[] {
   return out;
 }
 
-afterEach(() => vi.unstubAllGlobals());
+afterEach(() => {
+  vi.unstubAllGlobals();
+  vi.unstubAllEnvs();
+});
 
 describe('P33 HQA#6 — assistant memory status casing', () => {
   it('record workbench (sole indicator): Title-Case "Memory Available", not "memory: available"', async () => {
@@ -116,6 +119,7 @@ describe('P33 HQA#6 — assistant memory status casing', () => {
 describe('P33 HQA#7 — no duplicate availability state where a chip owns it', () => {
   it('Project Memory: the assistant does not duplicate the GraphStatusChip', async () => {
     stubFetchRoutes({ 'GET /api/graph/status': { body: graphStatusAvailable } });
+    vi.stubEnv('VITE_ISAAC_DEV_TOOLS', '1'); // `/memory` is a developer tool (2026-11-16)
     const { findByText, getAllByText, container } = renderAt('/memory');
     // singular findByText: it THROWS on more than one match, so this alone is a
     // duplicate guard — exactly one visible "Memory Available", the chip's.

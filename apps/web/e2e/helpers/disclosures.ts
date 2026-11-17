@@ -181,7 +181,7 @@ export const PROSE_DISCLOSURES: Readonly<Record<string, number>> = Object.freeze
 export const WIDGET_INFO_PANELS: Readonly<Record<string, number>> = Object.freeze({
   statistics: 2,
   'statistics-example': 7,
-  'statistics-build': 6,
+  // ~~'statistics-build': 6~~ — the surface retired 2026-11-16 (a developer tab now).
   /* Settings and Governance & Safety, MEASURED in Chromium on 2026-10-19 (the merge
      of #289 into the Settings branch), each read out of this helper's own failure
      ("mounts N widget info panel(s) … declares 0"):
@@ -200,7 +200,8 @@ export const WIDGET_INFO_PANELS: Readonly<Record<string, number>> = Object.freez
   settings: 2,
   validator: 1,
   'schema-reference': 1,
-  imports: 1,
+  /* ~~imports: 1~~ — 0 since 2026-11-16: Historical Import is the skill guide, a reading
+     page with no widget, so it keeps the default. */
   /* The pages slice (#291), MEASURED in Chromium on 2026-10-19 on the merged branch
      (`.widget-info` counted after load, the memory surfaces served a valid snapshot):
        ~~experiments-example  1 — What Needs Me?~~ — 0 since 2026-11-02: the
@@ -214,8 +215,8 @@ export const WIDGET_INFO_PANELS: Readonly<Record<string, number>> = Object.freez
      `memory-graph` and `not-found` mount no widget, so they keep the default 0. The
      `HelpTip` info tips these pages also use are a different control (`.helptip`),
      not counted here. */
-  load: 1,
-  memory: 1,
+  /* ~~load: 1, memory: 1~~ — both surfaces retired 2026-11-16 (`/load` redirects;
+     `/memory` is behind the developer flag). */
 });
 
 /**
@@ -344,7 +345,7 @@ export const SETTINGS_CONCEPT_DISCLOSURES: Readonly<Record<string, number>> = Ob
  */
 export const SETTINGS_PAGE_DISCLOSURES: Readonly<Record<string, number>> = Object.freeze({
   settings: 1,
-  'settings-explorer': 1,
+  // ~~'settings-explorer': 1~~ — the surface retired 2026-11-16 (Advanced is a developer tab).
 });
 
 /**
@@ -362,7 +363,9 @@ export const SETTINGS_PAGE_DISCLOSURES: Readonly<Record<string, number>> = Objec
  */
 export const MEMORY_GRAPH_DISCLOSURES: Readonly<Record<string, { query: number; legendInExplore: number }>> =
   Object.freeze({
-    'memory-graph': { query: 1, legendInExplore: 1 },
+    /* ~~'memory-graph': { query: 1, legendInExplore: 1 }~~ — the surface retired
+       2026-11-16: `/memory` is behind the developer flag, which the e2e build does not
+       set. The helper stays for the day a surface with a graph Query toggle is scanned. */
   });
 
 /**

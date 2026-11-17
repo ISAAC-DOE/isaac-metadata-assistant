@@ -50,7 +50,7 @@ import {
   routeDocumentTitle,
   recordWorkspaceTitleSegment,
 } from '../lib/documentTitle';
-import { RECORD_VIEW_IDS, ROUTE_PATTERNS, resolveRecordView } from '../lib/routes';
+import { RECORD_VIEW_IDS, REDIRECT_ROUTE_PATTERNS, ROUTE_PATTERNS, resolveRecordView } from '../lib/routes';
 import { LABELS } from '../lib/labels';
 
 const ID = 'demo';
@@ -119,6 +119,13 @@ describe('every route is titled, and no two routes share a title', () => {
       // The page name must actually be there — a bare site name satisfies the
       // letter of "has a title" and none of its purpose.
       expect(title).not.toBe(APP_TITLE);
+    }
+  });
+
+  it('owes no title on an address that only redirects (`/load`, 2026-11-16)', () => {
+    for (const path of Object.values(REDIRECT_ROUTE_PATTERNS)) {
+      expect(routeDocumentTitle(path, ''), path).toBeNull();
+      expect(paths).not.toContain(path);
     }
   });
 

@@ -442,56 +442,11 @@ export const LAYOUT_BASELINE: readonly LayoutFinding[] = [
         linux: ['main#main.screen-main.centered < div.screen-body.record < div.screen-card'],
       },
       /*
-       * FIXED ON DARWIN, 2026-08-25. `components/runner.css` gave `.onramps`
-       * `repeat(auto-fit, minmax(240px, 1fr))` in place of a hard `1fr 1fr` that
-       * this file had no `@media` rule to soften, so Load Materials reflows to
-       * one column below ~494px of container instead of holding 468px of cards
-       * in a 242px box. That grid was the whole of this region's overflow: the
-       * widest overflowing child measured `div.onramp` with a right edge of 507
-       * against main's scrollWidth of 496. The same geometry was also the source
-       * of an `[unusable-sliver]` occlusion finding on `button.drop-target`
-       * (15px of 194px), which stopped firing in the same run.
-       *
-       * ~~"Unlike LAYOUT-02's font-metric instances, this one is STRUCTURAL — a
-       * single `1fr` track cannot overflow its own container under any font — so the
-       * linux lists are kept only for the reason the helper documents, not because the
-       * mechanism is in doubt."~~ **WRONG ON BOTH HALVES, CORRECTED IN PLACE
-       * 2026-08-25.** Keeping the linux lists is the right decision; the stated reason
-       * was an invitation to delete them.
-       *
-       * FIRST: the track is not `1fr`, it is `minmax(240px, 1fr)`, and MINMAX HAS A
-       * FLOOR THAT OVERFLOWS. Measured in headless Chromium on `/load`, as `.onramps`
-       * scrollWidth/clientWidth:
-       *
-       *     viewport 320 -> 242/242   (clean)
-       *     viewport 317 -> 240/239   (+1)
-       *     viewport 310 -> 240/232   (+8)
-       *
-       * 320 is simply the narrowest width this sweep measures; it is not a width below
-       * which the geometry is safe.
-       *
-       * SECOND, and this is why the linux lists are LOAD-BEARING EVIDENCE rather than
-       * conservatism: at 320 the binding constraint is FONT-DEPENDENT. `.onramp-head`
-       * is a no-wrap flex row, and its title/tagline stack had no `min-width: 0`, so
-       * the row's width was floored by that stack's min-content. Scaling the on-ramp
-       * fonts as a proxy for the wider Linux face reopened this very key: grid 245/242
-       * (+3) at 1.3x, 265/242 (+23) at 1.5x, 318/242 (+76) at 2.0x. A wider system
-       * face is exactly the input that can make `load@width-*` fire again, and the
-       * linux lists are the only thing that would tolerate it while CI told us so.
-       *
-       * `components/runner.css` now declares `.onramp-head > div { min-width: 0 }`,
-       * which returns every one of those scales to 242/242 — measured. That closes the
-       * font-dependent half. The minmax FLOOR below ~318px is unclosed and lies outside
-       * this sweep's widths.
-       *
-       * ONE FIGURE FROM THE REVIEW THAT DID NOT REPRODUCE, recorded rather than
-       * repeated: it reported 21px of grid overflow at a 1.10x font scale. This
-       * environment measures ZERO at 1.10x; the first overflow appears at 1.3x. The
-       * mechanism is real; the threshold quoted is not what darwin measures.
+       * ~~`load@width-320|375|390`~~ (linux-only `.onramps` overflow, fixed on darwin
+       * 2026-08-25) — DELETED 2026-11-16 with the surface: `/load` redirects to My
+       * Experiments and `components/runner.css` is gone. Nothing is carried forward,
+       * because no cell remains to measure.
        */
-      'load@width-320': fixedOnDarwin('main#main.screen-main.centered < div.screen-body.full < div.screen-card'),
-      'load@width-375': fixedOnDarwin('main#main.screen-main.centered < div.screen-body.full < div.screen-card'),
-      'load@width-390': fixedOnDarwin('main#main.screen-main.centered < div.screen-body.full < div.screen-card'),
     },
   },
   // I-1 (independent review, 2026-09-03) — A `LAYOUT-05` ENTRY WAS ADDED HERE

@@ -1039,7 +1039,7 @@ const HARDCODED_LABEL_SLOT_CEILING: Readonly<Record<string, number>> = {
   'components/RunsSection.tsx': 4,
   'components/SchemaBrowser.tsx': 6,
   'components/SearchDialog.tsx': 3,
-  'components/StagedRunner.tsx': 1,
+  // ~~'components/StagedRunner.tsx': 1~~ — removed 2026-11-16 with Load Materials.
   'components/StatusBar.tsx': 6,
   'components/StructuredValueEntry.tsx': 9,
   'components/UnmappedNotesPanel.tsx': 9,
@@ -1047,7 +1047,7 @@ const HARDCODED_LABEL_SLOT_CEILING: Readonly<Record<string, number>> = {
   'screens/ExportReadiness.tsx': 1,
   // 'screens/GovernancePage.tsx' was 1: its one literal, the "Data Governance" eyebrow, was cut 2026-11-02.
   'screens/GuidedCompletion.tsx': 2,
-  'screens/HistoricalImport.tsx': 22,
+  // ~~'screens/HistoricalImport.tsx': 22~~ — removed 2026-11-16 with the in-browser import flow.
   // `screens/LoadMaterials.tsx` dropped 2026-10-12: its last hardcoded label-slot
   // literal moved into `lib/labels.ts` when the on-ramp became two widgets.
   'screens/MemoryGraphCard.tsx': 3,

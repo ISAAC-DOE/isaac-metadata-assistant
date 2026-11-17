@@ -168,13 +168,9 @@ shows real results, nothing is staged client-side.
 1. **My Experiments** (`/experiments`) — the home queue, grouped by status
    (Needs Attention / In Review / Ready to Export / Done). Empty on first run.
    Click **Run Synthetic Demo** or **New Record**.
-2. **Load Materials** (`/load`) — click **Run Demo** under "Run the Synthetic
-   Demo". This calls `POST /api/demo/run`, which assembles the evidenced draft
-   from the two committed synthetic fixtures and returns the pipeline steps
-   the CLI would produce. The other on-ramp, **Load Local Structured Files**,
-   is present but always refused: it calls the governance seam, which returns
-   `403` and the refusal is shown verbatim (`Blocked by governance.`) — nothing
-   is read or uploaded. When the draft finishes, click **Open the Record**.
+2. ~~**Load Materials** (`/load`)~~ — since 2026-11-16 `/load` redirects to My
+   Experiments. Start the **Guided Walkthrough** there; inside it, the worked example
+   runs `POST /api/demo/run`, and **Open the Worked Example** opens the record.
 3. **Review Record** (`/record/:id`) — the core workbench. Grouped draft
    fields on the left/main, each selectable to load its evidence
    (`source_file`, `locator`, `quote`) in the right panel above the
@@ -332,7 +328,24 @@ answered question), and `POST …/{bundle}/decisions` for the merge,
 keep-apart and Athena-version decisions; with the variable set the OpenAPI document lists them under
 *Local Import Bundles*. Contract: `docs/local-import-bundle-contract.md` §23.
 
+## Developer tools (`VITE_ISAAC_DEV_TOOLS=1`)
+
+Project Memory (`/memory`), Statistics → Build & Verification and Settings → Advanced
+(the Endpoint Explorer and its related-tools links) are developer surfaces. A build
+shows them only when started with the flag:
+
+```bash
+cd apps/web
+VITE_ISAAC_DEV_TOOLS=1 npm run dev
+```
+
+Without it (every hosted build), they are not offered: `/memory` redirects to My
+Experiments, `?tab=build` shows Statistics' Overview, `?tab=advanced` shows Settings'
+Overview and `?tab=explorer` shows Integrations. The APIs behind them are unchanged.
+
 ## Project Memory (Phase 24)
+
+*Behind `VITE_ISAAC_DEV_TOOLS=1` since 2026-11-16 (see above).*
 
 The **Project Memory** nav destination (`/memory`) is a real, read-only
 browsing surface over the `/api/memory/*` endpoints and the additive

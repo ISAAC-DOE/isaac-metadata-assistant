@@ -97,6 +97,7 @@ afterEach(() => {
   clearAllSessions();
   sessionStorage.clear();
   vi.restoreAllMocks();
+  vi.unstubAllEnvs();
 });
 
 describe('P34.3 provenance chips', () => {
@@ -154,6 +155,8 @@ describe('P34.3 provenance chips', () => {
   });
 
   it('a Project-Memory answer renders its cited leads and keeps the advisory framing (no verdict)', async () => {
+    // A memory lead navigates to `/memory`, a developer tool (2026-11-16): flag on here.
+    vi.stubEnv('VITE_ISAAC_DEV_TOOLS', '1');
     vi.spyOn(api, 'askAssistant').mockResolvedValue(
       answerResponse({
         answer:
@@ -183,6 +186,28 @@ describe('P34.3 provenance chips', () => {
     // a memory lead navigates in-app on click.
     fireEvent.click(within(region).getByRole('button', { name: 'Cu K-edge XANES (concept)' }));
     expect(navigateSpy).toHaveBeenCalledWith('/memory');
+  });
+
+  it('without the developer flag a memory lead is a plain label, and a record lead still navigates', async () => {
+    vi.spyOn(api, 'askAssistant').mockResolvedValue(
+      answerResponse({
+        answer: 'Memory suggests a related Cu K-edge run. These are leads to verify, not facts.',
+        grounding: ['graph'],
+        sources: [
+          { label: 'Related Cu K-edge run', navigate_to: `/record/${OTHER}` },
+          { label: 'Cu K-edge XANES (concept)', navigate_to: '/memory' },
+        ],
+      }),
+    );
+    const { getByRole, container } = panel({ availability: 'available' });
+    await ask(container, getByRole, 'anything related?');
+    const region = container.querySelector('.assistant-provenance') as HTMLElement;
+    expect(region.querySelectorAll('.assistant-provenance-item').length).toBe(2);
+    expect(within(region).queryByRole('button', { name: 'Cu K-edge XANES (concept)' })).toBeNull();
+    expect(within(region).getByText('Cu K-edge XANES (concept)')).toBeInTheDocument();
+    fireEvent.click(within(region).getByRole('button', { name: 'Related Cu K-edge run' }));
+    expect(navigateSpy).toHaveBeenCalledWith(`/record/${OTHER}`);
+    expect(navigateSpy).not.toHaveBeenCalledWith('/memory');
   });
 });
 

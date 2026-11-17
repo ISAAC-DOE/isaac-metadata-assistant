@@ -85,7 +85,7 @@ export function ApiQuickStartView({
   onOpenProgram,
 }: {
   schema: ApiOpenApiResponse;
-  onOpenExplorer: () => void;
+  onOpenExplorer?: () => void;
   onOpenProgram: () => void;
 }) {
   const rows = useMemo(() => flattenOpenApi(schema), [schema]);
@@ -112,7 +112,7 @@ export function ApiProgramAgentView({
   onOpenExplorer,
 }: {
   schema: ApiOpenApiResponse;
-  onOpenExplorer: () => void;
+  onOpenExplorer?: () => void;
 }) {
   const rows = useMemo(() => flattenOpenApi(schema), [schema]);
   const facts = useMemo(() => quickStartFacts(schema, rows), [schema, rows]);
@@ -159,11 +159,13 @@ function QuickStart({
 }: {
   facts: QuickStartFacts;
   onCopied: (what: string) => void;
-  onOpenExplorer: () => void;
+  onOpenExplorer?: () => void;
   onOpenConnect: () => void;
 }) {
   const first = facts.firstRequest;
   const firstSample = first ? codeSamples(first)[0] : null;
+  /* Without the developer flag there is no Endpoint Explorer to point at (2026-11-16). */
+  const listing = onOpenExplorer ? 'the Endpoint Explorer' : 'the contract';
   return (
     /*
      * ── A VIEW, NOT A DRAWER, SINCE 2026-10-12 ──────────────────────────────
@@ -193,14 +195,14 @@ function QuickStart({
             <>
               <code className="mono api-quickstart-value">{facts.basePath}</code>
               <span className="api-quickstart-note">
-                Relative to the origin serving this page. Every path in the Endpoint Explorer
+                Relative to the origin serving this page. Every path in {listing}
                 already begins with it, so a request needs the origin and nothing else.
               </span>
             </>
           ) : (
             <span className="api-quickstart-note">
               The contract's paths share no single base, so there is no one base URL to
-              report. Use each path exactly as the Endpoint Explorer lists it.
+              report. Use each path exactly as {listing} lists it.
             </span>
           )}
         </QuickStartRow>
@@ -230,8 +232,8 @@ function QuickStart({
           <span className="api-quickstart-note">
             One credential belonging to the deployment, sent on every call that needs it — where a
             deployment sets one. Where none is set, no operation refuses a call for want of it.{' '}
-            {facts.authRequiredCount} of {facts.operationCount} operations document a 401, and the
-            Endpoint Explorer marks which.
+            {facts.authRequiredCount} of {facts.operationCount} operations document a 401, and{' '}
+            {listing} marks which.
           </span>
         </QuickStartRow>
 
@@ -297,10 +299,12 @@ function QuickStart({
       {/* Where a reader goes next: the Endpoint Explorer (Advanced tab), and the
           guide that is this widget's other view. */}
       <nav className="api-quickstart-jump" aria-label="More API detail">
-        <button type="button" className="settings-jump-btn" onClick={onOpenExplorer}>
-          Browse Every Endpoint
-          <ChevronRight size={13} strokeWidth={2.2} aria-hidden="true" />
-        </button>
+        {onOpenExplorer && (
+          <button type="button" className="settings-jump-btn" onClick={onOpenExplorer}>
+            Browse Every Endpoint
+            <ChevronRight size={13} strokeWidth={2.2} aria-hidden="true" />
+          </button>
+        )}
         <button type="button" className="settings-jump-btn" onClick={onOpenConnect}>
           Program an Agent
         </button>

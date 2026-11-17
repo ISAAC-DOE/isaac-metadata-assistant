@@ -1,5 +1,5 @@
-import { describe, it, expect, afterEach, vi } from 'vitest';
-import { render, screen, fireEvent, act, waitFor } from '@testing-library/react';
+import { describe, it, expect, afterEach, beforeEach, vi } from 'vitest';
+import { cleanup, render, screen, fireEvent, act, waitFor } from '@testing-library/react';
 import { MemoryRouter, useLocation, useNavigate, type NavigateFunction } from 'react-router-dom';
 
 import { AppRoutes } from '../App';
@@ -113,6 +113,7 @@ const settingsRoutes = () => ({
  */
 
 afterEach(() => {
+  vi.unstubAllEnvs();
   vi.unstubAllGlobals();
 });
 
@@ -305,6 +306,13 @@ describe('sidebar destinations', () => {
 });
 
 describe('every demoted destination is still reachable', () => {
+  /* WITH THE DEVELOPER FLAG (2026-11-16). Project Memory and Settings → Advanced are
+     developer tools now, offered only with `VITE_ISAAC_DEV_TOOLS=1`; this block holds
+     that, WITH the flag, they are still reached the way they always were. Without it,
+     `/memory` redirects (`historical-import-guide.test.tsx`). */
+  beforeEach(() => {
+    vi.stubEnv('VITE_ISAAC_DEV_TOOLS', '1');
+  });
   /*
    * §19's SEQUENCING RULE, ASSERTED. The rule for a demotion is: provide the
    * capability elsewhere FIRST, verify nothing becomes inaccessible, and only
@@ -456,7 +464,12 @@ describe('the Settings destination reads "Settings"', () => {
        `Settings` rename slice; the rename still has not reached the strip, and the
        strip is now the four tabs `DEC-28` named. An equality, as before. */
     // THREE since 2026-11-02: Privacy & Governance was retired (owner's direction).
-    expect(screen.getAllByRole('tab').map(accessibleText)).toEqual(['Overview', 'Integrations', 'Advanced']);
+    // TWO in a build without the developer flag (2026-11-16): Advanced is a developer tab.
+    expect(screen.getAllByRole('tab').map(accessibleText)).toEqual(['Overview', 'Integrations']);
+    vi.stubEnv('VITE_ISAAC_DEV_TOOLS', '1');
+    cleanup();
+    renderAt(ROUTES.settings);
+    expect((await screen.findAllByRole('tab')).map(accessibleText)).toEqual(['Overview', 'Integrations', 'Advanced']);
   });
 });
 
@@ -514,7 +527,8 @@ describe('routing', () => {
 
   /* The Endpoint Explorer is the Advanced tab's widget since 2026-10-12; the old
      id is an alias, so the link still lands on it. */
-  it('/settings?tab=explorer still deep-links to the Endpoint Explorer', async () => {
+  it('/settings?tab=explorer still deep-links to the Endpoint Explorer, with the developer flag', async () => {
+    vi.stubEnv('VITE_ISAAC_DEV_TOOLS', '1');
     stubFetchRoutes(settingsRoutes());
     renderAt(ROUTES.settingsTab('explorer'));
 

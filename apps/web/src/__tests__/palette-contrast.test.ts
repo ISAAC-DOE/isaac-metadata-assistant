@@ -674,16 +674,7 @@ const EXEMPT_SITES: readonly ExemptSite[] = [
     mark: 'concept-lookup-chevron',
     why: 'Decorative concept-row chevron.',
   },
-  {
-    file: 'components/runner.css',
-    selector: '.stage.upcoming .stage-disc',
-    token: '--text-disabled',
-    basis: 'aria-hidden-mark',
-    mark: 'stage-disc',
-    why:
-      'The numeral inside a not-yet-reached pipeline step disc. The disc is `aria-hidden`; the ' +
-      'step name beside it is `--text-secondary` and carries the meaning.',
-  },
+  // ~~`components/runner.css` `.stage.upcoming .stage-disc`~~ — removed 2026-11-16 with Load Materials.
   {
     file: 'components/workflow.css',
     selector: '.spine-step.blocked .spine-disc, .spine-step.skeleton .spine-disc',

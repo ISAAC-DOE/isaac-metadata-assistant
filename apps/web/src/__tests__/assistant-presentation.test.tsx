@@ -172,6 +172,7 @@ beforeEach(() => {
   sessionStorage.clear();
 });
 afterEach(() => {
+  vi.unstubAllEnvs();
   clearAllSessions();
   sessionStorage.clear();
   vi.unstubAllGlobals();
@@ -798,6 +799,7 @@ describe('P36V S-A · the contract holds on every mount surface', () => {
 
   it('Project Memory: state (b) — the page chip owns the axis; the composer is still docked beneath the transcript', async () => {
     stubFetchRoutes({ 'GET /api/graph/status': { body: graphStatusAvailable } });
+    vi.stubEnv('VITE_ISAAC_DEV_TOOLS', '1'); // `/memory` is a developer tool (2026-11-16)
     const { findByText, getByText, container } = renderAt('/memory');
     await findByText('Memory Available');
     const assistant = container.querySelector('.assistant') as HTMLElement;

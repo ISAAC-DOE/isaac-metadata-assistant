@@ -191,10 +191,9 @@ export function CaptureTaskHead({
 /**
  * BRING FILES YOU ALREADY HAVE — a bridge, not a second importer.
  *
- * Two real destinations and nothing re-implemented: Historical Import (reads one
- * layout today, keeps anything else as a reference, and every value it finds is a
- * suggestion), and this record's own Asset References (a pointer, a checksum and
- * notes for one file). Neither transmits file bytes from this screen, and the copy
+ * Two real destinations and nothing re-implemented: Historical Import (the guide to
+ * importing a past beamtime with the Claude Code skill, 2026-11-16), and this record's
+ * own Asset References (a pointer, a checksum and notes for one file). Neither transmits file bytes from this screen, and the copy
  * claims nothing about file reading beyond what each destination says of itself —
  * `upload-claim-parity.test.tsx` holds every such claim to its scope.
  */

@@ -4,6 +4,7 @@ import { useEffect, useRef, useState } from 'react';
 import { Link, useSearchParams } from 'react-router-dom';
 
 import { AppShell } from '../../components/AppShell';
+import { devToolsEnabled } from '../../lib/devTools';
 import { TopBar } from '../../components/TopBar';
 import { LeftNav } from '../../components/LeftNav';
 import { BackendDown, LoadingPanel } from '../../components/FetchStates';
@@ -582,9 +583,16 @@ export function StatisticsPage() {
   const [searchParams, setSearchParams] = useSearchParams();
   const requestedTab = searchParams.get(STATISTICS_TAB_PARAM);
   const showMine = myStatsAvailable();
-  const tabs = showMine ? STATISTICS_TABS : STATISTICS_TABS.filter((tab) => tab.id !== 'mine');
+  /* BUILD & VERIFICATION IS A DEVELOPER TAB (2026-11-16): offered only with
+     `VITE_ISAAC_DEV_TOOLS=1`. Without it, `?tab=build` resolves to Overview like any
+     other value the page cannot open. */
+  const showBuild = devToolsEnabled();
+  const tabs = STATISTICS_TABS.filter(
+    (tab) => (tab.id !== 'mine' || showMine) && (tab.id !== 'build' || showBuild),
+  );
   const activeTab: StatisticsTabId =
-    isStatisticsTab(requestedTab) && (requestedTab !== 'mine' || showMine) ? requestedTab : 'general';
+    isStatisticsTab(requestedTab) && tabs.some((tab) => tab.id === requestedTab) ? requestedTab : 'general';
+  const tabbed = tabs.length > 1;
 
   function selectTab(tab: StatisticsTabId) {
     const next = new URLSearchParams(searchParams);
@@ -850,7 +858,11 @@ export function StatisticsPage() {
             implement (automatic activation, Arrow/Home/End, exactly one tab in the
             tab order, `aria-controls` on the selected tab only) — and it wears the
             same `.section-tabs` / `.section-tab` styling those three pages do.
-            NOT a fourth paradigm. */}
+            NOT a fourth paradigm.
+            ONE TAB IS NO TABLIST (2026-11-16): without the developer flag and without
+            personal statistics, Overview is the whole page, so no tab row is drawn and
+            the panel below is a plain region. */}
+        {tabbed && (
         <RovingTabs
           className="section-tabs"
           tabClassName="section-tab"
@@ -861,15 +873,16 @@ export function StatisticsPage() {
           tabId={tabId}
           panelId={panelId}
         />
+        )}
       </div>
 
       {activeTab === 'general' && (
         <div
           className="statistics"
           id={panelId('general')}
-          role="tabpanel"
-          aria-labelledby={tabId('general')}
-          tabIndex={0}
+          {...(tabbed
+            ? { role: 'tabpanel', 'aria-labelledby': tabId('general'), tabIndex: 0 }
+            : {})}
         >
           <ReadMeta
             tab={activeTab}

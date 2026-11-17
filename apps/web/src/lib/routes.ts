@@ -16,9 +16,8 @@
 export const SETTINGS_TAB_PARAM = 'tab';
 
 /**
- * The open import and its stage on `/imports` (2026-10-18, QA `C-14`). Two parameters
- * rather than one `?tab=`, because the import is the subject and the stage is a view of
- * it — the same split `/record/<id>?view=` makes, with the record in the path.
+ * The open import and its stage on the retired in-browser import flow (2026-10-18 to
+ * 2026-11-16). Kept only so `/imports` can recognise an old link and drop them.
  */
 export const IMPORT_SESSION_PARAM = 'import';
 /** The bundle (its folder name) a Local Imports link opens. */
@@ -105,12 +104,24 @@ export function isSettingsTabAlias(value: string | null | undefined): value is S
  * `overview` without throwing, exactly as before — so there is still no dead
  * route, and no value that used to open a tab now opens nothing.
  */
-export function resolveSettingsTab(value: string | null | undefined): {
+export function resolveSettingsTab(
+  value: string | null | undefined,
+  /**
+   * Whether the Advanced tab is offered (2026-11-16: only with `VITE_ISAAC_DEV_TOOLS=1`,
+   * `lib/devTools.ts`). Without it, `advanced` lands on Overview and `explorer` on
+   * Integrations' API Access widget, the nearest thing a scientist has to it.
+   */
+  { advanced = true }: { advanced?: boolean } = {},
+): {
   tab: SettingsTabId;
   widget: string | null;
   /** True for a card anchor: the page also moves focus to the widget's heading. */
   focus?: true;
 } {
+  if (!advanced) {
+    if (value === 'advanced') return { tab: 'overview', widget: null };
+    if (value === 'explorer') return { tab: 'integrations', widget: SETTINGS_TAB_ALIASES.api.widget };
+  }
   if (isSettingsTab(value)) return { tab: value, widget: null };
   if (isSettingsTabAlias(value)) {
     const alias = SETTINGS_TAB_ALIASES[value];
@@ -505,25 +516,11 @@ export const RECORD_ADDRESS_PARAM = 'at';
 export const ROUTES = {
   experiments: '/experiments',
   /**
-   * HISTORICAL IMPORT — one of the three primary destinations.
-   *
-   * ~~"a route with NO parameters of its own … A `?import=` parameter would therefore
-   * be a link to a working area that may not exist by the time it is followed, which
-   * is a worse defect than not being linkable."~~ — WITHDRAWN 2026-10-18 (owner QA
-   * `C-14`). The cost of NOT linking was measured and was the larger one: a reload
-   * returned the reader to the list mid-import, and Back left the feature entirely. The
-   * open import and its stage are now `?import=<id>&stage=<stage>`
-   * (`IMPORT_SESSION_PARAM`, `IMPORT_STAGE_PARAM`), and the case the old argument
-   * feared is ANSWERED rather than avoided: a link to an import that no longer exists
-   * says so in words and offers the way back (`IMPORT_COPY.goneTitle`).
+   * HISTORICAL IMPORT — the guide to importing a past beamtime with the Claude Code skill
+   * (2026-11-16). The in-browser import flow it replaced kept `?import=<id>&stage=<stage>`
+   * (`IMPORT_SESSION_PARAM`, `IMPORT_STAGE_PARAM`); a link carrying them still lands here.
    */
   imports: '/imports',
-  /** One open import, optionally at one stage — `?import=<id>&stage=<stage>`. */
-  importSession: (importId: string, stage?: string) =>
-    `/imports?${IMPORT_SESSION_PARAM}=${encodeURIComponent(importId)}${
-      stage ? `&${IMPORT_STAGE_PARAM}=${encodeURIComponent(stage)}` : ''
-    }`,
-  load: '/load',
   memory: '/memory',
   governance: '/governance',
   statistics: '/statistics',
@@ -629,11 +626,19 @@ export const ROUTES = {
   export: (id: string) => `/record/${id}/export`,
 } as const;
 
+/**
+ * Addresses that only redirect (2026-11-16). Kept apart from `ROUTE_PATTERNS` because a
+ * reader is never on one, so none owes a document title or a nav item. `/load` held only
+ * the walkthrough's Start button, which My Experiments has; it lands there.
+ */
+export const REDIRECT_ROUTE_PATTERNS = {
+  load: '/load',
+} as const;
+
 // Path patterns for the router definitions.
 export const ROUTE_PATTERNS = {
   experiments: '/experiments',
   imports: '/imports',
-  load: '/load',
   memory: '/memory',
   governance: '/governance',
   statistics: '/statistics',

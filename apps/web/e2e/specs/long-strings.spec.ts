@@ -31,7 +31,7 @@ const assertNoPageScroll = async (page: import('@playwright/test').Page, where: 
 test('@responsive a long token typed into the ⌘K search box does not push the page sideways', async ({ page, app }) => {
   await app.open(SURFACES.find((s) => s.id === 'experiments')!);
   await page.locator('button.topbar-search').click();
-  const input = page.getByRole('searchbox', { name: /Search experiments and project memory/i });
+  const input = page.getByRole('searchbox', { name: /^Search experiments/i });
   await input.fill(LONG_TOKEN);
   await page.waitForTimeout(400);
   await assertNoPageScroll(page, 'search dialog with a 240-char token');

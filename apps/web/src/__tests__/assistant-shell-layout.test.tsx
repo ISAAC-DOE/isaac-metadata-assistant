@@ -162,6 +162,7 @@ beforeEach(() => {
   sessionStorage.clear();
 });
 afterEach(() => {
+  vi.unstubAllEnvs();
   clearAllSessions();
   sessionStorage.clear();
   vi.unstubAllGlobals();
@@ -515,6 +516,7 @@ describe('P36V.1 S2 · per-mount availability gating is unchanged', () => {
     evidence.unmount();
 
     stubFetchRoutes({ 'GET /api/graph/status': { body: graphStatusAvailable } });
+    vi.stubEnv('VITE_ISAAC_DEV_TOOLS', '1'); // `/memory` is a developer tool (2026-11-16)
     const memory = renderAt('/memory');
     await memory.findByText('Memory Available');
     const memoryPanel = memory.container.querySelector('.assistant') as HTMLElement;
@@ -835,6 +837,7 @@ describe('P36V.1 · all five Assistant mounts still render the panel shell', () 
 
   it('RENDERED: Project Memory mounts the panel shell', async () => {
     stubFetchRoutes({ 'GET /api/graph/status': { body: graphStatusAvailable } });
+    vi.stubEnv('VITE_ISAAC_DEV_TOOLS', '1'); // `/memory` is a developer tool (2026-11-16)
     const { findByText, container } = renderAt('/memory');
     await findByText('Memory Available');
     const assistant = container.querySelector('.assistant') as HTMLElement;

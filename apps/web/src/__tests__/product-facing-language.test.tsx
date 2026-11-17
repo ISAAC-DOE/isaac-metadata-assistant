@@ -377,7 +377,7 @@ describe('P1 · product-facing language — the scan itself', () => {
       'lib/settingsContent.ts',
       'screens/ExperimentsHome.tsx',
       'screens/GuidedCompletion.tsx',
-      'screens/LoadMaterials.tsx',
+      'screens/HistoricalImportGuide.tsx', // was LoadMaterials.tsx, retired 2026-11-16
       'screens/statistics/StatisticsPage.tsx',
     ]) {
       expect(files, `${covered} must be scanned`).toContain(covered);
@@ -502,7 +502,9 @@ const CREATION_CAPABILITY_SITES: Readonly<Record<string, readonly string[]>> = {
    * the rule-scope fields (QA `C-13`) — the same act, the same `POST /api/experiments`,
    * on the same screen. ~~`'screens/HistoricalImport.tsx': ['New record from this import']`~~
    */
-  'lib/historicalImportContent.ts': ['New record from this import'],
+  /* ~~`'lib/historicalImportContent.ts': ['New record from this import']`~~ — REMOVED
+     2026-11-16 with the in-browser import flow: the guide that replaced it creates
+     nothing, so the one exempt act is gone and the patterns hold on every file. */
 };
 
 function creationScannedCopy(path: string): string {

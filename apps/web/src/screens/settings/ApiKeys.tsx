@@ -70,7 +70,8 @@ export function ApiKeysPanel({
   onOpenExplorer,
 }: {
   state: OpenApiState;
-  onOpenExplorer: () => void;
+  /** Absent without the developer flag (no Endpoint Explorer to open). */
+  onOpenExplorer?: () => void;
 }) {
   const programRef = useRef<HTMLDivElement>(null);
 

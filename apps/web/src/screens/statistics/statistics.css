@@ -299,7 +299,7 @@
    * every label, value and note is the same string it is at 1440px, and each
    * card's own `min-width: 0` plus `overflow-wrap: anywhere` on its value keeps
    * the page's scroll width at the viewport width (the property
-   * `e2e/specs/statistics-states.spec.ts` measures at 320px).
+   * `e2e/specs/statistics-states.spec.ts` measured at 320px until 2026-11-16).
    *
    * The GLANCE grid is deliberately NOT given this treatment: its cards can be
    * five (an `Unrecognized Status` card appears when one is measured), and an

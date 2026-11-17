@@ -111,6 +111,7 @@ beforeEach(() => {
   navigateSpy.mockReset();
 });
 afterEach(() => {
+  vi.unstubAllEnvs();
   clearAllSessions();
   sessionStorage.clear();
   vi.restoreAllMocks();
@@ -118,6 +119,8 @@ afterEach(() => {
 
 describe('P34.4 memory scope — free-form question', () => {
   it('calls api.askMemory (NOT askAssistant) and renders the memory answer + cited leads', async () => {
+    // A `/memory` lead navigates only with the developer flag (2026-11-16).
+    vi.stubEnv('VITE_ISAAC_DEV_TOOLS', '1');
     const mem = vi.spyOn(api, 'askMemory').mockResolvedValue(memoryAnswer());
     const rec = vi.spyOn(api, 'askAssistant');
     const { getByRole, getByText, container } = memoryPanel();

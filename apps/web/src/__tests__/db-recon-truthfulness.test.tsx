@@ -781,7 +781,7 @@ describe('sweep guard — no unqualified whole-application claim in any frontend
       'lib/labels.ts',
       'lib/settingsContent.ts',
       'screens/GovernancePage.tsx',
-      'screens/LoadMaterials.tsx',
+      'screens/HistoricalImportGuide.tsx', // was LoadMaterials.tsx, retired 2026-11-16
       'screens/SettingsPage.tsx',
       'screens/settings/ApiKeys.tsx',
     ]) {
