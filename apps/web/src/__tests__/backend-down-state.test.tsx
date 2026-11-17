@@ -55,7 +55,7 @@ const unreachable = () =>
 describe('BackendDown — local build (no VITE_API_BASE)', () => {
   it('keeps the run command and today’s copy: there it is actionable', () => {
     const view = render(<BackendDown error={unreachable()} onRetry={() => {}} />);
-    expect(view.getByText('Backend Not Running')).toBeInTheDocument();
+    expect(view.getByText('ISAAC Is Not Running')).toBeInTheDocument();
     expect(view.getByText(RUN_COMMAND)).toBeInTheDocument();
     expect(view.getByRole('button', { name: 'Retry' })).toBeInTheDocument();
   });
@@ -66,7 +66,7 @@ describe('BackendDown — local build (no VITE_API_BASE)', () => {
     expect(alert).toBeInTheDocument();
     const headings = alert.querySelectorAll('h2');
     expect(headings).toHaveLength(1);
-    expect(headings[0].textContent).toBe('Backend Not Running');
+    expect(headings[0].textContent).toBe('ISAAC Is Not Running');
   });
 
   /*
@@ -85,7 +85,7 @@ describe('BackendDown — local build (no VITE_API_BASE)', () => {
     expect(view.getByText('Record Not Found')).toBeInTheDocument();
     expect(
       view.getByText(
-        'This experiment id is not in the local workspace — it may not have been created yet.',
+        'This experiment is not in your workspace. It may not have been created yet.',
       ),
     ).toBeInTheDocument();
     expect(view.queryByText(RUN_COMMAND)).toBeNull();
@@ -112,7 +112,7 @@ describe('BackendDown — local build (no VITE_API_BASE)', () => {
     expect(view.getByText('Not Found')).toBeInTheDocument();
     expect(view.queryByText('Record Not Found')).toBeNull();
     const body = view.container.querySelector('.fetch-state-body')!.textContent ?? '';
-    expect(body).toContain('answered HTTP 404 for this request');
+    expect(body).toContain('could not find what this page asked for');
     // The two claims that were false of a list read.
     expect(body).not.toMatch(/experiment id/i);
     expect(body).not.toMatch(/may not have been created yet/i);
@@ -243,9 +243,9 @@ describe('BackendDown — hosted build (VITE_API_BASE=/krish/api)', () => {
     );
     expect(view.getByText('ISAAC Is Not Responding')).toBeInTheDocument();
     const body = view.container.querySelector('.fetch-state-body')!.textContent ?? '';
-    expect(body).toContain('cannot tell which of two causes applies');
-    expect(body).toContain('the sign-in session may have ended');
-    expect(body).toContain('the service may be temporarily unavailable');
+    expect(body).toContain('This page cannot tell which');
+    expect(body).toContain('Your sign-in may have ended');
+    expect(body).toContain('the service may be briefly unavailable');
     // It must NOT claim the specific cause it cannot observe.
     expect(view.queryByText('Sign-In Required')).toBeNull();
     expect(body).not.toContain('session has ended');
@@ -281,18 +281,18 @@ describe('BackendDown — hosted build (VITE_API_BASE=/krish/api)', () => {
       <hosted.BackendDown error={new hosted.ApiError('x', { status: 401 })} />,
     );
     expect(view401.getByText('Sign-In Required')).toBeInTheDocument();
-    expect(
-      view401.getByText(/rejected this request as unauthenticated \(HTTP 401\)/),
-    ).toBeInTheDocument();
+    // a 401 says no accepted sign-in came with the request: never why (2026-11-17 review)
+    expect(view401.getByText('You need to sign in to see this.')).toBeInTheDocument();
+    expect(view401.container.textContent).not.toMatch(/has ended|no longer/);
     view401.unmount();
 
     const view403 = render(
       <hosted.BackendDown error={new hosted.ApiError('x', { status: 403 })} />,
     );
     expect(view403.getByText('Sign-In Required')).toBeInTheDocument();
-    expect(
-      view403.getByText(/refused this request as unauthorized \(HTTP 403\)/),
-    ).toBeInTheDocument();
+    // a 403 says this account may not read it: never that it once could
+    expect(view403.getByText('Your account doesn’t have access to this.')).toBeInTheDocument();
+    expect(view403.container.textContent).not.toMatch(/has ended|no longer/);
   });
 
   it('an HTML intercept is treated as the authentication signal it is', async () => {
@@ -310,7 +310,7 @@ describe('BackendDown — hosted build (VITE_API_BASE=/krish/api)', () => {
     );
     expect(view.getByText('Sign-In Required')).toBeInTheDocument();
     expect(
-      view.getByText(/A sign-in page was returned in place of the ISAAC API/),
+      view.getByText(/A sign-in page came back instead of ISAAC/),
     ).toBeInTheDocument();
     expect(view.getByRole('button', { name: 'Reload' })).toBeInTheDocument();
   });
@@ -321,7 +321,7 @@ describe('BackendDown — hosted build (VITE_API_BASE=/krish/api)', () => {
       <hosted.BackendDown error={new hosted.ApiError('x', { status: 500 })} />,
     );
     expect(view.getByText('ISAAC Returned an Error')).toBeInTheDocument();
-    expect(view.getByText(/was reached but answered with HTTP 500/)).toBeInTheDocument();
+    expect(view.getByText(/is running but could not complete this request/)).toBeInTheDocument();
   });
 
   it('404 on a record path keeps its own branch, worded without "local"', async () => {
@@ -334,7 +334,7 @@ describe('BackendDown — hosted build (VITE_API_BASE=/krish/api)', () => {
     expect(view.getByText('Record Not Found')).toBeInTheDocument();
     expect(
       view.getByText(
-        'This experiment id is not in the workspace — it may not have been created yet.',
+        'This experiment is not in your workspace. It may not have been created yet.',
       ),
     ).toBeInTheDocument();
   });
@@ -367,7 +367,7 @@ describe('BackendDown — hosted build (VITE_API_BASE=/krish/api)', () => {
     expect(view.queryByText('Record Not Found')).toBeNull();
     expect(view.getByText('Sign-In Required')).toBeInTheDocument();
     expect(
-      view.getByText(/A sign-in page was returned in place of the ISAAC API/),
+      view.getByText(/A sign-in page came back instead of ISAAC/),
     ).toBeInTheDocument();
     expect(view.getByRole('button', { name: 'Reload' })).toBeInTheDocument();
   });
@@ -573,7 +573,7 @@ describe('both render sites guard the run command at build time', () => {
     // function at all — the wording assertions below are what stop it drifting.
     expect(source).toMatch(/downCopy\(error[,)]/);
     expect(source).toContain('DownTechnicalDetails');
-    expect(source).not.toContain('The local ISAAC API is not responding');
+    expect(source).not.toContain('ISAAC is not running on this computer');
   });
 });
 
@@ -991,7 +991,7 @@ describe('SUB_RESOURCE_LABELS covers every sub-read api.ts builds', () => {
       true,
     ).lines.join(' ');
     expect(lines).toContain('“not-a-real-part”');
-    expect(lines).toContain('does not establish that the experiment is missing');
+    expect(lines).toContain('does not mean the experiment is missing');
   });
 });
 
@@ -1001,7 +1001,7 @@ describe('a 404 about part of a record never claims the record is missing', () =
 
   /** The two sentences that assert the record does not exist. */
   const assertsMissingRecord = (text: string) =>
-    /experiment id is not in the/i.test(text) || /may not have been created yet/i.test(text);
+    /experiment is not in your workspace/i.test(text) || /may not have been created yet/i.test(text);
 
   const bodyOf = (error: ApiError) => {
     const view = render(<BackendDown error={error} />);
@@ -1013,7 +1013,7 @@ describe('a 404 about part of a record never claims the record is missing', () =
   it('THE REGRESSION: a run 404 does not claim the experiment is missing', () => {
     const body = bodyOf(at('/experiments/EXP-1/runs/RUN-1', 'run_not_found'));
     expect(assertsMissingRecord(body)).toBe(false);
-    expect(body).toContain('does not establish that the experiment is missing');
+    expect(body).toContain('does not mean the experiment is missing');
     // It names the part that WAS read, from the path — in the product's words, and
     // not by rendering the backend's `runs` path segment into the sentence.
     expect(body).toContain('the measurement runs');
@@ -1071,7 +1071,7 @@ describe('a 404 about part of a record never claims the record is missing', () =
     expect(view.getByText('Record Not Found')).toBeInTheDocument();
     expect(
       view.getByText(
-        'This experiment id is not in the local workspace — it may not have been created yet.',
+        'This experiment is not in your workspace. It may not have been created yet.',
       ),
     ).toBeInTheDocument();
   });
@@ -1092,7 +1092,7 @@ describe('a 404 about part of a record never claims the record is missing', () =
     // the session and none at all about whether the record exists.
     const body = bodyOf(at('/experiments/EXP-1', 'tutorial_session_not_found'));
     expect(assertsMissingRecord(body)).toBe(false);
-    expect(body).toContain('answered HTTP 404 for this request');
+    expect(body).toContain('could not find what this page asked for');
   });
 
   /*
@@ -1106,7 +1106,7 @@ describe('a 404 about part of a record never claims the record is missing', () =
     const copy = downCopy(new ApiError('x', { status: 404, reason: 'run_not_found' }), true);
     expect(copy.kind).toBe('record_part_not_found');
     const lines = copy.lines.join(' ');
-    expect(lines).toContain('a read of one part of this experiment');
+    expect(lines).toContain('one part of this experiment');
     expect(lines).not.toContain('“');
     expect(lines).not.toContain('the measurement runs');
     expect(assertsMissingRecord(lines)).toBe(false);
@@ -1153,14 +1153,14 @@ describe('a 404 about part of a record never claims the record is missing', () =
     const view = render(<BackendDown error={html('/experiments/EXP-1')} />);
     expect(view.getByText('Sign-In Required')).toBeInTheDocument();
     expect(
-      view.getByText(/A sign-in page was returned in place of the ISAAC API/),
+      view.getByText(/A sign-in page came back instead of ISAAC/),
     ).toBeInTheDocument();
     // The negative half: neither 404 branch, and neither 404 branch's wording.
     expect(view.queryByText('Record Not Found')).toBeNull();
     expect(view.queryByText('Not Found')).toBeNull();
     const body = view.container.querySelector('.fetch-state-body')!.textContent ?? '';
     expect(assertsMissingRecord(body)).toBe(false);
-    expect(body).not.toContain('answered HTTP 404');
+    expect(body).not.toContain('could not find what this page asked for');
 
     // And the intercept wins even when a reason field is somehow populated — on a
     // record path, a sub-resource path, and for each reason the branches key on.
@@ -1207,7 +1207,7 @@ describe('experiment_not_found is honoured only under /experiments/{id}', () => 
         true,
       );
       expect(copy.kind).toBe('not_found');
-      expect(copy.lines.join(' ')).toContain('This experiment id is not in the workspace');
+      expect(copy.lines.join(' ')).toContain('This experiment is not in your workspace');
     }
   });
 
@@ -1224,7 +1224,7 @@ describe('experiment_not_found is honoured only under /experiments/{id}', () => 
       const lines = copy.lines.join(' ');
       expect(lines).not.toMatch(/experiment id/i);
       expect(lines).not.toMatch(/may not have been created yet/i);
-      expect(lines).toContain('answered HTTP 404 for this request');
+      expect(lines).toContain('could not find what this page asked for');
     }
   });
 
@@ -1250,7 +1250,7 @@ describe('experiment_not_found is honoured only under /experiments/{id}', () => 
       for (const reason of ['run_not_found', 'source_not_allowed']) {
         const copy = downCopy(new ApiError('x', { status: 404, path, reason }), true);
         const lines = copy.lines.join(' ');
-        expect(lines).not.toMatch(/experiment id is not in the/i);
+        expect(lines).not.toMatch(/experiment is not in your workspace/i);
         expect(lines).not.toMatch(/may not have been created yet/i);
         // Current, deliberate behaviour — see the comment above before changing it.
         expect(copy.kind).toBe('record_part_not_found');
@@ -1298,7 +1298,7 @@ describe('an example-record 404 with no worked-example session open', () => {
     expect(lines).toContain('this browser tab is not in one');
     // The withdrawn explanation, in either build's wording.
     expect(lines).not.toMatch(/may not have been created yet/i);
-    expect(lines).not.toMatch(/experiment id is not in the/i);
+    expect(lines).not.toMatch(/experiment is not in your workspace/i);
   });
 
   /*
@@ -1326,7 +1326,7 @@ describe('an example-record 404 with no worked-example session open', () => {
   it('says the workspace is gone and promises no way back to it', () => {
     const lines = downCopy(missing(`/experiments/${EXAMPLE}`), true, null).lines.join(' ');
     // Honest about the loss, conditioned on the walkthrough actually having ended…
-    expect(lines).toMatch(/when that walkthrough ends the ISAAC API discards it/i);
+    expect(lines).toMatch(/when a walkthrough ends, its examples are discarded/i);
     expect(lines).toContain('anything answered or exported inside it');
     expect(lines).toContain('this page cannot reach it');
     // …and explicit that a replay is a new start, not a way back.
@@ -1347,7 +1347,7 @@ describe('an example-record 404 with no worked-example session open', () => {
     expect(copy.kind).toBe('not_found');
     expect(copy.title).toBe('Record Not Found');
     expect(copy.lines).toEqual([
-      'This experiment id is not in the workspace — it may not have been created yet.',
+      'This experiment is not in your workspace. It may not have been created yet.',
     ]);
     // B-23 INVERTED THIS ASSERTION, NOT DELETED IT. It read `toBe(false)`: a missing
     // record was a dead end with no way out of the page, and the test pinned that as
@@ -1357,7 +1357,7 @@ describe('an example-record 404 with no worked-example session open', () => {
     expect(copy.offerExperimentsLink).toBe(true);
     // and the local build's wording is likewise untouched
     expect(downCopy(missing(`/experiments/${ORDINARY}`), false, null).lines).toEqual([
-      'This experiment id is not in the local workspace — it may not have been created yet.',
+      'This experiment is not in your workspace. It may not have been created yet.',
     ]);
   });
 

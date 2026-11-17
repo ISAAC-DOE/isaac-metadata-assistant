@@ -506,7 +506,7 @@ function ConflictBrowser({ experimentId }: { experimentId: string }) {
 
       {list.status === 'loading' && (
         <p className="conflicts-loading" role="status">
-          Loading this record’s conflicting evidence from the ISAAC API…
+          Loading this record’s conflicting evidence…
         </p>
       )}
 
@@ -909,9 +909,8 @@ function CandidateChoice({
         Which answer do you stand behind?
       </legend>
       <p className="conflict-choice-note" id={orderNoteId}>
-        Listed in the order the ISAAC API returned them, which is alphabetical by
-        the stored answer and carries no ranking. Nothing is selected for you, and
-        the number of citations behind an answer is not a vote.
+        Listed alphabetically, so the order carries no ranking. Nothing is selected
+        for you, and the number of citations behind an answer is not a vote.
       </p>
       {conflict.candidates.map((candidate, index) => {
         const value = `candidate:${index}`;

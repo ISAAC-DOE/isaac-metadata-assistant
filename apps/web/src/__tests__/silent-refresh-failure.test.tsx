@@ -318,7 +318,7 @@ describe('R1b · the three surfaces that used a silent refresh', () => {
     expect(note!.textContent ?? '').toMatch(/last loaded state/i);
     // The record is still there — the fix must not blank or error the screen.
     expect(getByText('5 Fields Need Your Confirmation')).toBeInTheDocument();
-    expect(queryByText(/Loading the record from the ISAAC API/)).toBeNull();
+    expect(queryByText(/Loading the record…/)).toBeNull();
   });
 
   /*

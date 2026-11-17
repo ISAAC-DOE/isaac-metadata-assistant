@@ -904,6 +904,14 @@ describe('mutationFailureCopy — names one cause and no others', () => {
     }
   });
 
+  it('a 401 and a 403 state only what is known: never that a session ended or access was lost (2026-11-17 review)', () => {
+    const s401 = mutationFailureCopy(new ApiError('x', { status: 401 }), FALLBACK);
+    const s403 = mutationFailureCopy(new ApiError('x', { status: 403 }), FALLBACK);
+    expect(s401).toMatch(/^You need to sign in to make this change, so nothing was changed\./);
+    expect(s403).toMatch(/^Your account doesn’t have permission to make this change, so nothing was changed\./);
+    for (const copy of [s401, s403]) expect(copy).not.toMatch(/has ended|no longer/);
+  });
+
   /*
    * A SITE-COVERAGE GUARD, not a behaviour test, and it is honest about that.
    *

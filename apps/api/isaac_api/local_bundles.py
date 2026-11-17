@@ -1019,7 +1019,32 @@ def describe_question(bundle: Mapping, q: Mapping, *, folder: str,
         # do it on the command line (the page has its own controls for each)
         "text": page_words(q.get("text")),
         "why": page_words(q.get("why")),
+        **({"conflict": cf_said} if (cf_said := _conflict_said(q, conflicts)) else {}),
+        # 2026-11-17 re-review: how many of a confirm question's targets carry NO value, counted here for every confirm
+        # question (the start times asked again after a clock-zone change carry no `targets_without_a_value` of their
+        # own), so the page never asks to confirm a value that is not there. Additive; the question is unchanged.
+        **({"targets_without_a_value": sum(1 for t in targets if t.get("kind") == "candidate"
+                                           and (cands.get(t.get("id")) or {}).get("value") is None)}
+           if kind == "confirm_value" else {}),
     }, shown
+
+
+def _conflict_said(q: Mapping, conflicts: Mapping[str, Mapping]) -> dict | None:
+    """2026-11-17 (plain-language pass): a disagreement question's own conflict, so the page can tell two
+    disagreements about one field in one group apart (each is its own question): the conflict's kind and subject as
+    the bundle states them, and its distinct readings (the values its question already shows). ``None`` for any
+    other question. Additive: the question's id, text and targets do not change."""
+    if q.get("kind") != "resolve_conflict":
+        return None
+    tid = next((t.get("id") for t in q.get("targets") or () if t.get("kind") == "conflict"), None)
+    cf = conflicts.get(tid) if tid else None
+    if not isinstance(cf, Mapping):
+        return None
+    readings = list(dict.fromkeys(str(r.get("value")) for r in cf.get("readings") or ()
+                                  if isinstance(r, Mapping) and r.get("value") is not None))
+    return {"conflict_id": tid, "kind": cf.get("kind"),
+            "subject": str(cf["subject"]) if cf.get("subject") not in (None, "") else None,
+            "readings": readings[:SUGGESTIONS_PER_QUESTION]}
 
 
 def capture_items(bundle: Mapping) -> dict:
@@ -1184,7 +1209,96 @@ def progress(bundle_dir: Path, bundle: Mapping, check: Mapping) -> dict:
         "statement": ("What the last `isaac bundle validate` wrote, per group. It is not re-run here; a report older "
                       "than the bundle does not reflect the answers given since."),
     }
+    near = [g.get("group_id") for m in ((out["athena_merges"] or {}).get("items") or ())
+            for g in m.get("near_groups") or ()]
+    out["group_names"] = group_names(bundle, [*_minimum_group_ids(minimum), *(r["group_id"] for r in reports), *near])
     return out
+
+
+def _minimum_group_ids(minimum: Mapping | None) -> list[str]:
+    """The record groups ``minimum_for_one_group`` names: its group and the groups its answers are given for."""
+    if not isinstance(minimum, Mapping):
+        return []
+    ids = [minimum.get("group_id")]
+    for row in [*(minimum.get("questions") or ()), *(minimum.get("recommended") or ())]:
+        only = row.get("only") if isinstance(row, Mapping) else None
+        if isinstance(only, str) and only.startswith("group:"):
+            ids.append(only[len("group:"):])
+    return [i for i in ids if isinstance(i, str)]
+
+
+def group_names(bundle: Mapping, ids) -> dict[str, str]:
+    """2026-11-17 (plain-language pass): ``{group_id: name}`` for the record groups a page names, so the page can call
+    each group by a name the scientist knows instead of its ``rg-…`` id. The name is the one export rows already
+    use (:func:`records.group_labels`: the group's first member file), made unique by :func:`unique_group_names`.
+    Additive and read-only: no id changes, and a group with no member file simply has no name here."""
+    wanted = {i for i in ids if isinstance(i, str)}
+    if not wanted:
+        return {}
+    return {gid: name for gid, name in unique_group_names(bundle).items() if gid in wanted}
+
+
+def _bundle_folder(path: object) -> str | None:
+    """``path``'s folder when it is a plain folder inside the bundle's beamtime root, else ``None``: never an absolute
+    path, a drive, a ``..`` step or anything else that would point outside the import."""
+    if not isinstance(path, str) or path.startswith(("/", "\\", "~")):
+        return None
+    p = path.replace("\\", "/").rstrip("/")
+    if not p or re.match(r"^[A-Za-z]:", p) or any(seg in ("", ".", "..") for seg in p.split("/")):
+        return None
+    return p
+
+
+def _short_id(gid: str, among: Sequence[str]) -> str:
+    """The shortest leading part (at least 6 characters, ``rg-`` dropped) of ``gid`` that no other id in ``among``
+    shares: deterministic, and always tells the groups apart (the whole id at worst)."""
+    bare = gid[3:] if gid.startswith("rg-") else gid
+    others = [(o[3:] if o.startswith("rg-") else o) for o in among if o != gid]
+    for n in range(6, len(bare) + 1):
+        if not any(o.startswith(bare[:n]) for o in others):
+            return bare[:n]
+    return bare
+
+
+def unique_group_names(bundle: Mapping) -> dict[str, str]:
+    """``{group_id: name}`` with no two groups named alike (2026-11-17 review: a group is named by its first file's
+    stem, and stems repeat across folders — two groups both read "scan_001"). A name only one group has stays as it
+    is. Groups sharing a name are told apart by the folder their first file is in, relative to the beamtime root
+    ("day1/scan_001"), where that folder is theirs alone; otherwise by a short form of their group id
+    ("scan_001 (group 5c5436)"). Deterministic: the same bundle gives the same names on every page."""
+    from collections import Counter
+
+    from .local_import import records as R
+
+    labels = R.group_labels(bundle)
+    firsts = R.first_member_runs(bundle)
+    folder_of_source = {s.get("source_id"): s.get("parent_dir") for s in bundle.get("sources") or ()
+                        if isinstance(s, Mapping)}
+    by_name: dict[str, list[str]] = {}
+    for gid in sorted(labels):
+        by_name.setdefault(labels[gid], []).append(gid)
+    out = dict(labels)
+    for name, gids in by_name.items():
+        if len(gids) < 2:
+            continue
+        folders = {g: _bundle_folder(folder_of_source.get((firsts.get(g) or {}).get("acquisition_source_id")))
+                   for g in gids}
+        seen = Counter(folders.values())
+        for g in gids:
+            f = folders[g]
+            out[g] = f"{f}/{name}" if f and seen[f] == 1 else f"{name} (group {_short_id(g, gids)})"
+    # a name made unique above may still equal another group's own name (a stem that reads "day1/scan_001" cannot,
+    # as a stem holds no "/", but one that reads "scan_001 (group …)" could): the id settles it, pass after pass
+    # until no two names are alike. It ends: the short ids are unique among all groups, so the names alike in one
+    # pass all differ after it, and each pass makes a still-clashing name longer than any it can clash with in the end.
+    every = sorted(out)
+    while True:
+        counts = Counter(out.values())
+        clashing = [g for g in every if counts[out[g]] > 1]
+        if not clashing:
+            return out
+        for g in clashing:
+            out[g] = f"{out[g]} (group {_short_id(g, every)})"
 
 
 #: How many of the scientist's unmatched Athena merges the progress block lists (the rest are counted).
@@ -1579,6 +1693,13 @@ def get_local_bundle_questions(
         **Q.hidden_outside_live_groups(outside, "include_outside_live_groups=true"),
         "minimum_for_one_group": with_page_words(minimum),
         "questions": out_questions,
+        "group_names": group_names(data, [
+            *(sc.get("group_id") for q in out_questions for sc in (q.get("display") or {}).get("scopes") or ()),
+            *(x.get("group_id") for q in out_questions for x in q.get("not_reached") or ()),
+            *_minimum_group_ids(minimum),
+            *(g for m in capture.get("merge_candidates") or () for g in m.get("group_ids") or ()),
+            *(a.get("group_id") for a in capture.get("athena_selections") or ()),
+        ]),
         "capture": capture,
         "exposures_recorded": added,
         "identity": "local_unverified",

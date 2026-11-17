@@ -77,6 +77,7 @@ import {
   mcpStateLine,
 } from '../../lib/mcpConnectContent';
 import { useHealthState } from '../../lib/useHealth';
+import { devToolsEnabled } from '../../lib/devTools';
 import { AssistantCompanionSection } from './AssistantCompanion';
 
 export const AGENT_WIDGET_HEADING_ID = 'settings-agent-heading';
@@ -92,6 +93,14 @@ export function ConnectYourAgentPanel({
   /* The posture only ever chooses WHICH unconfigured line is shown; the published
      branch is driven by `endpoint` alone, exactly as before. */
   const { settled, health } = useHealthState();
+  /* ONE LINE AND NOTHING ELSE WHILE NOTHING IS SET UP (2026-11-17, owner's direction:
+     Settings must not read like an engineer wrote it). The reference — what an agent
+     can and cannot do, its permissions, the setup steps and the companion, about
+     2,000 words — is NOT RENDERED in the unconfigured state of an ordinary build: a
+     scientist cannot act on it there. It renders when an address is published, or
+     with the developer flag (`VITE_ISAAC_DEV_TOOLS=1`), where the people who set an
+     agent up read it. */
+  const showReference = !unconfigured || devToolsEnabled();
 
   return (
     <Widget
@@ -115,7 +124,7 @@ export function ConnectYourAgentPanel({
           )}
         </div>
       }
-      details={{
+      details={!showReference ? undefined : {
         summary: MCP_WIDGET_COPY.detailsSummary,
         content: (
           <div className="settings-sequence">

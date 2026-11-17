@@ -377,13 +377,13 @@ export function ResetDemoDialog() {
                 This is a <strong>temporary worked-example workspace</strong>, belonging to this
                 walkthrough alone. Resetting discards the current progress on the built-in
                 examples in it and restores all five to their original state. The rows on My
-                Experiments are this walkthrough&rsquo;s own copies, so they are what is reset; the
-                ordinary workspace is not in this scope and this control cannot reach it.
+                Experiments are this walkthrough&rsquo;s own copies, so they are what is reset. Your
+                own work is not part of this walkthrough, and this reset cannot reach it.
               </p>
 
               {preview.status === 'error' && (
                 <p className="reset-refused" role="note">
-                  The preview could not be loaded from the backend. Nothing was changed.
+                  The preview could not be loaded. Nothing was changed.
                 </p>
               )}
 
@@ -447,7 +447,7 @@ export function ResetDemoDialog() {
                   This reset was <strong>refused for safety</strong>{' '}
                   {preview.status === 'data' &&
                   preview.data.refusal_reason === 'malformed_records_present'
-                    ? 'because a record is stored in a form this build cannot read, so the reset cannot prove what it would be replacing.'
+                    ? 'because a record is stored in a form ISAAC cannot read, so the reset cannot tell what it would be replacing.'
                     : 'because an ambiguous record is present.'}{' '}
                   No records were changed, and the reset stays disabled.
                 </p>
@@ -476,7 +476,7 @@ export function ResetDemoDialog() {
                 */}
               {executeState === 'refused' && (
                 <p className="reset-refused" role="note">
-                  The backend refused the reset for safety. No records were changed.
+                  ISAAC refused the reset for safety. No records were changed.
                 </p>
               )}
               {/*

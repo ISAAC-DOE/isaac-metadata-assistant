@@ -125,7 +125,7 @@ describe('P30.3 · SearchDialog cross-record triage', () => {
     const dialog = await openDialog(view);
     fireEvent.click(within(dialog).getByRole('button', { name: 'Needs Attention' }));
     // Honest, quiet unavailable note — never role=alert, never a verdict.
-    expect(await within(dialog).findByText(/cross-record triage is unavailable/i)).toBeTruthy();
+    expect(await within(dialog).findByText(/quick filters are not available right now/i)).toBeTruthy();
     expect(within(dialog).queryByRole('alert')).toBeNull();
     // Search below is unaffected: typing a query still returns workspace results.
     const box = within(dialog).getByRole('searchbox');

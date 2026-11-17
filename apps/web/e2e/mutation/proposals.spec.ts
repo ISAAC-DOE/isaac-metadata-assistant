@@ -322,7 +322,7 @@ async function assertNoAttributableActor(api: APIRequestContext): Promise<void> 
 async function openRecord(page: Page, id: string): Promise<void> {
   // 2026-09-22: the proposals panel moved to the focused Proposals view.
   await page.goto(`/record/${id}?view=proposals`);
-  await expect(page.getByRole('heading', { name: 'Ingestion Proposals' })).toBeVisible();
+  await expect(page.getByRole('heading', { name: 'Suggestions' })).toBeVisible();
   // The panel's own count line, which is only rendered once a window has LOADED.
   // Waiting on it means no assertion below races the first read.
   await expect(page.locator('.proposals-count')).not.toBeEmpty();
@@ -1027,8 +1027,8 @@ test('an unsaved correction survives a background change-feed refresh', async ({
 // 8 + the acceptance question · staleness is the TARGET's, and acceptance is refused
 // ---------------------------------------------------------------------------
 
-const UNCHANGED = 'the value at this field path was unchanged since this proposal was made';
-const CHANGED = 'the value at this field path had CHANGED since this proposal was made';
+const UNCHANGED = 'This field has not changed since this proposal was made';
+const CHANGED = 'This field has changed since this proposal was made';
 
 test('an unrelated write does not make a proposal stale; a write to the target does', async ({
   page,
@@ -1083,7 +1083,7 @@ test('an unrelated write does not make a proposal stale; a write to the target d
   const staleCard = cardFor(page, noteId);
   await expect(staleCard.locator('.proposal-target-state')).toContainText(CHANGED);
   await expect(staleCard.locator('.proposal-target-state')).toContainText(
-    'accepting is refused while that is so — nothing would be written'
+    'accepting is refused for now — nothing would be written'
   );
 
   const staleRow = await serverProposal(request, id, created.proposal_id);

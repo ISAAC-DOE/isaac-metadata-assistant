@@ -339,7 +339,7 @@ test('measure the ingestion-proposal read path and the change feed', async ({
        A bare `/record/<id>` opens Record Fields, where it is not in the DOM at all,
        so the wait below would hang for its full timeout rather than fail. */
     await page.goto(`/record/${TARGET}?view=proposals`); // 2026-09-22: panel moved
-    await expect(page.getByRole('heading', { name: 'Ingestion Proposals' })).toBeVisible({
+    await expect(page.getByRole('heading', { name: 'Suggestions' })).toBeVisible({
       timeout: 300_000,
     });
     await expect(page.locator('.proposals-count')).not.toBeEmpty({ timeout: 300_000 });
@@ -598,7 +598,7 @@ test('measure the ingestion-proposal read path and the change feed', async ({
      A bare `/record/<id>` opens Record Fields, where it is not in the DOM at all,
      so the wait below would hang for its full timeout rather than fail. */
   await page.goto(`/record/${TARGET}?view=proposals`); // 2026-09-22: panel moved
-  await expect(page.getByRole('heading', { name: 'Ingestion Proposals' })).toBeVisible({
+  await expect(page.getByRole('heading', { name: 'Suggestions' })).toBeVisible({
     timeout: 300_000,
   });
   await expect(page.locator('.proposals-count')).not.toBeEmpty({ timeout: 300_000 });

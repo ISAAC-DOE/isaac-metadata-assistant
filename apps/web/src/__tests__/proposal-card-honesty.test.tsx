@@ -135,7 +135,7 @@ function posts(): Record<string, unknown>[] {
 }
 
 const LOCKED = { available: false, reason: 'no_verifier_configured' };
-const STALE_SENTENCE = /accepting is refused while that is so/;
+const STALE_SENTENCE = /accepting is refused for now/;
 
 // --- A-13 / C-18 ---------------------------------------------------------------
 

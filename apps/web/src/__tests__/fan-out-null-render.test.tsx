@@ -111,7 +111,7 @@ describe('the null-marker guard itself', () => {
   });
 
   it('no longer fires on the word "provenance", which is the defect it had', () => {
-    // The exact sentence `BackendDown` renders, and the reason this file failed at all.
+    // The sentence `BackendDown` rendered when this file failed, kept as the control.
     expect(() =>
       assertNoNullText(
         textOnly('copies this build’s version, route, viewport and project memory provenance'),

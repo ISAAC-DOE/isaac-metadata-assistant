@@ -2741,7 +2741,7 @@ function FocusedRun({
           have been deleted, or the link may be for a different record. Everything else on this
           record is unaffected.
           {focus.status === 'missing' && focus.error.status !== 404
-            ? ` The server said: ${focus.error.message}`
+            ? ` ISAAC said: ${focus.error.message}`
             : ''}
         </p>
         <button type="button" className="btn btn-secondary" onClick={onLeave}>

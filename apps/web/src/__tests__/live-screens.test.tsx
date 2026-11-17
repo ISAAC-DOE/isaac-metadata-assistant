@@ -109,10 +109,10 @@ describe('S1 · My Experiments renders live queue groups from injected data', ()
     ).toBeInTheDocument();
   });
 
-  it('backend down → visible "Backend Not Running" with the exact run command, never fake rows', async () => {
+  it('backend down → visible "ISAAC Is Not Running" with the exact run command, never fake rows', async () => {
     stubFetchDown();
     const { findByText, queryByText, getByText } = renderAt('/experiments');
-    expect(await findByText('Backend Not Running')).toBeInTheDocument();
+    expect(await findByText('ISAAC Is Not Running')).toBeInTheDocument();
     expect(getByText(RUN_COMMAND)).toBeInTheDocument();
     // no mock/fake experiment rows appear
     expect(queryByText(/Cu K-edge/)).toBeNull();
@@ -446,7 +446,7 @@ describe('S3 · Review Record (live bundle)', () => {
   it('backend down → the workbench shows the down state, not a fake record', async () => {
     stubFetchDown();
     const { findByText, queryByText } = renderAt('/record/demo');
-    expect(await findByText('Backend Not Running')).toBeInTheDocument();
+    expect(await findByText('ISAAC Is Not Running')).toBeInTheDocument();
     expect(queryByText(/Fields Need Your Confirmation/)).toBeNull();
   });
 

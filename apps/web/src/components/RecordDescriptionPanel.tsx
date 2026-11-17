@@ -337,7 +337,7 @@ function RecordDescriptionEditor({ experimentId }: { experimentId: string }) {
         storedContributors.unreadable === 1 ? 'it' : 'them'
       }, so the list is read-only until that entry is corrected elsewhere.`
     : attributionHasUploadedBy
-      ? 'This record stores a server-owned `attribution.uploaded_by`. No client may author that field, so the contributor list is read-only here rather than being rewritten without it.'
+      ? 'This record already names who uploaded it, which only ISAAC can set, so the contributor list cannot be edited here.'
       : roles === null
         ? 'The official schema could not be read, so the contributor roles it allows are unknown. Roles are chosen from that list and are never free text, so the list is read-only until the schema loads.'
         : null;
@@ -520,9 +520,9 @@ function RecordDescriptionEditor({ experimentId }: { experimentId: string }) {
       )}
       {loaded !== null && !loaded.fieldsServed && (
         <p className="rdesc-lead">
-          This server did not say which fields it accepts a value at, so the boxes below
-          are this screen&rsquo;s own list rather than the server&rsquo;s. A value may
-          still be refused when you save it, and the refusal will say so.
+          ISAAC did not say which fields can be filled in here, so the boxes below are this
+          page&rsquo;s own list. A value may still be refused when you save it, and the refusal will
+          say why.
         </p>
       )}
       {RECORD_FIELD_GROUPS.filter((group) =>

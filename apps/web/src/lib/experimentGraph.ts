@@ -81,7 +81,8 @@ import {
   officialFindingSource,
   officialFindingsNote,
 } from './officialAttribution';
-import { titleCase } from './labels';
+import { formatCreatedDate, titleCase } from './labels';
+import { advisoryTitle } from './advisoryTitles';
 import { experimentStatusLabel } from './adapt';
 
 export { MAX_SCALE, MIN_SCALE, VIEW_EXTENT };
@@ -294,6 +295,12 @@ export function sectionTitleFor(pathOrKey: string): string {
 export interface ExperimentGraphDetailLine {
   term: string;
   value: string;
+  /**
+   * An internal id, a code or an ISO timestamp: shown behind the detail pane's
+   * Details disclosure rather than in its main list (2026-11-17, plain-language pass).
+   * Still in the DOM, still in `detail`, so nothing that reads it loses it.
+   */
+  technical?: boolean;
 }
 
 /** An in-app destination for "jump to the actual record / editor location". */
@@ -605,14 +612,18 @@ export function buildExperimentGraph(
     label: detail.title,
     producer: NODE_PRODUCERS.experiment,
     detail: [
-      { term: 'Experiment id', value: detail.id },
+      { term: 'Experiment id', value: detail.id, technical: true },
       /* UX-014 — this read the raw server enum (`needs_attention`), measured in
          a real browser on a freshly created record. `experimentStatusLabel` is
          the queue's own wording, derived from the queue's own maps rather than
          authored again here. The `Experiment id` above it is deliberately NOT
          humanized: an id is an identifier a curator maps by, not a word. */
       { term: 'Status', value: experimentStatusLabel(detail.status) },
-      { term: 'Created', value: detail.created_utc },
+      // The date in words leads; the exact ISO instant is behind Details (2026-11-17).
+      ...(formatCreatedDate(detail.created_utc)
+        ? [{ term: 'Created', value: formatCreatedDate(detail.created_utc)!.display }]
+        : []),
+      { term: 'Created (exact)', value: detail.created_utc, technical: true },
       { term: 'Fields with evidence', value: String(detail.evidenced_field_count) },
     ],
     jump: { label: 'Open This Record', to: ROUTES.record(detail.id) },
@@ -624,10 +635,11 @@ export function buildExperimentGraph(
     b.addNode({
       id: recordId,
       kind: 'record',
-      label: detail.record_id,
+      // The ULID is an identifier, not a name: it moved behind Details (2026-11-17).
+      label: 'Official record',
       producer: NODE_PRODUCERS.record,
       detail: [
-        { term: 'Record id', value: detail.record_id },
+        { term: 'Record id', value: detail.record_id, technical: true },
         { term: 'Schema', value: validate.schema },
         {
           term: 'Exported artifact',
@@ -641,21 +653,21 @@ export function buildExperimentGraph(
       source: experimentId,
       target: recordId,
       kind: 'produces',
-      why: `This experiment was exported to official ISAAC record ${detail.record_id}.`,
+      why: 'This record was exported as an official ISAAC record.',
       label: null,
     });
     subjectId = recordId;
   } else {
     b.note(
       'not_exported',
-      'This experiment has not been exported yet, so there is no official record id. The draft structure below hangs off the experiment — no record id is invented.',
+      'This record hasn’t been exported yet, so it has no official record id. The graph shows the draft.',
     );
   }
 
   if (artifactStale) {
     b.note(
       'artifact_stale',
-      'The exported artifact is STALE: the record changed after export. Anything read out of it is marked, and is not presented as the current draft.',
+      'The exported artifact is STALE: the record changed after it was exported. Anything read from it is marked, and is not shown as the current draft.',
     );
   }
 
@@ -1016,7 +1028,7 @@ export function buildExperimentGraph(
             detail: [
               { term: 'Question', value: question },
               ...(ev.answer ? [{ term: 'Your answer', value: ev.answer }] : []),
-              { term: 'Timestamp', value: timestamp },
+              { term: 'Timestamp', value: timestamp, technical: true },
             ],
             jump: { label: 'Review & Answer', to: ROUTES.complete(detail.id) },
           });
@@ -1178,13 +1190,14 @@ export function buildExperimentGraph(
     const id = b.addNode({
       id: nodeIds.warning(w.code, index),
       kind: 'warning',
-      label: w.code,
+      // The plain sentence names the node; the raw code is behind Details (2026-11-17).
+      label: advisoryTitle(w.code),
       producer: NODE_PRODUCERS.warning,
       detail: [
-        { term: 'Code', value: w.code },
-        { term: 'Where', value: w.where },
-        { term: 'Message', value: w.message },
-        { term: 'Gating', value: 'no — advisory only, it blocks nothing' },
+        { term: 'Gating', value: 'no — advice only, it blocks nothing' },
+        { term: 'Code', value: w.code, technical: true },
+        { term: 'Where', value: w.where, technical: true },
+        { term: 'Message', value: w.message, technical: true },
       ],
       jump: null,
     });
@@ -1193,7 +1206,7 @@ export function buildExperimentGraph(
       source: subjectId,
       target: id,
       kind: 'advises',
-      why: `Advisory warning ${w.code} at ${w.where} — ${w.message}. This is advisory and non-gating: it decides nothing about validity or export.`,
+      why: `${advisoryTitle(w.code)} This is advice only: it never blocks export or changes whether the record is valid.`,
       label: null,
     });
   });
@@ -1286,7 +1299,7 @@ export function buildExperimentGraph(
   if (b.truncated) {
     b.note(
       'node_cap',
-      `This experiment produced more than ${MAX_EXPERIMENT_NODES} nodes, so the graph is incomplete. It is bounded rather than partial-and-silent.`,
+      `This record has more than ${MAX_EXPERIMENT_NODES} items, so the graph shows only part of it.`,
     );
   }
 

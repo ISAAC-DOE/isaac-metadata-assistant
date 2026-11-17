@@ -1304,14 +1304,22 @@ def _evidence(classified, ctx, base, followups):
 
 def _record(ctx, base, followups):
     s = ctx.record_summary or {}
-    title = s.get("title")
-    status = _STATUS_LABELS.get(s.get("status"), str(s.get("status") or "in progress"))
+    # 2026-11-17 (plain-language pass): this read "This record 'X' is currently
+    # needs attention, with …" — a template that broke on the one state phrased as a
+    # verb. Each state now carries its own verb, and the title is left out (the reader
+    # is on the record). The counts are unchanged.
+    raw_status = s.get("status")
+    if raw_status == "needs_attention":
+        state = "needs attention"
+    elif raw_status in _STATUS_LABELS:
+        state = f"is {_STATUS_LABELS[raw_status]}"
+    else:
+        state = f"is {str(raw_status or 'in progress')}"
     pending_n = int(s.get("pending_count") or 0)
     evidenced = int(s.get("evidenced_field_count") or 0)
-    name = f" '{title}'" if isinstance(title, str) and title.strip() else ""
     text = (
-        f"This record{name} is currently {status}, with "
-        f"{_count(pending_n, 'pending field')} and {_count(evidenced, 'evidenced field')}."
+        f"This record {state}. It has {_count(pending_n, 'pending field')} and "
+        f"{_count(evidenced, 'field')} with evidence."
     )
     # IMPORTANT-3 audit — DELIBERATELY left at the record root. The label is
     # "Record" and the record root IS the record surface, so the target matches what

@@ -203,7 +203,7 @@ export function DiscardExperimentPanel({
       const said = serverMessageOf(err);
       if (said !== undefined) setError(said);
       else if (err instanceof ApiError && !err.unreachable && status !== undefined && status < 500)
-        setError(`${LABELS.discardRefusedPlain} (HTTP ${status})`);
+        setError(LABELS.discardRefusedPlain);
       else setError(LABELS.discardUnknownOutcome);
     }
   };

@@ -38,7 +38,7 @@ export function GraphStatusChip({ availability, note }: GraphStatusChipProps) {
          reader to hear, which is why it is worth a role rather than a shrug.
          See `ProvenanceChips.tsx` for the measurement (QA-023). */
       role="group"
-      aria-label={`Project memory ${availability} — memory plane, advisory only, never a validator`}
+      aria-label={`Project memory ${availability}. It points to related context and never decides whether a record is valid.`}
     >
       <Network size={13} strokeWidth={2} aria-hidden="true" />
       <span className="graph-chip-label">{label}</span>

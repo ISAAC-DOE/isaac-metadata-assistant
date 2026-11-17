@@ -158,6 +158,7 @@ afterEach(() => {
   cleanup();
   __resetHealthCache();
   vi.unstubAllGlobals();
+  vi.unstubAllEnvs();
 });
 
 // --- locating and reading the real sources -----------------------------------
@@ -292,6 +293,10 @@ async function mcpNoUploadRow(): Promise<string> {
     'GET /api/health': { body: { ...healthSynthetic, mcp: { posture: 'unmounted' } } },
     'GET /api/runtime/assistant-companion': { body: assistantCompanionUnconfigured },
   } as never);
+  /* 2026-11-17: the reference (this row included) renders only with the developer
+     flag while no agent address is published (owner's direction: plain pages), so
+     the site is rendered where it is actually shown. */
+  vi.stubEnv('VITE_ISAAC_DEV_TOOLS', '1');
   render(<ConnectYourAgentPanel />);
   // Settled: the posture line has arrived, so no update escapes the test.
   await screen.findByText(MCP_CONNECT_COPY.stateLine);

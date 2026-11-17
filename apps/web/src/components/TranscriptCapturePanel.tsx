@@ -112,6 +112,7 @@ import type {
 } from '../lib/types';
 import { DiscardStaged } from './DiscardStaged';
 import { Disclosure } from './Disclosure';
+import { TechnicalDetails } from './TechnicalDetails';
 import { HelpTip } from './HelpTip';
 import { Mic } from './icons';
 import { DISCARD_COPY } from '../lib/discardContent';
@@ -1641,7 +1642,7 @@ export function TranscriptCapturePanel({
           (storedCount > 0
             ? onReviewProposals !== undefined
               ? '. Review them in Proposals.'
-              : '. Review them in Ingestion Proposals below.'
+              : '. Review them in Suggestions below.'
             : '.'),
       );
       onCaptured?.();
@@ -1713,13 +1714,13 @@ export function TranscriptCapturePanel({
     if (section !== null) {
       section.scrollIntoView({ block: 'start' });
       setAnnouncement(
-        'The Ingestion Proposals heading could not be found, so this scrolled to ' +
+        'The Suggestions heading could not be found, so this scrolled to ' +
           'the proposals section instead. Your proposals are still stored.',
       );
       return;
     }
     setAnnouncement(
-      'Ingestion Proposals could not be located on this screen. Your proposals ' +
+      'Suggestions could not be located on this screen. Your proposals ' +
         'are still stored with the record.',
     );
   }
@@ -2657,12 +2658,16 @@ export function TranscriptCapturePanel({
               {/* THE SERVER'S OWN SENTENCE AND THE SERVER'S OWN ROUTE. Neither the
                   method nor the path is transcribed here — a second copy in this
                   bundle would be free to drift from the operation that enforces it. */}
-              {reading.accept_contract.message} Accepting one happens through{' '}
+              {reading.accept_contract.message} You can accept them in Suggestions.
+            </p>
+            {/* The route is for a curator, so it sits behind Details (2026-11-17). */}
+            <TechnicalDetails>
+              Accepting one happens through{' '}
               <code>
                 {reading.accept_contract.method} {reading.accept_contract.path}
               </code>
-              , which is what the Ingestion Proposals surface calls.
-            </p>
+              .
+            </TechnicalDetails>
           </div>
     ) : null;
 

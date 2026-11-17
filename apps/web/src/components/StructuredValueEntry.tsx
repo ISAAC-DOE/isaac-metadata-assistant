@@ -515,7 +515,7 @@ export const SERIES_PLACEHOLDER =
  * dependency, so the copy names which check happens where instead of implying parity.
  */
 export const SERIES_CHECK_NOTE =
-  'This box checks that the text is JSON and that every series has a series_id. When you confirm, the server checks the whole value against the official ISAAC schema’s rule for a series and names any part that does not fit. The values themselves are never altered.';
+  'This box checks that the text is JSON and that every series has a series_id. When you confirm, ISAAC checks it against the official ISAAC schema and names any part that does not fit. The values themselves are never altered.';
 
 interface SeriesEntryProps {
   text: string;
@@ -529,11 +529,14 @@ export function SeriesEntry({ text, onChange, idPrefix }: SeriesEntryProps) {
 
   return (
     <div className="structured-entry">
-      {/* ONE LINE ABOVE THE BOX (owner QA, DEC-35). The fuller explanation —
-          where the value comes from, and where custom conditions go — is one click
-          away below it, still rendered. */}
+      {/* ONE LINE ABOVE THE BOX (owner QA, DEC-35), in the scientist's words
+          (2026-11-17). ~~"Paste the reduction product's series JSON."~~ named an
+          engineer's artifact. The box stays visible: the prompt above it says
+          "Paste", and `suggestion-provenance.test.tsx` pins that claim to a control
+          on screen. "Point to your file" was not used because this screen has no
+          file picker — the ISAAC skill is the way to process a file. */}
       <p className="structured-entry-lead">
-        Paste the reduction product&rsquo;s series JSON. It is stored exactly as given.
+        Paste your processed spectrum here. It is stored exactly as given.
       </p>
       <label className="structured-field" htmlFor={`${idPrefix}-series`}>
         <span className="structured-label">Series JSON</span>
@@ -576,11 +579,11 @@ export function SeriesEntry({ text, onChange, idPrefix }: SeriesEntryProps) {
         the only place a scientist can put them today. It is NOT a promise that
         ISAAC interprets them: a condition is carried through to the record
         verbatim, and nothing reads it. Anything with no schema home at all still
-        belongs in Unmapped Notes, which is the surface built for exactly that.
+        belongs in Notes Not Yet in a Field, which is the surface built for exactly that.
       */}
-      <Disclosure summary="About Series JSON" className="structured-entry-more">
+      <Disclosure summary="About the processed spectrum" className="structured-entry-more">
         <p className="structured-entry-note">
-          A reduced spectrum comes out of your reduction pipeline — nobody types one. It
+          A processed spectrum comes out of your processing step — nobody types one. It
           goes into the record as its <code>measurement.series</code>.
         </p>
         <p className="structured-entry-note">

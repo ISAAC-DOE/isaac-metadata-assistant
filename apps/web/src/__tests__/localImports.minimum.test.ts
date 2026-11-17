@@ -15,7 +15,7 @@ describe('nearestRecordText with the minimum’s questions and unasked fields', 
       questions: [],
       unasked_required: [unasked('sample.sample_form'), unasked('context.environment')],
     };
-    expect(nearestRecordText(m)).toBe('group g1 needs 2 required fields no question asks yet: sample form, environment.');
+    expect(nearestRecordText(m, 'SYN_run_A')).toBe('Closest to done: SYN_run_A. 2 required fields no question asks yet: sample form, environment.');
   });
 
   it('counts the questions it lists, and names the unasked fields beside them (one field: singular)', () => {
@@ -26,21 +26,21 @@ describe('nearestRecordText with the minimum’s questions and unasked fields', 
       questions: [{ question_id: 'Q-0000000001', fields: ['system.technique'], only: null }],
       unasked_required: [unasked('attribution.produced_by.group', true)],
     };
-    expect(nearestRecordText(m)).toBe(
-      'group g2 needs 1 blocking answer(s) and 1 required field no question asks yet: produced by group; plus: confirm the group.',
+    expect(nearestRecordText(m, 'SYN_run_B')).toBe(
+      'Closest to done: SYN_run_B. 1 answer left. 1 required field no question asks yet: produced by group. Also needed: confirm the group.',
     );
   });
 
   it('a server that sends neither list is read as before', () => {
-    expect(nearestRecordText({ group_id: 'g3', blocking_questions: 3, plus_decisions: [] })).toBe('group g3 needs 3 blocking answer(s).');
-    expect(nearestRecordText({ group_id: 'g3', blocking_questions: 1, plus_decisions: [], questions: [{ question_id: 'Q-1', fields: [], only: null }], unasked_required: [] })).toBe(
-      'group g3 needs 1 blocking answer(s).',
+    expect(nearestRecordText({ group_id: 'g3', blocking_questions: 3, plus_decisions: [] }, 'SYN_run_C')).toBe('Closest to done: SYN_run_C. 3 answers left.');
+    expect(nearestRecordText({ group_id: 'g3', blocking_questions: 1, plus_decisions: [], questions: [{ question_id: 'Q-1', fields: [], only: null }], unasked_required: [] }, 'SYN_run_C')).toBe(
+      'Closest to done: SYN_run_C. 1 answer left.',
     );
   });
 
   it('keeps the blocked reason after the named fields', () => {
     const m = { group_id: 'g4', blocking_questions: 0, plus_decisions: [], questions: [], unasked_required: [unasked('sample.material.name')], blocked: 'SERVER-SAID: no measurement run' };
-    expect(nearestRecordText(m)).toBe('group g4 needs 1 required field no question asks yet: material name. SERVER-SAID: no measurement run.');
+    expect(nearestRecordText(m, 'SYN_run_D')).toBe('Closest to done: SYN_run_D. 1 required field no question asks yet: material name. SERVER-SAID: no measurement run.');
   });
 });
 
@@ -102,12 +102,12 @@ describe('polish c7-w: counts that add up, deferred, links', () => {
       group_id: 'g1', blocking_questions: 2, plus_decisions: [],
       questions: [{ question_id: 'Q-1', fields: ['a'], only: null, deferred: true }, { question_id: 'Q-2', fields: ['b'], only: null }],
     };
-    expect(nearestRecordText(m)).toBe('group g1 needs 2 blocking answer(s) (1 deferred).');
+    expect(nearestRecordText(m, 'SYN_run_A')).toBe('Closest to done: SYN_run_A. 2 answers left (1 marked “I don’t know”).');
   });
 
   it('deferredText, onlyWords and splitAtId', () => {
-    expect(deferredText({ by: 'Synthetic Scientist', decided_utc: '2099-01-02T03:04:05Z' })).toBe('Deferred by Synthetic Scientist, 2099-01-02');
-    expect(deferredText({ by: null, decided_utc: null })).toBe('Deferred by a name not recorded, date not recorded');
+    expect(deferredText({ by: 'Synthetic Scientist', decided_utc: '2099-01-02T03:04:05Z' })).toBe('Marked “I don’t know” by Synthetic Scientist, 2099-01-02');
+    expect(deferredText({ by: null, decided_utc: null })).toBe('Marked “I don’t know” by a name not recorded, date not recorded');
     expect(onlyWords('group:g1')).toBe('group g1');
     expect(onlyWords('run:r1')).toBe('run r1');
     expect(onlyWords(null)).toBeNull();

@@ -46,7 +46,7 @@ export function LiveSyncNote({ degraded, onRefresh, refreshFailed = false }: Liv
     >
       <span className="livesync-degraded-text">
         {refreshFailed
-          ? 'That refresh did not reach the ISAAC API — this is the last loaded state, not a newly checked one. Try again.'
+          ? 'That refresh did not go through, so this is the last loaded state, not a newly checked one. Try again.'
           : 'Live updates paused — showing the last loaded state, not a freshly verified one.'}
       </span>
       <button type="button" className="btn btn-secondary livesync-degraded-refresh" onClick={onRefresh}>

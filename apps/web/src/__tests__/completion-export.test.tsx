@@ -1123,7 +1123,7 @@ describe('S4 · Complete Missing Fields — grounded assistant (P25.6)', () => {
       fireEvent.click(panel.getByText(label).closest('button')!);
       expect(assistant.textContent).not.toMatch(VERDICT);
       expect(assistant.textContent).not.toMatch(INVALID_AGAINST);
-      expect(assistant.textContent).not.toMatch(/\bthat is a truth question\b/i); // guard never triggered
+      expect(assistant.textContent).not.toMatch(/decided by ISAAC’s checks/i); // guard never triggered
     }
   });
 
@@ -1161,7 +1161,7 @@ describe('S4 · Complete Missing Fields — grounded assistant (P25.6)', () => {
   it('does NOT render an assistant panel when the backend is down', async () => {
     stubFetchDown();
     const { container, findByText } = renderAt('/record/demo/complete');
-    await findByText('Backend Not Running');
+    await findByText('ISAAC Is Not Running');
     expect(container.querySelector('.assistant')).toBeNull();
   });
 });

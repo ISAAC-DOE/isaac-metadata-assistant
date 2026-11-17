@@ -231,7 +231,7 @@ export const SURFACES: readonly Surface[] = [
     name: 'Record Detail — Proposals',
     path: `/record/${SEED.partial}?view=proposals`,
     scope: 'example',
-    ready: { role: 'heading', name: 'Ingestion Proposals' },
+    ready: { role: 'heading', name: 'Suggestions' },
   },
   {
     /*
@@ -440,9 +440,10 @@ export const SURFACES: readonly Surface[] = [
     path: '/settings',
     scope: 'ordinary',
     /* The gate follows a heading a reader actually sees, and one that renders
-       only after `/api/about` resolves would be stricter still — `This Build`
-       renders at once, so the gate is the widget's own title. */
-    ready: { role: 'heading', name: 'This Build' },
+       only after `/api/about` resolves would be stricter still — `Version`
+       (~~`This Build`~~, renamed 2026-11-17) renders at once, so the gate is the
+       widget's own title. */
+    ready: { role: 'heading', name: 'Version' },
   },
   /*
    * ~~`settings-privacy` — "Settings — Privacy & Governance", `?tab=privacy`~~ —

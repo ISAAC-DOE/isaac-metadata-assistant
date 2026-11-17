@@ -311,7 +311,7 @@ test.describe('@interaction starting the walkthrough', () => {
     // It makes three structural claims; all three are true of a session, and a
     // reader is told them in visible text rather than only in an aria-label.
     await expect(region).toContainText(/this walkthrough/i);
-    await expect(region).toContainText(/no request made outside it reaches them/i);
+    await expect(region).toContainText(/Nothing outside it can reach them/i);
     await expect(region).toContainText(/discarded when the walkthrough ends/i);
     /*
      * THE CLAIM THE BAR MUST NOT MAKE, ASSERTED BESIDE THE ROWS THAT DISPROVE IT.

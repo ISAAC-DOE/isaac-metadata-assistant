@@ -257,7 +257,10 @@ describe('experiment graph — producers', () => {
   it('marks an advisory warning as non-gating and never as a failure', () => {
     const graph = build(experimentGraphBundle());
     const advise = graph.edges.find((e) => e.kind === 'advises');
-    expect(advise?.why).toContain('advisory and non-gating');
+    // Plain words since 2026-11-17 ("advisory and non-gating" → "advice only"); the
+    // claim pinned is the same: an advisory never blocks export or decides validity.
+    expect(advise?.why).toContain('advice only');
+    expect(advise?.why).toContain('never blocks export');
     const warning = graph.byId.get(advise!.target);
     expect(warning?.detail.find((d) => d.term === 'Gating')?.value).toContain('no');
     // The warning is reachable only through `advises`, never through `fails`.

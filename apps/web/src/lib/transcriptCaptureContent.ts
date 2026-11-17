@@ -549,8 +549,8 @@ export const CAPTURE_COPY = {
     'Speech becomes text in your Claude app, not here — so the words never ' +
     'reach this deployment as audio, only as text you have seen.',
   mcpRoutePrecondition:
-    'No agent endpoint is published. Settings → Connect Your Agent shows the ' +
-    'setup steps.',
+    'Connecting a Claude app is not set up on this site. Settings → Connect Your ' +
+    'Agent shows the setup steps.',
   mcpRouteSayLabel: 'What to say, once it is connected',
   /*
    * A WORKED SENTENCE rather than a description of one. The owner asked for

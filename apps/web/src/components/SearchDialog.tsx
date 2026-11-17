@@ -446,7 +446,7 @@ function SearchDown({ error }: { error: ApiError }) {
   return (
     <div className="search-down" role="status">
       <p className="search-down-title">
-        Search is unavailable — no server-derived results can be shown.
+        Search is not available right now.
       </p>
       {copy.lines.map((line) => (
         <p className="search-down-text" key={line}>
@@ -520,15 +520,14 @@ function TriagePanel({ triage, headId, onRun, onSelect }: TriagePanelProps) {
         })}
       </div>
 
-      {triage.status === 'loading' && <LoadingPanel label="Triaging records…" />}
+      {triage.status === 'loading' && <LoadingPanel label="Finding records…" />}
 
       {triage.status === 'error' && (
         // Honest degradation — the cross-record projection could not be fetched.
         // A quiet status note (never role=alert / verdict color); the query search
         // below is completely unaffected.
         <p className="search-triage-unavailable" role="status">
-          Cross-record triage is unavailable right now — the runtime projection could not
-          be loaded. Search below is unaffected.
+          These quick filters are not available right now. Search below still works.
         </p>
       )}
 

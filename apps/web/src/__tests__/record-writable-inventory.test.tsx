@@ -525,7 +525,7 @@ describe('what must never be offered', () => {
     // "Said false" and "said nothing" are different claims — the same distinction
     // `serialize._UNKNOWN_CAPTURE` draws with `level: null`.
     await open(draftWithCapture({}, { omitCapture: true }));
-    expect(screen.getByText(/did not say which fields it accepts a value at/i)).toBeInTheDocument();
+    expect(screen.getByText(/did not say which fields can be filled in here/i)).toBeInTheDocument();
     // The declared list is still offered, so a contract skew does not blank the screen.
     for (const spec of RECORD_FIELDS) expect(controlForPath(spec.path)).toBeTruthy();
   });

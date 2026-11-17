@@ -258,7 +258,7 @@ export function ExportReadiness() {
       >
         <h1 className="sr-only">{LABELS.screenExport}</h1>
         {load.name === 'loading' ? (
-          <LoadingPanel label="Loading validation, coverage and advisory from the ISAAC API…" />
+          <LoadingPanel label="Loading the export checks…" />
         ) : (
           <BackendDown error={load.error} onRetry={() => runFetch(true)} />
         )}
@@ -849,8 +849,7 @@ function LoadedExport({
                   claim stacked on the first. */}
               {!viewArtifacts && !fanOut && (
                 <p className="artifact-hint">
-                  The artifact content could not be read from the workspace — open the files at the
-                  paths above.
+                  These files couldn&rsquo;t be shown here. Open them from the paths above.
                 </p>
               )}
             </>
@@ -873,8 +872,8 @@ function LoadedExport({
                   {pendingCount} field{pendingCount === 1 ? '' : 's'} still block export
                 </div>
                 <p className="preexport-text">
-                  Export unlocks only when every field the system refused to guess is confirmed.
-                  This is expected — not a failure.
+                  Export opens once you confirm the fields ISAAC won&rsquo;t guess. This is
+                  normal, not an error.
                 </p>
                 {/*
                   BLOCKERS FIRST (review #277, I-7). What the checks already report
@@ -935,8 +934,8 @@ function LoadedExport({
                   officialFindingSource(validate),
                   officialCheckedDocument(validate),
                 )}{' '}
-                Exporting runs the gated validation and writes the official record +
-                evidence sidecar.
+                Exporting checks the record once more, then saves the official record and
+                its evidence sidecar.
               </p>
               <button
                 type="button"
@@ -1133,7 +1132,7 @@ function LoadedExport({
         <div className="export-conflict" role="alert">
           <TriangleAlert size={16} strokeWidth={2} aria-hidden="true" />
           <span>
-            Export was refused by the gated validation — nothing was written.{' '}
+            The export checks refused this record, so nothing was saved.{' '}
             {phase.errors.length} schema error{phase.errors.length === 1 ? '' : 's'}.
           </span>
         </div>

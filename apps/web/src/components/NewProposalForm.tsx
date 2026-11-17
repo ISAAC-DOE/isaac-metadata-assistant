@@ -307,8 +307,8 @@ export function NewProposalForm({
           // the first half.
           reported = true;
           setError(
-            'Your source note WAS stored on this record and is safe — it is on the ' +
-              'Unmapped Notes list above. The proposal that was to cite it was refused, ' +
+            'Your source note WAS stored on this record and is safe — it is in ' +
+              'Notes Not Yet in a Field above. The proposal that was to cite it was refused, ' +
               'so no proposal exists yet. ' +
               refusalSentence(err),
           );

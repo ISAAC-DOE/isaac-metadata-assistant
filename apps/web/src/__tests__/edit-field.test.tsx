@@ -233,7 +233,10 @@ describe('S4 · summary-first edit of a confirmed field (P28.3)', () => {
     fireEvent.change(screen.getByDisplayValue(SHA), { target: { value: 'whatever' } });
     fireEvent.click(screen.getByText('Save'));
 
-    expect(await screen.findByText(/could not be applied \(422\)/)).toBeInTheDocument();
+    // The plain line leads; the status code moved behind Details (2026-11-17) and is
+    // still in the DOM.
+    expect(await screen.findByText(/That correction could not be applied\. Nothing was changed/)).toBeInTheDocument();
+    expect(screen.getByText('Server response: 422')).toBeInTheDocument();
     expect(screen.queryByText(/still holds the value it held before/)).toBeNull();
   });
 
@@ -249,7 +252,10 @@ describe('S4 · summary-first edit of a confirmed field (P28.3)', () => {
     fireEvent.change(screen.getByDisplayValue(SHA), { target: { value: 'whatever' } });
     fireEvent.click(screen.getByText('Save'));
 
-    expect(await screen.findByText(/could not be applied \(422\)/)).toBeInTheDocument();
+    // The plain line leads; the status code moved behind Details (2026-11-17) and is
+    // still in the DOM.
+    expect(await screen.findByText(/That correction could not be applied\. Nothing was changed/)).toBeInTheDocument();
+    expect(screen.getByText('Server response: 422')).toBeInTheDocument();
     expect(screen.queryByText(/still holds the value it held before/)).toBeNull();
   });
 

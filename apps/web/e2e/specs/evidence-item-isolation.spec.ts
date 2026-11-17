@@ -84,7 +84,7 @@ test('@interaction an unreadable evidence entry is shown as unavailable, and the
   await expect(trail).toBeVisible();
   await expect(page.getByRole('heading', { name: 'Evidence & File Preview' })).toBeVisible();
   await expect(page.getByRole('alert')).toHaveCount(0);
-  await expect(page.locator('body')).not.toContainText('Backend Not Running');
+  await expect(page.locator('body')).not.toContainText('ISAAC Is Not Running');
 
   // 2. The valid entries are all still listed — measured against the trail this
   //    record really has, not a hard-coded number.

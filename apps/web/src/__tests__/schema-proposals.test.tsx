@@ -258,7 +258,7 @@ describe('the destination', () => {
     });
     renderAt(ROUTE);
     await screen.findByRole('combobox', { name: 'List' });
-    await screen.findAllByRole('button', { name: 'Copy Portal Payload' });
+    await screen.findAllByRole('button', { name: 'Copy for the Portal' });
     expect(screen.getByText(COPY.boundary)).toBeInTheDocument();
     expect(document.body.textContent ?? '').not.toMatch(FALSE_CLAIM);
     // One page: the form, the proposals and the folded vocabulary are all in the document at once.
@@ -437,7 +437,7 @@ describe('Propose a Change', () => {
     const notice = within(status.closest('[role="status"]') as HTMLElement);
     // It says what to do next, and claims nothing was sent.
     expect(status.closest('[role="status"]')?.textContent ?? '').not.toMatch(FALSE_CLAIM);
-    expect(notice.getByRole('button', { name: 'Copy Portal Payload' })).toBeInTheDocument();
+    expect(notice.getByRole('button', { name: 'Copy for the Portal' })).toBeInTheDocument();
     expect(notice.getByRole('button', { name: 'Download JSON' })).toBeInTheDocument();
     // The list is beside the form, so the notice has no "View Proposals" button.
     expect(notice.queryByRole('button', { name: 'View Proposals' })).toBeNull();
@@ -736,7 +736,7 @@ describe('Proposals', () => {
       },
     });
     renderAt(`${ROUTE}?tab=proposals`);
-    await screen.findAllByRole('button', { name: 'Copy Portal Payload' });
+    await screen.findAllByRole('button', { name: 'Copy for the Portal' });
     expect(screen.getAllByRole('button', { name: 'Withdraw' })).toHaveLength(1);
 
     fireEvent.click(screen.getByRole('button', { name: 'Withdraw' }));
@@ -837,7 +837,7 @@ describe('Copy and download the portal payload', () => {
     vi.stubGlobal('navigator', { ...navigator, clipboard: { writeText } });
     stubPayload();
     renderAt(`${ROUTE}?tab=proposals`);
-    fireEvent.click(await screen.findByRole('button', { name: 'Copy Portal Payload' }));
+    fireEvent.click(await screen.findByRole('button', { name: 'Copy for the Portal' }));
     await waitFor(() => expect(writeText).toHaveBeenCalledTimes(1));
     expect(JSON.parse(writeText.mock.calls[0][0])).toEqual(payloadFor(p).body);
     const said = await screen.findByText(/^Copied\. Paste it into the ISAAC portal\.$/);
@@ -849,8 +849,8 @@ describe('Copy and download the portal payload', () => {
     vi.stubGlobal('navigator', { ...navigator, clipboard: { writeText } });
     stubPayload();
     renderAt(`${ROUTE}?tab=proposals`);
-    fireEvent.click(await screen.findByRole('button', { name: 'Copy Portal Payload' }));
-    const box = await screen.findByRole('textbox', { name: 'Portal payload' });
+    fireEvent.click(await screen.findByRole('button', { name: 'Copy for the Portal' }));
+    const box = await screen.findByRole('textbox', { name: 'Text for the portal' });
     expect(JSON.parse((box as HTMLTextAreaElement).value)).toEqual(payloadFor(p).body);
     expect(screen.queryByText(/^Copied/)).toBeNull();
   });
@@ -887,7 +887,7 @@ describe('Copy and download the portal payload', () => {
       [`GET /api/schema-proposals/${p.id}/portal-payload`]: { status: 404, body: { error: 'proposal_not_found', message: 'gone' } },
     });
     renderAt(`${ROUTE}?tab=proposals`);
-    fireEvent.click(await screen.findByRole('button', { name: 'Copy Portal Payload' }));
+    fireEvent.click(await screen.findByRole('button', { name: 'Copy for the Portal' }));
     expect(await screen.findByText(/Nothing was copied/)).toBeInTheDocument();
     expect(writeText).not.toHaveBeenCalled();
   });
@@ -940,11 +940,11 @@ describe('review fixes', () => {
       'GET /api/schema-proposals': list([proposal()]),
     });
     renderAt(`${ROUTE}?tab=browse`);
-    await screen.findAllByRole('button', { name: 'Copy Portal Payload' });
+    await screen.findAllByRole('button', { name: 'Copy for the Portal' });
     await screen.findByRole('radiogroup', { name: 'Source' });
     expect(document.querySelectorAll('.sp-screen .btn-secondary')).toHaveLength(0);
     expect(screen.getByRole('button', { name: 'Save Proposal' })).toHaveClass('btn-primary');
-    expect(screen.getByRole('button', { name: 'Copy Portal Payload' })).toHaveClass('btn-action');
+    expect(screen.getByRole('button', { name: 'Copy for the Portal' })).toHaveClass('btn-action');
     expect(screen.getByRole('button', { name: 'Download JSON' })).toHaveClass('btn-action');
     expect(screen.getByRole('button', { name: 'Withdraw' })).toHaveClass('btn-danger-quiet');
     // No browser-default <select> is left on the screen.
@@ -989,7 +989,7 @@ describe('review fixes', () => {
     expect(summary.querySelector('time')).not.toBeNull();
     expect(within(summary).queryByRole('button')).toBeNull();
     const body = details.querySelector('.sp-proposal-body') as HTMLElement;
-    for (const name of ['Copy Portal Payload', 'Download JSON', 'Withdraw']) {
+    for (const name of ['Copy for the Portal', 'Download JSON', 'Withdraw']) {
       expect(within(body).getByRole('button', { name })).toBeInTheDocument();
     }
     expect(body).toHaveTextContent('X-ray magnetic circular dichroism, measured at SSRL.');
@@ -1012,7 +1012,7 @@ describe('review fixes', () => {
       },
     });
     renderAt(`${ROUTE}?tab=proposals`);
-    fireEvent.click(await screen.findByRole('button', { name: 'Copy Portal Payload' }));
+    fireEvent.click(await screen.findByRole('button', { name: 'Copy for the Portal' }));
     const status = await screen.findByText(/Ontology Editor/);
     expect(status.textContent).toMatch(/^Copied\. /);
     expect(status.textContent).not.toMatch(FALSE_CLAIM);
@@ -1030,7 +1030,7 @@ describe('review fixes', () => {
       [`GET /api/schema-proposals/${p.id}/portal-payload`]: { body: payloadFor(p) },
     });
     renderAt(`${ROUTE}?tab=proposals`);
-    fireEvent.click(await screen.findByRole('button', { name: 'Copy Portal Payload' }));
+    fireEvent.click(await screen.findByRole('button', { name: 'Copy for the Portal' }));
     expect(await screen.findByText(/Paste it into the ISAAC portal/)).toBeInTheDocument();
   });
 

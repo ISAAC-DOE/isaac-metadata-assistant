@@ -798,8 +798,9 @@ describe('sweep guard — no unqualified whole-application claim in any frontend
     // property is the same — a sentence the source wraps over three lines is matched as
     // the one sentence the browser renders.
     const help = renderedCopy('components/HelpPanel.tsx');
+    // 2026-11-17: the sentence was split into plain ones; this one still wraps in source.
     expect(help).toContain(
-      'a record can be valid against that schema and still be refused here, and no screen reports such a refusal as a schema error.',
+      'So a record can be valid against that schema and still be refused here.',
     );
     // ...and the comments explaining the retired copy are gone, so a note about the
     // defect is never counted as the defect.

@@ -722,7 +722,7 @@ test.describe('two scientists, two real browsers, one record', () => {
         // ...and A settles on the review surface the rest of this walk observes.
         await switchWorkspace(page, 'proposals');
         await expect(
-          page.getByRole('heading', { name: 'Ingestion Proposals' }),
+          page.getByRole('heading', { name: 'Suggestions' }),
           'step 2: A is on the Proposals view',
         ).toBeVisible();
       });
@@ -887,7 +887,7 @@ test.describe('two scientists, two real browsers, one record', () => {
           'step 4: A’s page has not been reloaded since step 1 — the whole arrival claim rests on it',
         );
 
-        const proposals = page.getByRole('region', { name: 'Ingestion Proposals' });
+        const proposals = page.getByRole('region', { name: 'Suggestions' });
         const arrivalNote = proposals.locator('.proposals-arrival-note-text');
 
         /*
@@ -1237,7 +1237,7 @@ test.describe('two scientists, two real browsers, one record', () => {
         await expect(
           card.locator('.proposal-target-state'),
           'step 7: the card tells the reader the value moved',
-        ).toContainText(/CHANGED since this proposal was made/, { timeout: DISCOVERY_DEADLINE });
+        ).toContainText(/has changed since this proposal was made/, { timeout: DISCOVERY_DEADLINE });
         /*
          * ACCEPT IS STILL OFFERED, AND THAT IS DELIBERATE RATHER THAN A DEFECT.
          * `acceptUnavailableReason` fails OPEN — `target_stale` was read a moment ago
@@ -1508,7 +1508,7 @@ test.describe('two scientists, two real browsers, one record', () => {
          * and the absence of a "Submit" one is asserted too rather than assumed.
          */
         await switchWorkspace(page, 'proposals');
-        const proposals = page.getByRole('region', { name: 'Ingestion Proposals' });
+        const proposals = page.getByRole('region', { name: 'Suggestions' });
         /*
          * THE REGION IS ASSERTED PRESENT BEFORE ANYTHING IS COUNTED IN IT — ADDED
          * AFTER INDEPENDENT REVIEW (m-3). Four `toHaveCount(0)` checks scoped to a
@@ -1812,7 +1812,7 @@ test.describe('two scientists, two real browsers, one record', () => {
 
       await switchWorkspace(page, 'proposals');
       await expect(
-        page.getByRole('region', { name: 'Ingestion Proposals' }).locator('.proposals-empty'),
+        page.getByRole('region', { name: 'Suggestions' }).locator('.proposals-empty'),
         'A’s review surface starts empty, so the arrival below is unambiguous',
       ).toBeVisible();
       await plantSameDocumentMark(page);
@@ -1826,7 +1826,7 @@ test.describe('two scientists, two real browsers, one record', () => {
         'and the server holds exactly those',
       ).toBe(minted);
 
-      const proposals = page.getByRole('region', { name: 'Ingestion Proposals' });
+      const proposals = page.getByRole('region', { name: 'Suggestions' });
       const arrivalNote = proposals.locator('.proposals-arrival-note-text');
       await expect(arrivalNote, 'A is told, at the widest viewport').toBeVisible({
         timeout: DISCOVERY_DEADLINE,
