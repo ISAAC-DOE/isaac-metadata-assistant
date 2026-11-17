@@ -2,8 +2,9 @@
 
 The official ISAAC portal (upstream ``ISAAC-DOE/isaac-ai-ready-record``) validates a
 submitted record with ``portal/validation.validate_record_full`` against the CURRENT
-upstream schema, vocabulary and semantic rules — stricter than this repository's
-vendored v1.05 schema. This module runs that same function, from a PINNED upstream
+upstream schema, vocabulary and semantic rules — its vocabulary and semantic layers go beyond
+what any JSON schema expresses. Since 2026-11-16 this repository's vendored schema is the
+pinned commit's own document (``schema/PROVENANCE.md``). This module runs that same function, from a PINNED upstream
 checkout, in an ISOLATED interpreter (a subprocess with ``-I``), and hands back its
 result verbatim.
 
