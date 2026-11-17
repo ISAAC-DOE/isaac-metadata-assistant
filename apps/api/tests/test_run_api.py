@@ -4385,7 +4385,11 @@ _DISCLOSED_TRUTH_PATH_CHANGES: dict[str, str] = {
         "schema's own context.allOf rule; previously such a draft was refused for a missing "
         "required property). A null without that basis is never written. Exported records "
         "change only for drafts carrying the new fields. Covered by "
-        "tests/test_portal_schema_fields.py."
+        "tests/test_portal_schema_fields.py. ALSO (a defect that predates this branch, found "
+        "by its review): `export_draft` refuses any field envelope whose status is "
+        "`needs_confirmation`; `transform` wrote such a value, with no evidence, into the "
+        "official record. `validate_draft` is unchanged, so drafts in progress report as "
+        "before."
     ),
     "src/isaac_records/cli.py": (
         "`isaac validate --official` now also runs `exactness.check_exactness`, prints "

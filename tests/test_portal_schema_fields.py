@@ -277,6 +277,17 @@ def test_a_needs_confirmation_temperature_is_not_closed_by_the_basis(draft):
     # LOW 1: an evidenced `not_reported` basis must not answer an open temperature question.
     draft["fields"]["context.temperature_K"] = {"value": None, "status": "needs_confirmation", "evidence": []}
     draft["fields"]["context.temperature_basis"] = _envelope("not_reported")
+    # transform itself does not close it (no null is written) ...
+    assert "temperature_K" not in transform(draft, record_id=RID, now=NOW)["context"]
+    # ... and export refuses.
+    assert not export_draft(draft, ROOT, record_id=RID, now=NOW).ok
+
+
+def test_a_needs_confirmation_value_is_never_exported(draft):
+    """Predates #323: `transform` wrote any non-null value regardless of status, so an
+    unconfirmed value with no evidence went into an official record."""
+    draft["fields"]["sample.material.formula"] = {"value": "SYNTHETIC-Cu9", "status": "needs_confirmation", "evidence": []}
+    assert validate_draft(draft).ok  # still a legitimate DRAFT state
     result = export_draft(draft, ROOT, record_id=RID, now=NOW)
-    assert not result.ok
-    assert "temperature_K" not in result.record["context"]
+    assert not result.ok and result.record is None and result.sidecar is None
+    assert any(where == "fields.sample.material.formula" for where, _ in result.draft_report.errors)

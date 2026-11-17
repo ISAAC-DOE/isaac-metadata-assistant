@@ -321,6 +321,18 @@ def export_draft(
     now: str | None = None,
 ) -> ExportResult:
     draft_report = validate_draft(draft)
+    # AN OPEN QUESTION IS NEVER EXPORTED (CLAUDE.md §5). `validate_draft` accepts a
+    # `needs_confirmation` envelope (it is a legitimate DRAFT state), and `transform` writes
+    # every non-null value regardless of status, so an unconfirmed, unevidenced value went
+    # into an official record. Refused here, at export only, so drafts in progress are
+    # reported exactly as before. Predates the 2026-11-16 schema re-vendoring.
+    for path, env in (draft.get("fields") or {}).items() if isinstance(draft.get("fields"), dict) else ():
+        if isinstance(env, dict) and env.get("status") == "needs_confirmation":
+            draft_report.err(
+                f"fields.{path}",
+                "status 'needs_confirmation' is an open question: confirm the value with its "
+                "evidence, or mark it missing, before export",
+            )
     if record_id is not None and not is_record_id(record_id):
         # The message must NOT quote `^[0-9A-Z]{26}$` as the rule it applied. That was
         # the old text, and it was false in the one case that matters most: for
