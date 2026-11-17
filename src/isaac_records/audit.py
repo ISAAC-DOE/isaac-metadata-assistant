@@ -31,12 +31,19 @@ _EXCLUDE_TOP = {
 }
 # Dotted subtrees/leaves that never contribute scalar targets. ``timestamps.created_utc``
 # is system-stamped; ``tags`` are user-authored labels; ``measurement.qc`` is covered by
-# the ``qc:status`` block target; ``attribution`` contributors are per-person block targets.
+# the ``qc:status`` block target; ``attribution`` contributors are per-person block targets
+# and ``attribution.uploaded_by`` is server-stamped. ``attribution.produced_by`` (declared by
+# the schema vendored 2026-11-16) is NOT excluded: who produced a result is a claim, written
+# from evidence-gated field envelopes whose sidecar keys are its dotted paths, so its scalar
+# leaves are expected targets like any other. Excluding the whole ``attribution`` subtree, as
+# this did when the schema had nothing else there, would have audited an uncited
+# ``produced_by`` at full coverage.
 _EXCLUDE_PATHS = {
     "timestamps.created_utc",
     "tags",
     "measurement.qc",
-    "attribution",
+    "attribution.contributors",
+    "attribution.uploaded_by",
 }
 
 
@@ -56,6 +63,15 @@ def _scalar_targets(record: dict) -> list[str]:
                 walk(value, path)
             elif isinstance(value, list):
                 continue  # lists are block territory, never scalar targets
+            elif value is None:
+                # A null asserts NO value, so there is nothing for evidence to support
+                # (CLAUDE.md §5: every NON-null finalized field needs evidence), and
+                # `build_sidecar` never files evidence under a null. The one null the
+                # schema now requires is `context.temperature_K` with
+                # `temperature_basis: not_reported`; the basis is the evidenced claim
+                # and is a target in its own right. Counting the null would report a
+                # stated absence as uncovered forever.
+                continue
             else:
                 out.append(path)
 

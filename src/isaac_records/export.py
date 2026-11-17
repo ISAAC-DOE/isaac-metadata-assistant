@@ -127,6 +127,33 @@ def _enforce_server_owned_invariant(record: dict) -> None:
             del record[block_key]
 
 
+def _write_not_reported_temperature(record: dict) -> None:
+    """Write ``context.temperature_K: null`` when, and only when, the record states
+    ``context.temperature_basis: "not_reported"`` and carries no ``temperature_K`` at all.
+
+    The schema vendored on 2026-11-16 REQUIRES ``context.temperature_K`` and makes it
+    ``number | null``, with a ``context.allOf`` rule tying the two together: null only with
+    basis ``not_reported``, and basis ``not_reported`` only with null. The ``fields`` loop
+    skips a null or ``status: missing`` envelope, so without this a draft whose evidenced
+    answer is "the source does not state the temperature" exported a record with NO
+    ``temperature_K`` and was refused for a missing required property — reporting the
+    stated absence as an unanswered question.
+
+    This is the schema's own rule, not a guess: null asserts no value, and it is written only
+    for the one basis that means "not stated". Nothing is defaulted. A draft that holds a
+    number AND ``not_reported`` keeps its number, and official validation refuses the
+    contradiction; a null temperature WITHOUT that basis is never written here, so the
+    schema still refuses it (or reports the missing property) exactly as before."""
+    context = record.get("context")
+    if not isinstance(context, dict):
+        return
+    if context.get("temperature_basis") == "not_reported" and "temperature_K" not in context:
+        # A copy, not an in-place write: under the whole-block spelling
+        # (`fields["context"] = {"value": {...}}`) `record["context"]` IS the draft's own dict,
+        # and `transform` must stay side-effect free (see `_enforce_server_owned_invariant`).
+        record["context"] = {**context, "temperature_K": None}
+
+
 def transform(draft: dict, *, record_id: str | None = None, now: str | None = None) -> dict:
     """Build the official-shape record from a draft (no validation here)."""
     now = now or _now_iso()
@@ -189,7 +216,19 @@ def transform(draft: dict, *, record_id: str | None = None, now: str | None = No
     if draft.get("links") is not None:
         record["links"] = strip_evidence(draft["links"])
     if draft.get("attribution"):
-        record["attribution"] = strip_evidence(draft["attribution"])
+        block = strip_evidence(draft["attribution"])
+        existing = record.get("attribution")
+        # MERGE, NOT REPLACE, since the 2026-11-16 schema declares `attribution.produced_by`:
+        # the `fields` loop above writes `attribution.produced_by.*` envelopes into
+        # `record["attribution"]`, and assigning the block over it silently DROPPED them from
+        # any draft that also carried contributors. Block keys win on a collision, which is
+        # the previous behaviour for every key the block holds. (`validate_draft` refuses
+        # `produced_by` inside the block, so the two spellings do not meet there.)
+        if isinstance(existing, dict) and isinstance(block, dict):
+            record["attribution"] = {**existing, **block}
+        else:
+            record["attribution"] = block
+    _write_not_reported_temperature(record)
     if draft.get("tags"):
         record["tags"] = list(draft["tags"])
 
