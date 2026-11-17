@@ -60,6 +60,7 @@ import { API_ACCESS_COPY, SETTINGS_WIDGET_COPY as COPY } from '../../lib/setting
 import type { ApiOpenApiResponse } from '../../lib/types';
 import type { useFetch } from '../../lib/useFetch';
 import { ApiProgramAgentView, ApiQuickStartView } from './ApiDocs';
+import { devToolsEnabled } from '../../lib/devTools';
 
 type OpenApiState = ReturnType<typeof useFetch<ApiOpenApiResponse>>;
 
@@ -68,10 +69,18 @@ export const API_WIDGET_HEADING_ID = 'settings-apiaccess-heading';
 export function ApiKeysPanel({
   state,
   onOpenExplorer,
+  withGuide = devToolsEnabled(),
 }: {
   state: OpenApiState;
   /** Absent without the developer flag (no Endpoint Explorer to open). */
   onOpenExplorer?: () => void;
+  /**
+   * Whether Quick Start and Program an Agent render. ONE LINE AND NOTHING ELSE in an
+   * ordinary build (2026-11-17, owner's direction: Settings must not read like an
+   * engineer wrote it) — there is no key to set up, so the HTTP guide is a developer's
+   * reference and renders only with the developer flag (`VITE_ISAAC_DEV_TOOLS=1`).
+   */
+  withGuide?: boolean;
 }) {
   const programRef = useRef<HTMLDivElement>(null);
 
@@ -94,7 +103,7 @@ export function ApiKeysPanel({
       title={COPY.apiTitle}
       icon={<Lock size={18} strokeWidth={2} />}
       headline={<p className="settings-state-line">{API_ACCESS_COPY.stateLine}</p>}
-      details={{
+      details={!withGuide ? undefined : {
         summary: COPY.apiSetup,
         content: (
           <div className="settings-sequence">

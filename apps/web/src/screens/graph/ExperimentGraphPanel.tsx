@@ -31,6 +31,7 @@ import {
 import { pointerHitRadius, screenBoundedUnits, type GraphPoint } from '../../lib/graphModel';
 import type { ExperimentGraphBundle } from '../../lib/types';
 import { Maximize2, RotateCcw, ZoomIn, ZoomOut } from '../../components/icons';
+import { TechnicalDetails } from '../../components/TechnicalDetails';
 
 /**
  * The EXPERIMENT-SCOPED graph — a picture of ONE experiment's science, not of
@@ -923,6 +924,8 @@ function NodeDetail({
   onJump: (to: string) => void;
 }) {
   const neighbours = graph.adjacency.get(node.id) ?? [];
+  const plainLines = node.detail.filter((line) => !line.technical);
+  const technicalLines = node.detail.filter((line) => line.technical);
 
   return (
     <div className="expgraph-detail-body">
@@ -946,15 +949,29 @@ function NodeDetail({
         <span className="expgraph-detail-producer-value">{node.producer}</span>
       </details>
 
-      {node.detail.length > 0 && (
+      {plainLines.length > 0 && (
         <dl className="expgraph-detail-list">
-          {node.detail.map((line, i) => (
+          {plainLines.map((line, i) => (
             <div className="expgraph-detail-row" key={`${line.term}-${i}`}>
               <dt>{line.term}</dt>
               <dd>{line.value}</dd>
             </div>
           ))}
         </dl>
+      )}
+      {/* Ids, codes and exact timestamps: one closed row, still in the DOM
+          (2026-11-17, plain-language pass). */}
+      {technicalLines.length > 0 && (
+        <TechnicalDetails>
+          <dl className="expgraph-detail-list">
+            {technicalLines.map((line, i) => (
+              <div className="expgraph-detail-row" key={`${line.term}-${i}`}>
+                <dt>{line.term}</dt>
+                <dd className="mono">{line.value}</dd>
+              </div>
+            ))}
+          </dl>
+        </TechnicalDetails>
       )}
 
       <div className="expgraph-detail-actions">

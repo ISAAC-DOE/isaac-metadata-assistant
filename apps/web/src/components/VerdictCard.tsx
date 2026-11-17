@@ -1,6 +1,7 @@
 import './signals.css';
 import { Check, TriangleAlert } from './icons';
 import { LABELS } from '../lib/labels';
+import { SchemaMessage } from './TechnicalDetails';
 import type { ValidationResult } from '../lib/types';
 
 interface VerdictCardProps {
@@ -138,7 +139,8 @@ export function VerdictCard({ result, onRevalidate, onBackToComplete }: VerdictC
               errors on the surface that reports the export gate. */}
           {result.errors.map((err, i) => (
             <div className="schema-error-row" key={`${i}:${err.path}`}>
-              <span className="schema-error-path mono">{err.path}</span> — {err.message}
+              <span className="schema-error-path mono">{err.path}</span> —{' '}
+              <SchemaMessage message={err.message} path={err.path} />
             </div>
           ))}
           {exactnessErrors.length === 0 && failFooter}
@@ -162,7 +164,8 @@ export function VerdictCard({ result, onRevalidate, onBackToComplete }: VerdictC
           </p>
           {exactnessErrors.map((err, i) => (
             <div className="schema-error-row" key={`${i}:${err.path}`}>
-              <span className="schema-error-path mono">{err.path}</span> — {err.message}
+              <span className="schema-error-path mono">{err.path}</span> —{' '}
+              <SchemaMessage message={err.message} path={err.path} />
             </div>
           ))}
           {failFooter}

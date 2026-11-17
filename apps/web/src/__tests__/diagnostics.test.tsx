@@ -604,6 +604,9 @@ describe('the two mounts', () => {
         <SettingsPage />
       </MemoryRouter>,
     );
+    /* 2026-11-17: Copy Diagnostics sits inside Version's closed Technical Details
+       disclosure (owner's direction: plain pages) — reachable, one press away. */
+    fireEvent.click(await view.findByRole('button', { name: 'Technical Details' }));
     const button = await view.findByRole('button', { name: /Copy Diagnostics/ });
     expect(button).toBeInTheDocument();
     // Never the error state — this mount exists precisely so the report is
@@ -626,6 +629,7 @@ describe('the two mounts', () => {
         <SettingsPage />
       </MemoryRouter>,
     );
+    fireEvent.click(await view.findByRole('button', { name: 'Technical Details' }));
     const button = await view.findByRole('button', { name: /Copy Diagnostics/ });
     vi.stubGlobal('navigator', { ...navigator, clipboard: { writeText }, onLine: true });
     fireEvent.click(button);

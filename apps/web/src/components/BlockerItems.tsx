@@ -3,6 +3,7 @@ import { useId } from 'react';
 import { Link, useInRouterContext } from 'react-router-dom';
 import { CornerDownRight } from './icons';
 import { HelpTip } from './HelpTip';
+import { SchemaMessage } from './TechnicalDetails';
 import { fieldLabel, isRunFieldPath, officialPathOf } from '../lib/fieldLabels';
 import { RUN_FIELDS } from '../lib/runFields';
 import { RECORD_FIELDS } from '../lib/recordFields';
@@ -205,7 +206,8 @@ function BlockerItem({
             );
           })()}
       </span>
-      <span className="blocker-message">{message}</span>
+      {/* Plain line first; the validator's exact words behind Details (2026-11-17). */}
+      <SchemaMessage className="blocker-message" message={message} path={path} />
     </li>
   );
 }

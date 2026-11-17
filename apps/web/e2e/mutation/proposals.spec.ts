@@ -322,7 +322,7 @@ async function assertNoAttributableActor(api: APIRequestContext): Promise<void> 
 async function openRecord(page: Page, id: string): Promise<void> {
   // 2026-09-22: the proposals panel moved to the focused Proposals view.
   await page.goto(`/record/${id}?view=proposals`);
-  await expect(page.getByRole('heading', { name: 'Ingestion Proposals' })).toBeVisible();
+  await expect(page.getByRole('heading', { name: 'Suggestions' })).toBeVisible();
   // The panel's own count line, which is only rendered once a window has LOADED.
   // Waiting on it means no assertion below races the first read.
   await expect(page.locator('.proposals-count')).not.toBeEmpty();

@@ -958,18 +958,18 @@ export function IngestionProposalsPanel({
           state uses it as its primary action's destination ("Review N Proposals"
           scrolls here and focuses it), exactly the pattern skip-links use.
         */}
+        {/* "Ingestion Proposals" until 2026-11-17 — the owner's plain-language pass. */}
         <h2 className="proposals-title" id="ingestion-proposals-heading" tabIndex={-1}>
-          Ingestion Proposals
+          Suggestions
         </h2>
         {/* One line, and the full account one `?` away (DEC-35). */}
         <p className="proposals-sub">
-          Stored suggestions about one field each.{' '}
-          <HelpTip subject="Ingestion Proposals">
+          Values suggested for a field, waiting for you to review.{' '}
+          <HelpTip subject="Suggestions">
             <span>
-              Each proposal is a value, the field path it is for, and the rule that
-              produced it. A proposal is not a field value or evidence, even once
-              accepted. Rejecting, superseding and withdrawing are states, and the note
-              behind a proposal survives all of them.
+              Each suggestion is one value for one field, with where it came from. It is
+              not part of the record until you accept it. If you reject, replace or
+              withdraw it, the note it came from stays on the record.
             </span>
           </HelpTip>
         </p>
@@ -2307,7 +2307,7 @@ function ProposalsBrowser({
       )}
 
       {list.status === 'loading' && (
-        <LoadingPanel label="Loading this record's ingestion proposals…" />
+        <LoadingPanel label="Loading this record's suggestions…" />
       )}
       {list.status === 'error' && (
         <BackendDown error={list.error} onRetry={() => reload(false)} />
@@ -2546,7 +2546,7 @@ function EmptyProposals({
           <span>
             A proposal is a value suggested for a field, waiting for your review. One is
             created three ways: finishing a transcript capture adds one for each value it
-            can store, proposing a value from a note in Unmapped Notes adds one, and a
+            can store, proposing a value from a note in Notes Not Yet in a Field adds one, and a
             connected AI agent can propose one from a note it cites. Nothing is inferred
             from this record&rsquo;s contents on its own.
           </span>

@@ -122,13 +122,20 @@ describe('A11Y-04 · a scrollable region a keyboard user can actually scroll', (
    * VERIFIED TO FAIL PRE-FIX: `expected null to be '0'`.
    */
   it('the API Access code sample is focusable and named', async () => {
-    const { container } = renderSettings('/settings?tab=api');
-    await waitFor(() => {
-      expect(container.querySelector('pre.api-samples-code')).not.toBeNull();
-    });
-    const sample = container.querySelector('pre.api-samples-code')!;
-    expect(sample.getAttribute('tabindex')).toBe('0');
-    expect(landmarkName(sample)).not.toBe('');
+    /* 2026-11-17: the API guide (and this sample) renders only with the developer flag
+       (owner's direction: an ordinary build's API Access is one plain line). */
+    vi.stubEnv('VITE_ISAAC_DEV_TOOLS', '1');
+    try {
+      const { container } = renderSettings('/settings?tab=api');
+      await waitFor(() => {
+        expect(container.querySelector('pre.api-samples-code')).not.toBeNull();
+      });
+      const sample = container.querySelector('pre.api-samples-code')!;
+      expect(sample.getAttribute('tabindex')).toBe('0');
+      expect(landmarkName(sample)).not.toBe('');
+    } finally {
+      vi.unstubAllEnvs();
+    }
   });
 
   /*

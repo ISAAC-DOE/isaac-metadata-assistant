@@ -2,6 +2,8 @@ import './validate-review.css';
 import { LABELS } from '../lib/labels';
 import { useId, useRef, useState } from 'react';
 import { BlockerItems } from './BlockerItems';
+import { TechnicalDetails } from './TechnicalDetails';
+import { advisoryTitle } from '../lib/advisoryTitles';
 import { Disclosure } from './Disclosure';
 import { HelpTip } from './HelpTip';
 import { FindingList } from './RunFindingList';
@@ -767,8 +769,13 @@ function UnitGroup({
           <ul className="vr-advisory-list">
             {adviceWarnings.map((warning, j) => (
               <li key={`${j}:${warning.code}`}>
-                <span className="mono">[{warning.code}]</span> {warning.where} —{' '}
-                {warning.message}
+                {/* Plain sentence first; the code, location and server message behind
+                    Details (2026-11-17). */}
+                <span>{advisoryTitle(warning.code)}</span>
+                <TechnicalDetails>
+                  <span className="mono">[{warning.code}]</span> {warning.where} —{' '}
+                  {warning.message}
+                </TechnicalDetails>
               </li>
             ))}
           </ul>

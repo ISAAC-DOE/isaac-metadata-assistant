@@ -1615,7 +1615,7 @@ export const LABELS = {
   helpOnPageExport: 'A dry run: what would still refuse the export. Nothing is written here.',
   helpOnPageImports: 'How to import a past beamtime with the ISAAC skill in Claude Code.',
   helpOnPageStatistics: 'Workspace record counts and checks.',
-  helpOnPageSettings: "This deployment's build details and integrations.",
+  helpOnPageSettings: 'Where your data is kept, the app version, the walkthrough, and agent access.',
   helpOnPageGovernance: 'Check a record file against the official schema, or browse it.',
   helpOnPageMemory: "A developer map of this project's own files and docs.",
   helpOnPageUnknown: 'This address matches no screen in ISAAC.',
@@ -1645,7 +1645,9 @@ export const LABELS = {
   // The graph command bar's disclosure for the hint and the suggested commands.
   graphCommandsToggle: 'Suggestions',
   graphCanvasInfoLabel: 'About This View',
-  helpStepsNote: "Each step is re-derived from the record's current state; export needs all three gates.",
+  /* 2026-11-17 (owner's direction: plain words): ~~"Each step is re-derived from the
+     record's current state; export needs all three gates."~~ */
+  helpStepsNote: 'Each step updates as you work. Export needs every check to pass.',
   helpOnPageHeading: 'On This Page',
 
   /*

@@ -156,7 +156,7 @@ describe('the empty state', () => {
     stubFetchRoutes({ [NOTES]: { body: notesEmpty } });
     renderPanel();
 
-    await screen.findByText(/No unmapped notes on this record/);
+    await screen.findByText(/No notes waiting for a field/);
     // One line (declutter, 2026-11-02), and no controls over an empty record.
     expect(screen.queryByLabelText('Show')).toBeNull();
     expect(document.querySelector('.notes-count')).toBeNull();
@@ -614,7 +614,7 @@ describe('what this build could not read is disclosed, not hidden', () => {
     });
     renderPanel();
 
-    const empty = await screen.findByText(/No unmapped notes on this record/);
+    const empty = await screen.findByText(/No notes waiting for a field/);
     expect(empty.textContent).toContain('1 stored entry that cannot be shown');
     expect(empty.textContent).toContain('kept unchanged on the record');
   });
@@ -827,7 +827,7 @@ describe('accessibility', () => {
     await screen.findByText(noteFixture().text);
     const section = container.querySelector('section.notes-section');
     expect(section?.getAttribute('aria-labelledby')).toBe('unmapped-notes-heading');
-    expect(screen.getByRole('heading', { name: 'Unmapped Notes' })).toBeTruthy();
+    expect(screen.getByRole('heading', { name: 'Notes Not Yet in a Field' })).toBeTruthy();
 
     const count = container.querySelector('.notes-count');
     expect(count?.getAttribute('aria-live')).toBe('polite');
@@ -1264,7 +1264,7 @@ describe('propose a value from this note', () => {
     });
     fireEvent.click(screen.getByRole('button', { name: 'Propose This Value' }));
 
-    await screen.findByText(/Proposal stored\. Review it in Ingestion Proposals\./);
+    await screen.findByText(/Proposal stored\. Review it in Suggestions\./);
     const calls = (globalThis.fetch as Mock).mock.calls as [string, RequestInit?][];
     const create = calls.find(([, init]) => init?.method === 'POST');
     expect(create).toBeDefined();
@@ -1425,7 +1425,7 @@ describe('propose a value from this note', () => {
     });
     const submit = screen.getByRole('button', { name: 'Propose This Value' });
     fireEvent.click(submit);
-    await screen.findByText(/Proposal stored\. Review it in Ingestion Proposals\./);
+    await screen.findByText(/Proposal stored\. Review it in Suggestions\./);
 
     // A second identical submit (e.g. the form re-opened and re-sent) is answered
     // `deduplicated: true`, and the panel says so rather than claiming a second
@@ -1460,7 +1460,7 @@ describe('propose a value from this note', () => {
       target: { value: '"XRD"' },
     });
     fireEvent.click(screen.getByRole('button', { name: 'Propose This Value' }));
-    await screen.findByText(/Proposal stored\. Review it in Ingestion Proposals\./);
+    await screen.findByText(/Proposal stored\. Review it in Suggestions\./);
 
     const postCallsAfterChange = (
       (globalThis.fetch as Mock).mock.calls as [string, RequestInit?][]
@@ -1926,7 +1926,7 @@ describe('C1: a silent reload that fails before anything has ever loaded', () =>
         },
       });
       const view = renderPanel(null);
-      await screen.findByText(/Loading this record's unmapped notes/);
+      await screen.findByText(/Loading this record's notes/);
 
       // The reader changes `Show` before that first load has resolved. This is a
       // SILENT reload (see the `onChange` comment) and it supersedes the first.
@@ -1937,7 +1937,7 @@ describe('C1: a silent reload that fails before anything has ever loaded', () =>
       // `listStatusRef.current` was `'loading'` — nothing had ever succeeded, so
       // there was nothing to protect and this correctly took the LOUD path.
       expect(await screen.findByText(/Backend Not Running/)).toBeTruthy();
-      expect(screen.queryByText(/Loading this record's unmapped notes/)).toBeNull();
+      expect(screen.queryByText(/Loading this record's notes/)).toBeNull();
       expect(screen.getByRole('button', { name: 'Retry' })).toBeTruthy();
       // And the non-destructive notice is NOT also showing beside it — the two are
       // mutually exclusive by design.
@@ -1969,7 +1969,7 @@ describe('C1: a silent reload that fails before anything has ever loaded', () =>
         },
       });
       const view = renderPanel(null);
-      await screen.findByText(/Loading this record's unmapped notes/);
+      await screen.findByText(/Loading this record's notes/);
 
       view.rerender(
         <MemoryRouter
@@ -2227,7 +2227,7 @@ describe('a Show-filter change that fails', () => {
 
     // Now the LOUD reload. The list blanks, and the notice must go with it.
     fireEvent.click(clear);
-    expect(await screen.findByText(/Loading this record's unmapped notes/)).toBeTruthy();
+    expect(await screen.findByText(/Loading this record's notes/)).toBeTruthy();
     expect(
       screen.queryByText(/A background refresh of this list did not complete/, {
         selector: NOTICE,

@@ -390,9 +390,9 @@ test.describe('two scientists, one record, end to end', () => {
      * assertion in step 7 depends on no navigation happening after this point.
      */
     await switchWorkspace(page, 'proposals');
-    const proposals = page.getByRole('region', { name: 'Ingestion Proposals' });
+    const proposals = page.getByRole('region', { name: 'Suggestions' });
     await expect(
-      page.getByRole('heading', { name: 'Ingestion Proposals' }),
+      page.getByRole('heading', { name: 'Suggestions' }),
       'step 5: the review surface is on this screen'
     ).toBeVisible();
     await expect(
@@ -977,7 +977,7 @@ test.describe('two scientists, one record, end to end', () => {
     ).toBe('filesystem');
 
     await page.reload();
-    await expect(page.getByRole('heading', { name: 'Ingestion Proposals' })).toBeVisible();
+    await expect(page.getByRole('heading', { name: 'Suggestions' })).toBeVisible();
     await expect(
       cardInState(page, runTarget.path, 'Accepted'),
       'step 18: the accepted proposal survives'

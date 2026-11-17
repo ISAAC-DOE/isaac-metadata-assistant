@@ -1,4 +1,5 @@
 import './screens.css';
+import { TechnicalDetails } from '../components/TechnicalDetails';
 import '../components/assistant.css';
 import { useEffect, useMemo, useState, useRef, type MutableRefObject } from 'react';
 import type { ReactNode } from 'react';
@@ -1116,8 +1117,11 @@ function LoadedCompletion({
         <div className="completion-submit-error" role="alert">
           {serverExplanation(editError) ?? (
             <>
-              That correction could not be applied ({editError.status ?? 'error'}). Nothing was
-              changed — try again.
+              That correction could not be applied. Nothing was changed — try again.
+              {/* The status code is for whoever investigates (2026-11-17). */}
+              {editError.status !== undefined && (
+                <TechnicalDetails>Server response: {editError.status}</TechnicalDetails>
+              )}
             </>
           )}
         </div>
@@ -1376,8 +1380,8 @@ function LoadedCompletion({
                 named by `LABELS.screenExport` rather than a literal, for the reason
                 below. */}
             <p className="completion-done-text">
-              Every blocker the system refused to guess is now confirmed or resolved. Three
-              gates decide export, and they run on the {LABELS.screenExport} screen.
+              You&rsquo;ve answered every question ISAAC couldn&rsquo;t answer for you. Export
+              runs three checks, on the {LABELS.screenExport} screen.
             </p>
           </div>
         </div>
@@ -1704,8 +1708,11 @@ function LoadedCompletion({
             <div className="completion-submit-error" role="alert">
               {serverExplanation(submitError) ?? (
                 <>
-                  That answer could not be applied ({submitError.status ?? 'error'}). Nothing
-                  was changed — try again.
+                  That answer could not be applied. Nothing was changed — try again.
+                  {/* The status code is for whoever investigates (2026-11-17). */}
+                  {submitError.status !== undefined && (
+                    <TechnicalDetails>Server response: {submitError.status}</TechnicalDetails>
+                  )}
                 </>
               )}
             </div>

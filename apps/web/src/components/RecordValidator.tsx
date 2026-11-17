@@ -2,6 +2,8 @@ import './record-validator.css';
 import { useRef, useState } from 'react';
 import { VerdictCard } from './VerdictCard';
 import { Widget } from './Widget';
+import { TechnicalDetails } from './TechnicalDetails';
+import { advisoryTitle } from '../lib/advisoryTitles';
 import { LoadingPanel, BackendDown } from './FetchStates';
 import { Upload, FileJson, TriangleAlert } from './icons';
 import { api, ApiError } from '../lib/api';
@@ -388,8 +390,13 @@ export function RecordValidator() {
                 <ul className="rec-val-advisory-list">
                   {outcome.warnings.map((w) => (
                     <li key={`${w.code}:${w.where}`} className="rec-val-advisory-item">
-                      <code className="mono rec-val-advisory-where">{w.where}</code>
-                      <span className="rec-val-advisory-msg">{w.message}</span>
+                      {/* Plain sentence first; the location and the check's own
+                          message behind Details (2026-11-17). */}
+                      <span className="rec-val-advisory-msg">{advisoryTitle(w.code)}</span>
+                      <TechnicalDetails>
+                        <code className="mono rec-val-advisory-where">{w.where}</code>{' '}
+                        <span>{w.message}</span>
+                      </TechnicalDetails>
                     </li>
                   ))}
                 </ul>

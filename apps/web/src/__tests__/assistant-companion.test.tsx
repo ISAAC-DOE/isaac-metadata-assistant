@@ -45,7 +45,7 @@ import { execFileSync } from 'node:child_process';
 import { existsSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 
-import { describe, it, expect, afterEach, vi } from 'vitest';
+import { describe, it, expect, afterEach, beforeEach, vi } from 'vitest';
 import { render, screen, within, cleanup, waitFor, fireEvent } from '@testing-library/react';
 
 import { MemoryRouter } from 'react-router-dom';
@@ -69,6 +69,7 @@ import {
 afterEach(() => {
   cleanup();
   vi.unstubAllGlobals();
+  vi.unstubAllEnvs();
 });
 
 const ROUTE = 'GET /api/runtime/assistant-companion';
@@ -187,6 +188,37 @@ function renderedUrls(container: HTMLElement): string[] {
 // --- it actually reaches a screen a scientist opens -------------------------
 
 describe('the section is mounted on a real tab, not merely written', () => {
+  /* 2026-11-17 (owner's direction: plain pages): in an ordinary build the unconfigured
+     Connect Your Agent widget is one line and nothing else, so the companion is
+     mounted on Integrations WITH THE DEVELOPER FLAG (or once an agent address is
+     published). The two mount tests below run with the flag; the third pins that an
+     ordinary build neither renders the section nor issues its read. */
+  beforeEach(() => {
+    vi.stubEnv('VITE_ISAAC_DEV_TOOLS', '1');
+  });
+
+  it('an ordinary build does not mount it on the unconfigured Integrations tab, and reads nothing', async () => {
+    vi.stubEnv('VITE_ISAAC_DEV_TOOLS', '');
+    const calls = stubFetchRoutes({
+      'GET /api/about': { body: aboutResponse },
+      'GET /api/openapi': { body: openApiFixture },
+      'GET /api/graph/status': { body: graphStatusAvailable },
+      [ROUTE]: { body: assistantCompanionUnconfigured },
+    });
+    render(
+      <MemoryRouter
+        initialEntries={[ROUTES.settingsTab('mcp')]}
+        future={{ v7_startTransition: true, v7_relativeSplatPath: true }}
+      >
+        <SettingsPage />
+      </MemoryRouter>,
+    );
+    const panel = await screen.findByRole('tabpanel', { name: 'Integrations' });
+    await waitFor(() => expect(calls.length).toBeGreaterThan(0));
+    expect(within(panel).queryByRole('heading', { name: COPY.heading })).toBeNull();
+    expect(calls.filter((key) => key === ROUTE)).toHaveLength(0);
+  });
+
   it('renders inside Settings → Integrations → Connect Your Agent, from a ?tab= deep link', async () => {
     /*
      * The claim `artifact_link.py` existed for four commits without: a validated

@@ -279,14 +279,14 @@ export const SUB_RESOURCE_LABELS: Readonly<Record<string, string>> = {
   // anywhere: a path exists exactly while some experiment names it.
   folder: 'which folder this is in',
   ingestion: 'a CSV comparison',
-  notes: 'the unmapped notes',
+  notes: 'the notes not yet in a field',
   pending: 'the missing fields',
   // The three `/proposals…` operations. "the ingestion proposals" is the product's own
   // heading for this section (`IngestionProposalsPanel`), in the register `notes`
   // already uses for "the unmapped notes"; `proposals` alone is the wire segment and,
   // taken bare, reads as this application's OTHER proposal — the assistant's staged,
   // in-session one — which is a different thing entirely.
-  proposals: 'the ingestion proposals',
+  proposals: 'the suggestions',
   // `GET .../provenance`. "Where the values came from" is the product's phrasing
   // for this axis (`lib/provenance.ts`: origin and review state, two separate
   // answers); `provenance` is the wire segment and never reaches a scientist.

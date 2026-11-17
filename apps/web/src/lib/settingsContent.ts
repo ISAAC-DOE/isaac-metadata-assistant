@@ -80,11 +80,11 @@ export function dataRows(facts: SettingsFacts): SettingsDataRow[] {
   const { persistence } = facts;
   const records =
     persistence === 'durable'
-      ? "Stored in this deployment's database, so they survive a restart."
+      ? "Saved in this site's database, so they survive a restart."
       : persistence === 'ephemeral'
-        ? 'Stored as files on this server, for this deployment only.'
+        ? 'Saved as files on this server, for this site only.'
         : persistence === 'unavailable'
-          ? 'A database is configured for them, and the server reports that records are not reaching it.'
+          ? 'A database is set up for them, but the server reports that records are not reaching it.'
           : `The server reports their storage as “${persistence}”.`;
   return [
     { label: 'Experiment Records', text: records },
@@ -97,8 +97,8 @@ export function dataRows(facts: SettingsFacts): SettingsDataRow[] {
          to the reader's computer, not to "the browser". */
       text:
         persistence === 'durable'
-          ? 'An export writes the official record and its evidence sidecar as files on the server, outside the database. Download a copy to keep it.'
-          : 'An export writes the official record and its evidence sidecar on the server. A download saves a copy to your computer.',
+          ? 'An export saves the official record and its evidence file on the server, outside the database. Download a copy to keep it.'
+          : 'An export saves the official record and its evidence file on the server. Download a copy to keep it.',
     },
     {
       label: 'Walkthroughs',
@@ -108,11 +108,8 @@ export function dataRows(facts: SettingsFacts): SettingsDataRow[] {
   ];
 }
 
-/** This Build's info panel: the no-guessing principle. */
-export const NO_GUESSING = {
-  label: 'No-Guessing',
-  text: 'Every finalized field carries either cited evidence or an explicit user confirmation — nothing scientific is invented.',
-} as const;
+/* ~~`NO_GUESSING`~~ — retired 2026-11-17 with This Build's info toggle (owner's direction:
+   plain pages). The principle is the Help dialog's "No guessing" section. */
 
 /** The `GET /api/about` response keys behind the identity labels above. */
 export const ABOUT_RESPONSE_FIELDS: readonly string[] = [
@@ -151,8 +148,7 @@ export const REPO_DOCS_CAPTION = 'Tracked in the repository, not served as pages
  * Privacy & Governance tab (owner's direction: no standing disclaimers).
  */
 export const API_ACCESS_COPY = {
-  stateLine:
-    'API keys are not set up on this server. An administrator configures access in the deployment settings.',
+  stateLine: 'API keys are not set up for this site.',
   authMarkerLegend:
     "Auth reports whether the contract documents a 401 for an operation. Where a deployment enables authentication those operations need the deployment's credential, and the liveness check is the one that stays reachable without it.",
 } as const;
@@ -166,12 +162,15 @@ export const API_ACCESS_COPY = {
 export const SETTINGS_WIDGET_COPY = {
   dataTitle: 'Data',
 
-  buildTitle: 'This Build',
-  buildRuntime: 'Runtime',
-  provenanceLive: 'read per request',
-  provenanceFixed: 'fixed for this build',
+  /* 2026-11-17 (owner's direction: plain pages): ~~'This Build'~~, ~~`buildRuntime`
+     'Runtime'~~ (its rows joined the one Technical Details disclosure), ~~'read per
+     request'~~, ~~'fixed for this build'~~. */
+  buildTitle: 'Version',
+  buildDetails: 'Technical Details',
+  provenanceLive: 'read live from the server',
+  provenanceFixed: 'fixed for this version',
   provenanceLegend:
-    'A value marked with the clock is read per request from the running deployment; an unmarked one is fixed for this build.',
+    'The clock marks a value read live from the server. The others are fixed for this version.',
 
   walkthroughNotFinished: 'Not Finished',
   walkthroughFinished: 'Finished',

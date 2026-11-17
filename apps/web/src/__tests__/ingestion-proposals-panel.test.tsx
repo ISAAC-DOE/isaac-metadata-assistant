@@ -292,7 +292,7 @@ describe('the read states', () => {
 
     const empty = await screen.findByText(/No proposals yet\./);
     expect(empty.textContent).toMatch(/finishing a transcript capture/);
-    expect(empty.textContent).toMatch(/proposing a value from a note in Unmapped Notes/);
+    expect(empty.textContent).toMatch(/proposing a value from a note in Notes Not Yet in a Field/);
     expect(empty.textContent).toMatch(/a connected AI agent can propose one/);
     expect(empty.textContent).not.toMatch(/above/);
     expect(screen.queryByText(/isaac_propose_field_value/)).toBeNull();
@@ -734,7 +734,7 @@ describe('the order control', () => {
     chooseValue(screen.getByLabelText('Order'), 'newest_first');
     // THE DEFECT THIS CATCHES is rule 5 in this component's header: a reload that
     // blanks the list unmounts every card and takes a half-written value with it.
-    expect(screen.queryByText(/Loading this record’s ingestion proposals/)).toBeNull();
+    expect(screen.queryByText(/Loading this record’s suggestions/)).toBeNull();
     expect(screen.getByText('Proposed value')).toBeTruthy();
 
     // Settle the read this change started, so the assertion above is about the
@@ -2342,7 +2342,7 @@ describe('a background change-feed update', () => {
       renderPanel(null);
 
       // The first (loud) load is still in flight — nothing has ever succeeded.
-      await screen.findByText(/Loading this record's ingestion proposals/);
+      await screen.findByText(/Loading this record's suggestions/);
 
       // The reader changes Order before that first load has resolved. This is a
       // SILENT, VIEW-CHANGE reload (`changeOrder`), and it supersedes the first
@@ -2356,7 +2356,7 @@ describe('a background change-feed update', () => {
       // the moment this failure was handled — there was nothing to protect, so
       // this correctly took the LOUD path.
       expect(await screen.findByRole('alert')).toBeTruthy();
-      expect(screen.queryByText(/Loading this record's ingestion proposals/)).toBeNull();
+      expect(screen.queryByText(/Loading this record's suggestions/)).toBeNull();
       // And the non-destructive notice must NOT ALSO be showing beside it — the
       // two are mutually exclusive by design (see the render-time comment on
       // `backgroundRefreshError`'s gate).
@@ -2390,7 +2390,7 @@ describe('a background change-feed update', () => {
         },
       });
       const view = renderPanel(null);
-      await screen.findByText(/Loading this record's ingestion proposals/);
+      await screen.findByText(/Loading this record's suggestions/);
 
       view.rerender(
         <MemoryRouter
@@ -2403,7 +2403,7 @@ describe('a background change-feed update', () => {
       await waitFor(() => expect(calls).toBe(2));
 
       expect(await screen.findByRole('alert')).toBeTruthy();
-      expect(screen.queryByText(/Loading this record's ingestion proposals/)).toBeNull();
+      expect(screen.queryByText(/Loading this record's suggestions/)).toBeNull();
       expect(
         screen.queryByText(/A background refresh of this list did not complete/),
       ).toBeNull();
@@ -3077,7 +3077,7 @@ describe('focus after a review act never falls to <body> (review #277, pre-exist
     fireEvent.click(screen.getByRole('button', { name: 'Confirm Reject' }));
     await waitFor(() => expect(screen.queryAllByRole('article')).toHaveLength(0));
     await waitFor(() =>
-      expect(screen.getByRole('heading', { name: 'Ingestion Proposals' })).toHaveFocus(),
+      expect(screen.getByRole('heading', { name: 'Suggestions' })).toHaveFocus(),
     );
   });
 });

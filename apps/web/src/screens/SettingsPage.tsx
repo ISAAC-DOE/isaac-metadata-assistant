@@ -10,12 +10,7 @@ import { Link, useLocation, useSearchParams } from 'react-router-dom';
 import { AppShell } from '../components/AppShell';
 import { TopBar } from '../components/TopBar';
 import { LeftNav } from '../components/LeftNav';
-import {
-  LoadingPanel,
-  BackendDown,
-  COPY_DIAGNOSTICS_NOTE,
-  DiagnosticsPanel,
-} from '../components/FetchStates';
+import { LoadingPanel, BackendDown, DiagnosticsPanel } from '../components/FetchStates';
 import { Widget } from '../components/Widget';
 import { Disclosure } from '../components/Disclosure';
 import { LazyDisclosure } from '../components/LazyDisclosure';
@@ -31,7 +26,6 @@ import {
 } from '../lib/routes';
 import {
   ABOUT_RESPONSE_FIELDS,
-  NO_GUESSING,
   REPO_DOCS,
   REPO_DOCS_CAPTION,
   SETTINGS_SOURCE_ENDPOINTS,
@@ -59,6 +53,13 @@ import { TUTORIAL_ANCHORS } from '../lib/tutorialSteps';
  * one disclosure; Advanced is a Related Tools list, Technical Details as a bare
  * `<details>`, and the Endpoint Explorer behind a closed disclosure that the
  * `explorer` alias, a `#…` hash, and every "Endpoint Explorer" jump open.
+ *
+ * 2026-11-17 (owner's direction: "pages … like Settings … read like an engineer
+ * wrote it"): This Build became Version — version and schema visible, every fact,
+ * the clock legend and Copy Diagnostics in ONE closed Technical Details disclosure.
+ * In an ordinary build each Integrations card is ONE state line and nothing else;
+ * the agent and API reference renders only with the developer flag (or, for the
+ * agent, once an address is published).
  *
  * The history below describes the four-tab page this replaced.
  *
@@ -422,8 +423,8 @@ function OverviewTab({ state, graphStatus }: { state: AboutState; graphStatus: G
 }
 
 /**
- * THIS BUILD — version and schema as the headline, and the seven facts
- * `GET /api/about` reports behind a Build | Runtime switch.
+ * VERSION (was "This Build") — version and schema as the headline, and the seven
+ * facts `GET /api/about` reports behind one closed Technical Details disclosure.
  *
  * ── PROVENANCE, ONE MARK INSTEAD OF SEVEN SUBLABELS ─────────────────────────
  *
@@ -433,7 +434,7 @@ function OverviewTab({ state, graphStatus }: { state: AboutState; graphStatus: G
  * once grouping `Build Commit` with the fixed rows when it is read from the
  * environment per request). That per-row decision is kept — it is checkable —
  * and only its PRESENTATION changes: a row read per request carries a clock
- * mark, the legend is in the widget's info, and every row still states its
+ * mark, the legend sits above the rows, and every row still states its
  * provenance in words to assistive technology. `Build Commit`, `Runtime Mode`
  * and `Persistence` are the three live ones; the switch partitions the facts
  * by what a reader asks (which build / how is it running), not by provenance,
@@ -444,21 +445,21 @@ function OverviewTab({ state, graphStatus }: { state: AboutState; graphStatus: G
  * consistency" would be a claim nobody has established.
  */
 function BuildWidget({ state, graphStatus }: { state: AboutState; graphStatus: GraphStatusState }) {
+  /*
+   * PLAIN BY DEFAULT (2026-11-17, owner's direction: pages must not read like an
+   * engineer wrote them). Visible: the version and the schema, nothing else. The
+   * seven facts, the clock legend and Copy Diagnostics sit together in ONE closed
+   * "Technical Details" disclosure — they used to be four visible rows ("Core
+   * isaac_records · fixed for this build", "Build Commit · read per request · not
+   * set"), a second Runtime disclosure, an info toggle and a footer button. Every
+   * row keeps its provenance words for assistive technology; nothing was dropped.
+   */
   return (
     <Widget
       id="settings-build-heading"
       className="settings-widget-build"
       title={COPY.buildTitle}
       icon={<Settings size={18} strokeWidth={2} />}
-      info={
-        <>
-          <p>{COPY.provenanceLegend}</p>
-          <p>
-            <strong>{NO_GUESSING.label}.</strong> {NO_GUESSING.text}
-          </p>
-          <p>{COPY_DIAGNOSTICS_NOTE}</p>
-        </>
-      }
       headline={
         state.status === 'data' ? (
           <>
@@ -467,26 +468,14 @@ function BuildWidget({ state, graphStatus }: { state: AboutState; graphStatus: G
           </>
         ) : undefined
       }
-      footer={
-        state.status === 'data' ? (
-          /* THE NORMAL-STATE HOME OF COPY DIAGNOSTICS, beside the identity it
-             reports — the same control over the same generator the failure state
-             uses (`components/FetchStates.tsx`). */
-          <DiagnosticsPanel
-            app={diagnosticsAppFrom(state.data)}
-            memory={graphStatus.status === 'data' ? diagnosticsMemoryFrom(graphStatus.data) : null}
-            tab="overview"
-            showNote={false}
-          />
-        ) : undefined
-      }
     >
       {state.status !== 'data' ? (
         <AboutGate state={state}>{() => null}</AboutGate>
       ) : (
-        <>
-          {/* The Build rows, then Runtime one press away (2026-11-02): the widget
-              used to switch between two views inside a tabbed page. */}
+        /* The app's chevron disclosure, not the browser's own `<details>` triangle
+           (2026-11-02): one "there's more here" affordance across the app. */
+        <Disclosure className="settings-build-details" summary={COPY.buildDetails}>
+          <p className="settings-build-legend">{COPY.provenanceLegend}</p>
           <dl className="settings-figures settings-facts">
             <Figure
               label="App Version"
@@ -504,29 +493,31 @@ function BuildWidget({ state, graphStatus }: { state: AboutState; graphStatus: G
               source="build"
             />
             <Figure label="Core" value={<span className="mono">{state.data.core}</span>} source="build" />
+            <Figure
+              label="Runtime Mode"
+              value={<span className="mono">{state.data.runtime_mode}</span>}
+              source="live"
+            />
+            <Figure
+              label="Data Regime"
+              value={<span className="mono">{state.data.data_regime}</span>}
+              source="build"
+            />
+            <Figure
+              label="Persistence"
+              value={<span className="mono">{state.data.persistence}</span>}
+              source="live"
+            />
           </dl>
-          {/* The app's chevron disclosure, not the browser's own `<details>` triangle
-              (2026-11-02): one "there's more here" affordance across the app. */}
-          <Disclosure className="settings-runtime" summary={COPY.buildRuntime}>
-            <dl className="settings-figures settings-facts">
-              <Figure
-                label="Runtime Mode"
-                value={<span className="mono">{state.data.runtime_mode}</span>}
-                source="live"
-              />
-              <Figure
-                label="Data Regime"
-                value={<span className="mono">{state.data.data_regime}</span>}
-                source="build"
-              />
-              <Figure
-                label="Persistence"
-                value={<span className="mono">{state.data.persistence}</span>}
-                source="live"
-              />
-            </dl>
-          </Disclosure>
-        </>
+          {/* THE NORMAL-STATE HOME OF COPY DIAGNOSTICS, beside the identity it
+              reports — the same control over the same generator the failure state
+              uses (`components/FetchStates.tsx`). Its note says what it copies. */}
+          <DiagnosticsPanel
+            app={diagnosticsAppFrom(state.data)}
+            memory={graphStatus.status === 'data' ? diagnosticsMemoryFrom(graphStatus.data) : null}
+            tab="overview"
+          />
+        </Disclosure>
       )}
     </Widget>
   );
@@ -538,7 +529,7 @@ function BuildWidget({ state, graphStatus }: { state: AboutState; graphStatus: G
  * `source` is `'live'` for a value this deployment resolves per request and
  * `'build'` for one fixed for a given image. The words are always present for
  * assistive technology (`.settings-figure-source`, visually hidden); a live row
- * also carries a visible clock mark, and the widget's info says what it means.
+ * also carries a visible clock mark, and the legend above the rows says what it means.
  * Omitted entirely where the caller does not know — guessing a provenance is
  * how two wrong sentences about these rows were written.
  */

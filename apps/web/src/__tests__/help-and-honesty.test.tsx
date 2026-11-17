@@ -109,7 +109,9 @@ describe('P22D · Help is a real, working popover', () => {
     // element's direct text-node children, so a pattern spanning the `<em>`,
     // `.mono` or `<strong>` children of this paragraph would never match however
     // correct the copy was.
-    expect(getByText(/anchored-pattern exactness check/i)).toBeInTheDocument();
+    // 2026-11-17: ~~/anchored-pattern exactness check/i~~ — the plain name (owner's direction).
+    expect(getByText(/ISAAC.s\s+format check/i)).toBeInTheDocument();
+    expect(queryByText(/anchored-pattern/i)).toBeNull();
     expect(getByText(/Neither the evidence audit nor advisory review gates anything/i)).toBeInTheDocument();
     expect(getByText(/never blocks or authorizes anything/i)).toBeInTheDocument();
     // Was `/synthetic demo data only/i`, from the sentence "This prototype runs

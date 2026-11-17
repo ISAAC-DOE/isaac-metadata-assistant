@@ -187,19 +187,20 @@ export const WIDGET_INFO_PANELS: Readonly<Record<string, number>> = Object.freez
   /* Settings and Governance & Safety, MEASURED in Chromium on 2026-10-19 (the merge
      of #289 into the Settings branch), each read out of this helper's own failure
      ("mounts N widget info panel(s) … declares 0"):
-       settings (Overview)      2 — This Build, Guided Walkthrough (2026-11-02: the
+       settings (Overview)      1 — Guided Walkthrough (2026-11-17: Version, which
+                                    was This Build, has no info panel any more; the
                                     Data card that replaced Data Safety has none)
        ~~settings-privacy~~     retired 2026-11-02 with the tab
        settings-api             0 — 2026-11-02: neither Integrations card has an info
-                                    panel any more (each is one state line + one
-                                    disclosure)
+                                    panel any more (2026-11-17: each is one state line
+                                    and nothing else in this suite's build)
        settings-explorer        0 — 2026-11-02: the launcher cards became one Related
                                     Tools list
        validator                1 — the Standalone Validator
        schema-reference         1 — the Schema Reference
      `imports` is #290's Historical Import surface, measured in the same run and
      declared here so the merged branch's sweep is complete. */
-  settings: 2,
+  settings: 1,
   validator: 1,
   'schema-reference': 1,
   /* ~~imports: 1~~ — 0 since 2026-11-16: Historical Import is the skill guide, a reading
@@ -331,8 +332,9 @@ export const SETTINGS_CONCEPT_DISCLOSURES: Readonly<Record<string, number>> = Ob
    Governance tab was retired, and so asserted 0 everywhere. */
 
 /**
- * How many of Settings' own secondary disclosures each surface mounts: This Build's
- * `Runtime` rows (Overview) and Advanced's `Technical Details`. Both are the shared
+ * How many of Settings' own secondary disclosures each surface mounts: Version's
+ * `Technical Details` (Overview, `.settings-build-details` since 2026-11-17, which
+ * replaced This Build's `Runtime`) and Advanced's `Technical Details`. Both are the shared
  * chevron `Disclosure` (`.disclosure.settings-runtime`, `.disclosure.settings-technical`),
  * collapsed by default, and — unlike a widget Details — sit OUTSIDE `.widget-details`,
  * so `openWidgetInfoAndViews` never presses them.
@@ -570,7 +572,7 @@ export async function openUnreachableDisclosures(page: Page, surfaceId: string):
   /* Settings' own secondary disclosures — see `SETTINGS_PAGE_DISCLOSURES`. Declared
      count, opened by index, asserted open. */
   const settingsDisclosures = page.locator(
-    '.disclosure.settings-runtime > .disclosure-trigger, .disclosure.settings-technical > .disclosure-trigger'
+    '.disclosure.settings-build-details > .disclosure-trigger, .disclosure.settings-runtime > .disclosure-trigger, .disclosure.settings-technical > .disclosure-trigger'
   );
   const expectedSettings = SETTINGS_PAGE_DISCLOSURES[surfaceId] ?? 0;
   const settingsCount = await settingsDisclosures.count();

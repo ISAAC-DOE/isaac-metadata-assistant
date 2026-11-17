@@ -289,17 +289,18 @@ export function UnmappedNotesPanel({
   return (
     <section className="notes-section" aria-labelledby="unmapped-notes-heading">
       <div className="notes-head">
+        {/* "Unmapped Notes" until 2026-11-17 — the owner's plain-language pass. */}
         <h2 className="notes-title" id="unmapped-notes-heading">
-          Unmapped Notes
+          Notes Not Yet in a Field
         </h2>
         {/* One line, the full account one `?` away (DEC-35). */}
         <p className="notes-sub">
-          Captured content with no confident field yet.{' '}
-          <HelpTip subject="Unmapped Notes">
+          Things you captured that don&rsquo;t have a field yet.{' '}
+          <HelpTip subject="Notes Not Yet in a Field">
             <span>
-              Content captured against this record that has no confident schema home. A
-              note is not a field value or evidence; dismissing a note sets it aside and
-              keeps it on the record.
+              A note is kept on the record as you wrote it. It is not a field value or
+              evidence. You can suggest a value from it, or dismiss it — a dismissed note
+              is set aside, not deleted.
             </span>
           </HelpTip>
         </p>
@@ -822,8 +823,8 @@ function NotesBrowser({
         setAnnouncement(
           written.deduplicated
             ? 'This value was already proposed from this note — no second proposal was ' +
-                'created. Review it in Ingestion Proposals.'
-            : 'Proposal stored. Review it in Ingestion Proposals.',
+                'created. Review it in Suggestions.'
+            : 'Proposal stored. Review it in Suggestions.',
         );
         return written;
       } catch (err: unknown) {
@@ -1008,7 +1009,7 @@ function NotesBrowser({
       )}
 
       {list.status === 'loading' && (
-        <LoadingPanel label="Loading this record's unmapped notes…" />
+        <LoadingPanel label="Loading this record's notes…" />
       )}
       {list.status === 'error' && (
         <BackendDown error={list.error} onRetry={() => reload(false)} />
@@ -1103,8 +1104,8 @@ function EmptyNotes({
   return (
     <div className="notes-empty">
       <p>
-        No unmapped notes on this record{disclosure}. Notes appear here when a capture
-        holds something no schema field can take.
+        No notes waiting for a field{disclosure}. A note appears here when something you
+        capture doesn&rsquo;t fit a field yet.
       </p>
     </div>
   );
@@ -2048,8 +2049,8 @@ function NoteCard({
                 <span className="mono">{proposeFieldSpec.path}</span> — the same field
                 the Runs section itself edits, entered the same way.
                 {proposeFieldSpec.hint ? ` ${proposeFieldSpec.hint}` : ''} This does not
-                write the value — it stores a proposal for someone to accept or reject
-                on the Ingestion Proposals screen.
+                write the value — it stores a suggestion for someone to accept or reject
+                in Suggestions.
               </p>
             </>
           )}
@@ -2077,8 +2078,8 @@ function NoteCard({
               <p className="note-form-hint">
                 Entered as JSON so the type is never guessed: a text value is quoted,
                 for example <span className="mono">&quot;CuO&quot;</span>. This does
-                not write the value — it stores a proposal for someone to accept or
-                reject on the Ingestion Proposals screen.
+                not write the value — it stores a suggestion for someone to accept or
+                reject in Suggestions.
               </p>
             </>
           )}

@@ -282,8 +282,8 @@ describe('UX-004 §1 · exactness is a real SECOND gate, and it is ISAAC’s own
       refusals.length,
       `export_draft has ${refusals.length} refusal returns, and the Help popover ` +
         'says THREE. Either a gate was added or one was removed — read the ' +
-        'function, then fix "Three gates on export" and step 5\'s "all three ' +
-        'export gates" in components/HelpPanel.tsx, and the two sentences in ' +
+        'function, then fix "Three checks before export" and step 5\'s "all three ' +
+        'export checks" in components/HelpPanel.tsx, and the two sentences in ' +
         'screens/GuidedCompletion.tsx, in the same change.',
     ).toBe(3);
     expect(successes.length, 'export_draft must have exactly one success return').toBe(1);
@@ -566,9 +566,16 @@ const REQUIRED_CLAIMS: [string, RegExp][] = [
     'the first of the three is the no-guessing draft check',
     /\bno[- ]guessing\b[\s\S]{0,20}\b(draft|checks?)\b/i,
   ],
+  /*
+   * 2026-11-17 — RENAMED, NOT RELAXED (owner's direction: plain words). The panel
+   * names the second check "ISAAC's format check" instead of "ISAAC's own
+   * anchored-pattern exactness check". The claim is the same — the second gate is
+   * ISAAC's own, and is named — and the ownership half is still pinned by the
+   * "ISAAC’s, not the schema’s" row below. ~~/\banchored[- ]pattern exactness\b/i~~
+   */
   [
-    'the second is ISAAC’s own anchored-pattern exactness check',
-    /\banchored[- ]pattern exactness\b/i,
+    'the second is ISAAC’s own format check',
+    /\bISAAC(’|')s format check\b/i,
   ],
   [
     'the third is the official ISAAC v1.05 schema',
@@ -1745,6 +1752,26 @@ describe('QA-010 §5f · the version-aware clause split, both directions', () =>
 
 // --- §5c the bans, applied to the shipped panel -----------------------------
 
+describe('2026-11-17 · the Help panel speaks plainly', () => {
+  /* The owner's direction: no engineer vocabulary in Help. Each retired phrase is
+     banned over the rendered panel, with a control that the ban fires on the exact
+     sentence it replaced. */
+  const RETIRED_JARGON: [string, RegExp][] = [
+    ["ISAAC's own anchored-pattern exactness check", /anchored[- ]pattern/i],
+    ["Each step is re-derived from the record's current state; export needs all three gates.", /re-derived/i],
+    ['How values, signals and gates work', /signals and gates/i],
+    ['Evidence Audit is a deterministic evidence-coverage count.', /\bdeterministic\b/i],
+  ];
+  it.each(RETIRED_JARGON)('no longer says “%s”', (retired, pattern) => {
+    expect(retired, 'control: the ban fires on the retired sentence').toMatch(pattern);
+    expect(helpPanelText()).not.toMatch(pattern);
+  });
+
+  it('the visible line under the steps is the plain one', () => {
+    expect(helpPanelText()).toContain('Each step updates as you work. Export needs every check to pass.');
+  });
+});
+
 describe('UX-003/UX-004 §5c · the shipped panel makes none of these claims', () => {
   it('makes no file-to-field capability claim', () => {
     const flagged = fileToFieldClaims(helpPanelText());
@@ -1819,6 +1846,25 @@ const CORRECT_COPY_FIXTURES: [string, string][] = [
       "two are ISAAC's, not the schema's — a record can be valid against that schema and " +
       'still be refused here, and no screen reports such a refusal as a schema error. ' +
       'Neither the evidence audit nor advisory review gates anything.',
+  ],
+  [
+    'the THREE-check statement, in plain words (2026-11-17)',
+    "Export runs three checks, in order: the no-guessing checks, ISAAC's format check, and " +
+      "the official ISAAC v1.05 schema. The first two are ISAAC's, not the schema's. So a " +
+      'record can be valid against that schema and still be refused here. No screen reports ' +
+      'such a refusal as a schema error. Neither the evidence audit nor advisory review ' +
+      'gates anything.',
+  ],
+  [
+    'the plain step 1, step 5, signals and evidence sentences (2026-11-17)',
+    'opens a record. Every step below is worked out again from the record as it is now, ' +
+      'each time you open it. saves the official ISAAC record and its evidence file — and ' +
+      'only when all three export checks pass. Evidence Audit counts how many values have ' +
+      'evidence. Advisory review is a set of fixed checks on the record’s own content. It ' +
+      'never blocks or authorizes anything. Citations show inline beside the value where ' +
+      'evidence was recorded. A field honestly missing or awaiting your confirmation shows ' +
+      'none. Each export also saves an evidence file, the evidence sidecar ' +
+      '(<record>.evidence.json), beside the official record.',
   ],
   [
     'step 5, corrected',

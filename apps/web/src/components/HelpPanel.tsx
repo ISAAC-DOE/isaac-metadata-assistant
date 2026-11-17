@@ -35,15 +35,19 @@ import { startTutorial, useTutorialState } from '../lib/tutorialController';
  */
 const STEP_TEXT: Record<string, string> = {
   /*
-   * VERBATIM, and rendered in the "How values, signals and gates work" disclosure
+   * VERBATIM, and rendered in the "How values and checks work" disclosure
    * under "What each step checks" since 2026-10-12 (the visible list is now the
    * chain of step NAMES). A first trim shortened these and dropped three claims —
    * "is satisfied when none are left", "over every unit of the record", "each time
    * it is read" — which an independent review caught; moving a claim behind a
    * disclosure is allowed, rewording it shorter is not, so the originals stand.
    */
+  /* 2026-11-17 (owner's direction: plain words) — the same claims, without the
+     engineer's vocabulary: ~~"re-derived from that record’s current state each time it
+     is read"~~, ~~"plus an evidence sidecar — and only when all three export gates
+     pass"~~. */
   load_record:
-    'opens a record. Every step below is re-derived from that record’s current state each time it is read.',
+    'opens a record. Every step below is worked out again from the record as it is now, each time you open it.',
   complete_metadata:
     'asks only the questions still blocking export, and is satisfied when none are left.',
   review_evidence:
@@ -51,7 +55,7 @@ const STEP_TEXT: Record<string, string> = {
   review_export_readiness:
     'dry-runs the export over every unit of the record and reports what would still refuse. Nothing is written.',
   export:
-    'writes the official ISAAC record plus an evidence sidecar — and only when all three export gates pass.',
+    'saves the official ISAAC record and its evidence file — and only when all three export checks pass.',
 };
 
 /**
@@ -306,7 +310,8 @@ export function HelpPanel() {
                 for this repository -- OPENED BY THE ACCESSIBILITY SWEEP, so
                 every sentence behind it is still scanned at every viewport. */}
             <details className="help-more">
-              <summary className="help-more-summary">How values, signals and gates work</summary>
+              {/* ~~"How values, signals and gates work"~~ — 2026-11-17, plain words. */}
+              <summary className="help-more-summary">How values and checks work</summary>
               <section className="help-section">
                 <h3>What each step checks</h3>
                 <ol className="help-step-details">
@@ -483,13 +488,16 @@ export function HelpPanel() {
                     consistent with it instead of teaching the conflation the Validator
                     was fixed to stop making. The advisory tier is unchanged and still
                     gates nothing. */}
+                {/* 2026-11-17 (plain words): ~~"a deterministic evidence-coverage count"~~,
+                    ~~"a set of deterministic local checks over the record's own
+                    content"~~. Same claims: a count, the schema's verdict, and an
+                    advisory tier that gates nothing. */}
                 <p>
-                  <strong>{LABELS.evidenceAudit}</strong> is a deterministic evidence-coverage count.{' '}
+                  <strong>{LABELS.evidenceAudit}</strong> counts how many values have evidence.{' '}
                   <strong>Official {LABELS.signalValidation}</strong> is the ISAAC v1.05 schema
                   verdict.{' '}
-                  <strong>{LABELS.signalAdvisory} review</strong> is a set of deterministic
-                  local checks over the record's own content; it never blocks or authorizes
-                  anything.
+                  <strong>{LABELS.signalAdvisory} review</strong> is a set of fixed checks on the
+                  record's own content. It never blocks or authorizes anything.
                 </p>
               </section>
               <section className="help-section">
@@ -595,15 +603,19 @@ export function HelpPanel() {
                     strings therefore have to sit in the `<p>`'s own text runs and not
                     inside the `<strong>`. They do; the two `.mono` spans that used to
                     split this paragraph are gone with the jargon. */}
-                <h3>Three gates on export</h3>
+                {/* 2026-11-17 (owner's direction: plain words): ~~"Three gates on
+                    export"~~ and ~~"ISAAC's own anchored-pattern exactness check"~~ →
+                    "ISAAC's format check". Every claim above is kept — which three run, in
+                    what order, whose they are, and that the audit and advisory tiers gate
+                    nothing (`help-claim-parity.test.tsx` §2). */}
+                <h3>Three checks before export</h3>
                 <p>
-                  Export runs three checks, in order: the no-guessing draft checks,
-                  ISAAC&apos;s own anchored-pattern exactness check, and the official ISAAC
-                  v1.05 schema. The first two are{' '}
-                  <strong>ISAAC&apos;s, not the schema&apos;s</strong> — a record can be valid
-                  against that schema and still be refused here, and no screen reports such
-                  a refusal as a schema error. Neither the evidence audit nor advisory
-                  review gates anything.
+                  Export runs three checks, in order: the no-guessing checks, ISAAC&apos;s
+                  format check, and the official ISAAC v1.05 schema. The first two are{' '}
+                  <strong>ISAAC&apos;s, not the schema&apos;s</strong>. So a record can be valid
+                  against that schema and still be refused here. No screen reports such a
+                  refusal as a schema error. Neither the evidence audit nor advisory review
+                  gates anything.
                 </p>
               </section>
               <section className="help-section">
@@ -661,10 +673,10 @@ export function HelpPanel() {
                     earns a monospace face. */}
                 <h3>Where evidence lives</h3>
                 <p>
-                  Citations show inline beside the value where evidence was recorded; a
-                  field honestly missing or awaiting your confirmation shows none. Exports
-                  write an evidence sidecar
-                  (<span className="mono">&lt;record&gt;.evidence.json</span>) beside the
+                  Citations show inline beside the value where evidence was recorded. A
+                  field honestly missing or awaiting your confirmation shows none. Each
+                  export also saves an evidence file, the evidence sidecar
+                  (<span className="mono">&lt;record&gt;.evidence.json</span>), beside the
                   official record.
                 </p>
               </section>

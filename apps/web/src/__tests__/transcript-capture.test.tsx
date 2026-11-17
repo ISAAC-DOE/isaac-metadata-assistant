@@ -2098,7 +2098,7 @@ describe('proposals-ready controls', () => {
         {/* Stands in for `IngestionProposalsPanel`'s own heading, which lives
             directly below this panel on every screen this app mounts it on. */}
         <h2 id="ingestion-proposals-heading" tabIndex={-1}>
-          Ingestion Proposals
+          Suggestions
         </h2>
       </MemoryRouter>,
     );
@@ -2132,7 +2132,7 @@ describe('proposals-ready controls', () => {
     );
     const status = container.querySelector('[role="status"]');
     await waitFor(() =>
-      expect(status?.textContent).toMatch(/Ingestion Proposals could not be located/),
+      expect(status?.textContent).toMatch(/Suggestions could not be located/),
     );
     expect(status?.textContent).toMatch(/Your proposals are still stored/);
   });
@@ -2402,7 +2402,7 @@ describe('accessibility', () => {
     expect(status?.textContent).toMatch(/1 segment stored with this record/);
     expect(status?.textContent).toMatch(/1 value read/);
     expect(status?.textContent).toMatch(/1 stored as a proposal/);
-    expect(status?.textContent).toMatch(/Review them in Ingestion Proposals below/);
+    expect(status?.textContent).toMatch(/Review them in Suggestions below/);
     expect(status?.textContent).not.toMatch(/\(s\)/);
   });
 
@@ -2448,7 +2448,7 @@ describe('accessibility', () => {
     expect(status?.textContent).toMatch(/0 stored as proposals/);
     // NOTHING was stored — the announcement must not direct a reader to an
     // empty Ingestion Proposals destination.
-    expect(status?.textContent).not.toMatch(/Review them in Ingestion Proposals below/);
+    expect(status?.textContent).not.toMatch(/Review them in Suggestions below/);
   });
 });
 
