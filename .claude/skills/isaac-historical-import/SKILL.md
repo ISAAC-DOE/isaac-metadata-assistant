@@ -59,13 +59,12 @@ command and flag is in `reference/commands.md`; exit codes and what to say, in `
 Find the ISAAC folder: the path in `checkout-path.txt` beside this file. If there is no such file, ask
 the scientist where their ISAAC folder is (the one with `scripts/setup_isaac_local.sh`); if they have
 none, point them to `docs/local-skill-quickstart.md` and stop. Then run, from that folder,
-`scripts/setup_isaac_local.sh --check` (changes nothing): one `[ok]`/`[missing]` line each for the Python
-environment, the command, the processing extra and the portal check, then the skill copy in
-`~/.claude/skills` (or `--skill-dir`): `[ok]`, `[stale]` or `[skipped]` (none installed there). Use
-`<folder>/.venv/bin/isaac` as `<isaac>` and `<folder>/.venv/bin/python` as `<python>`.
+`scripts/setup_isaac_local.sh --check` (changes no file; its update check downloads code and sends no data): one
+`[ok]`/`[missing]` line each for the Python environment, the command, the processing extra and the portal check; the skill copy in `~/.claude/skills` (or `--skill-dir`): `[ok]`, `[stale]` or `[skipped]`; the update check: `[ok]`, `[behind N commits]` or `[skipped]` (offline: fine).
+`<isaac>` is `<folder>/.venv/bin/isaac`, `<python>` is `<folder>/.venv/bin/python`.
 
-- `[stale]`, or (`[skipped]`, or this copy runs from elsewhere) it differs (`reference/troubleshooting.md`)
-  → `scripts/setup_isaac_local.sh --install-skill`, restart Claude Code; do not continue on this copy.
+- `[stale]`, or (`[skipped]`, or this copy runs from elsewhere) it differs (`reference/troubleshooting.md`) → say "Your installed skill is out of date, I'm updating it", run `scripts/setup_isaac_local.sh --install-skill`, Read `~/.claude/skills/isaac-historical-import/SKILL.md` again and follow THAT text from Step 0 on (it wins where it differs; no restart).
+- `[behind N commits]` → ask once: "Your ISAAC folder is N updates behind. Update now? It only changes the ISAAC code, not your data." Yes → `scripts/setup_isaac_local.sh --update`, then re-read the skill as above (a refusal names its reason: say it and continue). No → continue, and say the version in use (the commit the line names).
 - command missing → the ONE fix is `scripts/setup_isaac_local.sh` (then `--install-skill` if there
   was no `checkout-path.txt`); stop.
 - processing or portal check missing → say what it costs ("curves and quality checks need

@@ -31,10 +31,19 @@ ISAAC portal expects, plus a plain list of what is still missing. **It never upl
 
    You want to see `0 failed` at the end. Lines marked `SKIP` are parts you have not installed.
 
-Run `scripts/setup_isaac_local.sh --check` any time to see what is installed. It also tells you
-when the skill copy in `~/.claude/skills` differs from the one in the ISAAC folder (for example after
-you update the folder). Claude Code uses that copy, so refresh it with
-`scripts/setup_isaac_local.sh --install-skill` and restart Claude Code.
+Run `scripts/setup_isaac_local.sh --check` any time to see what is installed. It also tells you:
+
+- when the skill copy in `~/.claude/skills` differs from the one in the ISAAC folder (`[stale]`).
+  Claude Code uses that copy. The skill notices this itself, says so, runs
+  `scripts/setup_isaac_local.sh --install-skill` and carries on with the new instructions; you do not
+  need to restart Claude Code.
+- when your ISAAC folder is behind the latest version on GitHub (`[behind N commits]`). To find out it
+  runs `git fetch`, which **downloads** code and sends none of your data; offline, the line says
+  `[skipped]` and nothing fails (`--offline` skips the check). The skill asks before updating.
+  `scripts/setup_isaac_local.sh --update` updates only when it is safe: the folder must be on `main`,
+  with no local changes to ISAAC's files and no commits of its own; otherwise it says why and changes
+  nothing. It then refreshes the skill copy (and the tools, if their dependencies changed). It only
+  changes the ISAAC code, never your data or bundles.
 
 ## Run it
 
