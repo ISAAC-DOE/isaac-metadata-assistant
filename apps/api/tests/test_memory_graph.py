@@ -6,7 +6,8 @@ driven against a synthetic, unmistakably-fake ``graphify-out/`` artifact set
 via ``ISAAC_MEMORY_DIR`` (never the real repo graph) for most cases, plus one
 integration check (test 14) against the real committed
 ``apps/api/isaac_api/data/memory-snapshot.json`` for the documented real
-counts (201 files / 19 concepts / 508 edges).
+counts (199 files / 19 concepts / 494 edges; 201 / 508 before the
+2026-11-16 targeted removal of StagedRunner.tsx and LoadMaterials.tsx).
 """
 
 from __future__ import annotations
@@ -653,9 +654,10 @@ def test_real_committed_snapshot_counts(tmp_path, monkeypatch):
     assert resp.status_code == 200
     body = resp.json()
     assert body["available"] is True
-    assert body["meta"]["counts"]["files"] == 201
+    # 201 -> 199 and 508 -> 494 with the 2026-11-16 targeted removal of StagedRunner.tsx and LoadMaterials.tsx.
+    assert body["meta"]["counts"]["files"] == 199
     assert body["meta"]["counts"]["concepts"] == 19
-    assert body["meta"]["counts"]["reference_edges"] == 508
+    assert body["meta"]["counts"]["reference_edges"] == 494
     assert body["meta"]["underlying_graph"]["node_count"] == 2988
     assert body["meta"]["underlying_graph"]["edge_count"] == 4465
     assert body["meta"]["underlying_graph"]["community_count"] == 257
@@ -667,7 +669,7 @@ def test_real_committed_snapshot_counts(tmp_path, monkeypatch):
     assert body["meta"]["provenance"]["provider"] == "sanitized-snapshot"
     # Every real file node is uniformly not-on-disk (the snapshot bakes this).
     file_nodes = [n for n in body["nodes"] if n["kind"] == "file"]
-    assert len(file_nodes) == 201
+    assert len(file_nodes) == 199
     assert all(n["on_disk"] is False for n in file_nodes)
     concept_nodes = [n for n in body["nodes"] if n["kind"] == "concept"]
     assert len(concept_nodes) == 19
@@ -676,4 +678,4 @@ def test_real_committed_snapshot_counts(tmp_path, monkeypatch):
     assert all_relations == {
         "references", "imports", "calls", "imports_from", "shares_data_with",
     }
-    assert body["truncated"] is False  # 220ish nodes / 508 edges, well under caps
+    assert body["truncated"] is False  # 218 nodes / 494 edges, well under caps

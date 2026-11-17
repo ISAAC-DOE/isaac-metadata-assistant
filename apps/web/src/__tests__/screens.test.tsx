@@ -22,6 +22,7 @@ function renderAt(path: string) {
 }
 
 afterEach(() => {
+  vi.unstubAllEnvs();
   vi.unstubAllGlobals();
 });
 
@@ -34,11 +35,12 @@ describe('router-level smoke: each surface renders without error', () => {
     expect(await findByText('Synthetic XANES — CuO (Cu K-edge) Demo')).toBeInTheDocument();
   });
 
-  it('S2 · Load Materials (/load)', () => {
-    const { getByText, queryByText } = renderAt('/load');
-    // 2026-11-02: one widget, one name for one feature; the upload widget is retired.
-    expect(getByText('Guided Walkthrough')).toBeInTheDocument();
-    expect(queryByText('Can I Load My Own Files?')).toBeNull();
+  // ~~S2 · Load Materials (/load)~~ — retired 2026-11-16: `/load` redirects to My
+  // Experiments (`historical-import-guide.test.tsx`).
+  it('Historical Import (/imports) is the skill guide', () => {
+    const { getByText, getAllByText } = renderAt('/imports');
+    expect(getByText('Historical Import', { selector: 'h1' })).toBeInTheDocument();
+    expect(getAllByText('scripts/setup_isaac_local.sh --install-skill').length).toBeGreaterThan(0);
   });
 
   it('S3 · Review Record (/record/:id) — live bundle', async () => {
@@ -65,7 +67,8 @@ describe('router-level smoke: each surface renders without error', () => {
     expect(await findByText('5 fields still block export')).toBeInTheDocument();
   });
 
-  it('Project Memory (/memory) is a separate destination', async () => {
+  it('Project Memory (/memory) is a separate destination, with the developer flag', async () => {
+    vi.stubEnv('VITE_ISAAC_DEV_TOOLS', '1');
     stubFetchRoutes({ 'GET /api/graph/status': { body: graphStatusAvailable } });
     const { getByText, findByText } = renderAt('/memory');
     // ~~'Memory / Query Plane'~~ — the eyebrow was removed 2026-10-12 (clutter audit;

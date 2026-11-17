@@ -195,6 +195,20 @@ beforeEach(() => {
   Object.assign(navigator, { clipboard: { writeText: vi.fn().mockResolvedValue(undefined) } });
 });
 
+
+/*
+ * THE DEVELOPER FLAG IS ON FOR THIS FILE (2026-11-16). It covers the Endpoint Explorer, on Settings' Advanced tab, which a
+ * build shows only with `VITE_ISAAC_DEV_TOOLS=1` (`lib/devTools.ts`). What a build
+ * WITHOUT the flag shows — no such tab, and where its old `?tab=` lands — is pinned in
+ * `dev-tools-flag.test.tsx`.
+ */
+beforeEach(() => {
+  vi.stubEnv('VITE_ISAAC_DEV_TOOLS', '1');
+});
+afterEach(() => {
+  vi.unstubAllEnvs();
+});
+
 afterEach(() => {
   vi.unstubAllGlobals();
   vi.restoreAllMocks();
@@ -3334,5 +3348,30 @@ describe('Settings → API Access — no over-correction, and no infrastructure 
     ]) {
       expect(lower.includes(needle), `named provider or protocol: ${needle}`).toBe(false);
     }
+  });
+});
+
+describe('Settings → API Access without the developer flag (2026-11-16)', () => {
+  /* The file-level hook turns the flag on; this block turns it off again, so the
+     scientist build's Integrations tab is held here too. */
+  beforeEach(() => {
+    vi.stubEnv('VITE_ISAAC_DEV_TOOLS', '');
+  });
+
+  it('the agent guide names the contract, never a tab that is not there, and offers no explorer jump', async () => {
+    const connect = await openGuide();
+    const text = norm(connect.textContent ?? '');
+    expect(text).toMatch(/Start from this app's own contract, GET \/api\/openapi\./);
+    expect(text).toMatch(/exactly as the contract lists them/);
+    expect(text).not.toMatch(/Endpoint Explorer|under Advanced/);
+    expect(within(connect).queryByRole('button', { name: 'Open the Endpoint Explorer' })).toBeNull();
+    expect(screen.queryByRole('tab', { name: 'Advanced' })).toBeNull();
+  });
+
+  it('Quick Start offers Program an Agent and no Browse Every Endpoint', async () => {
+    await openApiAccess();
+    expect(screen.queryByRole('button', { name: /Browse Every Endpoint/ })).toBeNull();
+    expect(screen.getByRole('button', { name: 'Program an Agent' })).toBeInTheDocument();
+    expect(norm(document.body.textContent ?? '')).not.toMatch(/Endpoint Explorer/);
   });
 });

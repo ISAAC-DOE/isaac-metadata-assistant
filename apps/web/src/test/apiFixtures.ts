@@ -3769,49 +3769,12 @@ export const statisticsRecordsBody = {
   total: statisticsRuntimeRecords.length,
 };
 
-/**
- * The import-session list, as `GET /api/imports` serves it — TWO sessions, one
- * of which has a source recorded and has sent a candidate to review.
- *
- * Deliberately minimal: Statistics reduces this body to three counts
- * (`deriveImportTotals`) and renders no filename, digest, path or candidate, so
- * a richer fixture here would only be asserting fields the surface cannot show.
- * `total` matches the array length, which is the ordinary case; a test that
- * wants the TRUNCATED case overrides `imports` with its own body.
- */
-export const importListFixture = {
-  imports: [
-    {
-      import_id: '01JIMPORTSESSIONAAAAAAAAAA',
-      label: 'Synthetic BL15-2 bundle',
-      created_utc: '2099-07-01T00:00:00Z',
-      updated_utc: '2099-07-02T00:00:00Z',
-      furthest_step: 'reconstructed',
-      source_count: 2,
-      parsed_source_count: 1,
-      candidate_count: 4,
-      proposed_count: 1,
-    },
-    {
-      import_id: '01JIMPORTSESSIONBBBBBBBBBB',
-      label: 'Empty working area',
-      created_utc: '2099-07-03T00:00:00Z',
-      updated_utc: '2099-07-03T00:00:00Z',
-      furthest_step: 'new_import',
-      source_count: 0,
-      parsed_source_count: 0,
-      candidate_count: 0,
-      proposed_count: 0,
-    },
-  ],
-  total: 2,
-  workflow: [],
-  durability: 'workspace',
-  available_fixtures: [],
-};
+/* ~~`importListFixture`~~ (`GET /api/imports`) — removed 2026-11-16 with the Statistics
+   Historical Imports widget, its only reader. */
 
 /**
- * EXACTLY the SIX route keys the Statistics page requests, in the order the
+ * EXACTLY the route keys the Statistics page requests (six; seven from 2026-09-18 to
+ * 2026-11-16, while `GET /api/imports` was among them), in the order the
  * page issues them. Exported so a test can assert the request set itself instead
  * of restating six literals it might mistype.
  *
@@ -3938,8 +3901,8 @@ export const STATISTICS_ROUTE_KEYS = [
   'GET /api/about',
   'GET /api/openapi',
   'GET /api/schema',
-  'GET /api/imports',
-  // `ACT-004`'s SEVENTH tracked read. It joins the page's round and Refresh
+  // ~~'GET /api/imports'~~ — removed 2026-11-16 with the Historical Imports widget.
+  // `ACT-004`'s tracked read (the seventh until 2026-11-16, the sixth now). It joins the page's round and Refresh
   // re-issues it, which is the property this constant records — see the note
   // above about why the verification key is deliberately NOT in here.
   'GET /api/activity/summary',
@@ -3976,7 +3939,6 @@ export function statisticsRoutes(
       | 'about'
       | 'openapi'
       | 'schema'
-      | 'imports'
       | 'activity'
       | 'verification',
       RouteEntry
@@ -3989,7 +3951,6 @@ export function statisticsRoutes(
     'GET /api/about': over.about ?? { body: aboutResponse },
     'GET /api/openapi': over.openapi ?? { body: openApiFixture },
     'GET /api/schema': over.schema ?? { body: schemaBrowserFixture },
-    'GET /api/imports': over.imports ?? { body: importListFixture },
     'GET /api/activity/summary': over.activity ?? { body: activitySummaryFixture },
     [STATISTICS_VERIFICATION_ROUTE_KEY]: over.verification ?? { body: verificationReportOk },
   };

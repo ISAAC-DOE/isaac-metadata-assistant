@@ -13,7 +13,6 @@ import {
   answersStaleWrite,
   bundleRoutes,
   demoResetPreviewClean,
-  demoRunDraftOnly,
   draftResponse,
   experimentSummary,
   exportStaleWrite,
@@ -210,14 +209,7 @@ describe('typed API client — parses the real backend shapes', () => {
     expect(body.reason).toBe(uploadsBlocked.reason);
   });
 
-  it('runDemo POSTs the mode and returns the real pipeline steps', async () => {
-    const calls = stubFetchRoutes({ 'POST /api/demo/run': { body: demoRunDraftOnly } });
-    const run = await api.runDemo('draft_only');
-    expect(calls).toEqual(['POST /api/demo/run']);
-    expect(run.experiment_id).toBe(EXP_ID);
-    expect(run.steps.map((s) => s.name)).toEqual(['build_draft', 'validate_draft']);
-    expect(run.status).toBe('needs_attention');
-  });
+  // ~~runDemo POSTs the mode~~ — `api.runDemo` removed 2026-11-16 (no caller since `/load` went).
 });
 
 describe('ApiError', () => {
@@ -1175,7 +1167,7 @@ describe('typed API client — a 4xx refusal keeps the server\'s reason and mess
 
   it('a POST 422 carries the typed error as `reason` and the whole body as `body`', async () => {
     stubRefusal(422, JSON.stringify(DUPLICATE));
-    const error = (await api.createImport().catch((e: unknown) => e)) as ApiError;
+    const error = (await api.createTutorialSession().catch((e: unknown) => e)) as ApiError;
     expect(error).toBeInstanceOf(ApiError);
     expect(error.status).toBe(422);
     expect(error.reason).toBe('duplicate_archive');
@@ -1195,13 +1187,13 @@ describe('typed API client — a 4xx refusal keeps the server\'s reason and mess
 
   it('the human-readable ApiError.message is unchanged — only the typed fields are new', async () => {
     stubRefusal(422, JSON.stringify(DUPLICATE));
-    const error = (await api.createImport().catch((e: unknown) => e)) as ApiError;
+    const error = (await api.createTutorialSession().catch((e: unknown) => e)) as ApiError;
     expect(error.message).toBe('Request failed (422).');
   });
 
   it('an HTML-bodied 4xx yields NO reason, NO body and no server message (an edge page is not ISAAC)', async () => {
     stubRefusal(422, '<!doctype html><title>Sign in</title>', 'text/html; charset=utf-8');
-    const error = (await api.createImport().catch((e: unknown) => e)) as ApiError;
+    const error = (await api.createTutorialSession().catch((e: unknown) => e)) as ApiError;
     expect(error.htmlIntercept).toBe(true);
     expect(error.reason).toBeUndefined();
     expect(error.body).toBeUndefined();
@@ -1211,7 +1203,7 @@ describe('typed API client — a 4xx refusal keeps the server\'s reason and mess
   it('an unreadable, empty or untyped 4xx body degrades to "not observed", never to a wrong reason', async () => {
     for (const text of ['not json at all', '{}', JSON.stringify({ detail: 'Unprocessable' }), JSON.stringify({ error: 7, message: 7 })]) {
       stubRefusal(422, text);
-      const error = (await api.createImport().catch((e: unknown) => e)) as ApiError;
+      const error = (await api.createTutorialSession().catch((e: unknown) => e)) as ApiError;
       expect(error).toBeInstanceOf(ApiError);
       expect(error.status).toBe(422);
       expect(error.reason).toBeUndefined();
@@ -1221,7 +1213,7 @@ describe('typed API client — a 4xx refusal keeps the server\'s reason and mess
 
   it('a 5xx is still left unread (a server fault is not a refusal with a reason)', async () => {
     stubRefusal(503, JSON.stringify({ error: 'experiment_storage_unavailable', message: 'x' }));
-    const error = (await api.createImport().catch((e: unknown) => e)) as ApiError;
+    const error = (await api.createTutorialSession().catch((e: unknown) => e)) as ApiError;
     expect(error.status).toBe(503);
     expect(error.reason).toBeUndefined();
     expect(error.body).toBeUndefined();
@@ -1229,7 +1221,7 @@ describe('typed API client — a 4xx refusal keeps the server\'s reason and mess
 
   it('the generic http_error screen says what the server said when it said something', async () => {
     stubRefusal(422, JSON.stringify(DUPLICATE));
-    const error = (await api.createImport().catch((e: unknown) => e)) as ApiError;
+    const error = (await api.createTutorialSession().catch((e: unknown) => e)) as ApiError;
     const copy = downCopy(error, true);
     expect(copy.kind).toBe('http_error');
     expect(copy.lines.join(' ')).toContain(DUPLICATE.message);

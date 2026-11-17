@@ -124,22 +124,14 @@ test('@interaction NOT FOUND: an unknown record id says so inside a worked-examp
   await expect(alert).toContainText(/Record Not Found/i);
 });
 
-test('@interaction Load Materials offers the walkthrough, and no upload control at all', async ({ page, app }) => {
+/* ~~Load Materials offers the walkthrough, and no upload control at all~~ — `/load`
+   redirects to My Experiments since 2026-11-16, which offers the same Start control. */
+test('@interaction /load lands on My Experiments, with the walkthrough and no upload control', async ({ page, app }) => {
   await app.goto('/load');
-
-  // ~~The "Can I Load My Own Files?" widget, its caveat and "Try an Upload"~~ —
-  // retired 2026-11-02 (owner's direction: no standing disclaimers). The screen is
-  // one card, "Guided Walkthrough", with one Start control.
-  await expect(page.getByRole('heading', { name: 'Guided Walkthrough' })).toBeVisible();
-  await expect(page.getByRole('button', { name: 'Try an Upload' })).toHaveCount(0);
-  await expect(page.getByText(/Can I Load My Own Files/i)).toHaveCount(0);
-
-  // There is genuinely no file input anywhere on the surface.
-  await expect(page.locator('input[type="file"]')).toHaveCount(0);
-
-  // The one action is present and enabled. Its visible verb is "Start"; its name is
-  // the full "Start Guided Walkthrough" (WCAG 2.5.3: it opens with the visible word).
+  await expect(page).toHaveURL(/\/experiments$/);
+  await expect(page.getByRole('heading', { name: 'My Experiments', level: 1 })).toBeVisible();
   await expect(page.getByRole('button', { name: 'Start Guided Walkthrough' })).toBeEnabled();
+  await expect(page.locator('input[type="file"]')).toHaveCount(0);
 });
 
 test('@interaction REFUSED: the upload endpoint itself answers 403', async ({ request }) => {

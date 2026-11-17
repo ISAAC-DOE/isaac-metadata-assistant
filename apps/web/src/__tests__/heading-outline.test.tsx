@@ -28,7 +28,10 @@ function renderAt(path: string) {
   );
 }
 
-afterEach(() => vi.unstubAllGlobals());
+afterEach(() => {
+  vi.unstubAllGlobals();
+  vi.unstubAllEnvs();
+});
 
 async function h1CountAt(
   path: string,
@@ -42,6 +45,9 @@ async function h1CountAt(
 }
 
 describe('A11Y-1 — one screen-level h1 per routed surface', () => {
+  it('Historical Import (the skill guide)', async () => {
+    expect(await h1CountAt('/imports', null, null)).toBe(1);
+  });
   it('My Experiments', async () => {
     expect(
       await h1CountAt('/experiments', { 'GET /api/experiments': { body: { experiments: [experimentSummary] } } }, 'Synthetic XANES — CuO (Cu K-edge) Demo'),
@@ -60,6 +66,7 @@ describe('A11Y-1 — one screen-level h1 per routed surface', () => {
     expect(await h1CountAt('/record/demo/export', bundleRoutes('demo'), '5 fields still block export')).toBe(1);
   });
   it('Project Memory', async () => {
+    vi.stubEnv('VITE_ISAAC_DEV_TOOLS', '1'); // a developer surface (2026-11-16)
     expect(await h1CountAt('/memory', { 'GET /api/graph/status': { body: graphStatusAvailable } }, 'Memory Available')).toBe(1);
   });
   it('Governance & Safety', async () => {
@@ -78,6 +85,8 @@ describe('A11Y-1 — one screen-level h1 per routed surface', () => {
   });
 
   it('Statistics · Build & Verification', async () => {
+
+    vi.stubEnv('VITE_ISAAC_DEV_TOOLS', '1'); // a developer surface (2026-11-16)
     // The tab that gained the sections, asserted for the same property. Without
     // this, a second tab's outline would be checked by nothing.
     expect(await h1CountAt('/statistics?tab=build', statisticsRoutes(), 'Synthetic-Only')).toBe(1);
@@ -106,7 +115,18 @@ describe('A11Y — heading levels never skip a level or go backwards', () => {
     }
   }
 
+  it('Historical Import (the skill guide): h1, then one h2 per section, nothing deeper', () => {
+    const view = renderAt('/imports');
+    const main = view.container.querySelector('main')!;
+    const found = levels(main);
+    assertMonotonic(found, 'Historical Import guide');
+    expect(found[0]).toBe(1);
+    expect(found.slice(1).every((level) => level === 2)).toBe(true);
+  });
+
   it('Project Memory · Graph (Explore, a node selected)', async () => {
+
+    vi.stubEnv('VITE_ISAAC_DEV_TOOLS', '1'); // a developer surface (2026-11-16)
     stubFetchRoutes({
       'GET /api/graph/status': { body: graphStatusUnavailable },
       'GET /api/memory/graph': { body: memoryGraphAvailable },
@@ -248,12 +268,14 @@ describe('A11Y — heading levels never skip a level or go backwards', () => {
       2 /* Kinds of Change */,
       2 /* Workflow */,
       2 /* Evidence Support */,
-      2 /* Historical Imports */,
+      // ~~2 /* Historical Imports */~~ — the widget was removed 2026-11-16.
     ]);
     assertMonotonic(found, 'Statistics page · Overview');
   });
 
   it('Statistics · Build & Verification (every section loaded, disclosures closed)', async () => {
+
+    vi.stubEnv('VITE_ISAAC_DEV_TOOLS', '1'); // a developer surface (2026-11-16)
     stubFetchRoutes(statisticsRoutes());
     const view = renderAt('/statistics?tab=build');
     // Settles /api/about, which is the last of this tab's reads to paint.
@@ -306,6 +328,8 @@ describe('A11Y — heading levels never skip a level or go backwards', () => {
   });
 
   it('Project Memory · Graph · About This Graph drawer', async () => {
+
+    vi.stubEnv('VITE_ISAAC_DEV_TOOLS', '1'); // a developer surface (2026-11-16)
     stubFetchRoutes({
       'GET /api/graph/status': { body: graphStatusUnavailable },
       'GET /api/memory/graph': { body: memoryGraphAvailable },

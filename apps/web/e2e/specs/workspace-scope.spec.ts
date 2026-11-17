@@ -87,7 +87,8 @@ test.describe('@interaction the ordinary workspace', () => {
      * who wants to RECOVER rather than CREATE had nowhere to go from the one
      * screen they land on.
      */
-    const importOffer = page.getByRole('link', { name: 'Open Historical Import' });
+    // 2026-11-16: a text link to the Historical Import guide (the Claude Code skill).
+    const importOffer = page.getByRole('link', { name: 'Import a Past Beamtime' });
     await expect(importOffer).toBeVisible();
     await expect(importOffer).toHaveAttribute('href', /\/imports$/);
     // The create control is real and it is the primary.
@@ -333,7 +334,7 @@ test.describe('@interaction the example-workspace operations refuse outside a se
     });
   }
 
-  test('Load Materials offers the guided demo, not a run it would refuse, outside a worked example', async ({
+  test('/load (now My Experiments) offers the guided demo, not a run it would refuse, outside a worked example', async ({
     page,
     app,
     request,
@@ -350,14 +351,16 @@ test.describe('@interaction the example-workspace operations refuse outside a se
      * ordinary workspace is still empty. Nothing is pressed here, so nothing could
      * have written to it — which is exactly the point.
      */
+    // 2026-11-16: `/load` redirects to My Experiments, whose card offers the same Start.
     await app.goto('/load');
+    await expect(page).toHaveURL(/\/experiments$/);
     await expect(page.getByRole('button', { name: 'Start Guided Walkthrough' })).toBeEnabled();
     await expect(page.getByRole('button', { name: 'Run the Worked Example' })).toHaveCount(0);
 
     const after = await request.get(`${API_BASE}/experiments`);
     expect(
       ((await after.json()) as { experiments?: unknown[] }).experiments ?? [],
-      'viewing Load Materials must not have written into the ordinary workspace'
+      'viewing /load must not have written into the ordinary workspace'
     ).toEqual([]);
   });
 });

@@ -29,6 +29,7 @@ import {
 
 afterEach(() => {
   vi.unstubAllGlobals();
+  vi.unstubAllEnvs();
 });
 
 /** Shows the live router location so navigation can be asserted from a TopBar-only render. */
@@ -153,6 +154,7 @@ describe('P26.5 · SearchDialog — visible trigger + ⌘K', () => {
 
 describe('P26.5 · SearchDialog — grouped, plane-labeled, honest results', () => {
   it('typing a query renders BOTH the Workspace and Project Memory groups', async () => {
+    vi.stubEnv('VITE_ISAAC_DEV_TOOLS', '1'); // memory leads are a developer tool (2026-11-16)
     stubFetchRoutes(searchRoutes());
     const view = renderTopBar();
     const { dialog } = await openAndType(view);
@@ -167,6 +169,16 @@ describe('P26.5 · SearchDialog — grouped, plane-labeled, honest results', () 
     expect(within(dialog).getByText(/project memory/i)).toBeTruthy();
   });
 
+  it('without the developer flag, only the Workspace group shows and nothing offers memory', async () => {
+    stubFetchRoutes(searchRoutes());
+    const view = renderTopBar();
+    const { dialog } = await openAndType(view);
+    expect(await within(dialog).findByText(WS.label)).toBeTruthy();
+    expect(within(dialog).queryByText(MEM.label)).toBeNull();
+    expect(dialog.textContent ?? '').not.toMatch(/memory/i);
+    expect(within(dialog).getByRole('searchbox', { name: 'Search experiments' })).toBeTruthy();
+  });
+
   it('a workspace result navigates via its server navigate_to and closes the dialog', async () => {
     stubFetchRoutes(searchRoutes());
     const view = renderTopBar();
@@ -178,6 +190,7 @@ describe('P26.5 · SearchDialog — grouped, plane-labeled, honest results', () 
   });
 
   it('a memory result navigates to its /memory?concept= deep link and closes', async () => {
+    vi.stubEnv('VITE_ISAAC_DEV_TOOLS', '1'); // memory leads are a developer tool (2026-11-16)
     stubFetchRoutes(searchRoutes());
     const view = renderTopBar();
     const { dialog } = await openAndType(view);
@@ -196,6 +209,7 @@ describe('P26.5 · SearchDialog — grouped, plane-labeled, honest results', () 
   });
 
   it('shows an honest, non-error memory-unavailable note while workspace results still render', async () => {
+    vi.stubEnv('VITE_ISAAC_DEV_TOOLS', '1'); // memory leads are a developer tool (2026-11-16)
     stubFetchRoutes(searchRoutes({ body: searchResponseMemoryDown }));
     const view = renderTopBar();
     const { dialog } = await openAndType(view);

@@ -165,8 +165,6 @@ export function routeDocumentTitle(pathname: string, search: string): string | n
   switch (path) {
     case '/experiments':
       return composeDocumentTitle([LABELS.screenExperiments]);
-    case '/load':
-      return composeDocumentTitle([LABELS.screenLoad]);
     case '/imports':
       // `navImports`, the SAME string the nav item and the page `<h1>` read.
       // A title authored here would be a second name for a destination that
@@ -187,6 +185,8 @@ export function routeDocumentTitle(pathname: string, search: string): string | n
     case '/settings':
       return composeDocumentTitle([LABELS.navSettings]);
     case '/':
+    case '/load':
+      // `/load` redirects to My Experiments too (2026-11-16).
       // The site root is the one remaining `<Navigate replace>`: the reader is
       // never on it, so no title is owed and writing one would name a screen
       // they are already leaving.

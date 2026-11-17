@@ -800,60 +800,8 @@ export function deriveRecentWork(
   };
 }
 
-// --- historical imports --------------------------------------------------------
-
-export interface ImportTotals {
-  /** The API's own workspace total for import sessions. */
-  sessions: number | null;
-  /** How many session summaries this page actually received. */
-  summariesReceived: number;
-  /** Sessions with at least one source recorded. */
-  sessionsWithSources: number;
-  /** Sessions with at least one candidate already sent to review. */
-  sessionsWithProposals: number;
-}
-
-/**
- * Import-session counts, from `GET /api/imports`.
- *
- * SESSIONS, NEVER SOURCES OR FILES. Each entry is a summary that carries counts
- * and never the bundle (the route's own description says so), so nothing here
- * can state a filename, a digest or a path — and nothing tries to.
- *
- * `sessions` is the API's own `total` and is `null` when the body carried no
- * usable one; `summariesReceived` is what this page was actually handed. They
- * are kept apart for the same reason `Total Records` is kept apart from the
- * records received: a truncated list must not be presented as the whole
- * workspace.
- *
- * An import session is NOT a record and is never added to a record count. It is
- * a working area, and this build creates no experiment from one automatically.
- */
-export function deriveImportTotals(body: unknown): ImportTotals {
-  const imports =
-    typeof body === 'object' && body !== null && Array.isArray((body as { imports?: unknown }).imports)
-      ? ((body as { imports: unknown[] }).imports as Record<string, unknown>[])
-      : [];
-  const total =
-    typeof body === 'object' && body !== null
-      ? numberOrNull((body as { total?: unknown }).total)
-      : null;
-  let sessionsWithSources = 0;
-  let sessionsWithProposals = 0;
-  for (const entry of imports) {
-    if (typeof entry !== 'object' || entry === null) continue;
-    const sources = numberOrNull(entry.source_count);
-    const proposed = numberOrNull(entry.proposed_count);
-    if (sources !== null && sources > 0) sessionsWithSources += 1;
-    if (proposed !== null && proposed > 0) sessionsWithProposals += 1;
-  }
-  return {
-    sessions: total,
-    summariesReceived: imports.length,
-    sessionsWithSources,
-    sessionsWithProposals,
-  };
-}
+// ~~--- historical imports ---~~ (`deriveImportTotals`, `deriveImportSteps`) — removed
+// 2026-11-16 with the Statistics widget that read `/api/imports`.
 
 /* ---- distributions for the Overview dashboard (2026-11-02) -------------- */
 
@@ -885,53 +833,4 @@ export function deriveOpenQuestionDistribution(
   return rows;
 }
 
-export interface ImportSteps {
-  /** The API's own session total, or `null` when it sent none usable. */
-  sessions: number | null;
-  /** Session summaries this page received. */
-  received: number;
-  /** One row per import step, in the server's own order and wording. */
-  rows: { key: string; label: string; value: number }[];
-}
 
-/**
- * Import sessions by the furthest step each has reached, over the step list the
- * import list itself serves. A step id the list does not name is counted under
- * its own humanised id rather than dropped.
- */
-export function deriveImportSteps(body: unknown): ImportSteps {
-  const object = typeof body === 'object' && body !== null ? (body as Record<string, unknown>) : {};
-  const imports = Array.isArray(object.imports) ? (object.imports as unknown[]) : [];
-  const workflow = Array.isArray(object.workflow) ? (object.workflow as unknown[]) : [];
-  const rows: { key: string; label: string; value: number }[] = [];
-  const index = new Map<string, number>();
-  for (const step of workflow) {
-    if (typeof step !== 'object' || step === null) continue;
-    const id = stringOrNull((step as Record<string, unknown>).id);
-    const label = stringOrNull((step as Record<string, unknown>).label);
-    if (id === null || index.has(id)) continue;
-    index.set(id, rows.length);
-    rows.push({ key: id, label: label ?? id, value: 0 });
-  }
-  let received = 0;
-  for (const entry of imports) {
-    if (typeof entry !== 'object' || entry === null) continue;
-    received += 1;
-    const step = stringOrNull((entry as Record<string, unknown>).furthest_step) ?? 'unknown';
-    let at = index.get(step);
-    if (at === undefined) {
-      at = rows.length;
-      index.set(step, at);
-      rows.push({
-        key: step,
-        label: step
-          .split('_')
-          .map((w) => w.charAt(0).toUpperCase() + w.slice(1))
-          .join(' '),
-        value: 0,
-      });
-    }
-    rows[at].value += 1;
-  }
-  return { sessions: numberOrNull(object.total), received, rows };
-}

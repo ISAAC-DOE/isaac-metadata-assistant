@@ -90,6 +90,7 @@ import type {
   MemoryAvailability,
   SuggestedPrompt,
 } from '../lib/types';
+import { devToolsEnabled } from '../lib/devTools';
 
 interface AssistantPanelProps {
   reply: AssistantMessage;
@@ -479,7 +480,10 @@ const KIND_META: Record<MessageKind, { label: string; Icon: LucideIcon; classNam
 function isClientRoute(nav: string | null | undefined): nav is string {
   return (
     typeof nav === 'string' &&
-    (nav.startsWith('/record') || nav.startsWith('/memory') || nav.startsWith('/governance'))
+    (nav.startsWith('/record') ||
+      // `/memory` is a developer tool (2026-11-16): only a navigating chip with the flag.
+      (nav.startsWith('/memory') && devToolsEnabled()) ||
+      nav.startsWith('/governance'))
   );
 }
 

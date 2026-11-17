@@ -1,0 +1,134 @@
+/*
+ * HISTORICAL IMPORT — THE SKILL GUIDE (2026-11-16).
+ *
+ * A reading page: one column at a prose measure, sections separated by space rather
+ * than by cards, commands in quiet boxes with the app's existing copy button. Every
+ * value is a token from `styles/tokens.css`; the only literals are 1px borders and
+ * the measure.
+ */
+
+.hig {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-xl);
+  max-width: 72ch;
+  min-width: 0;
+  color: var(--text-primary);
+  line-height: var(--line-height-normal);
+}
+.hig p { margin: 0; }
+
+.hig-head { display: flex; flex-direction: column; gap: var(--space-sm); }
+.hig-head .page-title { margin: 0; }
+.hig-lead {
+  font-size: var(--font-size-heading-sm);
+  line-height: var(--line-height-normal);
+  color: var(--text-secondary);
+}
+
+.hig-section {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-sm);
+  min-width: 0;
+}
+.hig-title {
+  margin: 0;
+  font-size: var(--font-size-heading-md);
+  font-weight: var(--font-weight-semibold);
+  line-height: var(--line-height-snug);
+  color: var(--text-heading);
+}
+
+.hig-note { color: var(--text-secondary); }
+
+/* Numbered sequences: the order is the instruction, so the numbers stay. */
+.hig-sequence,
+.hig-steps,
+.hig-list {
+  margin: 0;
+  padding-left: var(--space-xl);
+  display: flex;
+  flex-direction: column;
+}
+.hig-sequence { gap: var(--space-md); }
+/* A list item, not a flex box, so its number is drawn; children are spaced instead. */
+.hig-sequence > li { min-width: 0; }
+.hig-sequence > li > * + * { margin-top: var(--space-sm); }
+.hig-steps,
+.hig-list { gap: var(--space-xs); }
+.hig-sequence > li::marker,
+.hig-steps > li::marker {
+  color: var(--text-secondary);
+  font-weight: var(--font-weight-semibold);
+}
+.hig-step-name { font-weight: var(--font-weight-semibold); color: var(--text-heading); }
+
+/* A command: selectable text that wraps rather than scrolls, so it never needs a
+   scroll region at 320px, with the copy button beside it. */
+.hig-cmd {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: var(--space-md);
+  padding: var(--space-sm) var(--space-md);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-control);
+  background: var(--surface-subtle);
+  min-width: 0;
+}
+.hig-cmd-text {
+  flex: 1 1 auto;
+  min-width: 0;
+  font-family: var(--font-mono);
+  font-size: var(--font-size-body);
+  line-height: var(--line-height-normal);
+  color: var(--text-heading);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+.hig-cmd-text::selection { background: var(--cited-line-bg); }
+
+/* The data table: two columns, row headers on the left. */
+.hig-table {
+  width: 100%;
+  border-collapse: collapse;
+  border: 1px solid var(--border);
+}
+.hig-table th,
+.hig-table td {
+  padding: var(--space-sm) var(--space-md);
+  text-align: left;
+  vertical-align: top;
+  border-bottom: 1px solid var(--border-faint);
+}
+.hig-table thead th {
+  font-size: var(--font-size-meta);
+  font-weight: var(--font-weight-semibold);
+  color: var(--text-secondary);
+  background: var(--surface-subtle);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+.hig-table tbody th {
+  font-weight: var(--font-weight-semibold);
+  color: var(--text-heading);
+  width: 34%;
+}
+.hig-table tbody tr:last-child th,
+.hig-table tbody tr:last-child td { border-bottom: 0; }
+
+/* Troubleshooting: problem, then its fix beneath it. Stacks at every width. */
+.hig-trouble { margin: 0; display: flex; flex-direction: column; gap: var(--space-md); }
+.hig-trouble-row { display: flex; flex-direction: column; gap: var(--space-xs); min-width: 0; }
+.hig-trouble dt { font-weight: var(--font-weight-semibold); color: var(--text-heading); }
+.hig-trouble dd { margin: 0; display: flex; flex-direction: column; gap: var(--space-xs); min-width: 0; }
+
+.hig a:not(.btn) {
+  color: var(--action);
+  text-decoration: underline;
+  text-decoration-color: var(--action-selected-border);
+  text-underline-offset: 3px;
+}
+.hig a:not(.btn):hover { color: var(--action-hover); text-decoration-color: currentColor; }
+.hig a:not(.btn):focus-visible { outline: 2px solid var(--action); outline-offset: 2px; }

@@ -46,8 +46,9 @@ afterEach(() => {
 
 describe('P22B · navigation / no dead ends', () => {
   it('the brand mark is a real link to My Experiments (/experiments)', () => {
-    // /load renders synchronously (no fetch) and mounts the brand + breadcrumb chrome.
-    const { container } = renderAt('/load');
+    // The Historical Import guide renders synchronously (no fetch) and mounts the brand.
+    // (It was `/load`, which redirects to My Experiments since 2026-11-16.)
+    const { container } = renderAt('/imports');
     const brand = container.querySelector('a.brand');
     expect(brand).not.toBeNull();
     expect(brand!.getAttribute('href')).toBe('/experiments');
@@ -61,8 +62,10 @@ describe('P22B · navigation / no dead ends', () => {
    * navigation is present, no item claims to be the current page (no nav destination
    * matches /load), and Help is in reach. The retired `.breadcrumb` crumb is absent.
    */
-  it('/load carries the shared chrome: primary navigation with no item current, and Help', () => {
-    const { container, getByRole } = renderAt('/load');
+  /* 2026-11-16: `/load` redirects, so the not-found page — the other screen that is not a
+     nav destination — carries this property now. */
+  it('the not-found page carries the shared chrome: primary navigation with no item current, and Help', () => {
+    const { container, getByRole } = renderAt('/no-such-place');
     const nav = getByRole('navigation', { name: 'Primary' });
     expect(nav.querySelectorAll('a').length).toBeGreaterThanOrEqual(4);
     expect(nav.querySelector('[aria-current]')).toBeNull();

@@ -72,6 +72,7 @@ function cssRules(source: string): { selector: string; body: string }[] {
 }
 
 afterEach(() => {
+  vi.unstubAllEnvs();
   vi.unstubAllGlobals();
 });
 
@@ -319,6 +320,8 @@ describe('screens opt into the width system', () => {
   });
 
   it('Statistics · Build & Verification renders wide too', async () => {
+
+    vi.stubEnv('VITE_ISAAC_DEV_TOOLS', '1'); // a developer surface (2026-11-16)
     // The second data tab shares the page's shell, so it shares the width mode.
     // Asserted rather than assumed: a tab is a panel inside one `AppShell`, and
     // a future split into two routes would silently drop this.

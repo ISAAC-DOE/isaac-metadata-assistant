@@ -241,7 +241,6 @@ export const LABELS = {
 
   // Screen titles
   screenExperiments: 'My Experiments',
-  screenLoad: 'Load Materials',
   /*
    * THE NAME OF THE RECORD SCREEN THAT HAS NOT LOADED — not of the loaded one.
    *
@@ -781,7 +780,6 @@ export const LABELS = {
 
   // Actions
   actionRunDemo: 'Open the Worked Example',
-  actionRunDemoShort: 'Run the Worked Example',
   // The /load breadcrumb. NOT "New Record": nothing on that screen can create a
   // record — its second on-ramp is a permanent governance refusal — so the
   // breadcrumb names what the screen actually offers.
@@ -1059,11 +1057,8 @@ export const LABELS = {
   actionStartTutorial: `Start ${SETTINGS_WALKTHROUGH}`,
   // The strip's visible verb; its accessible name is `actionStartTutorial`.
   actionStart: 'Start',
-  // The Load Materials card's visible verb once this browser has finished it.
+  // The walkthrough card's visible verb once this browser has finished it.
   actionReplay: 'Replay',
-  // The My Experiments empty state's Historical Import card: the card title carries
-  // the noun, and the link's accessible name is `actionOpenHistoricalImport`.
-  actionOpen: 'Open',
   actionSkipForNow: 'Not Now',
   actionSkipTutorial: 'Skip Walkthrough',
   actionTutorialBack: 'Back',
@@ -1336,29 +1331,16 @@ export const LABELS = {
   emptyExperimentsChoices: 'Ways to begin',
 
   /*
-   * `UX-016`'s IMPORT HALF — the first-run discovery of Pillar 2.
-   *
-   * A scientist with zero experiments who wants to RECOVER rather than CREATE
-   * had nowhere to go from this screen. This is the card that closes that, and
-   * its description is checkable rather than promotional: the destination really
-   * does record where a file is without opening it, really does read the
-   * committed synthetic fixtures, and really does put every candidate through the
-   * proposal review a person decides.
+   * HISTORICAL IMPORT on My Experiments' empty state (2026-11-16): a text link to the
+   * guide, beside the validator's. The card it replaces linked to the in-browser
+   * import flow, which is gone; importing a past beamtime is the Claude Code skill's job.
    */
-  /*
-   * ONE LINE since 2026-10-12. The reassurance it carried — "review every
-   * candidate before any of it becomes a value" — is kept in substance: nothing
-   * becomes a value until a person reviews it. The mechanism (record where each
-   * file lives, see what ISAAC can read) is the destination's own landing copy.
-   */
-  historicalImportHint:
-    'Rebuild a past experiment; nothing becomes a value unreviewed.',
+  actionImportPastBeamtime: 'Import a Past Beamtime',
+  importPastBeamtimeHint: 'With the ISAAC skill in Claude Code, on your own computer.',
   /* The empty state's validator CARD is a text link now (2026-11-02): the button
      reads `actionOpenValidator` and this hint follows it. ~~"Check a file against the
      official schema; it is never stored."~~ and the info tip ~~"It is the same
      deterministic check this app runs on an exported record…"~~ are retired. */
-  actionOpenHistoricalImport: 'Open Historical Import',
-
   actionOpenValidator: 'Open Validator',
   openValidatorHint: 'Check a record file you already have against the official schema.',
 
@@ -1631,12 +1613,11 @@ export const LABELS = {
   helpOnPageComplete: 'The questions still blocking export. “I don’t know” is always a safe answer.',
   helpOnPageEvidence: 'The evidence this record holds, and the source each entry cites.',
   helpOnPageExport: 'A dry run: what would still refuse the export. Nothing is written here.',
-  helpOnPageImports: 'Rebuild a past experiment; nothing becomes a value until you review it.',
+  helpOnPageImports: 'How to import a past beamtime with the ISAAC skill in Claude Code.',
   helpOnPageStatistics: 'Workspace record counts and checks.',
-  helpOnPageSettings: "This deployment's integrations and developer tools.",
+  helpOnPageSettings: "This deployment's build details and integrations.",
   helpOnPageGovernance: 'Check a record file against the official schema, or browse it.',
   helpOnPageMemory: "A developer map of this project's own files and docs.",
-  helpOnPageLoad: 'The guided walkthrough and its worked example.',
   helpOnPageUnknown: 'This address matches no screen in ISAAC.',
   helpWalkthroughOpen: 'The Guided Walkthrough is open in this tab.',
 
@@ -1652,10 +1633,6 @@ export const LABELS = {
   // truth plane…") are retired at the owner's direction.
   memoryIntro: 'Related files and concepts from this project — leads to verify, not truth.',
   memoryTrustTitle: 'Can I Trust the Snapshot?',
-  historicalImportInfoLabel: 'How Rebuilding a Past Experiment Works',
-  historicalImportHintMore:
-    'Record where each file lives, see what ISAAC can read out of it, and review every candidate ' +
-    'before any of it becomes a value.',
   memoryTrustInfoLabel: 'What Each Check Means',
   memorySizeTitle: 'How Big Is It?',
   memoryOriginTitle: 'Where Did It Come From?',

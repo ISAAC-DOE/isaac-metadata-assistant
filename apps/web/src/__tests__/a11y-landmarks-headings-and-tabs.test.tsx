@@ -1,8 +1,7 @@
-import { describe, it, expect, afterEach, vi } from 'vitest';
+import { describe, it, expect, afterEach, beforeEach, vi } from 'vitest';
 import { render, waitFor } from '@testing-library/react';
 import { MemoryRouter } from 'react-router-dom';
 
-import { AppRoutes } from '../App';
 import { SettingsPage } from '../screens/SettingsPage';
 import { SourcePreview } from '../components/SourcePreview';
 import { aboutResponse, openApiFixture, stubFetchRoutes } from '../test/apiFixtures';
@@ -32,14 +31,6 @@ afterEach(() => {
 });
 
 const FUTURE = { v7_startTransition: true, v7_relativeSplatPath: true } as const;
-
-function renderAt(path: string) {
-  return render(
-    <MemoryRouter initialEntries={[path]} future={FUTURE}>
-      <AppRoutes />
-    </MemoryRouter>,
-  );
-}
 
 function renderSettings(entry: string) {
   stubFetchRoutes({
@@ -167,54 +158,20 @@ describe('A11Y-04 · a scrollable region a keyboard user can actually scroll', (
   });
 });
 
-/* ── A11Y-05 · /load has a top-level heading ─────────────────────────────── */
-
-describe('A11Y-05 · Load Materials has exactly one <h1>', () => {
-  /*
-   * BEFORE: `/load` rendered no heading of ANY level. A screen-reader user
-   * landing there got an empty heading list; "go to the first heading" and the
-   * `1` quick-key both did nothing, and the page announced no name of its own —
-   * only the breadcrumb chrome shared with every other screen.
-   *
-   * AFTER: one `<h1>`, visually hidden so the on-ramp's visual design is
-   * unchanged, carrying the same name the navigation uses.
-   *
-   * VERIFIED TO FAIL PRE-FIX: `expected [] to have a length of 1 but got +0`.
-   */
-  it('renders a single top-level heading naming the screen', () => {
-    const { container } = renderAt('/load');
-    const h1s = Array.from(container.querySelectorAll('h1'));
-    expect(h1s).toHaveLength(1);
-    expect(h1s[0].textContent).toBe('Load Materials');
-  });
-
-  /*
-   * The heading must not be reachable ONLY by sight or ONLY by assistive
-   * technology — `sr-only` hides it visually while leaving it in the
-   * accessibility tree, and `display: none` / `aria-hidden` would remove it from
-   * both. This pins the difference, because "add an <h1>" is satisfiable in a
-   * way that closes the axe rule and helps nobody.
-   */
-  /*
-   * ~~"the heading is visually hidden but NOT hidden from assistive technology"~~ —
-   * INVERTED 2026-10-12, and the property it guarded is now held in a stronger form.
-   * The heading was `sr-only` because the on-ramp's visual design had no title. With
-   * the same chrome and page header as every other screen, it is VISIBLE: reachable by
-   * sight AND by assistive technology. What must still never happen — the heading
-   * being removed from the accessibility tree — is asserted unchanged.
-   */
-  it('the heading is visible AND not hidden from assistive technology', () => {
-    const { container } = renderAt('/load');
-    const h1 = container.querySelector('h1')!;
-    expect(h1.className).not.toContain('sr-only');
-    expect(h1.getAttribute('aria-hidden')).toBeNull();
-    expect(h1.hasAttribute('hidden')).toBe(false);
-  });
-});
+/* ── ~~A11Y-05 · /load has a top-level heading~~ — retired 2026-11-16: `/load`
+   redirects to My Experiments, whose one <h1> `heading-outline.test.tsx` holds. ── */
 
 /* ── A11Y-06 · the two search landmarks are told apart ───────────────────── */
 
 describe('A11Y-06 · every role="search" landmark carries its own name', () => {
+  /* The Endpoint Explorer is on Settings' Advanced tab, a developer surface shown only
+     with `VITE_ISAAC_DEV_TOOLS=1` (2026-11-16). */
+  beforeEach(() => {
+    vi.stubEnv('VITE_ISAAC_DEV_TOOLS', '1');
+  });
+  afterEach(() => {
+    vi.unstubAllEnvs();
+  });
   /*
    * BEFORE: Settings → Endpoint Explorer rendered TWO `role="search"` landmarks
    * — the TopBar trigger and the endpoint filter — and NEITHER had a name. A
@@ -292,6 +249,14 @@ describe('A11Y-06 · every role="search" landmark carries its own name', () => {
  */
 
 describe('A11Y-06 residue · the Endpoint Explorer tab names one region, once', () => {
+  /* The Endpoint Explorer is on Settings' Advanced tab, a developer surface shown only
+     with `VITE_ISAAC_DEV_TOOLS=1` (2026-11-16). */
+  beforeEach(() => {
+    vi.stubEnv('VITE_ISAAC_DEV_TOOLS', '1');
+  });
+  afterEach(() => {
+    vi.unstubAllEnvs();
+  });
   /** Every element the accessibility tree exposes with the `region` role. */
   function regions(container: HTMLElement): Element[] {
     return Array.from(container.querySelectorAll('section, [role="region"]')).filter((el) => {

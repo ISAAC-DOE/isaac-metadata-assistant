@@ -83,83 +83,24 @@ export const SURFACES: readonly Surface[] = [
     scope: 'example',
     ready: { role: 'heading', name: 'My Experiments' },
   },
-  {
-    id: 'load',
-    name: 'Load Materials',
-    path: '/load',
-    // ORDINARY on purpose. `/load` renders regardless of what any workspace
-    // holds. Outside a worked-example session its primary control is "Launch
-    // Guided Demo" (B-05) — the "Run the Worked Example" button, which POSTs
-    // `/api/demo/run`, is offered only inside one, because that endpoint refuses
-    // any request without a session header. The refusal itself is a BEHAVIOUR this
-    // suite asserts elsewhere rather than a reason to open the surface in a session.
-    scope: 'ordinary',
-    ready: { role: 'button', name: 'Start Guided Walkthrough' },
-    // FINDING A11Y-05 is CLOSED (2026-08-26). `LoadMaterials.tsx` renders
-    // `<h1 class="sr-only">Load Materials</h1>`, so `expectH1: false` is gone
-    // and `specs/structure.spec.ts` now holds this surface to the same
-    // exactly-one-<h1> rule as every other. The `page-has-heading-one` entry in
-    // `a11y-baseline.ts` was deleted in the same change, which is what
-    // structure.spec's own failure message instructs.
-  },
+  /*
+   * ~~`load` — "Load Materials", `/load`~~ — RETIRED 2026-11-16: `/load` redirects to My
+   * Experiments, which `experiments` scans. It recorded no a11y cell; its three layout
+   * entries went with it.
+   */
   {
     /*
-     * HISTORICAL IMPORT — the second of the three primary destinations, added
-     * 2026-09-13 with the destination itself.
-     *
-     * ORDINARY SCOPE, and this is the one that matters for this surface. An
-     * import session has NOTHING to do with the worked-example records, and the
-     * ordinary workspace is where a reader actually meets it: on a fresh
-     * deployment it holds no sessions, so this surface measures the REAL
-     * first-run state — the empty list and the Start control. That is what a
-     * reader of this deployment sees, so it is what is swept.
-     *
-     * CORRECTED 2026-09-15: this used to also name "the workflow strip, the
-     * durability sentence" as part of that first-run state. As of the
-     * landing-density slice (`HistoricalImport.tsx`'s `ImportList`), both now
-     * live inside a COLLAPSED `<details className="hi-how-it-works">` at the
-     * end of the page — reachable, not deleted (`CLAUDE.md`'s own rule for a
-     * relocated honesty claim), but no longer part of the DEFAULT-collapsed
-     * state this generic per-surface ready-gate measures. Opening a native
-     * `<details>` mutates no backend state, so it is not itself out of scope
-     * here — `e2e/specs/pill-shape.spec.ts`'s stepper-shape test does exactly
-     * that, in the SAME ordinary/read-only scope, to measure the node shapes
-     * inside it. This entry's own sweep simply has no reason to: it exists to
-     * gate readiness for axe/width/200%-zoom checks over the page a reader
-     * actually lands on, and a reader lands on it collapsed.
-     *
-     * THE READY GATE IS THE LIST's OWN `<h2>`, NOT THE PAGE `<h1>`, and the
-     * distinction is the race `record-detail`'s comment documents at length. The
-     * `<h1>` renders unconditionally — it is outside the fetch branch — so a gate
-     * on it would resolve while `role="status"`/`Loading imports…` was still on
-     * screen, and axe, the width sweep, the layout probes and the 200% pass would
-     * all measure a skeleton and report it as this surface. `Imports` is inside
-     * the `status === 'data'` branch and cannot render before the fetch settles.
-     *
-     * WHAT THIS SURFACE DOES NOT COVER, AND WHERE THAT NOW LIVES: an OPEN
-     * session. Reaching one needs a POST (`Start an Import` creates a working
-     * area), and this suite is read-only by construction.
-     *
-     * *** THAT GAP IS CLOSED AS OF 2026-09-13 (finding M-11), in the suite that
-     * IS allowed to POST: `e2e/mutation/imports-session-a11y.spec.ts`. *** It
-     * drives a real session through all four states — empty Sources, Sources
-     * with an entry in its table, after the sources are read, and after
-     * candidates are reconstructed — and requires each axe-CLEAN. So the
-     * sentence this paragraph used to end on is no longer the whole story: the
-     * component tests (`src/__tests__/historical-import.test.tsx`) still cover
-     * behaviour, but they run in jsdom, which computes no colours and runs no
-     * accessibility engine. Do not read "covered by the component tests" as
-     * accessibility coverage anywhere in this file.
-     *
-     * The split is deliberate rather than incidental: adding `imports-session`
-     * to `SURFACES` would enrol it in THIRTEEN sweeps across seven viewport
-     * projects, every one of which needs the POST this config forbids.
+     * HISTORICAL IMPORT — since 2026-11-16 the guide to importing a past beamtime with the
+     * Claude Code skill. The in-browser import flow this surface used to scan (an empty
+     * session list, and `e2e/mutation/imports-session-a11y.spec.ts` for an open session)
+     * is gone. The page is static: it reads nothing from the API, so the `<h1>` would do
+     * as a gate; the last section's heading is used so the scan waits for the whole page.
      */
     id: 'imports',
-    name: 'Historical Import (ordinary, no sessions)',
+    name: 'Historical Import (skill guide)',
     path: '/imports',
     scope: 'ordinary',
-    ready: { role: 'heading', name: 'Imports' },
+    ready: { role: 'heading', name: 'If something goes wrong' },
   },
   {
     /*
@@ -400,20 +341,11 @@ export const SURFACES: readonly Surface[] = [
     scope: 'example',
     ready: { role: 'heading', name: /Export/ },
   },
-  {
-    id: 'memory',
-    name: 'Project Memory — Overview',
-    path: '/memory',
-    scope: 'ordinary',
-    ready: { role: 'heading', name: 'Project Memory' },
-  },
-  {
-    id: 'memory-graph',
-    name: 'Project Memory — Graph',
-    path: '/memory?tab=graph',
-    scope: 'ordinary',
-    ready: { role: 'heading', name: 'Graph' },
-  },
+  /*
+   * ~~`memory`, `memory-graph` — Project Memory~~ — RETIRED 2026-11-16: Project Memory is
+   * a developer tool behind `VITE_ISAAC_DEV_TOOLS=1`, which this suite's build does not
+   * set, so `/memory` redirects to My Experiments. Neither recorded an a11y cell.
+   */
   {
     /*
      * QA-020 — the not-found state, enrolled deliberately and with its cost known.
@@ -480,34 +412,11 @@ export const SURFACES: readonly Surface[] = [
     scope: 'example',
     ready: { role: 'heading', name: 'Records' },
   },
-  {
-    /*
-     * *** ADDED 2026-09-15 TO STOP A COVERAGE LOSS, not to add coverage that
-     * never existed. ***
-     *
-     * The Statistics redesign moved four `details.stats-disclosure` blocks off
-     * the Overview tab onto this new `Build & Verification` tab. Measured in
-     * Chrome: Overview mounts **0**, My Stats **0**, `?tab=build` mounts **4**
-     * (plus one `details.stats-technical`). This tab was absent from the
-     * catalog, so those four blocks — and Record Verification, Mutation
-     * Verification and the platform-metrics region with them — were scanned by
-     * axe at NO viewport.
-     *
-     * `openUnreachableDisclosures` caught it rather than letting the baselines
-     * quietly drop, which is the failure its own header records having happened
-     * before: "exactly such a drop was once recorded as an accessibility win;
-     * it is a coverage loss."
-     *
-     * `ready` waits on the panel's own first heading, not the page `h1`, so the
-     * scan cannot race a tab that has not painted yet — the same reasoning the
-     * `statistics-mine` entry above states.
-     */
-    id: 'statistics-build',
-    name: 'Statistics — Build & Verification',
-    path: '/statistics?tab=build',
-    scope: 'ordinary',
-    ready: { role: 'heading', name: 'Record Verification' },
-  },
+  /*
+   * ~~`statistics-build` — Statistics → Build & Verification~~ — RETIRED 2026-11-16: a
+   * developer tab behind `VITE_ISAAC_DEV_TOOLS=1`; without it `?tab=build` shows Overview,
+   * which `statistics` scans. It recorded no a11y cell.
+   */
   /*
    * ── SETTINGS IS FOUR TABS OF WIDGETS SINCE 2026-10-12 ─────────────────────
    *
@@ -549,16 +458,11 @@ export const SURFACES: readonly Surface[] = [
     /* ~~'No API Keys in This Build'~~ — retired 2026-11-02; the widget's own title. */
     ready: { role: 'heading', name: 'API Access' },
   },
-  {
-    id: 'settings-explorer',
-    name: 'Settings — Advanced (via ?tab=explorer)',
-    path: '/settings?tab=explorer',
-    scope: 'ordinary',
-    // Wait for the DETAIL pane, not the group list: the list heading renders
-    // before the detail mounts, and scanning in between saw an h4 before the
-    // h2/h3 above it (an intermittent heading-order failure at zoom-200).
-    ready: { role: 'heading', name: /\/api\/about/ },
-  },
+  /*
+   * ~~`settings-explorer` — Settings → Advanced, `?tab=explorer`~~ — RETIRED 2026-11-16:
+   * Advanced is a developer tab behind `VITE_ISAAC_DEV_TOOLS=1`; without it `?tab=explorer`
+   * lands on Integrations, which `settings-api` scans. It recorded no a11y cell.
+   */
   /*
    * ~~`settings-connect` — "Settings — Connect Your Agent", `?tab=mcp`~~ — RETIRED
    * 2026-10-12 as a duplicate: `?tab=mcp` now lands on Integrations, which
@@ -639,9 +543,9 @@ export const SURFACES: readonly Surface[] = [
  * an `<aside>` with the accessible name "Assistant" on every mount (Project Memory's
  * "Assistant (advisory)" was retired 2026-11-02), containing `role="log"`.
  *
- * Carries its own `scope` for the same reason `Surface` does: four of the five
- * mounts are record surfaces and exist only inside a worked-example session,
- * while Project Memory is an ordinary surface with an advisory panel.
+ * Carries its own `scope` for the same reason `Surface` does: all four mounts are
+ * record surfaces and exist only inside a worked-example session. (Project Memory's
+ * mount went behind the developer flag on 2026-11-16.)
  */
 export const ASSISTANT_MOUNTS: readonly {
   id: string;
@@ -658,18 +562,12 @@ export const ASSISTANT_MOUNTS: readonly {
   },
   { id: 'evidence', path: recordSub(SEED.partial, 'evidence'), scope: 'example', asideName: /^Assistant/ },
   { id: 'export-readiness', path: recordSub(SEED.review, 'export'), scope: 'example', asideName: /^Assistant/ },
-  { id: 'memory', path: '/memory', scope: 'ordinary', asideName: /^Assistant/ },
+  // ~~`memory`~~ — retired 2026-11-16: `/memory` is behind the developer flag.
 ] as const;
 
 /** Surfaces that own a `role="tablist"`, with the expected tab labels. */
 export const TABBED_SURFACES = [
-  {
-    id: 'memory',
-    path: '/memory',
-    tablistName: 'Project Memory sections',
-    tabs: ['Overview', 'Sources', 'Concepts', 'Graph'],
-    panelIdPrefix: 'memory-tabpanel-',
-  },
+  // ~~`memory`~~ — retired 2026-11-16: `/memory` is behind the developer flag.
   {
     id: 'governance',
     /* Policy moved to Settings (2026-10-12) and a bare `/governance` redirects
@@ -700,26 +598,12 @@ export const TABBED_SURFACES = [
        derived from this array, so the list stays the single place a tab is
        declared. */
     /* THREE TABS SINCE 2026-11-02 — Privacy & Governance was retired. */
-    tabs: ['Overview', 'Integrations', 'Advanced'],
+    /* TWO SINCE 2026-11-16 — Advanced is behind the developer flag. */
+    tabs: ['Overview', 'Integrations'],
     panelIdPrefix: 'settings-tabpanel-',
   },
-  {
-    // Statistics is the FOURTH page-level tablist, and it reuses the shared
-    // `RovingTabs` component and the shared `.section-tabs` / `.section-tab`
-    // styling rather than introducing a paradigm of its own — so the APG-structure,
-    // keyboard and deep-link specs above apply to it unchanged.
-    id: 'statistics',
-    path: '/statistics',
-    tablistName: 'Statistics sections',
-    /* `General ISAAC` -> `Overview`, and a THIRD tab added, 2026-09-15: the
-       Statistics redesign moved the engineering content onto
-       `Build & Verification` so a scientist does not land on it. Measured in
-       Chrome — the tablist reads exactly these three, in this order.
-       TWO since 2026-11-02: My Stats is not offered while no personal source
-       can return data. */
-    tabs: ['Overview', 'Build & Verification'],
-    panelIdPrefix: 'statistics-tabpanel-',
-  },
+  // ~~`statistics`~~ — retired 2026-11-16: with Build & Verification behind the developer
+  // flag and My Stats not offered, Overview is the whole page and no tablist is drawn.
   // Schema Proposals' own tablist (2026-10-29) was removed on 2026-11-02, when the
   // screen became one page with no tabs; its three surfaces above still catalogue it.
 ] as const;

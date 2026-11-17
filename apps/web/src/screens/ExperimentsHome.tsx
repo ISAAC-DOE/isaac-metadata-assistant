@@ -19,7 +19,7 @@ import { LibraryOverview } from '../components/LibraryOverview';
 import { TutorialPromotion } from '../components/TutorialPromotion';
 import { LoadingPanel, BackendDown } from '../components/FetchStates';
 import { HelpTip } from '../components/HelpTip';
-import { Compass, Inbox, LayoutList, Plus } from '../components/icons';
+import { Compass, LayoutList, Plus } from '../components/icons';
 import { LABELS } from '../lib/labels';
 import { ROUTES } from '../lib/routes';
 import { api } from '../lib/api';
@@ -800,12 +800,12 @@ function EmptyExperiments({
         </div>
       </div>
 
-      {/* ONE PRIMARY, TWO QUIET PEERS (2026-11-02). Create Experiment is the solid
-          `btn-primary`. The walkthrough and Historical Import keep their cards but
-          their buttons are short ("Start", "Open") because the card title carries
-          the noun; each accessible name still opens with the visible word and
-          names the destination (WCAG 2.5.3). The Schema Validator is a utility,
-          not a way to begin, so it is a text link under the list. */}
+      {/* ONE PRIMARY, ONE QUIET PEER (2026-11-02; Historical Import left the list
+          2026-11-16). Create Experiment is the solid `btn-primary`. The walkthrough's
+          button is short ("Start") because the card title carries the noun; its
+          accessible name still opens with the visible word and names the destination
+          (WCAG 2.5.3). Historical Import and the Schema Validator are text links
+          under the list. */}
       <ul className="queue-empty-list" aria-label={LABELS.emptyExperimentsChoices}>
         <CreateExperimentControl variant="card" onCreated={onCreated} />
 
@@ -850,37 +850,6 @@ function EmptyExperiments({
           </div>
         </li>
 
-        {/*
-          HISTORICAL IMPORT — a LINK and not a button, deliberately: it goes to a
-          destination that exists in the nav, and a button that navigates is a
-          button a reader cannot middle-click, bookmark or open in a new tab.
-        */}
-        <li className="queue-empty-action">
-          <span className="queue-empty-action-mark" aria-hidden="true">
-            <Inbox size={18} strokeWidth={1.75} />
-          </span>
-          <div className="queue-empty-action-main">
-            <h3 className="queue-empty-action-title">{LABELS.navImports}</h3>
-            <p className="queue-empty-hint">
-              {LABELS.historicalImportHint}{' '}
-              {/* Named for what it explains, not "About Historical Import": the empty
-                  state offers no control named for importing (it LINKS there), and
-                  `tutorial-session-lifecycle.test.tsx` T7 holds it to that. */}
-              <HelpTip subject={LABELS.navImports} label={LABELS.historicalImportInfoLabel} kind="info">
-                <span>{LABELS.historicalImportHintMore}</span>
-              </HelpTip>
-            </p>
-          </div>
-          <div className="queue-empty-action-cta">
-            <Link
-              className="btn btn-secondary queue-empty-cta"
-              to={ROUTES.imports}
-              aria-label={LABELS.actionOpenHistoricalImport}
-            >
-              {LABELS.actionOpen}
-            </Link>
-          </div>
-        </li>
       </ul>
 
       {/*
@@ -893,9 +862,17 @@ function EmptyExperiments({
         </p>
       )}
 
-      {/* THE STANDALONE VALIDATOR, as a text link (2026-11-02). It checks a file a
-          reader already has; it is not a way to start an experiment, so it does not
-          get a card of the same weight as the three that are. */}
+      {/* TWO TEXT LINKS under the two cards. HISTORICAL IMPORT (2026-11-16) goes to its
+          guide: a past beamtime is imported with the Claude Code skill on the scientist's
+          own computer, not on this page. THE STANDALONE VALIDATOR (2026-11-02) checks a
+          file a reader already has. Neither is a way to start an experiment here, so
+          neither gets a card of the same weight as the two that are. */}
+      <p className="queue-empty-more">
+        <Link className="btn btn-ghost queue-empty-link" to={ROUTES.imports}>
+          {LABELS.actionImportPastBeamtime}
+        </Link>
+        <span className="queue-empty-more-hint">{LABELS.importPastBeamtimeHint}</span>
+      </p>
       <p className="queue-empty-more">
         <button type="button" className="btn btn-ghost queue-empty-link" onClick={onOpenValidator}>
           {LABELS.actionOpenValidator}

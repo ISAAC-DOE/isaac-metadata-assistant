@@ -22,7 +22,9 @@ const KEYBOARD_SURFACES = [
   'experiments-example',
   'record-detail',
   'guided-completion',
-  'memory',
+  // ~~'memory'~~ — retired 2026-11-16 (behind the developer flag); the skill guide's copy
+  // buttons take its place.
+  'imports',
   'settings',
 ] as const;
 
