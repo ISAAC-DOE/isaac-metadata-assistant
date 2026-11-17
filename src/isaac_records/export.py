@@ -127,7 +127,7 @@ def _enforce_server_owned_invariant(record: dict) -> None:
             del record[block_key]
 
 
-def _write_not_reported_temperature(record: dict) -> None:
+def _write_not_reported_temperature(record: dict, draft: dict) -> None:
     """Write ``context.temperature_K: null`` when, and only when, the record states
     ``context.temperature_basis: "not_reported"`` and carries no ``temperature_K`` at all.
 
@@ -143,9 +143,18 @@ def _write_not_reported_temperature(record: dict) -> None:
     for the one basis that means "not stated". Nothing is defaulted. A draft that holds a
     number AND ``not_reported`` keeps its number, and official validation refuses the
     contradiction; a null temperature WITHOUT that basis is never written here, so the
-    schema still refuses it (or reports the missing property) exactly as before."""
+    schema still refuses it (or reports the missing property) exactly as before.
+
+    AN OPEN QUESTION STAYS OPEN (review of #323, LOW 1). The null is written only when the
+    draft's own ``context.temperature_K`` envelope is absent or ``status: missing``. A
+    ``needs_confirmation`` (or any other) envelope is a question nobody has answered, and an
+    evidenced basis elsewhere must not close it: the record then has no ``temperature_K`` and
+    the schema refuses the export for the missing required property."""
     context = record.get("context")
     if not isinstance(context, dict):
+        return
+    env = (draft.get("fields") or {}).get("context.temperature_K")
+    if env is not None and not (isinstance(env, dict) and env.get("status") == "missing"):
         return
     if context.get("temperature_basis") == "not_reported" and "temperature_K" not in context:
         # A copy, not an in-place write: under the whole-block spelling
@@ -228,7 +237,7 @@ def transform(draft: dict, *, record_id: str | None = None, now: str | None = No
             record["attribution"] = {**existing, **block}
         else:
             record["attribution"] = block
-    _write_not_reported_temperature(record)
+    _write_not_reported_temperature(record, draft)
     if draft.get("tags"):
         record["tags"] = list(draft["tags"])
 

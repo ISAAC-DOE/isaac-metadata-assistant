@@ -47,6 +47,27 @@ _EXCLUDE_PATHS = {
 }
 
 
+#: Lists reached by dict-only traversal that the schema vendored 2026-11-16 added and that
+#: have no block target. Measured against the July document: exactly these two are new
+#: (`assets`, `links`, `measurement.series`, `descriptors.outputs`, `attribution.contributors`
+#: and `tags` already had block targets or exclusions; `measurement.processing.steps`,
+#: `measurement.qc.assumptions` and `sample.material.identifiers` predate it and are
+#: unchanged here). An empty list asserts nothing and is not a target.
+_LIST_TARGETS = frozenset({"attribution.produced_by.people", "context.modulation.levels"})
+
+#: An object whose WHOLE-OBJECT envelope (`fields["attribution.produced_by"] = {"value":
+#: {...}, "evidence": [...]}`) files one sidecar entry at the object's own path. That entry
+#: covers the object's leaves (review of #323, LOW 3). Scoped to this one object, the only
+#: one the refresh made writable in two spellings, so no other coverage figure moves.
+_WHOLE_OBJECT_COVERS = ("attribution.produced_by",)
+
+
+def _covered(key: str, present: set[str]) -> bool:
+    if key in present:
+        return True
+    return any(key.startswith(obj + ".") and obj in present for obj in _WHOLE_OBJECT_COVERS)
+
+
 def _scalar_targets(record: dict) -> list[str]:
     """Leaf values reachable by DICT-ONLY traversal (never descend into lists),
     keyed by dotted path, minus the identity/system/label exclusions above."""
@@ -62,7 +83,14 @@ def _scalar_targets(record: dict) -> list[str]:
             if isinstance(value, dict):
                 walk(value, path)
             elif isinstance(value, list):
-                continue  # lists are block territory, never scalar targets
+                # Lists are block territory — EXCEPT the ones the 2026-11-16 schema added
+                # that have no block target, which are claims with nowhere else to be
+                # counted (review of #323, MEDIUM 1): an uncited `produced_by.people`
+                # audited as fully covered. Each is ONE target at its own dotted path,
+                # which is where a field envelope files its evidence.
+                if path in _LIST_TARGETS and value:
+                    out.append(path)
+                continue
             elif value is None:
                 # A null asserts NO value, so there is nothing for evidence to support
                 # (CLAUDE.md §5: every NON-null finalized field needs evidence), and
@@ -126,8 +154,8 @@ def _sidecar_coverage(
     evidence = sidecar.get("evidence") or {}
     present = set(evidence.keys())
 
-    covered = sum(1 for key in expected if key in present)
-    uncovered = sorted(key for key in expected if key not in present)
+    covered = sum(1 for key in expected if _covered(key, present))
+    uncovered = sorted(key for key in expected if not _covered(key, present))
 
     dangling: list[str] = []
     for key in evidence:

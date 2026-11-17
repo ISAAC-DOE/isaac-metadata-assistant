@@ -227,3 +227,56 @@ def test_not_reported_with_a_drafted_number_is_refused_not_overwritten(draft):
     result = export_draft(draft, ROOT, record_id=RID, now=NOW)
     assert not result.ok
     assert result.record["context"]["temperature_K"] == 298
+
+
+# --- review of #323 ---------------------------------------------------------------------------
+
+
+def _coverage(tmp_path, record, evidence):
+    sidecar = tmp_path / f"{RID}.evidence.json"
+    sidecar.write_text(json.dumps({"evidence": evidence}), encoding="utf-8")
+    return _sidecar_coverage(record, sidecar)
+
+
+def test_an_unevidenced_produced_by_people_list_is_uncovered(tmp_path, record):
+    # MEDIUM 1: lists were skipped, so an uncited `people` list audited as fully covered.
+    record["attribution"]["produced_by"] = {**PRODUCED_BY, "people": ["SYNTHETIC Person A"]}
+    evidence = {"attribution.produced_by.group": EVIDENCE, "attribution.produced_by.organization": EVIDENCE}
+    _, _, uncovered, dangling = _coverage(tmp_path, record, evidence)
+    assert "attribution.produced_by.people" in uncovered
+    assert dangling == []
+    evidence["attribution.produced_by.people"] = EVIDENCE
+    _, _, uncovered, _ = _coverage(tmp_path, record, evidence)
+    assert not any(k.startswith("attribution.produced_by") for k in uncovered)
+
+
+def test_an_unevidenced_modulation_levels_list_is_uncovered(tmp_path, record):
+    record["context"]["modulation"] = {"levels": [{"label": "SYNTHETIC low", "value": 0.1, "unit": "V"}]}
+    _, _, uncovered, _ = _coverage(tmp_path, record, {})
+    assert "context.modulation.levels" in uncovered
+
+
+def test_an_empty_people_list_is_not_a_target(tmp_path, record):
+    record["attribution"]["produced_by"] = {**PRODUCED_BY, "people": []}
+    _, _, uncovered, _ = _coverage(tmp_path, record, {})
+    assert "attribution.produced_by.people" not in uncovered
+
+
+def test_a_whole_object_produced_by_envelope_covers_its_leaves(tmp_path, draft):
+    # LOW 3: one envelope for the whole object files one sidecar entry, at its own path.
+    draft["fields"]["attribution.produced_by"] = _envelope({**PRODUCED_BY, "people": ["SYNTHETIC Person A"]})
+    result = export_draft(draft, ROOT, record_id=RID, now=NOW)
+    assert result.ok, result.draft_report.render()
+    assert result.record["attribution"]["produced_by"]["group"] == PRODUCED_BY["group"]
+    _, _, uncovered, dangling = _coverage(tmp_path, result.record, result.sidecar["evidence"])
+    assert not any(k.startswith("attribution.produced_by") for k in uncovered), uncovered
+    assert dangling == []
+
+
+def test_a_needs_confirmation_temperature_is_not_closed_by_the_basis(draft):
+    # LOW 1: an evidenced `not_reported` basis must not answer an open temperature question.
+    draft["fields"]["context.temperature_K"] = {"value": None, "status": "needs_confirmation", "evidence": []}
+    draft["fields"]["context.temperature_basis"] = _envelope("not_reported")
+    result = export_draft(draft, ROOT, record_id=RID, now=NOW)
+    assert not result.ok
+    assert "temperature_K" not in result.record["context"]

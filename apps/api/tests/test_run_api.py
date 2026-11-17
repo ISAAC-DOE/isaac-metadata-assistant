@@ -4597,8 +4597,11 @@ _DISCLOSED_TRUTH_PATH_CHANGES: dict[str, str] = {
         "audited an uncited produced_by at full coverage; contributors and uploaded_by stay "
         "excluded), and a NULL leaf is not a target (a null asserts no value; the schema now "
         "requires temperature_K: null with basis not_reported, which was reported uncovered "
-        "forever). Coverage reporting only; validation verdicts unchanged. Covered by "
-        "tests/test_portal_schema_fields.py. Delete once landed."
+        "forever). After review of #323: the two list fields the schema added with no block "
+        "target (produced_by.people, context.modulation.levels) are targets at their own "
+        "path, and a whole-object produced_by envelope covers its leaves. Coverage reporting "
+        "only; validation verdicts unchanged. Covered by tests/test_portal_schema_fields.py. "
+        "Delete once landed."
     ),
 }
 
