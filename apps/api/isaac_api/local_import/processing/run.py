@@ -2479,6 +2479,8 @@ def process_group(group: Mapping, ctx: _Ctx, athena_entry: Mapping | None = None
             # never overlay a curve in an unknown energy frame, or one whose normalisation is implausible
             athena=athena_entry if athena_entry is not None and A.frame_known(athena_entry) and A.plausible(athena_entry) else None,
             np=np,
+            # the plot is never hashed (run_id below excludes it), so naming and marking the scans moves no id
+            **_plot_scan_marks(scans, used_entries, res["inputs"], selection, excl=excl, flagged=any(dg["scan_flags"])),
         )
     except Exception:  # noqa: BLE001 - a plot failure is a flag, never a processing failure
         plotted = False
@@ -2703,7 +2705,9 @@ def process_group(group: Mapping, ctx: _Ctx, athena_entry: Mapping | None = None
         vfiles = [{**f, "role": "athena_normalized"} for f in files if f["role"] == f"athena_version_{n:02d}"]
         # r7 K4: the chosen version's own plot, with its curve overlaid (the run's plot.png has no Athena curve: it was
         # drawn before any version was chosen). PNGs are never hashed, so no id moves; one already there is kept.
-        vplot = _version_plot(gdir, n, v, group, stems, grid, M, mg, dg, nm, np, ctx.bundle_dir)
+        vplot = _version_plot(gdir, n, v, group, stems, grid, M, mg, dg, nm, np, ctx.bundle_dir,
+                              marks=_plot_scan_marks(scans, used_entries, res["inputs"], selection, excl=excl,
+                                                     flagged=any(dg["scan_flags"])))
         vfiles += [vplot] if vplot else [f for f in files if f["role"] == "plot"]
         vres = _athena_result(group, v, vfiles, params, np, ctx, stems=stems, isaac_counts=(len(scans_data), len(scans)),
                               coverage=version_coverage[n - 1],
@@ -2778,7 +2782,41 @@ def version_plot_notes(results: Sequence[dict], *, stored: Sequence[Mapping] = (
     return notes
 
 
-def _version_plot(gdir: Path, n: int, v: Mapping, group: Mapping, stems, grid, M, mg, dg, nm, np, bundle_dir: Path) -> dict | None:
+def _plot_scan_marks(scans: Sequence[Mapping], used_entries: Sequence[Mapping], inputs: Sequence[Mapping],
+                     selection: Mapping | None, *, excl: bool, flagged: bool) -> dict:
+    """The review plot's scan names, scan-selection marks and footnote (``review_plot`` keywords), one per merged scan
+    (a row of ``M``, in ``used_entries`` order). Each scan is named by its REAL scan number (``bundle.input_scan_numbers``),
+    never by its place among the merged scans, so a group with a skipped scan 2 says 1, 3, 4, ...; by its file name when
+    the numbers are not known or repeat (several runs). The plot is never hashed: none of this moves an id. GUARDED:
+    marks that cannot be made leave the plot as it was drawn before (``{}``), never a plot or processing failure."""
+    try:
+        return _plot_scan_marks_unguarded(scans, used_entries, inputs, selection, excl=excl, flagged=flagged)
+    except Exception:  # noqa: BLE001 - a mark is never worth losing the plot
+        return {}
+
+
+def _plot_scan_marks_unguarded(scans, used_entries, inputs, selection, *, excl: bool, flagged: bool) -> dict:
+    run_of = {s.get("source_id"): s.get("run_key") for s in scans}
+    numbers, _ = B.input_scan_numbers(inputs, run_of)
+    num_of = {id(e): n for e, n in zip(inputs, numbers)}
+    used = [num_of.get(id(e)) for e in used_entries]
+    if all(isinstance(n, int) for n in used) and len(set(used)) == len(used):
+        labels = [f"scan {n}" for n in used]
+    else:
+        labels = [exclusion_name(e, inputs) for e in used_entries]
+    rows = list((selection or {}).get("scans") or ()) if (selection or {}).get("status") == "evaluated" else []
+    proposal_of = {id(e): x.get("proposal") for e, x in zip(inputs, rows)} if len(rows) == len(inputs) else {}
+    proposals = [proposal_of.get(id(e)) for e in used_entries]
+    n = len(used_entries)
+    note = (f"The merge is raw mu of all {n} scan{'s' if n != 1 else ''} used"
+            + (" (flagged points/scans excluded by the params file)" if excl and flagged else "")
+            + ("; scan-selection proposals are NOT applied." if any(p in (C.PROPOSAL_EXCLUDE, C.PROPOSAL_LOOK) for p in proposals)
+               else "."))
+    return {"scan_labels": labels, "scan_proposals": proposals, "merge_note": note}
+
+
+def _version_plot(gdir: Path, n: int, v: Mapping, group: Mapping, stems, grid, M, mg, dg, nm, np, bundle_dir: Path,
+                  marks: Mapping | None = None) -> dict | None:
     """r7 K4: ``plot_athena_v<n>.png`` in the run folder: the run's review plot with the chosen Athena version's curve
     overlaid (never one in an unknown energy frame or with an implausible step). Written once: a run folder is never
     rewritten. The file entry (role ``plot``), or ``None`` when no plot can be drawn."""
@@ -2792,7 +2830,7 @@ def _version_plot(gdir: Path, n: int, v: Mapping, group: Mapping, stems, grid, M
             if not review_plot(path, title=f"{group['group_id']} ({group.get('role')}) {', '.join(stems)[:50]} + Athena v{n:02d}",
                                grid=grid, M=M, merged=mg["mean"], point_flags=dg["point_flags"],
                                scan_flags=dg["scan_flags"], norm=nm["norm"], flat=nm["flat"], e0=nm["e0_eV"],
-                               athena=v, np=np):
+                               athena=v, np=np, **(marks or {})):
                 return None
         except Exception:  # noqa: BLE001 - a plot failure is never a processing failure
             return None
