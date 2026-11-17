@@ -173,21 +173,21 @@ const SIGN_IN_REMEDY = 'Reload the page to sign in again, then try again.';
 export function mutationFailureCopy(err: unknown, fallback: string): string {
   if (wasIntercepted(err)) {
     return (
-      'A sign-in page was returned in place of the ISAAC API, so this request never ' +
-      `reached it and nothing was changed. ${SIGN_IN_REMEDY}`
+      'A sign-in page came back instead of ISAAC, so nothing was changed. ' +
+      `${SIGN_IN_REMEDY}`
     );
   }
   const status = statusOf(err);
   if (status === 401) {
     return (
-      'The ISAAC API rejected this request as unauthenticated (HTTP 401) before it was ' +
-      `carried out, so nothing was changed. ${SIGN_IN_REMEDY}`
+      'Your sign-in session has ended, so nothing was changed. ' +
+      `${SIGN_IN_REMEDY}`
     );
   }
   if (status === 403) {
     return (
-      'The ISAAC API refused this request as unauthorized (HTTP 403) before it was ' +
-      `carried out, so nothing was changed. ${SIGN_IN_REMEDY}`
+      'Your sign-in no longer allows this change, so nothing was changed. ' +
+      `${SIGN_IN_REMEDY}`
     );
   }
   return fallback;

@@ -144,7 +144,7 @@ describe('the affordance is reachable', () => {
     // and it landed in a region that was already live, not one inserted with it
     expect(announced).toHaveAttribute('role', 'status');
     // The screen is still the record while the refresh is in flight, not a loading panel.
-    expect(screen.queryByText(/Loading the record from the ISAAC API/)).not.toBeInTheDocument();
+    expect(screen.queryByText(/Loading the record…/)).not.toBeInTheDocument();
     expect(screen.getByRole('button', { name: /Experiment Name/ })).toBeInTheDocument();
     expect(reads).toBeGreaterThan(1); // the refresh really was issued
   }, 20000);

@@ -1027,8 +1027,8 @@ test('an unsaved correction survives a background change-feed refresh', async ({
 // 8 + the acceptance question · staleness is the TARGET's, and acceptance is refused
 // ---------------------------------------------------------------------------
 
-const UNCHANGED = 'the value at this field path was unchanged since this proposal was made';
-const CHANGED = 'the value at this field path had CHANGED since this proposal was made';
+const UNCHANGED = 'This field has not changed since this proposal was made';
+const CHANGED = 'This field has changed since this proposal was made';
 
 test('an unrelated write does not make a proposal stale; a write to the target does', async ({
   page,
@@ -1083,7 +1083,7 @@ test('an unrelated write does not make a proposal stale; a write to the target d
   const staleCard = cardFor(page, noteId);
   await expect(staleCard.locator('.proposal-target-state')).toContainText(CHANGED);
   await expect(staleCard.locator('.proposal-target-state')).toContainText(
-    'accepting is refused while that is so — nothing would be written'
+    'accepting is refused for now — nothing would be written'
   );
 
   const staleRow = await serverProposal(request, id, created.proposal_id);

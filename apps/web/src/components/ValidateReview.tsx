@@ -385,10 +385,10 @@ export function ValidateReview({ experimentId }: { experimentId: string }) {
       <Disclosure summary="What this checks" className="vr-about">
       <p className="vr-sub">
         {review.status !== 'data'
-          ? 'Checks this record against the same deterministic validators the export gate uses — each run separately if it has runs — and lists what was found, so you can decide what to fix. '
+          ? 'Checks this record against the same checks export uses — each run separately if it has runs — and lists what was found, so you can decide what to fix. '
           : hasRuns
-            ? 'Checks every run against the same deterministic validators the export gate uses, and lists what each one found, so you can decide what to fix. '
-            : 'Checks this record against the same deterministic validators the export gate uses, and lists what they found, so you can decide what to fix.'}
+            ? 'Checks every run against the same checks export uses, and lists what each one found, so you can decide what to fix. '
+            : 'Checks this record against the same checks export uses, and lists what they found, so you can decide what to fix.'}
       </p>
       </Disclosure>
 
@@ -1051,7 +1051,7 @@ function AttentionBlock({ attention }: { attention: Attention }) {
       </p>
       <Disclosure summary="What this reviews" className="vr-attention-scope">
         <p className="vr-attention-note">
-          This reviews a different document from the run results above: the server
+          This reviews something different from the run results above: ISAAC
           classifies the record-level draft, which on a record with runs holds the
           experiment-level fields only — no measurement, no links, no run content — and is
           never exported on its own. There is no per-run breakdown, so none is shown. It is

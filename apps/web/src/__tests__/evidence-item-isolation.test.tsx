@@ -133,7 +133,7 @@ describe('Evidence trail · one bad item degrades to itself', () => {
       //    one reached the "Backend Not Running" alert — assert against both.)
       expect(await findByText('Direct Fields')).toBeInTheDocument();
       expect(container.querySelector('[role="alert"]')).toBeNull();
-      expect(container.textContent).not.toMatch(/Backend Not Running/i);
+      expect(container.textContent).not.toMatch(/ISAAC Is Not Running/i);
 
       // 2. Every VALID entry is still listed, unharmed.
       for (const validKey of VALID_KEYS) {

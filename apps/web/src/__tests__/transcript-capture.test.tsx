@@ -3444,7 +3444,7 @@ describe('leaving a record: the panel keeps its own promise, whoever the caller 
         {state.status === 'data' ? (
           <TranscriptCapturePanel experimentId={state.id} />
         ) : (
-          <p>Loading the record from the ISAAC API…</p>
+          <p>Loading the record…</p>
         )}
       </MemoryRouter>
     );

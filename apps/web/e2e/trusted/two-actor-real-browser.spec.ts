@@ -1237,7 +1237,7 @@ test.describe('two scientists, two real browsers, one record', () => {
         await expect(
           card.locator('.proposal-target-state'),
           'step 7: the card tells the reader the value moved',
-        ).toContainText(/CHANGED since this proposal was made/, { timeout: DISCOVERY_DEADLINE });
+        ).toContainText(/has changed since this proposal was made/, { timeout: DISCOVERY_DEADLINE });
         /*
          * ACCEPT IS STILL OFFERED, AND THAT IS DELIBERATE RATHER THAN A DEFECT.
          * `acceptUnavailableReason` fails OPEN — `target_stale` was read a moment ago

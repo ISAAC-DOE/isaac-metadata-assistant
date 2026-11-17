@@ -115,7 +115,7 @@ export function EvidenceExplorer() {
       >
         <h1 className="sr-only">{LABELS.screenEvidence}</h1>
         {bundle.status === 'loading' ? (
-          <LoadingPanel label="Loading the evidence trail from the ISAAC API…" />
+          <LoadingPanel label="Loading the evidence trail…" />
         ) : (
           <BackendDown error={bundle.error} onRetry={bundle.reload} />
         )}
@@ -842,7 +842,7 @@ function EvidenceGraphView({
   );
 
   if (runs.status === 'loading') {
-    return <LoadingPanel label="Loading this experiment's runs from the ISAAC API…" />;
+    return <LoadingPanel label="Loading this experiment's runs…" />;
   }
   if (runs.status !== 'data') {
     return <BackendDown error={runs.error} onRetry={runs.reload} />;

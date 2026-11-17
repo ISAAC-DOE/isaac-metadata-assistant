@@ -795,7 +795,7 @@ test.describe('two scientists, one record, end to end', () => {
     await expect(
       throwawayCard.locator('.proposal-target-state'),
       'step 13: the stale card tells the reader the value moved'
-    ).toContainText(/CHANGED since this proposal was made/, { timeout: DISCOVERY_DEADLINE });
+    ).toContainText(/has changed since this proposal was made/, { timeout: DISCOVERY_DEADLINE });
     // WITHDRAWN, NOT DELETED — which is the only recovery there is, per the note above.
     const withdrawn = await server.review(id, throwaway.proposal_id, {
       action: 'withdraw',

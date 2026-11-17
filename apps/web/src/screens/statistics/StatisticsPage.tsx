@@ -348,12 +348,12 @@ function announceRound(round: Round, lastSuccess: Date | null): string {
   if (round.failed === 0) {
     return lastSuccess === null
       ? 'Refresh finished.'
-      : `Refresh finished. The page last read the API at ${formatInstant(lastSuccess)}.`;
+      : `Refresh finished. Figures last updated at ${formatInstant(lastSuccess)}.`;
   }
-  const reads = `${round.failed} of ${round.attempted} reads failed`;
+  const reads = `${round.failed} of ${round.attempted} updates failed`;
   return lastSuccess === null
-    ? `Refresh finished, but ${reads} and no read has succeeded yet, so nothing on this page has been read from the API.`
-    : `Refresh finished, but ${reads} — the figures shown were last read at ${formatInstant(lastSuccess)}.`;
+    ? `Refresh finished, but ${reads} and none has succeeded yet, so this page has no figures yet.`
+    : `Refresh finished, but ${reads} — the figures shown were last updated at ${formatInstant(lastSuccess)}.`;
 }
 
 /**
@@ -803,7 +803,7 @@ export function StatisticsPage() {
     schema.reloadSilent();
     activity.reloadSilent();
     setRefreshing(true);
-    setRefreshMessage('Refreshing — re-reading the API.');
+    setRefreshMessage('Refreshing…');
   }
 
   const allFailed =
@@ -1029,21 +1029,21 @@ function ReadMeta({
             a fabricated reading time. */}
         {lastSuccess !== null ? (
           <p className="stats-meta-read">
-            <span className="stats-meta-label">Last Read From the API</span>
+            <span className="stats-meta-label">Last Updated</span>
             <time className="mono" dateTime={lastSuccess.toISOString()}>
               {formatInstant(lastSuccess)}
             </time>
           </p>
         ) : lastAttempt !== null ? (
           <p className="stats-meta-read">
-            <span className="stats-meta-label">Last Read Attempt</span>
+            <span className="stats-meta-label">Last Attempt</span>
             <time className="mono" dateTime={lastAttempt.toISOString()}>
               {formatInstant(lastAttempt)}
             </time>
           </p>
         ) : (
           <p className="stats-meta-read">
-            <span className="stats-meta-label">Reading From the API</span>
+            <span className="stats-meta-label">Loading Figures</span>
           </p>
         )}
         <div className="stats-meta-tools">
@@ -1065,13 +1065,11 @@ function ReadMeta({
       </div>
       <div className="widget-info stats-page-about" id="stats-page-about" hidden={!aboutOpen}>
         <p>
-          Every figure on this page is read from the API and describes either this workspace or
-          this deployment.
+          Every figure here comes from ISAAC itself and describes this workspace or this site.
         </p>
         <p>
-          This page mutates nothing and gates nothing. Refresh re-issues the same read-only reads
-          and does nothing else, and no control on this screen writes, validates or exports
-          anything.
+          Nothing on this page changes, checks or exports a record. Refresh loads the figures
+          again.
         </p>
         {tab === 'build' ? (
           /* From the retired `How Verification Works` disclosure, and kept OUT of
@@ -1096,11 +1094,11 @@ function ReadMeta({
         <div className="stats-block">
           <UnavailableNote>
             <p>
-              {round.failed} of {round.attempted} reads failed on the most recent attempt, at{' '}
+              {round.failed} of {round.attempted} updates failed on the most recent attempt, at{' '}
               {formatInstant(lastAttempt)}.{' '}
               {lastSuccess !== null
-                ? 'Nothing was substituted for what did not arrive, so any figure a failed read feeds is either absent or older than the last-read time above.'
-                : 'No read has succeeded yet, so nothing on this page has been read from the API.'}
+                ? 'Nothing is filled in for them, so any figure they feed is either missing or older than the time above.'
+                : 'None has succeeded yet, so this page has no figures yet.'}
             </p>
           </UnavailableNote>
         </div>

@@ -134,7 +134,7 @@ export function FindingList({
                   shown. Dropping it would quietly shrink the number of things
                   standing between this run and a valid record. */}
               <span className="run-check-item-text">
-                {text ?? 'The server reported an unrecognised finding.'}
+                {text ?? 'ISAAC reported a problem this page cannot describe.'}
               </span>
               {(canGo || askIsaac !== null) && (
                 <span className="run-check-item-actions">

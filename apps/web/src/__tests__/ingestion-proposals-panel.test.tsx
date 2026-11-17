@@ -1074,19 +1074,19 @@ describe('the three-valued derived reads', () => {
     });
     renderPanel();
 
-    await screen.findByText(/CANNOT BE ANSWERED: the run this proposal names is no longer/);
+    await screen.findByText(/cannot be told: the run this proposal names is no longer/);
     // THE DEFECT: rendering `null` with the `false` sentence. Asserting the right
     // sentence alone would pass on a build that showed both.
-    expect(screen.queryByText(/was unchanged since this proposal was made/)).toBeNull();
-    expect(screen.queryByText(/had CHANGED since this proposal was made/)).toBeNull();
+    expect(screen.queryByText(/has not changed since this proposal was made/)).toBeNull();
+    expect(screen.queryByText(/has changed since this proposal was made/)).toBeNull();
   });
 
   it('a true target_stale says accepting is refused while that is so', async () => {
     stubFetchRoutes({ [LIST]: { body: page([proposalFixture({ target_stale: true })]) } });
     renderPanel();
 
-    await screen.findByText(/had CHANGED since this proposal was made/);
-    expect(screen.queryByText(/was unchanged since this proposal was made/)).toBeNull();
+    await screen.findByText(/has changed since this proposal was made/);
+    expect(screen.queryByText(/has not changed since this proposal was made/)).toBeNull();
   });
 
   it('a null still_current is not rendered as still current', async () => {
@@ -1112,7 +1112,7 @@ describe('the three-valued derived reads', () => {
     renderPanel();
 
     await screen.findByText(
-      /Whether the record still holds what this acceptance wrote CANNOT BE ANSWERED/,
+      /Whether the record still holds what this acceptance wrote cannot be told/,
     );
     expect(screen.queryByText(/the record still held what this acceptance wrote/)).toBeNull();
     expect(
@@ -1153,7 +1153,7 @@ describe('the three-valued derived reads', () => {
     renderPanel();
 
     await screen.findByText(
-      /CANNOT BE ANSWERED: the content at its field path could not be read back/,
+      /cannot be told: the field could not be read back/,
     );
     // THE DEFECT: naming a run on a proposal that names none.
     expect(
@@ -1293,9 +1293,9 @@ describe('when Accept is withheld, and when it is not', () => {
     // three reasons and only one of them is the removed run, so the copy names it as
     // the reachable cause. Withholding Accept is right in all three.
     await screen.findByText(
-      /current content at this proposal’s target could not be read, so accepting it is withheld/,
+      /would replace could not be read, so accepting it is withheld/,
     );
-    expect(screen.getByText(/the reachable cause is that the run is no longer on this record/)).toBeTruthy();
+    expect(screen.getByText(/Usually that means its run is no longer on this record/)).toBeTruthy();
     expect(screen.queryByRole('button', { name: 'Accept as Proposed' })).toBeNull();
     // DEC-9: a proposal that cannot be applied must still be CLEARABLE.
     expect(screen.getByRole('button', { name: 'Reject…' })).toBeTruthy();
@@ -2894,7 +2894,7 @@ describe('the acceptance preflight', () => {
     const accept = await screen.findByRole('button', { name: 'Accept as Proposed' });
     expect((accept as HTMLButtonElement).disabled).toBe(true);
     const target = document.querySelector('.proposal-target-state') as HTMLElement;
-    expect(target.textContent).toMatch(/had CHANGED since this proposal was made/);
+    expect(target.textContent).toMatch(/has changed since this proposal was made/);
     // The sentence that exists to reconcile a live Accept with a stale target must
     // not stand beside an Accept that cannot be pressed.
     expect(target.textContent).not.toMatch(/Accept is still offered/);

@@ -215,7 +215,7 @@ describe('P28.5 · EvidenceExplorer wires the classification to the record', () 
   it('renders the backend-down state instead of the panel when the API is unreachable', async () => {
     stubFetchDown();
     const { container, findByText } = renderAt('/record/demo/evidence');
-    await findByText('Backend Not Running');
+    await findByText('ISAAC Is Not Running');
     expect(container.querySelector('.evclass')).toBeNull();
   });
 });

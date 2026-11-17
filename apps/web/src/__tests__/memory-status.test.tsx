@@ -254,7 +254,7 @@ describe('P24.10 · status card — backend down', () => {
   it('renders BackendDown with a retry action when the fetch is unreachable', async () => {
     stubFetchDown();
     const { findByText, getByRole } = renderScreen();
-    await findByText('Backend Not Running');
+    await findByText('ISAAC Is Not Running');
     expect(getByRole('button', { name: 'Retry' })).toBeInTheDocument();
   });
 });
@@ -528,7 +528,7 @@ describe('P25.7 · Project Memory grounded assistant — unavailable & fetch sta
   it('backend down → BackendDown, and the assistant panel is NOT shown', async () => {
     stubFetchDown();
     const { findByText, container } = renderScreen();
-    await findByText('Backend Not Running');
+    await findByText('ISAAC Is Not Running');
     expect(container.querySelector('.assistant')).toBeNull();
   });
 });

@@ -66,7 +66,7 @@ test('@interaction ERROR: an unreachable API states the failure and offers a ret
 
   const alert = page.getByRole('alert');
   await expect(alert).toBeVisible();
-  await expect(alert).toContainText(/Backend Not Running/i);
+  await expect(alert).toContainText(/ISAAC Is Not Running/i);
   // The local build's remedy is actionable, so it is shown.
   await expect(alert).toContainText(/uvicorn/i);
   await expect(page.getByRole('button', { name: /Retry/i })).toBeVisible();

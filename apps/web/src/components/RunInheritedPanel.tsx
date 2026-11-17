@@ -113,7 +113,7 @@ type Failure =
   | { kind: 'error'; address: string; message: string };
 
 const FALLBACK_REFUSAL =
-  'The server refused this override and this build could not read its reason. Nothing was written.';
+  'ISAAC refused this override and did not say why. Nothing was written.';
 
 /**
  * The controls focus may be moved to, keyed by kind and address.
@@ -866,8 +866,8 @@ function FailureNotice({
             This run changed somewhere else — the override was not recorded.
           </p>
           <p className="run-inherited-failure-text">
-            Nothing was written. Load the version the server holds, then record the override
-            again if you still want it.
+            Nothing was written. Load the current version, then record the override again if
+            you still want it.
           </p>
           <div className="run-inherited-failure-actions">
             <button
@@ -920,7 +920,7 @@ function FailureNotice({
         <p className="run-inherited-failure-title">
           {refusal.address !== undefined
             ? `This address cannot hold this override: ${refusal.address}`
-            : 'The server refused this override.'}
+            : 'ISAAC refused to record this override.'}
         </p>
         <p className="run-inherited-failure-text">{refusal.message}</p>
         {refusal.findings.length > 0 && (

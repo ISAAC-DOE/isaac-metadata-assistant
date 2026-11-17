@@ -185,7 +185,7 @@ function RevisionHistoryBrowser({
   };
 
   if (list.status === 'loading') {
-    return <LoadingPanel label="Loading submission history from the ISAAC API…" />;
+    return <LoadingPanel label="Loading submission history…" />;
   }
   if (list.status === 'error') {
     return <BackendDown error={list.error} onRetry={load} />;
@@ -463,10 +463,10 @@ function DeploymentBlockNote({ lifecycle }: { lifecycle: ApiLifecycle }) {
  */
 const DEPLOYMENT_BLOCKER_TEXT: Readonly<Record<string, string>> = {
   no_attributable_actor:
-    'No attributable person can be established for a request here, and a submission ' +
-    'is a declaration by a person. This is a server configuration matter.',
+    'Submitting needs a signed-in person, and this site does not identify who is signed in. ' +
+    'The site administrator can set that up.',
   no_durable_storage:
-    'No application database is configured to record a durable submission in.',
+    'Submissions need a database to be kept in, and none is set up on this site.',
 };
 
 /* ── availability ──────────────────────────────────────────────────────────── */

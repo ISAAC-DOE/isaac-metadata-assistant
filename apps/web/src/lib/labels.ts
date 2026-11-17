@@ -443,7 +443,7 @@ export const LABELS = {
    * covered the interaction — the strip never consulted `incomplete` at all.
    */
   libraryOverviewNotePartial:
-    'Counts over the records this read returned, which is fewer than the workspace holds. ' +
+    'These counts cover only the records loaded here, which is fewer than the workspace holds. ' +
     'Not a workspace total.',
 
   /*
@@ -536,7 +536,7 @@ export const LABELS = {
      said once, in words, instead of printing an uninterpretable token on every row —
      and it names the reason, because "unattributed" alone reads like a fault. */
   activityActorUnattributed:
-    'Entries are not attributed to a person. This deployment has no verified sign-in boundary, so a name taken from the request could not be trusted — and recording one anyway would be a guess presented as a fact.',
+    'Entries are not attributed to a person. This site does not verify who is signed in, so ISAAC records no name rather than guess one.',
   activityLoading: 'Reading this record\u2019s history\u2026',
   activityUnavailable:
     'This record\u2019s history could not be read just now. Nothing has been lost — reopen this view to try again.',
@@ -857,9 +857,9 @@ export const LABELS = {
   // "reassuring" rewrite cannot quietly restore them.
   resetStaleTitle: 'Reset refused — this workspace changed',
   resetStaleBody:
-    'Something in this workspace changed after this window opened, so the server ' +
-    'refused to act on the figures you approved. The figures below have been ' +
-    'refreshed. Please read them again and confirm again if you still want to reset.',
+    'Something in this workspace changed after this window opened, so ISAAC refused ' +
+    'to reset it. The figures below have been refreshed. Please read them again and ' +
+    'confirm again if you still want to reset.',
 
   // The worked example refused to re-run because its target record has been
   // edited (POST /api/demo/run → 409 `demo_target_drifted`). The server protected
@@ -879,8 +879,8 @@ export const LABELS = {
   demoDriftedTitle: 'Example not re-run — this record has been edited',
   demoDriftedBody:
     'The built-in example is restored from fixed reference files. This record has been ' +
-    'edited since it was created, and restoring it would discard those edits — so the ' +
-    'server refused. Nothing ran and nothing changed.',
+    'edited since it was created, and restoring it would discard those edits — so ISAAC ' +
+    'left it alone. Nothing ran and nothing changed.',
   demoDriftedRemedy:
     'To return to the baseline deliberately, use Reset Worked Example in the worked-example ' +
     'bar above. That restores all five built-in examples in this session and discards these ' +
@@ -948,8 +948,8 @@ export const LABELS = {
    */
   screenNotFound: 'Page not found',
   notFoundExplanation:
-    'No screen in this application answers to this address. The link may be out of date, or ' +
-    'the address may have a typo.',
+    'No page in ISAAC has this address. The link may be out of date, or the address may have ' +
+    'a typo.',
   notFoundAttemptedLabel: 'You asked for:',
   // The record top bar's id control (2026-10-12). The accessible name carries the
   // FULL record id after this prefix; the visible text shows it head…tail, and
@@ -1284,7 +1284,7 @@ export const LABELS = {
   runRenameSaved: 'Run name saved.',
   runRenameStale:
     'This run changed somewhere else while you were typing, so the new name was not saved and ' +
-    'nothing was written. Refresh this run to see what the server holds, then rename it again. ' +
+    'nothing was written. Refresh this run to see the current version, then rename it again. ' +
     'Nothing you typed has been lost.',
   runRenameFailed: 'The run name could not be saved.',
 
@@ -1463,7 +1463,7 @@ export const LABELS = {
   // SHORTENED 2026-11-02: the failure reason only. It still names no location and
   // no restart outcome, and states the failure as a recorded observation.
   storageUnavailable:
-    'A database is configured to hold experiments, and the backend has recorded that they ' +
+    'Experiments are meant to be saved to a database, and ISAAC has recorded that they ' +
     'were not reaching it. Creating one may fail.',
 
   // /load, outside a worked example (B-05). One sentence of cause, ahead of the audited
@@ -1547,10 +1547,9 @@ export const LABELS = {
    */
   tutorialSessionBarTitle: 'Worked Example',
   tutorialSessionBarBody:
-    'These five example records belong to this walkthrough only: they are its own copy, in a ' +
-    'temporary workspace of its own, and no request made outside it reaches them. While this bar ' +
-    'is showing, every screen that shows records — My Experiments included — is showing this ' +
-    'walkthrough rather than the ordinary workspace. They are discarded when the walkthrough ends.',
+    'These five example records belong to this walkthrough only. Nothing outside it can reach ' +
+    'them. While this bar is showing, every screen that shows records, My Experiments included, ' +
+    'shows the walkthrough instead of your own work. They are discarded when the walkthrough ends.',
   tutorialSessionBarRegion: 'Worked example session',
 
   /*

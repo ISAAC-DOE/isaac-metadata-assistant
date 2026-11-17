@@ -420,7 +420,7 @@ describe('the lifecycle', () => {
       name: /^Submitting is unavailable$/i,
     });
     expect(within(block).getByText(/says nothing about whether this record is ready/i)).toBeTruthy();
-    expect(within(block).getByText(/No attributable person can be established/i)).toBeTruthy();
+    expect(within(block).getByText(/Submitting needs a signed-in person/i)).toBeTruthy();
   });
 
   it('renders an unrecognised deployment blocker verbatim rather than hiding it', async () => {

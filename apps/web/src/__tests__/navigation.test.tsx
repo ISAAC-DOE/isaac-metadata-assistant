@@ -153,7 +153,7 @@ describe('P23B · breadcrumb is a real link during loading/error, not just once 
     // the loading branch's TopBar, not the loaded one.
     const { container, getByText, findByText } = renderAt('/record/demo/export');
     expect(
-      getByText('Loading validation, coverage and advisory from the ISAAC API…'),
+      getByText('Loading the export checks…'),
     ).toBeInTheDocument();
     const back = container.querySelector('a.record-title-link');
     expect(back).not.toBeNull();
@@ -165,7 +165,7 @@ describe('P23B · breadcrumb is a real link during loading/error, not just once 
   it('S6 Ready to Export: the breadcrumb still links back to Review Record when the backend is down', async () => {
     stubFetchDown();
     const { container, findByText } = renderAt('/record/demo/export');
-    await findByText('Backend Not Running');
+    await findByText('ISAAC Is Not Running');
     const back = container.querySelector('a.record-title-link');
     expect(back).not.toBeNull();
     expect(back!.getAttribute('href')).toBe('/record/demo');
@@ -174,7 +174,7 @@ describe('P23B · breadcrumb is a real link during loading/error, not just once 
   it('S4 Complete: the breadcrumb links back to Review Record while the bundle is still loading', async () => {
     stubFetchRoutes(bundleRoutes('demo'));
     const { container, getByText, findByText } = renderAt('/record/demo/complete');
-    expect(getByText('Loading the blockers from the ISAAC API…')).toBeInTheDocument();
+    expect(getByText('Loading the open questions…')).toBeInTheDocument();
     const back = container.querySelector('a.record-title-link');
     expect(back).not.toBeNull();
     expect(back!.getAttribute('href')).toBe('/record/demo');
@@ -185,7 +185,7 @@ describe('P23B · breadcrumb is a real link during loading/error, not just once 
   it('S5 Evidence: the breadcrumb links back to Review Record while the bundle is still loading', async () => {
     stubFetchRoutes(evidenceBundleRoutes('demo'));
     const { container, getByText, findByText } = renderAt('/record/demo/evidence');
-    expect(getByText('Loading the evidence trail from the ISAAC API…')).toBeInTheDocument();
+    expect(getByText('Loading the evidence trail…')).toBeInTheDocument();
     const back = container.querySelector('a.record-title-link');
     expect(back).not.toBeNull();
     expect(back!.getAttribute('href')).toBe('/record/demo');
@@ -196,7 +196,7 @@ describe('P23B · breadcrumb is a real link during loading/error, not just once 
   it('S3 Review Record (hub): the loading branch has no ancestor link — it IS the record home, matching the loaded state', async () => {
     stubFetchRoutes(bundleRoutes('demo'));
     const { container, getByText, findByText } = renderAt('/record/demo');
-    expect(getByText('Loading the record from the ISAAC API…')).toBeInTheDocument();
+    expect(getByText('Loading the record…')).toBeInTheDocument();
     expect(container.querySelector('a.record-title-link')).toBeNull();
     // let the stubbed fetch settle so the effect update happens inside act()
     await findByText('5 Fields Need Your Confirmation');

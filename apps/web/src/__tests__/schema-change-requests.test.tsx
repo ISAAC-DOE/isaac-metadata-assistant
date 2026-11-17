@@ -302,7 +302,7 @@ describe('a new field (schema change request)', () => {
     const notice = within(status.closest('[role="status"]') as HTMLElement);
     expect(notice.getByRole('button', { name: 'Copy Change Request' })).toBeInTheDocument();
     // NEVER a portal payload for a new field.
-    expect(notice.queryByRole('button', { name: 'Copy Portal Payload' })).toBeNull();
+    expect(notice.queryByRole('button', { name: 'Copy for the Portal' })).toBeNull();
     expect(sent).toEqual({
       proposal_type: 'schema_change',
       section: 'Context',
@@ -383,7 +383,7 @@ describe('a new field (schema change request)', () => {
     const row = within(headline.closest('li') as HTMLElement);
     expect(row.getByText(/schema change request \(not a portal proposal\)/)).toBeInTheDocument();
     expect(row.getByText('1/h', { exact: false })).toBeInTheDocument();
-    expect(row.queryByRole('button', { name: 'Copy Portal Payload' })).toBeNull();
+    expect(row.queryByRole('button', { name: 'Copy for the Portal' })).toBeNull();
     fireEvent.click(row.getByRole('button', { name: 'Download Markdown' }));
     // Says what was done, and claims nothing was sent.
     const said = await row.findByText(/^Downloaded the change request as Markdown\.$/);

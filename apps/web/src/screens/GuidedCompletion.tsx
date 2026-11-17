@@ -239,7 +239,7 @@ export function GuidedCompletion() {
             starts at h1 like every other routed surface (A11Y-1 contract). */}
         <h1 className="sr-only">{LABELS.screenComplete}</h1>
         {load.status === 'loading' ? (
-          <LoadingPanel label="Loading the blockers from the ISAAC API…" />
+          <LoadingPanel label="Loading the open questions…" />
         ) : (
           <BackendDown error={load.error} onRetry={load.reload} />
         )}

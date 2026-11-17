@@ -136,8 +136,8 @@ export function SourcePreview({
           <pre className="preview-json scroll-x" tabIndex={0} role="group" aria-label={LABELS.tabSidecar}>{sidecarJson}</pre>
         ) : (
           <p className="preview-empty" role="note">
-            Not exported yet — the evidence sidecar is written on export. The draft
-            evidence below is what it will preserve.
+            Not exported yet. The evidence file is written on export, and it will keep the
+            evidence shown below.
           </p>
         ))}
 

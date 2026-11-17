@@ -1864,7 +1864,7 @@ describe('F-1: a change-feed record-moved entry refreshes the notes list', () =>
     });
     renderPanel(null);
 
-    await screen.findByText(/Backend Not Running/);
+    await screen.findByText(/ISAAC Is Not Running/);
     // The list content is gone — replaced by `BackendDown`, not disclosed beside
     // it. `CaptureNote` itself is unconditionally rendered even here (D2's own
     // rule: nothing removes the box while `version` is unknown; its SUBMIT button
@@ -1936,7 +1936,7 @@ describe('C1: a silent reload that fails before anything has ever loaded', () =>
       // NOT a permanent spinner. The full `BackendDown` panel appears, because
       // `listStatusRef.current` was `'loading'` — nothing had ever succeeded, so
       // there was nothing to protect and this correctly took the LOUD path.
-      expect(await screen.findByText(/Backend Not Running/)).toBeTruthy();
+      expect(await screen.findByText(/ISAAC Is Not Running/)).toBeTruthy();
       expect(screen.queryByText(/Loading this record's notes/)).toBeNull();
       expect(screen.getByRole('button', { name: 'Retry' })).toBeTruthy();
       // And the non-destructive notice is NOT also showing beside it — the two are

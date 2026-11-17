@@ -719,7 +719,7 @@ function UnresolvedComparison({
             No run with the id <span className="mono">{id}</span> is in this record. It may have
             been deleted, or the link may be for a different record.
             {state.status === 'missing' && state.message !== ''
-              ? ` The server said: ${state.message}`
+              ? ` ISAAC said: ${state.message}`
               : ''}{' '}
             Replace it to compare something else.
           </p>

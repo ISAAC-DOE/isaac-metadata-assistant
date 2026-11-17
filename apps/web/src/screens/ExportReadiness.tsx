@@ -258,7 +258,7 @@ export function ExportReadiness() {
       >
         <h1 className="sr-only">{LABELS.screenExport}</h1>
         {load.name === 'loading' ? (
-          <LoadingPanel label="Loading validation, coverage and advisory from the ISAAC API…" />
+          <LoadingPanel label="Loading the export checks…" />
         ) : (
           <BackendDown error={load.error} onRetry={() => runFetch(true)} />
         )}

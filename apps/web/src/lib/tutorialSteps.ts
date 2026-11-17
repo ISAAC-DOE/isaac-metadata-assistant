@@ -179,8 +179,7 @@ export const TUTORIAL_STEPS: readonly TutorialStep[] = [
     body:
       'The workflow beside the record is its own progress: load, complete, review evidence, review ' +
       'readiness, export. The current step is marked, finished steps link back, and a step you have ' +
-      'not reached yet is not clickable. Both the order and each state come from the server — this ' +
-      'screen never works them out for itself.',
+      'not reached yet is not clickable.',
     anchor: TUTORIAL_ANCHORS.recordWorkflow,
     target: 'anyRecord',
     path: (id) => `/record/${id}`,

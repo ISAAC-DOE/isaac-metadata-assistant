@@ -107,7 +107,7 @@ export function RunArtifactsPanel({
   };
 
   if (state.status === 'loading') {
-    return <LoadingPanel label="Loading the exported run records from the ISAAC API…" />;
+    return <LoadingPanel label="Loading the exported run records…" />;
   }
   if (state.status === 'error') {
     return (

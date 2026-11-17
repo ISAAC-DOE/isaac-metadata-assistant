@@ -191,7 +191,7 @@ describe('P22D · Project Memory never fabricates a freshness claim', () => {
         <ProjectMemory />
       </MemoryRouter>,
     );
-    await findByText('Backend Not Running');
+    await findByText('ISAAC Is Not Running');
     expect(container.textContent).not.toMatch(/project memory: fresh/i);
   });
 });

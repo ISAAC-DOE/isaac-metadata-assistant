@@ -302,7 +302,7 @@ describe('D1 · leaving a worked-example session does not leave its record on sc
       // 3. And the reader is NOT told something failed. The backend is healthy and
       //    the only thing that happened is that a temporary workspace was discarded
       //    exactly as the worked-example bar said it would be.
-      expect(screen.queryByText('Backend Not Running')).toBeNull();
+      expect(screen.queryByText('ISAAC Is Not Running')).toBeNull();
       expect(screen.queryByText('Record Not Found')).toBeNull();
       expect(screen.queryByText('ISAAC Is Not Responding')).toBeNull();
       expect(screen.queryByText('ISAAC Returned an Error')).toBeNull();

@@ -205,7 +205,7 @@ export function ConfirmedAnswersPanel({
   const Heading = headingLevel === 2 ? 'h2' : 'h3';
 
   if (state.status === 'loading') {
-    return <LoadingPanel label="Loading the confirmed answers from the ISAAC API…" />;
+    return <LoadingPanel label="Loading the confirmed answers…" />;
   }
   if (state.status === 'error') {
     return (

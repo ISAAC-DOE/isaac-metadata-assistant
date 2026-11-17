@@ -1339,7 +1339,7 @@ export function RunCard({
                   </p>
                 ) : (
                   <p className="run-conflict-text">
-                    Nothing you typed was written. Refresh to load the version the server holds —
+                    Nothing you typed was written. Refresh to load the current version —
                     it replaces what is in these boxes.
                   </p>
                 )}

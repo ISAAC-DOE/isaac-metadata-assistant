@@ -222,7 +222,7 @@ describe('P29.2 message distinction — role + kind + staleness (never color-onl
     const { container } = panel();
     const bubble = container.querySelector('.assistant-msg-assistant')!;
     expect(bubble.textContent).not.toMatch(/\bPASS\b/);
-    expect(bubble.textContent).toMatch(/truth question/i);
+    expect(bubble.textContent).toMatch(/decided by ISAAC’s checks/i);
   });
 });
 
