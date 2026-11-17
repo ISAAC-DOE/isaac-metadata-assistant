@@ -7,18 +7,23 @@
  * module gives the site a plain layer on top of them, by question kind and field:
  *
  *   "What is the environment (context.environment)? No source in this import states it. Applies to 90 group(s) …"
- *   → "Was this measured in situ, operando or ex situ? None of your files say."
+ *   → "Was this done operando, in situ, ex situ or in silico? None of your files say."
  *
  * COPY ONLY, and never more than the server said. Each plain line restates what the kind of question already
  * means (a missing value: no file states it; a conflict: the files disagree), so it adds no claim. The server's
  * full wording and the field path stay on the card, behind its "Details" disclosure. A kind this module does not
  * know returns `null`, and the card shows the server's text as it is.
+ *
+ * WHAT CHANGES HOW TO ANSWER IS NEVER BEHIND DETAILS (2026-11-17 review, CRITICAL). The server's wording can carry
+ * an instruction or a warning ("answer once ONLY if they are all the same sample", "ASKED AGAIN: …", "answers
+ * already given … differ"). `questionWarnings` says each of them plainly beside the title, read from the question's
+ * own structured fields (`partition`, `asked_again`, `answers_differ`, `targets_without_a_value`, …), never by
+ * matching the server's sentences.
  */
 import type { LocalQuestion, LocalScope } from './localImports';
 
 /** How a field is ASKED when no file states it, in the words a scientist would use. Paths read from the schema. */
 const FIELD_ASK: Readonly<Record<string, string>> = {
-  'context.environment': 'Was this measured in situ, operando or ex situ?',
   'sample.sample_form': 'What form was the sample in?',
   'system.domain': 'Is this experimental or computational work?',
   'system.technique': 'Which technique was used?',
@@ -69,9 +74,51 @@ export function fieldNoun(path: string): string {
   return VAGUE.has(last) && segs.length > 1 ? `${segs[segs.length - 2]} ${last}` : last;
 }
 
-/** The plain question for a field no file states. */
-export function fieldAsk(path: string): string {
+/**
+ * Fields asked as a choice between their allowed values: the lead, then the values themselves. The values are
+ * never written here: they are the question's own `allowed_values`, which the server reads from the vendored
+ * schema's enum (the same list the backend question and `decide` use), so a value the schema adds is asked too.
+ */
+const CHOICE_ASK: Readonly<Record<string, string>> = {
+  'context.environment': 'Was this done',
+};
+
+/** A vocabulary value in words: "in_situ" → "in situ". */
+function valueWords(v: unknown): string {
+  return String(v).replace(/_/g, ' ');
+}
+
+/** "a, b or c". */
+function orList(items: string[]): string {
+  return items.length <= 1 ? (items[0] ?? '') : `${items.slice(0, -1).join(', ')} or ${items[items.length - 1]}`;
+}
+
+/** The plain question for a field no file states; a choice field names its allowed values, as the server sends them. */
+export function fieldAsk(path: string, allowed?: readonly unknown[] | null): string {
+  const lead = CHOICE_ASK[path];
+  const values = (allowed ?? []).filter((v) => typeof v === 'string' && v !== '');
+  if (lead && values.length > 1) return `${lead} ${orList(values.map(valueWords))}?`;
   return FIELD_ASK[path] ?? `What is the ${fieldNoun(path)}?`;
+}
+
+/** The allowed values the server sent for a question's field, if any. */
+function allowedOf(q: LocalQuestion): readonly unknown[] | null {
+  return q.allowed_values ?? q.display.value_rule?.allowed ?? null;
+}
+
+/**
+ * What a confirm question can be answered with, from the server's own flags: `no_value` (no target carries a value:
+ * the question asks for one), `unfit` (every target's value is missing or one its field refuses: nothing to
+ * confirm), else `value` (there is a value read from the files to confirm, for some targets at least).
+ * `distinct_extracted_values` is NOT this: it is empty whenever any one target lacks a value.
+ */
+export function confirmShape(q: LocalQuestion): 'no_value' | 'unfit' | 'value' {
+  if (q.no_value) return 'no_value';
+  const total = q.targets.length;
+  const without = q.targets_without_a_value ?? 0;
+  const unfit = q.targets_with_an_unfit_value ?? 0;
+  if (total > 0 && unfit > 0 && without + unfit >= total) return 'unfit';
+  return 'value';
 }
 
 const ORDINALS = ['first', 'second', 'third', 'fourth', 'fifth', 'sixth', 'seventh', 'eighth', 'ninth', 'tenth'];
@@ -107,12 +154,15 @@ export function plainQuestion(q: LocalQuestion): string | null {
   const path = q.target_field_path;
   switch (q.kind) {
     case 'missing_value':
-      return path ? `${fieldAsk(path)} None of your files say.` : null;
-    case 'confirm_value':
-      if (!path) return null;
-      return q.display.distinct_extracted_values.length > 0
-        ? `Is the ${fieldNoun(path)} read from your files right?`
-        : `${fieldAsk(path)} Your files mention it, but not as a value a record can hold.`;
+      return path ? `${fieldAsk(path, allowedOf(q))} None of your files say.` : null;
+    case 'confirm_value': {
+      // nothing is asked of an informational one: the server's own words say so ("For information only: …")
+      if (!path || q.informational) return null;
+      const shape = confirmShape(q);
+      if (shape === 'no_value') return `${fieldAsk(path, allowedOf(q))} Your files mention it, but not as a value a record can hold.`;
+      if (shape === 'unfit') return `${fieldAsk(path, allowedOf(q))} The value read from your files does not fit this field.`;
+      return `Is the ${fieldNoun(path)} read from your files right?`;
+    }
     case 'resolve_conflict':
       return path ? `Your files disagree about the ${fieldNoun(path)}. Which is right?` : 'Your files disagree here. Which is right?';
     case 'naming_counter_positions':
@@ -177,7 +227,7 @@ export function repeatKey(q: LocalQuestion): string | null {
     return `sample|${q.kind}|${path}`;
   }
   if (REPEATED_PER_GROUP.has(q.kind) && q.scope.startsWith('group:')) {
-    const valued = q.kind === 'confirm_value' ? `|${q.display.distinct_extracted_values.length > 0}` : '';
+    const valued = q.kind === 'confirm_value' ? `|${q.informational ? 'informational' : confirmShape(q)}` : '';
     return `group|${q.kind}|${path}${valued}`;
   }
   return null;
@@ -210,6 +260,120 @@ export function clusterRepeats(questions: LocalQuestion[]): (LocalQuestion | Que
       }
     } else {
       out.push(q);
+    }
+  }
+  return out;
+}
+
+/** How many different groups (or samples) a cluster's questions are for: a group can hold several disagreements
+ *  about one field, each its own question, so this is not the number of questions. */
+export function clusterSize(cluster: QuestionCluster): number {
+  const key = (q: LocalQuestion) => (cluster.by === 'sample' ? (q.partition ?? q.question_id) : q.scope);
+  return new Set(cluster.questions.map(key)).size;
+}
+
+/**
+ * What a disagreement is about, from its own conflict (`display.conflict`): its subject where that names something
+ * other than the field asked about, else its readings ("10 or 20"). `null` for any other question.
+ */
+export function conflictSubject(q: LocalQuestion): string | null {
+  const cf = q.display.conflict;
+  if (q.kind !== 'resolve_conflict' || !cf) return null;
+  if (cf.subject && cf.subject !== q.target_field_path) return cf.subject;
+  if (cf.readings.length > 0) return orList(cf.readings.map((r) => `“${r}”`));
+  return cf.subject ?? null;
+}
+
+/**
+ * The row titles of a cluster, one per question in order, each telling its row apart: the group or sample, then —
+ * where one group holds more than one of the questions — the disagreement's own subject. Two rows that would still
+ * read alike are numbered.
+ */
+export function clusterRowLabels(cluster: QuestionCluster, base: (q: LocalQuestion) => string): string[] {
+  const qs = cluster.questions;
+  const bases = qs.map(base);
+  const repeats = new Map<string, number>();
+  for (const b of bases) repeats.set(b, (repeats.get(b) ?? 0) + 1);
+  const labels = qs.map((q, i) => {
+    const subject = (repeats.get(bases[i]) ?? 0) > 1 ? conflictSubject(q) : null;
+    return subject ? `${bases[i]}: ${subject}` : bases[i];
+  });
+  const seen = new Map<string, number>();
+  const total = new Map<string, number>();
+  for (const l of labels) total.set(l, (total.get(l) ?? 0) + 1);
+  return labels.map((l) => {
+    if ((total.get(l) ?? 0) < 2) return l;
+    const n = (seen.get(l) ?? 0) + 1;
+    seen.set(l, n);
+    return `${l} (${n} of ${total.get(l)})`;
+  });
+}
+
+// --- what changes how to answer ------------------------------------------------------------------
+
+/** An answer as the asked-again line quotes it. */
+function answeredWords(v: unknown): string {
+  if (typeof v === 'string') return `“${v}”`;
+  try {
+    return JSON.stringify(v) ?? String(v);
+  } catch {
+    return String(v);
+  }
+}
+
+/**
+ * Every instruction or warning in a question's server wording that changes HOW to answer it, in plain words and
+ * with nothing dropped or softened. Read from the question's structured fields; shown beside the title, never
+ * behind Details. Empty when there is none.
+ */
+export function questionWarnings(q: LocalQuestion): string[] {
+  const out: string[] = [];
+  const groups = Object.keys(q.per_scope_targets ?? {}).length;
+  if (q.partition === 'sample=unrecorded' && q.scope === 'experiment' && groups > 1) {
+    out.push(
+      'The files of these groups name no sample, so they may be different samples. Give one answer for all of them ' +
+        'only if they are all the same sample. Otherwise answer each group on its own.',
+    );
+  }
+  if (q.answers_differ) {
+    out.push(
+      'Answers already given for this field in other groups differ. Answer each group on its own, unless they ' +
+        'really are all the same.',
+    );
+  }
+  const again = q.asked_again ?? [];
+  if (again.length > 0) {
+    const distinct = new Map<string, { answered: unknown; reason: string | null | undefined; field?: string; n: number }>();
+    for (const a of again) {
+      const k = JSON.stringify([a.answered ?? null, a.field ?? null, a.reason ?? null]);
+      const cur = distinct.get(k);
+      if (cur) cur.n += 1;
+      else distinct.set(k, { answered: a.answered, reason: a.reason, field: a.field, n: 1 });
+    }
+    const parts = Array.from(distinct.values())
+      .slice(0, 3)
+      .map((x) => `${answeredWords(x.answered)}${x.field ? ` for the ${fieldNoun(x.field)}` : ''}${x.reason ? ` (${x.reason})` : ''}`);
+    const more = distinct.size > 3 ? `, and ${distinct.size - 3} other answer${distinct.size - 3 === 1 ? '' : 's'}` : '';
+    out.push(
+      `Asked again: ${again.length === 1 ? '1 answer' : `${again.length} answers`} already given here cannot go into ` +
+        `the record: ${parts.join('; ')}${more}. Answer again with a value the record can take.`,
+    );
+  }
+  if (q.kind === 'confirm_value' && !q.informational && confirmShape(q) === 'value') {
+    const total = q.targets.length;
+    const without = q.targets_without_a_value ?? 0;
+    const unfit = q.targets_with_an_unfit_value ?? 0;
+    if (without > 0) {
+      out.push(
+        `No value was read from your files for ${without} of the ${total} asked about here, so those cannot be ` +
+          'confirmed. Give their value one group at a time.',
+      );
+    }
+    if (unfit > 0) {
+      out.push(
+        `For ${unfit} of the ${total} asked about here, the value read from your files does not fit this field, so ` +
+          'those cannot be confirmed. Give their value one group at a time.',
+      );
     }
   }
   return out;

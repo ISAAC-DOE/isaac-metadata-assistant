@@ -284,6 +284,8 @@ export interface LocalQuestionDisplay {
   /** The beamtime question that fills this field for every record (`covered_by`), by id and its own words; the id
    *  is null when it is no question ("an answered beamtime value"). */
   covered_by?: { question_id: string | null; text: string };
+  /** A disagreement question's own conflict: its kind, subject and readings, as the bundle states them. */
+  conflict?: { conflict_id: string; kind: string | null; subject: string | null; readings: string[] };
   /** The question and its reason as the page says them: the command line's sentences, less its own instructions. */
   text?: string | null;
   why?: string | null;
@@ -295,6 +297,15 @@ export interface LocalDeferral {
   decided_utc: string | null;
   decision_id?: string | null;
   targets?: number;
+}
+
+/** One answer the record cannot take (`asked_again[]`): what was answered, for which target, and why not. */
+export interface LocalAskedAgain {
+  answered: unknown;
+  target?: { kind?: string; id?: string };
+  reason?: string | null;
+  field?: string;
+  decision_id?: string | null;
 }
 
 export interface LocalQuestion {
@@ -319,6 +330,17 @@ export interface LocalQuestion {
   deferred?: LocalDeferral;
   /** The beamtime question (or "an answered beamtime value") that makes this one not blocking. */
   covered_by?: string;
+  /** The answers already given for this field differ (`questions.consolidate`, L2): answer per group. */
+  answers_differ?: boolean;
+  /** Targets whose answer the record cannot take, asked again under the same id, each with why. */
+  asked_again?: LocalAskedAgain[];
+  /** A confirm question none of whose targets carries a value: it asks for one. */
+  no_value?: boolean;
+  /** A confirm question: how many targets carry no value, and how many a value their field refuses. */
+  targets_without_a_value?: number;
+  targets_with_an_unfit_value?: number;
+  /** No answer here can reach a record: shown, never answered. */
+  informational?: boolean;
   /** A per-group start-time question the beamtime-wide one (`stated_utc_start_times`) answers at once; it stays
    *  answerable on its own. */
   answered_at_once_by?: string;

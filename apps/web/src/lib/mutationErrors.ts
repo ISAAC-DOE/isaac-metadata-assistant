@@ -180,13 +180,15 @@ export function mutationFailureCopy(err: unknown, fallback: string): string {
   const status = statusOf(err);
   if (status === 401) {
     return (
-      'Your sign-in session has ended, so nothing was changed. ' +
+      // a 401 says no accepted sign-in came with the request, not why
+      'You need to sign in to make this change, so nothing was changed. ' +
       `${SIGN_IN_REMEDY}`
     );
   }
   if (status === 403) {
     return (
-      'Your sign-in no longer allows this change, so nothing was changed. ' +
+      // a 403 says this account may not make it, not that it once could
+      'Your account doesn’t have permission to make this change, so nothing was changed. ' +
       `${SIGN_IN_REMEDY}`
     );
   }

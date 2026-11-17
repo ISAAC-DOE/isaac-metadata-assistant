@@ -877,3 +877,83 @@ def test_the_page_can_name_each_group_it_shows_by_its_first_file(client, root):
     minimum = progress.get("minimum_for_one_group") or {}
     if minimum.get("group_id") in labels:
         assert minimum["group_id"] in progress["group_names"]
+
+
+def _named_bundle(groups):
+    """A minimal SYNTHETIC bundle: ``groups`` is ``[(group_id, stem, folder)]``, one run each."""
+    runs, sources, rgs = [], [], []
+    for i, (gid, stem, folder) in enumerate(groups):
+        runs.append({"run_key": f"k{i}", "run_id": f"run-{i:03d}", "stem": stem, "acquisition_source_id": f"src-{i}"})
+        sources.append({"source_id": f"src-{i}", "parent_dir": folder,
+                        "relative_path": f"{folder}/{stem}" if folder else stem})
+        rgs.append({"group_id": gid, "member_run_keys": [f"k{i}"], "status": "proposed"})
+    return {"runs": runs, "sources": sources, "record_groups": rgs}
+
+
+def test_two_groups_whose_first_files_share_a_stem_get_different_names():
+    """2026-11-17 review (IMPORTANT): a group is named by its first file's stem, and stems repeat across folders
+    (``{'rg-a': 'scan_001', 'rg-b': 'scan_001'}``). Every name in a reply is unique: told apart by the folder relative
+    to the beamtime root where that folder is theirs alone, else by a short group id; never an absolute path."""
+    b = _named_bundle([("rg-aaaaaaa1", "scan_001", "day1"), ("rg-bbbbbbb2", "scan_001", "day2/cellB"),
+                       ("rg-ccccccc3", "scan_002", "day1"),
+                       ("rg-ddddddd4", "scan_009", "same"), ("rg-ddddddd5", "scan_009", "same"),
+                       ("rg-eeeeeee6", "scan_007", "/Users/someone/beamtime"), ("rg-fffffff7", "scan_007", "../up")])
+    names = LB.group_names(b, [g["group_id"] for g in b["record_groups"]])
+    assert names["rg-aaaaaaa1"] == "day1/scan_001"
+    assert names["rg-bbbbbbb2"] == "day2/cellB/scan_001"
+    assert names["rg-ccccccc3"] == "scan_002", "a name only one group has stays as it is"
+    assert names["rg-ddddddd4"] == "scan_009 (group ddddddd4)"
+    assert names["rg-ddddddd5"] == "scan_009 (group ddddddd5)"
+    assert names["rg-eeeeeee6"] == "scan_007 (group eeeeee)"
+    assert names["rg-fffffff7"] == "scan_007 (group ffffff)"
+    assert len(set(names.values())) == len(names)
+    assert not any("/Users" in n or ".." in n for n in names.values())
+    assert LB.group_names(b, ["rg-aaaaaaa1"]) == {"rg-aaaaaaa1": "day1/scan_001"}, "the same name on every page"
+    assert LB.group_names(b, list(reversed([g["group_id"] for g in b["record_groups"]]))) == names
+
+
+def test_a_run_with_no_stem_and_no_run_id_is_named_without_failing():
+    """2026-11-17 review: ``records.group_labels`` read ``first["run_id"]``: a malformed bundle (a run with no stem
+    and no run id) raised ``KeyError`` outside the questions try block and failed the progress page."""
+    from isaac_api.local_import import records as R
+
+    b = _named_bundle([("rg-aaaaaaa1", "scan_001", "day1")])
+    del b["runs"][0]["stem"], b["runs"][0]["run_id"]
+    b["runs"].append({"stem": "no_key"})  # no run_key at all: skipped
+    b["record_groups"].append({"member_run_keys": ["k0"]})  # no group id: skipped
+    assert R.group_labels(b) == {"rg-aaaaaaa1": "group rg-aaaaaaa1"}
+    assert LB.group_names(b, ["rg-aaaaaaa1"]) == {"rg-aaaaaaa1": "group rg-aaaaaaa1"}
+
+
+def test_the_progress_page_survives_a_run_with_no_stem_and_no_run_id(client, root):
+    """The same malformed run through the progress route: a reply, never a 500. A last-validation report for the
+    group makes the page name it (``group_names``), outside the questions try block."""
+    from isaac_api.local_import import records as R
+
+    f = root / "alpha" / "bundle.json"
+    bundle = json.loads(f.read_text(encoding="utf-8"))
+    gid = bundle["record_groups"][0]["group_id"]
+    (root / "alpha" / R.VALIDATION_DIR).mkdir(exist_ok=True)
+    (root / "alpha" / R.VALIDATION_DIR / f"{gid}.json").write_text(json.dumps({"verdict": "invalid"}), encoding="utf-8")
+    first = bundle["record_groups"][0]["member_run_keys"][0]
+    run = next(r for r in bundle["runs"] if r["run_key"] == first)
+    run.pop("stem", None)
+    run.pop("run_id", None)
+    f.write_text(json.dumps(bundle), encoding="utf-8")
+    LB._check_memo.clear()
+    r = client.get("/api/local-bundles/alpha/progress")
+    assert r.status_code == 200, r.text[:400]
+    assert r.json()["progress"]["group_names"][gid] == f"group {gid}"
+
+
+def test_a_disagreement_question_carries_its_own_subject(client):
+    """2026-11-17 review: disagreement questions are one per conflict, so one group can hold several about one field;
+    the page tells them apart by each conflict's own subject and readings (``display.conflict``, additive)."""
+    qs = client.get("/api/local-bundles/alpha/questions").json()["questions"]
+    conflicts = [q for q in qs if q["kind"] == "resolve_conflict"]
+    assert conflicts, "the synthetic bundle has disagreements"
+    for q in conflicts:
+        said = q["display"]["conflict"]
+        assert said["conflict_id"] == q["targets"][0]["id"]
+        assert said["kind"] and isinstance(said["readings"], list) and said["readings"]
+    assert all("conflict" not in q["display"] for q in qs if q["kind"] != "resolve_conflict")

@@ -1813,7 +1813,8 @@ describe('skill rounds 5–7 on the page', () => {
     const merges = screen.getByTestId('li-athena-merges');
     expect(merges).toHaveTextContent(`${COPY.athenaMergesTitle} (3)`);
     expect(merges).toHaveTextContent('SYN merge 200mV');
-    expect(merges).toHaveTextContent('near: SYN_group_g1 (a hint, not a match)');
+    // named from the page's one set of unique names (group_names), as every other surface is (2026-11-17 review)
+    expect(merges).toHaveTextContent('near: SYN_run_A (a hint, not a match)');
     expect(merges).toHaveTextContent('Showing 1 of 3.');
     expect(within(merges).queryByRole('button')).toBeNull(); // read-only
     // the counts once; the two groups that share a verdict and a missing set are one row
@@ -1868,7 +1869,7 @@ describe('plain words on the questions page (2026-11-17, owner: “reads like an
   it('a question is asked in plain words; its field path and the full server wording are behind Details', async () => {
     stubPage([envQ]);
     renderAt(ROUTES.localImportBundle('synthetic-beamtime'));
-    const heading = await screen.findByRole('heading', { name: 'Was this measured in situ, operando or ex situ? None of your files say.' });
+    const heading = await screen.findByRole('heading', { name: 'Was this done operando, in situ or ex situ? None of your files say.' });
     const card = heading.closest('li') as HTMLElement;
     const details = within(card).getByTestId('li-question-details');
     expect(details.tagName).toBe('DETAILS');
@@ -1949,5 +1950,123 @@ describe('plain words on the questions page (2026-11-17, owner: “reads like an
     expect(options).toContain('SYN_sample_A_1p2V');
     expect(options).toContain('SYN_sample_B_1p2V');
     expect(options.join(' ')).not.toMatch(/Record group|\bg1\b/);
+  });
+
+  // --- 2026-11-17 review fixes -----------------------------------------------------------------
+
+  const unrecordedQ = question({
+    ...envQ,
+    question_id: 'Q-unrec00001',
+    target_field_path: 'sample.sample_form',
+    partition: 'sample=unrecorded',
+    allowed_values: null,
+    text:
+      'What is the sample form (sample.sample_form)? No source in this import states it. Applies to 5 group(s) that record no ' +
+      'sample reading — answer once ONLY if they are all the same sample; otherwise answer per group (--only group:<id>).',
+    display: { ...envQ.display, suggestions_differ: false, value_rule: null },
+  });
+
+  it('groups whose files name no sample: the warning is beside the title, and no scope is chosen for the person (review 1)', async () => {
+    const posts: Record<string, unknown>[] = [];
+    vi.stubEnv('VITE_ISAAC_LOCAL_IMPORTS', '1');
+    stubFetchRoutes({
+      'GET /api/local-bundles': { body: listBody },
+      [`GET ${QPATH}`]: { body: questionsBody([unrecordedQ]) },
+      [APATH(unrecordedQ.question_id)]: (init) => {
+        posts.push(bodyOf(init));
+        return { body: recordedBody(unrecordedQ.question_id, ['miss-0001']) };
+      },
+    });
+    renderAt(ROUTES.localImportBundle('synthetic-beamtime'));
+    const heading = await screen.findByRole('heading', { name: 'What form was the sample in? None of your files say.' });
+    const card = heading.closest('li') as HTMLElement;
+    const warning = within(card).getByTestId('li-question-warning');
+    expect(warning).toHaveTextContent('may be different samples');
+    expect(warning).toHaveTextContent('only if they are all the same sample. Otherwise answer each group on its own.');
+    expect(warning.closest('details')).toBeNull();
+    // "Same for all of these groups" is not pre-selected: one value is never written to groups that may differ
+    const radios = within(card).getAllByRole('radio');
+    expect(radios.length).toBeGreaterThan(1);
+    for (const r of radios) expect(r).not.toBeChecked();
+    fireEvent.change(screen.getByLabelText(COPY.yourName), { target: { value: 'Synthetic Scientist' } });
+    fireEvent.change(within(card).getByLabelText('Your answer'), { target: { value: 'SYN powder' } });
+    fireEvent.click(within(card).getByRole('button', { name: COPY.answer }));
+    expect(await within(card).findByText(COPY.chooseScope)).toBeInTheDocument();
+    expect(posts).toHaveLength(0);
+  });
+
+  it('asked again and answers that differ are said beside the title, not behind Details (review 1)', async () => {
+    const againQ = question({
+      ...envQ,
+      question_id: 'Q-again00001',
+      answers_differ: true,
+      asked_again: [{ answered: 'SYN_word', target: { kind: 'missing_value', id: 'miss-0001' }, reason: 'not one of the allowed values' }],
+      display: { ...envQ.display, suggestions_differ: false },
+    });
+    stubPage([againQ]);
+    renderAt(ROUTES.localImportBundle('synthetic-beamtime'));
+    const heading = await screen.findByRole('heading', { name: cardTitle(againQ) });
+    const card = heading.closest('li') as HTMLElement;
+    const warnings = within(card).getAllByTestId('li-question-warning');
+    expect(warnings.map((w) => w.textContent)).toEqual([
+      'Answers already given for this field in other groups differ. Answer each group on its own, unless they really are all the same.',
+      'Asked again: 1 answer already given here cannot go into the record: “SYN_word” (not one of the allowed values). Answer again with a value the record can take.',
+    ]);
+    for (const w of warnings) expect(w.closest('details')).toBeNull();
+    for (const r of within(card).getAllByRole('radio')) expect(r).not.toBeChecked();
+  });
+
+  it('a merged card of disagreements counts groups, not questions, and each row is its own question (review 3)', async () => {
+    const posts: { id: string; body: Record<string, unknown> }[] = [];
+    const scopeOf = (g: string, run: string) => ({ scope: `group:${g}`, kind: 'group' as const, group_id: g, label: `Record group ${g}`, target_count: 1, run_names: [run] });
+    const cf = (id: string, g: string, run: string, subject: string | null, readings: string[]) =>
+      question({
+        question_id: id, kind: 'resolve_conflict', tier: 2, blocking: false, scope: `group:${g}`, target_field_path: 'system.technique',
+        text: `SYNTHETIC: the sources disagree (field_disagreement, ${subject ?? 'system.technique'}).`,
+        applies_to: { groups: 1, runs: 1, targets: 1 }, targets: [{ kind: 'conflict', id: `conf-${id}` }],
+        per_scope_targets: { [`group:${g}`]: [`conf-${id}`] },
+        display: display({ answer_kind: 'conflict', scopes: [scopeOf(g, run)],
+          conflict: { conflict_id: `conf-${id}`, kind: 'field_disagreement', subject, readings } }),
+      });
+    const qs = [cf('Q-cf1', 'g1', 'SYN_run_A', 'SYN header line', ['SYN-XAS', 'SYN-XES']),
+      cf('Q-cf2', 'g1', 'SYN_run_A', 'SYN file name', ['SYN-XAS', 'SYN-RIXS']), cf('Q-cf3', 'g2', 'SYN_run_B', null, ['a', 'b'])];
+    vi.stubEnv('VITE_ISAAC_LOCAL_IMPORTS', '1');
+    stubFetchRoutes({
+      'GET /api/local-bundles': { body: listBody },
+      [`GET ${QPATH}`]: { body: { ...questionsBody(qs), group_names: { g1: 'SYN_run_A', g2: 'SYN_run_B' } } },
+      ...Object.fromEntries(qs.map((x) => [APATH(x.question_id), (init?: RequestInit) => {
+        posts.push({ id: x.question_id, body: bodyOf(init) });
+        return { body: recordedBody(x.question_id, [`conf-${x.question_id}`]) };
+      }])),
+    });
+    renderAt(ROUTES.localImportBundle('synthetic-beamtime'));
+    const title = await screen.findByRole('heading', { level: 4, name: 'Your files disagree about the technique. Which is right?' });
+    const card = title.closest('li') as HTMLElement;
+    expect(within(card).getByTestId('li-repeated-count')).toHaveTextContent('Asked once for each group: 2 groups, 3 questions. Answer each one below.');
+    const rows = ['SYN_run_A: SYN header line', 'SYN_run_A: SYN file name', 'SYN_run_B'].map(
+      (name) => within(card).getByRole('heading', { level: 5, name }).closest('li') as HTMLElement,
+    );
+    expect(rows.map((r) => r.id)).toEqual(qs.map((x) => questionCardId(x.question_id)));
+    // the merged card's list item carries no label of its own: its heading names it
+    expect(card).not.toHaveAttribute('aria-labelledby');
+    fireEvent.change(screen.getByLabelText(COPY.yourName), { target: { value: 'Synthetic Scientist' } });
+    fireEvent.change(within(rows[1]).getByLabelText('Or another value'), { target: { value: 'SYN-HERFD' } });
+    fireEvent.click(within(rows[1]).getByRole('button', { name: COPY.answer }));
+    await waitFor(() => expect(posts).toHaveLength(1));
+    expect(posts[0].id).toBe('Q-cf2');
+  });
+
+  it('each Details names what it holds details of, for a screen reader (review 8)', async () => {
+    stubPage([envQ, tempQ]);
+    renderAt(ROUTES.localImportBundle('synthetic-beamtime'));
+    await screen.findByRole('heading', { name: cardTitle(envQ) });
+    const summaries = Array.from(document.querySelectorAll('[data-testid="li-question-details"] > summary'));
+    expect(summaries.length).toBeGreaterThanOrEqual(2);
+    const said = summaries.map((x) => x.textContent);
+    expect(said).toContain(`${COPY.details}: ${cardTitle(envQ)}`);
+    expect(said).toContain(`${COPY.details}: ${cardTitle(tempQ)}`);
+    expect(new Set(said).size).toBe(said.length);
+    // the visible word stays "Details": the context is for a screen reader only
+    for (const x of summaries) expect(x.querySelector('.sr-only')).not.toBeNull();
   });
 });

@@ -61,6 +61,9 @@ import {
 import {
   cannotExportLines,
   clusterRepeats,
+  clusterRowLabels,
+  clusterSize,
+  questionWarnings,
   counterExample,
   fieldNoun,
   countLine,
@@ -78,6 +81,19 @@ import {
 /** `{group_id: name}` for the groups the page mentions, so every group is named, never shown by its id. */
 const GroupNamesCtx = createContext<GroupNames>({});
 const useGroupNames = () => useContext(GroupNamesCtx);
+
+/**
+ * A "Details" disclosure's summary that says, to a screen reader, what it holds details OF: a page has many, and a
+ * list of identical "Details" names tells them nothing. The visible word stays "Details".
+ */
+function DetailsSummary({ about }: { about: string }) {
+  return (
+    <summary>
+      {COPY.details}
+      <span className="sr-only">: {about}</span>
+    </summary>
+  );
+}
 
 /**
  * LOCAL IMPORTS — the import progress of every bundle in the folder this server was started
@@ -319,7 +335,7 @@ function ProgressBlock({ name }: { name: string }) {
             <div className="li-meta" data-testid="li-cannot-export">
               {cannotExportLines(cannot.by_reason).join(' ')}
               <details className="li-details">
-                <summary>{COPY.details}</summary>
+                <DetailsSummary about="why these groups cannot become records" />
                 <p className="li-meta">
                   <InlineCode text={cannot.statement} />
                 </p>
@@ -381,7 +397,7 @@ function AthenaMerges({ merges }: { merges: NonNullable<LocalProgress['athena_me
             {m.near_groups.length > 0 && (
               <span className="li-meta">
                 {' '}
-                · near: {m.near_groups.map((g) => g.group_name ?? groupName(g.group_id, names)).join(', ')} (a hint, not a match)
+                · near: {m.near_groups.map((g) => groupName(g.group_id, names, g.group_name ? [g.group_name] : undefined)).join(', ')} (a hint, not a match)
               </span>
             )}
           </li>
@@ -869,7 +885,7 @@ function BundleHead({ data }: { data: ApiLocalQuestions }) {
         {bundleFacts(b.source_label, b.beamline)} · {COPY.checkedAgainst}
       </p>
       <details className="li-details">
-        <summary>{COPY.details}</summary>
+        <DetailsSummary about="the record rules these questions are checked against" />
         <p className="li-meta">
           Record rules: <code>{data.blocking_basis.schema}</code>
           {data.blocking_basis.source ? <> · {data.blocking_basis.source}</> : null}
@@ -1712,8 +1728,13 @@ function QuestionCard({
   const [kept, setKept] = useState<{ group_id: string; element: string; edge: string }[]>([]);
   const groups = perGroupScopes(q);
   const multi = groups.length > 1;
-  // U1: where the groups' own files suggest different values, no scope is chosen for the person
-  const [scopeMode, setScopeMode] = useState<'all' | 'one' | null>(multi && d.suggestions_differ ? null : 'all');
+  // what changes how to answer, said beside the title (never behind Details): lib/plainQuestions.questionWarnings
+  const warnings = startTimes ? [] : questionWarnings(q);
+  // U1: where the groups' own files suggest different values, no scope is chosen for the person. Nor where the
+  // question itself says one answer for all may be wrong (2026-11-17 review): groups whose files name no sample may
+  // be different samples, and answers already given elsewhere differ. The person chooses; nothing is pre-selected.
+  const perGroupFirst = q.partition === 'sample=unrecorded' || q.answers_differ === true;
+  const [scopeMode, setScopeMode] = useState<'all' | 'one' | null>(multi && (d.suggestions_differ || perGroupFirst) ? null : 'all');
   // which group "This group only" is for: none until the person chooses one
   const [only, setOnly] = useState('');
   const [groupGone, setGroupGone] = useState(false);
@@ -2177,6 +2198,11 @@ function QuestionCard({
           {sample}
         </p>
       )}
+      {warnings.map((w, i) => (
+        <p key={i} className="li-warning" data-testid="li-question-warning">
+          {w}
+        </p>
+      ))}
       {q.deferred && (
         <p className="li-meta" data-testid="li-deferred" title={q.deferred.decided_utc ?? undefined}>
           {deferredText(q.deferred)}. It stays open and still counts.
@@ -2224,7 +2250,7 @@ function QuestionCard({
             </p>
           )}
           <details className="li-details" data-testid="li-question-details">
-            <summary>{COPY.details}</summary>
+            <DetailsSummary about={row !== undefined ? `${cardTitle(q)} (${row.label})` : (plain ?? fullText)} />
             {q.target_field_path && (
               <p className="li-meta">
                 {COPY.recordField}: <code>{q.target_field_path}</code>
@@ -2459,8 +2485,12 @@ function RepeatedCard({ cluster, handlers }: { cluster: QuestionCluster; handler
     cluster.by === 'sample'
       ? (sampleLabel(q) ?? q.question_id)
       : scopeName(q.display.scopes[0] ?? { kind: 'group', scope: q.scope, run_names: [], label: 'a group' }, names);
+  // one label per row, each telling its row apart (a group can hold several disagreements about one field)
+  const labels = clusterRowLabels(cluster, rowLabel);
+  // how many groups (or samples), not how many questions
+  const size = clusterSize(cluster);
   return (
-    <li className="li-card li-question li-repeated" aria-labelledby={`${uid}-t`} data-testid="li-repeated">
+    <li className="li-card li-question li-repeated" data-testid="li-repeated">
       {uniform && (
         <div className="li-card-head">
           <span className="li-chip">{first.blocking ? COPY.chipBlocks : first.tier === 2 ? COPY.chipAffectsRecord : COPY.chipOptional}</span>
@@ -2469,12 +2499,13 @@ function RepeatedCard({ cluster, handlers }: { cluster: QuestionCluster; handler
       <h4 id={`${uid}-t`} className="li-h4 li-question-text">
         <InlineCode text={cardTitle(first)} />
       </h4>
-      <p className="li-meta">
-        Asked once for each {cluster.by}: {qs.length} {cluster.by}s. Answer each one below.
+      <p className="li-meta" data-testid="li-repeated-count">
+        Asked once for each {cluster.by}: {size} {size === 1 ? cluster.by : `${cluster.by}s`}
+        {qs.length > size ? `, ${qs.length} questions` : ''}. Answer each one below.
       </p>
       <ol className="li-list li-repeated-rows">
-        {qs.map((q) => (
-          <QuestionCard key={q.question_id} q={q} handlers={handlers} row={{ label: rowLabel(q), chip: !uniform }} />
+        {qs.map((q, i) => (
+          <QuestionCard key={q.question_id} q={q} handlers={handlers} row={{ label: labels[i], chip: !uniform }} />
         ))}
       </ol>
     </li>
@@ -2567,7 +2598,7 @@ function StartTimesMore({ q }: { q: LocalQuestion }) {
       )}
       {text && (
         <details className="li-details" data-testid="li-question-details">
-          <summary>{COPY.details}</summary>
+          <DetailsSummary about={startTitle(q)} />
           {q.target_field_path && (
             <p className="li-meta">
               {COPY.recordField}: <code>{q.target_field_path}</code>
@@ -2693,7 +2724,7 @@ function MergeCard({ m, handlers }: { m: LocalMergeCandidate; handlers: WriteHan
         ))}
       </ul>
       <details className="li-details">
-        <summary>{COPY.details}</summary>
+        <DetailsSummary about={`merging ${named}`} />
         {m.question && (
           <p className="li-meta">
             <InlineCode text={m.question} />

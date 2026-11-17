@@ -281,18 +281,18 @@ describe('BackendDown — hosted build (VITE_API_BASE=/krish/api)', () => {
       <hosted.BackendDown error={new hosted.ApiError('x', { status: 401 })} />,
     );
     expect(view401.getByText('Sign-In Required')).toBeInTheDocument();
-    expect(
-      view401.getByText(/Your sign-in session has ended/),
-    ).toBeInTheDocument();
+    // a 401 says no accepted sign-in came with the request: never why (2026-11-17 review)
+    expect(view401.getByText('You need to sign in to see this.')).toBeInTheDocument();
+    expect(view401.container.textContent).not.toMatch(/has ended|no longer/);
     view401.unmount();
 
     const view403 = render(
       <hosted.BackendDown error={new hosted.ApiError('x', { status: 403 })} />,
     );
     expect(view403.getByText('Sign-In Required')).toBeInTheDocument();
-    expect(
-      view403.getByText(/Your sign-in no longer gives access to this page/),
-    ).toBeInTheDocument();
+    // a 403 says this account may not read it: never that it once could
+    expect(view403.getByText('Your account doesn’t have access to this.')).toBeInTheDocument();
+    expect(view403.container.textContent).not.toMatch(/has ended|no longer/);
   });
 
   it('an HTML intercept is treated as the authentication signal it is', async () => {

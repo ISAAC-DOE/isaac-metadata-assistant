@@ -701,8 +701,10 @@ export function downCopy(
       error?.htmlIntercept === true
         ? 'A sign-in page came back instead of ISAAC. That happens when a session has ended.'
         : status === 401
-          ? 'Your sign-in session has ended.'
-          : 'Your sign-in no longer gives access to this page.';
+          ? // a 401 says no accepted sign-in came with the request, not why (never signed in, ended, or refused)
+            'You need to sign in to see this.'
+          : // a 403 says this account may not read it, not that it once could
+            'Your account doesn’t have access to this.';
     return {
       kind: 'auth',
       title: 'Sign-In Required',

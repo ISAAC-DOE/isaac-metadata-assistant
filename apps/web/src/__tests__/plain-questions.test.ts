@@ -6,11 +6,15 @@ import {
   cannotExportLines,
   cardTitle,
   clusterRepeats,
+  clusterRowLabels,
+  clusterSize,
+  confirmShape,
   counterExample,
   countLine,
   fieldAsk,
   groupName,
   plainQuestion,
+  questionWarnings,
   repeatKey,
   sampleLabel,
   scopeName,
@@ -52,7 +56,9 @@ function q(over: Partial<LocalQuestion>): LocalQuestion {
 
 describe('plainQuestion', () => {
   it('asks the owner’s example in plain words', () => {
-    expect(plainQuestion(q({}))).toBe('Was this measured in situ, operando or ex situ? None of your files say.');
+    expect(plainQuestion(q({ allowed_values: ['operando', 'in_situ', 'ex_situ', 'in_silico'] }))).toBe(
+      'Was this done operando, in situ, ex situ or in silico? None of your files say.',
+    );
   });
 
   it('asks every kind it knows plainly, and a field it has no word for by its last segment', () => {
@@ -65,7 +71,7 @@ describe('plainQuestion', () => {
       display: { ...q({}).display, distinct_extracted_values: [{ value: 'flow_cell', targets: 1 }] } }))).toBe(
       'Is the cell type read from your files right?',
     );
-    expect(plainQuestion(q({ kind: 'confirm_value', target_field_path: 'sample.material.name' }))).toBe(
+    expect(plainQuestion(q({ kind: 'confirm_value', target_field_path: 'sample.material.name', no_value: true }))).toBe(
       'What is the sample material? Your files mention it, but not as a value a record can hold.',
     );
     expect(plainQuestion(q({ kind: 'naming_counter_positions', target_field_path: null, positions: [1] }))).toBe(
@@ -127,7 +133,7 @@ describe('clusterRepeats', () => {
     const lone = q({ question_id: 'Q-a', target_field_path: 'sample.sample_form', partition: 'sample={"sample_name": "a"}' });
     expect(clusterRepeats([lone])).toEqual([lone]);
     const withValue = q({ kind: 'confirm_value', scope: 'group:g1', display: { ...q({}).display, distinct_extracted_values: [{ value: 'x', targets: 1 }] } });
-    const without = q({ kind: 'confirm_value', scope: 'group:g2' });
+    const without = q({ kind: 'confirm_value', scope: 'group:g2', no_value: true });
     expect(repeatKey(withValue)).not.toBe(repeatKey(without));
   });
 });
@@ -155,5 +161,100 @@ describe('counts and groups in plain words', () => {
     expect(groupName('rg-1', {})).toBe('group rg-1');
     expect(scopeName({ kind: 'group', group_id: 'rg-1', run_names: ['SYN_run_C'], label: 'Record group rg-1' }, {})).toBe('SYN_run_C');
     expect(scopeName({ kind: 'experiment', run_names: [], label: 'The whole beamtime' }, {})).toBe('The whole beamtime');
+  });
+});
+
+/*
+ * 2026-11-17 review fixes. SYNTHETIC values only.
+ */
+describe('the environment choices come from the schema the server serves, never a hand list (review 5)', () => {
+  const schemaEnum = (): string[] => {
+    const schema = JSON.parse(readFileSync(join(__dirname, '../../../../schema/isaac_record_v1.json'), 'utf8'));
+    return schema.properties.context.properties.environment.enum as string[];
+  };
+
+  it('asks every value the vendored schema allows, in_silico included', () => {
+    const allowed = schemaEnum();
+    expect(allowed).toContain('in_silico');
+    const text = plainQuestion(q({ allowed_values: allowed })) ?? '';
+    for (const v of allowed) expect(text).toContain(v.replace(/_/g, ' '));
+  });
+
+  it('follows the served list, and names no value when none is served', () => {
+    expect(plainQuestion(q({ allowed_values: ['SYN_one', 'SYN_two'] }))).toBe('Was this done SYN one or SYN two? None of your files say.');
+    expect(plainQuestion(q({ allowed_values: null }))).toBe('What is the measurement environment? None of your files say.');
+  });
+});
+
+describe('a confirm question is read from the server’s flags, not from distinct_extracted_values (review 4)', () => {
+  const targets = [1, 2, 3, 4].map((i) => ({ kind: 'candidate', id: `cand-${i}` }));
+  it('most targets with a value: asked to confirm, and the ones without are said beside it', () => {
+    // the server sends no distinct values when any target lacks one
+    const mixed = q({ kind: 'confirm_value', target_field_path: 'context.electrochemistry.cell_type', targets, targets_without_a_value: 1 });
+    expect(confirmShape(mixed)).toBe('value');
+    expect(plainQuestion(mixed)).toBe('Is the cell type read from your files right?');
+    expect(questionWarnings(mixed)).toEqual([
+      'No value was read from your files for 1 of the 4 asked about here, so those cannot be confirmed. Give their value one group at a time.',
+    ]);
+  });
+
+  it('no target with a value (no_value), and every value unfit, are each asked as what they are', () => {
+    const none = q({ kind: 'confirm_value', target_field_path: 'sample.material.name', targets, no_value: true, targets_without_a_value: 4 });
+    expect(plainQuestion(none)).toBe('What is the sample material? Your files mention it, but not as a value a record can hold.');
+    expect(questionWarnings(none)).toEqual([]);
+    const unfit = q({ kind: 'confirm_value', target_field_path: 'sample.material.name', targets, targets_with_an_unfit_value: 4 });
+    expect(plainQuestion(unfit)).toBe('What is the sample material? The value read from your files does not fit this field.');
+  });
+});
+
+describe('what changes how to answer is said beside the title (review 1, CRITICAL)', () => {
+  it('groups whose files name no sample: one answer for all only if they are the same sample', () => {
+    const unrecorded = q({ partition: 'sample=unrecorded', per_scope_targets: { 'group:g1': ['m1'], 'group:g2': ['m2'] } });
+    const [w] = questionWarnings(unrecorded);
+    expect(w).toMatch(/name no sample, so they may be different samples/);
+    expect(w).toMatch(/only if they are all the same sample\. Otherwise answer each group on its own\./);
+    // one group alone: nothing to choose between, and the server says nothing either
+    expect(questionWarnings(q({ partition: 'sample=unrecorded', per_scope_targets: { 'group:g1': ['m1'] } }))).toEqual([]);
+  });
+
+  it('answers already given differ: answer per group unless they truly are the same', () => {
+    expect(questionWarnings(q({ answers_differ: true }))).toEqual([
+      'Answers already given for this field in other groups differ. Answer each group on its own, unless they really are all the same.',
+    ]);
+  });
+
+  it('asked again: how many, which answers and why, and what to do', () => {
+    const again = q({
+      asked_again: [
+        { answered: 'SYN_word', target: { kind: 'missing_value', id: 'm1' }, reason: 'not one of the allowed values' },
+        { answered: 'SYN_word', target: { kind: 'missing_value', id: 'm2' }, reason: 'not one of the allowed values' },
+        { answered: 7, target: { kind: 'missing_value', id: 'm3' }, reason: null },
+      ],
+    });
+    expect(questionWarnings(again)).toEqual([
+      'Asked again: 3 answers already given here cannot go into the record: “SYN_word” (not one of the allowed values); 7. ' +
+        'Answer again with a value the record can take.',
+    ]);
+    expect(questionWarnings(q({}))).toEqual([]);
+  });
+});
+
+describe('a merged card counts groups and tells its rows apart (review 3)', () => {
+  const cf = (id: string, group: string, subject: string | null, readings: string[]) =>
+    q({
+      question_id: id, kind: 'resolve_conflict', scope: `group:${group}`, target_field_path: 'system.technique',
+      display: { ...q({}).display, conflict: { conflict_id: `conf-${id}`, kind: 'field_disagreement', subject, readings } },
+    });
+
+  it('three disagreements in two groups: 2 groups, each row its own label', () => {
+    const cluster = { by: 'group' as const, questions: [cf('Q-1', 'g1', 'SYN header A', ['x', 'y']), cf('Q-2', 'g1', 'system.technique', ['p', 'q']), cf('Q-3', 'g2', null, ['m', 'n'])] };
+    expect(clusterSize(cluster)).toBe(2);
+    const names: Record<string, string> = { 'group:g1': 'SYN_run_A', 'group:g2': 'SYN_run_B' };
+    expect(clusterRowLabels(cluster, (x) => names[x.scope])).toEqual(['SYN_run_A: SYN header A', 'SYN_run_A: “p” or “q”', 'SYN_run_B']);
+  });
+
+  it('two rows that would still read alike are numbered', () => {
+    const cluster = { by: 'group' as const, questions: [cf('Q-1', 'g1', 'same', ['x']), cf('Q-2', 'g1', 'same', ['x'])] };
+    expect(clusterRowLabels(cluster, () => 'SYN_run_A')).toEqual(['SYN_run_A: same (1 of 2)', 'SYN_run_A: same (2 of 2)']);
   });
 });
