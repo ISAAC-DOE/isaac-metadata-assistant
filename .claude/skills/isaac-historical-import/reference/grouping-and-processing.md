@@ -168,7 +168,31 @@ it finds one. Show per group, in words:
   detachment of the sample"): say it, never offer to leave a scan out for it. Only on the scientist's word, use the
   `exclude_scans` snippet the sentence gives (it keeps any scan already left out) and re-process the group (below);
   the new result says what it proposes on the remaining scans. A result with proposals still open is approved only
-  on its own (a bulk approval refuses it), and the approval's note records what was open;
+  on its own (a bulk approval refuses it), and the approval's note records what was open.
+  **Where to read it:** `bundle list … processing-results` rows carry a `scan_selection` line ("proposes leaving out
+  3 of 9 merged scans (scans 1,3-4); not applied"); `bundle show <bundle> processing-result <id>` prints the
+  `scan_selection` block: `status` (with `detail` when `not_evaluated`), `open`, `applied: false`, `counts` per
+  proposal, `stable_window` and `evolving_metrics`, `observations` (the edge-step observation), every scan with a
+  remark as a row (`scan` by its real number, `file`, `proposal`, `reasons`, `said`, and `exclude_as` for a scan
+  proposed for leaving out or a look), and `included_without_remark` for the rest in one line. At most 20 rows
+  (`scans_not_shown` counts the others); `--full` prints every row with its metrics, which you give only when asked.
+  The plot marks the same scans: dotted purple with triangle markers "(proposed: leave out)", dash-dot amber "(proposed: look at)" (a flagged scan is dashed red), named
+  by scan number; its footnote says the proposals are NOT applied and the merge is raw mu of every scan used;
+- **the scientists' quick beamtime merges** (rule `isaac.processed_output.quick_merge_compare.v0`; a two-column
+  file the engine classified, e.g. in a `MERGE/` folder, linked to the group's run by its legacy number): a ROUGH
+  REFERENCE only. The beamline scientist said these merges "could be not robust or rigorous enough", so never call
+  one the answer key, never say ISAAC's curve is wrong because it differs, and never offer to approve it (it is
+  never `preferred_for_record` and never truth). A row's `quick_merge_agreement` says each linked merge's verdict;
+  `bundle show … processing-result` prints the `scientist_quick_merges` block, one entry per linked merge: `file`,
+  `matched_by` (the link rule, run and `status: proposed`), `role: rough_reference`, `verdict` (`agree`, `differs`,
+  or `not_comparable` with a `reason`), `normalization` (`already_normalized`: compared as stored; else normalised
+  with ISAAC's OWN parameters, not the scientist's), `assumptions` (column 1 read as energy, column 2 as mu: the
+  file names neither; say them), the key `metrics` (`rms_norm`, `e0_delta_eV`, the two E0s and edge steps, overlap
+  points; the `tolerances` they are judged by) and `raw_comparison`. A `scan_subset_hint` names the one subset of
+  the group's scans that rebuilds their merge (`scans_not_in_it`): a HINT, never applied. When it names the same
+  scans as the scan-selection proposal, say that both point at those scans and still ask the scientist; its
+  `exclude_scans` snippet is in its `statement`. Say a `differs` as "your quick merge at the beamline differs from
+  ISAAC's merge by …; it is a rough reference", and ask nothing about the quick merge itself;
 - **when a scan ends early** (reason `scans_truncated`, flag `scan_range_truncated`; `scans_used` still
   counts it): say the sentence in `bundle show processing-result` → `qc.statements`, which names each file
   (`qc.json` keeps the source ids it was first written with): how many scans end early, which, the
@@ -212,11 +236,13 @@ it finds one. Show per group, in words:
   it is never normalised again, so no edge-step ratio is given for it;
 - the plot PNG (`<bundle>/processing/<group id>/<run id>/plot.png`; the result's `outputs.files` gives the path): open it with Read, describe the curve (edge, pre/post-edge, obvious artefacts); the numbers are in `qc.json` beside it. Never read `processing/processing_results.json` (it can be
   over a MB): `<isaac> bundle list <bundle> processing-results --limit 20` pages each result's
-  `result_id`, verdict, applicability, failure, flags, key metrics, `plot` path, Athena agreement and,
+  `result_id`, verdict, applicability, failure, flags, key metrics, `plot` path, Athena agreement, the
+  `quick_merge_agreement` and `scan_selection` lines when the result has them and,
   when there are several Athena versions, `athena_version_choices` (each `version_id` with its project
   file, Athena group and label). `<isaac> bundle show <bundle> processing-result <result_id>` prints one
   result compactly (QC with its `statements`, each step's outcome, the Athena comparison and every
-  version's comparison; long lists are counted, not printed); its `result_file` (`result.json`) is the result as the run first wrote it and is never rewritten, so
+  version's comparison, the `scan_selection` and `scientist_quick_merges` blocks above; long lists are counted,
+  not printed; `--full` adds every scan row and metric); its `result_file` (`result.json`) is the result as the run first wrote it and is never rewritten, so
   the current sentences are in this output, not necessarily in that file.
 - **a merge that matches no group** (r6; summary line "A merge exists but was not matched", list
   `athena.unmatched_merges`; on each near group's results `qc.statements.athena_merge_not_matched`, flag
