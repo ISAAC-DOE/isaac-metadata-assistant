@@ -18,8 +18,9 @@ cloud model**, and **not uploading raw files is not the same as sending nothing 
 **Not a data flow: the setup update check.** `scripts/setup_isaac_local.sh --check` runs `git fetch` from the
 ISAAC folder's `origin` (GitHub) to say whether the folder is behind `main`, and `--update` (only on the scientist's
 yes in the skill) fast-forwards the ISAAC code. Both are code **downloads**: no file, name, value or bundle is sent
-(GitHub sees a request from the computer, as for any download). `--offline` skips it; offline, the check says
-`[skipped]` and nothing fails.
+(GitHub sees a request from the computer, as for any download). The check changes no file in the ISAAC folder (it
+updates git's record of what's on GitHub); `--update` refuses rather than replace a file git does not track, such as
+data in `examples/`. `--offline` skips it; when GitHub is not reached the check says `[skipped]` and nothing fails.
 
 ## Flow A — local deterministic parsing
 

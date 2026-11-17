@@ -33,17 +33,20 @@ ISAAC portal expects, plus a plain list of what is still missing. **It never upl
 
 Run `scripts/setup_isaac_local.sh --check` any time to see what is installed. It also tells you:
 
-- when the skill copy in `~/.claude/skills` differs from the one in the ISAAC folder (`[stale]`).
-  Claude Code uses that copy. The skill notices this itself, says so, runs
-  `scripts/setup_isaac_local.sh --install-skill` and carries on with the new instructions; you do not
-  need to restart Claude Code.
+- when the skill copy in `~/.claude/skills` (or the folder you pass with `--skill-dir`) differs from the
+  one in the ISAAC folder (`[stale]`). Claude Code uses that copy. The skill notices this itself, says so,
+  runs `scripts/setup_isaac_local.sh --refresh-skill` (it copies the skill only: nothing is downloaded or
+  installed) and carries on with the new instructions; you do not need to restart Claude Code.
 - when your ISAAC folder is behind the latest version on GitHub (`[behind N commits]`). To find out it
-  runs `git fetch`, which **downloads** code and sends none of your data; offline, the line says
-  `[skipped]` and nothing fails (`--offline` skips the check). The skill asks before updating.
+  runs `git fetch`, which **downloads** code and sends none of your data; it changes no file in your
+  ISAAC folder (it updates git's record of what's on GitHub). When GitHub is not reached the line says
+  `[skipped]` with the reason and nothing fails (`--offline` skips the check). The skill asks before updating.
   `scripts/setup_isaac_local.sh --update` updates only when it is safe: the folder must be on `main`,
-  with no local changes to ISAAC's files and no commits of its own; otherwise it says why and changes
-  nothing. It then refreshes the skill copy (and the tools, if their dependencies changed). It only
-  changes the ISAAC code, never your data or bundles.
+  with no local changes to ISAAC's files and no commits of its own, and the update must not replace
+  any file git does not track (such as your data in `examples/`); otherwise it says why and changes
+  nothing. It then refreshes the skill copy; if the tools' dependencies changed it prints the command
+  that refreshes them (a download) instead of running it. It only changes the ISAAC code, never your
+  data or bundles.
 
 ## Run it
 

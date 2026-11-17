@@ -7,16 +7,23 @@
 #   --skip-portal                           do not install the offline portal validator
 #   --skip-cli                              do not (re)install the CLI (use with --install-skill alone)
 #   --install-skill                         copy the Claude Code skill into ~/.claude/skills
-#   --skill-dir DIR                         where skills go (default: ~/.claude/skills)
+#   --refresh-skill                         ONLY re-copy the skill (no Python packages, no portal validator,
+#                                           no network): what a stale skill copy needs
+#   --skill-dir DIR                         where skills go (default: ~/.claude/skills; a project's own
+#                                           .claude/skills works too)
 #   --check                                 change nothing; only report what is and is not installed
 #                                           (including whether an installed skill copy is out of date,
 #                                           and whether this checkout is behind GitHub's main: a
-#                                           `git fetch` that downloads code and sends no data)
+#                                           `git fetch` that changes no file in your ISAAC folder (it
+#                                           updates git's record of what's on GitHub) and sends no data)
 #   --update                                bring this checkout up to GitHub's main (fast-forward only:
-#                                           refused with local changes, on another branch or diverged),
-#                                           then re-install the skill
+#                                           refused with local changes, on another branch, diverged, or
+#                                           when it would replace a file git does not track, such as
+#                                           your data in examples/), then re-copy the skill
 #   --offline                               skip the GitHub check (no network at all)
 #   -h, --help
+#
+# ISAAC_FETCH_TIMEOUT=<seconds> (a whole number; default 15) bounds the GitHub check.
 #
 # What it does (idempotent; safe to re-run; needs no sudo):
 #   1. a Python >= 3.11 virtual environment in <this checkout>/.venv (uv if present, else
@@ -29,18 +36,23 @@
 # What it downloads: packages from the Python package index (steps 1-3), the upstream ISAAC
 # repository at one pinned commit (step 3), and, if uv has to make a Python, a Python build;
 # and, unless --offline, the latest ISAAC code record from this checkout's `origin` (a `git fetch`,
-# to say whether this folder is behind; it changes no file of yours and sends no data).
+# to say whether this folder is behind; it changes no file in your ISAAC folder (it updates git's
+# record of what's on GitHub) and sends no data).
 # What it never does: sudo, change system Python, edit your shell profile, upload or send anything.
 set -uo pipefail
 
 CHECKOUT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 VENV="$CHECKOUT/.venv"
 SKILL_NAME="isaac-historical-import"
-WITH_PROCESSING=1; WITH_PORTAL=1; WITH_CLI=1; INSTALL_SKILL=0; CHECK_ONLY=0; UPDATE=0; OFFLINE=0
-SKILL_DIR="$HOME/.claude/skills"
+WITH_PROCESSING=1; WITH_PORTAL=1; WITH_CLI=1; INSTALL_SKILL=0; CHECK_ONLY=0; UPDATE=0; OFFLINE=0; REFRESH_SKILL=0
+DEFAULT_SKILL_DIR="$HOME/.claude/skills"
+SKILL_DIR="$DEFAULT_SKILL_DIR"
 MAIN_BRANCH="main"
-#: seconds the GitHub check may take before it is skipped (never a failure)
+#: the repository `origin` normally is; another one (a fork) is compared with, and said
+CANONICAL_REPO="ISAAC-DOE/isaac-metadata-assistant"
+#: seconds the GitHub check may take before it is skipped (never a failure); a bad value is the default
 FETCH_TIMEOUT="${ISAAC_FETCH_TIMEOUT:-15}"
+[[ "$FETCH_TIMEOUT" =~ ^[1-9][0-9]{0,3}$ ]] || FETCH_TIMEOUT=15
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
@@ -49,15 +61,31 @@ while [[ $# -gt 0 ]]; do
     --skip-portal) WITH_PORTAL=0 ;;
     --skip-cli) WITH_CLI=0 ;;
     --install-skill) INSTALL_SKILL=1 ;;
+    --refresh-skill) REFRESH_SKILL=1 ;;
     --skill-dir) shift; SKILL_DIR="${1:?--skill-dir needs a folder}" ;;
     --check) CHECK_ONLY=1 ;;
     --update) UPDATE=1 ;;
     --offline) OFFLINE=1 ;;
-    -h|--help) sed -n '2,33p' "${BASH_SOURCE[0]}"; exit 0 ;;
+    -h|--help) sed -n '2,41p' "${BASH_SOURCE[0]}"; exit 0 ;;
     *) echo "unknown option: $1 (try --help)" >&2; exit 2 ;;
   esac
   shift
 done
+
+# --check never changes anything, so it is never combined with an option that does
+if [[ $CHECK_ONLY -eq 1 && ( $UPDATE -eq 1 || $REFRESH_SKILL -eq 1 || $INSTALL_SKILL -eq 1 ) ]]; then
+  echo "error: --check changes nothing, so it cannot be combined with --update, --refresh-skill or --install-skill. Run them separately." >&2
+  exit 2
+fi
+if [[ $UPDATE -eq 1 && $REFRESH_SKILL -eq 1 ]]; then
+  echo "error: --update already re-copies the skill; pass one of --update or --refresh-skill." >&2
+  exit 2
+fi
+# --refresh-skill: the skill copy and nothing else (no package index, no GitHub, no portal validator)
+if [[ $REFRESH_SKILL -eq 1 ]]; then INSTALL_SKILL=1; WITH_CLI=0; WITH_PORTAL=0; WITH_PROCESSING=0; OFFLINE=1; fi
+# the --skill-dir to repeat in a suggested command (empty for the default folder)
+SKILL_DIR_ARG=""
+[[ "$SKILL_DIR" == "$DEFAULT_SKILL_DIR" ]] || SKILL_DIR_ARG=" --skill-dir \"$SKILL_DIR\""
 
 OK="[ok]"; BAD="[missing]"; SKIP="[skipped]"
 FINAL=()          # checklist lines
@@ -81,43 +109,95 @@ have_portal()     { compgen -G "$HOME/.cache/isaac/portal-validator/*/venv/bin/p
 skill_state() {
   local src="$CHECKOUT/.claude/skills/$SKILL_NAME" dest="$SKILL_DIR/$SKILL_NAME" recorded=""
   if [[ ! -f "$dest/SKILL.md" ]]; then
-    echo "$SKIP skill not installed at $dest (re-run with --install-skill)"; return
+    echo "$SKIP skill not installed at $dest (copy it: scripts/setup_isaac_local.sh --refresh-skill$SKILL_DIR_ARG)"; return
   fi
   if [[ ! -f "$src/SKILL.md" ]]; then
     echo "$OK skill installed at $dest (this checkout has no copy to compare with)"; return
   fi
+  if [[ "$(cd "$dest" && pwd -P)" == "$(cd "$src" && pwd -P)" ]]; then
+    echo "$OK skill at $dest is this checkout's own copy (always current)"; return
+  fi
   [[ -f "$dest/checkout-path.txt" ]] && recorded="$(head -n 1 "$dest/checkout-path.txt")"
   if ! diff -rq -x checkout-path.txt -x .DS_Store "$src" "$dest" >/dev/null 2>&1; then
-    echo "[stale] skill at $dest differs from this checkout's copy, so Claude Code is using other instructions. Refresh: scripts/setup_isaac_local.sh --install-skill (then re-read its SKILL.md; no restart needed)"
+    echo "[stale] skill at $dest differs from this checkout's copy, so Claude Code is using other instructions. Refresh (copies the skill only): scripts/setup_isaac_local.sh --refresh-skill$SKILL_DIR_ARG (then re-read $dest/SKILL.md; no restart needed)"
   elif [[ "$recorded" != "$CHECKOUT" ]]; then
-    echo "[stale] skill at $dest points at another ISAAC folder (${recorded:-none recorded}). Refresh from this one: scripts/setup_isaac_local.sh --install-skill"
+    echo "[stale] skill at $dest points at another ISAAC folder (${recorded:-none recorded}). Refresh from this one (copies the skill only): scripts/setup_isaac_local.sh --refresh-skill$SKILL_DIR_ARG"
   else
     echo "$OK skill installed at $dest, same as this checkout's"
   fi
 }
 
 # --- is this checkout behind GitHub's main? ----------------------------------------------------
-# `git fetch` downloads the code record only (no file of yours changes, nothing is sent but the
-# request). Never prompts for a password, never fails the check: offline is a [skipped] line.
+# `git fetch` downloads the code record only: it changes no file in your ISAAC folder (it updates
+# git's record of what's on GitHub), and sends nothing but the request. Never prompts for a
+# password, never fails the check: an unreachable GitHub is a [skipped] line.
 g() { git -C "$CHECKOUT" "$@"; }
 is_git_checkout() { [[ "$(g rev-parse --show-toplevel 2>/dev/null)" == "$(cd "$CHECKOUT" && pwd -P)" ]]; }
 
-# run "$@" for at most $1 seconds (macOS has no `timeout`); its exit status, or 124 when cut off
+# run "$@" for at most $1 seconds (macOS has no `timeout`); its exit status, or 124 when cut off.
+# The command runs in its OWN process group (job control on for that one start), and a timeout kills
+# the whole group, so a helper git started (ssh, a transport) is never left running.
 with_timeout() {
   local secs="$1"; shift
-  "$@" & local pid=$!
-  ( trap 'exit 0' TERM; local n=0; while (( n < secs * 10 )); do sleep 0.1; kill -0 "$pid" 2>/dev/null || exit 0; n=$((n+1)); done
-    kill "$pid" 2>/dev/null ) &
-  local watcher=$!
-  wait "$pid"; local rc=$?
-  if kill -0 "$watcher" 2>/dev/null; then kill "$watcher" 2>/dev/null; wait "$watcher" 2>/dev/null; else wait "$watcher" 2>/dev/null; fi
-  [[ $rc -eq 143 ]] && rc=124
+  local pid watcher rc
+  set -m
+  "$@" & pid=$!
+  set +m
+  ( trap 'exit 0' TERM; n=0; while (( n < secs * 10 )); do sleep 0.1; kill -0 "$pid" 2>/dev/null || exit 0; n=$((n+1)); done
+    kill -TERM -- "-$pid" 2>/dev/null ) &
+  watcher=$!
+  wait "$pid" 2>/dev/null; rc=$?
+  if kill -0 "$watcher" 2>/dev/null; then kill "$watcher" 2>/dev/null; fi
+  wait "$watcher" 2>/dev/null
+  if (( rc == 143 || rc == 137 )); then
+    kill -KILL -- "-$pid" 2>/dev/null   # anything in the group that outlived the TERM
+    rc=124
+  fi
   return $rc
 }
 
+# a URL without any user name or token in it, to print
+plain_url() { printf '%s' "$1" | sed -E 's#^([a-zA-Z][a-zA-Z0-9+.-]*://)[^@/]*@#\1#'; }
+ORIGIN_URL=""
+FETCH_ERR=""     # why the last fetch failed: "timeout", "no_main" or "unreachable"
+
+# The user's own ssh setup wins: only when neither GIT_SSH_COMMAND, GIT_SSH nor core.sshCommand is set
+# is ssh told not to prompt (BatchMode) and to give up connecting after a few seconds.
 fetch_main() {
-  GIT_TERMINAL_PROMPT=0 GIT_ASKPASS=/bin/echo GIT_SSH_COMMAND="ssh -o BatchMode=yes -o ConnectTimeout=5" \
-    with_timeout "$FETCH_TIMEOUT" git -C "$CHECKOUT" fetch --quiet origin "+refs/heads/$MAIN_BRANCH:refs/remotes/origin/$MAIN_BRANCH" >/dev/null 2>&1
+  local err rc askpass=/usr/bin/true
+  [[ -x "$askpass" ]] || askpass=/bin/true
+  local -a env_add=(GIT_TERMINAL_PROMPT=0 "GIT_ASKPASS=$askpass" "SSH_ASKPASS=$askpass")
+  if [[ -z "${GIT_SSH_COMMAND:-}" && -z "${GIT_SSH:-}" && -z "$(g config --get core.sshCommand 2>/dev/null)" ]]; then
+    env_add+=("GIT_SSH_COMMAND=ssh -o BatchMode=yes -o ConnectTimeout=$(( FETCH_TIMEOUT < 10 ? FETCH_TIMEOUT : 10 ))")
+  fi
+  err="$(mktemp "${TMPDIR:-/tmp}/isaac-fetch.XXXXXX")" || return 1
+  with_timeout "$FETCH_TIMEOUT" env "${env_add[@]}" git -C "$CHECKOUT" \
+    -c http.lowSpeedLimit=1000 -c "http.lowSpeedTime=$FETCH_TIMEOUT" \
+    fetch --quiet origin "+refs/heads/$MAIN_BRANCH:refs/remotes/origin/$MAIN_BRANCH" >/dev/null 2>"$err" </dev/null
+  rc=$?
+  if (( rc == 0 )); then FETCH_ERR=""
+  elif (( rc == 124 )); then FETCH_ERR="timeout"
+  elif grep -qi "couldn't find remote ref\|could not find remote ref" "$err" 2>/dev/null; then FETCH_ERR="no_main"
+  else FETCH_ERR="unreachable"; fi
+  rm -f "$err"
+  return $rc
+}
+
+# the fetch failure in plain words (after fetch_main failed)
+fetch_failure() {
+  case "$FETCH_ERR" in
+    timeout) echo "GitHub did not answer within ${FETCH_TIMEOUT}s (origin: $(plain_url "$ORIGIN_URL"))" ;;
+    no_main) echo "origin ($(plain_url "$ORIGIN_URL")) has no '$MAIN_BRANCH' branch to compare with (a fork or another repository?)" ;;
+    *) echo "could not reach GitHub (origin: $(plain_url "$ORIGIN_URL"); offline, or the address does not answer)" ;;
+  esac
+}
+
+# " (origin is <url>, not ISAAC-DOE/...)" when origin is not the ISAAC repository (a fork), else empty
+origin_note() {
+  case "$ORIGIN_URL" in
+    *"$CANONICAL_REPO"|*"$CANONICAL_REPO.git"|*"$CANONICAL_REPO/") ;;
+    *) printf ' (origin is %s, not github.com/%s: compared with that)' "$(plain_url "$ORIGIN_URL")" "$CANONICAL_REPO" ;;
+  esac
 }
 
 # why `--update` would refuse right now (empty when it would not); call after a fetch
@@ -138,11 +218,27 @@ update_refusal() {
   fi
 }
 
+# Paths the incoming commits ADD that already exist here as something git does not track (an
+# untracked or ignored file or folder, e.g. your data in examples/), or whose parent folder exists here
+# as a file: a fast-forward would replace or remove them, so --update refuses. NUL-separated, one per path.
+incoming_collisions() {
+  local p d
+  while IFS= read -r -d '' p; do
+    [[ -n "$p" ]] || continue
+    if [[ -e "$CHECKOUT/$p" || -L "$CHECKOUT/$p" ]]; then printf '%s\0' "$p"; continue; fi
+    d="$(dirname "$p")"
+    while [[ "$d" != "." && "$d" != "/" ]]; do
+      if [[ -L "$CHECKOUT/$d" || ( -e "$CHECKOUT/$d" && ! -d "$CHECKOUT/$d" ) ]]; then printf '%s\0' "$d"; break; fi
+      d="$(dirname "$d")"
+    done
+  done < <(g diff -z --name-only --no-renames --diff-filter=A HEAD "origin/$MAIN_BRANCH" 2>/dev/null)
+}
+
 update_state() {
   if [[ $OFFLINE -eq 1 ]]; then echo "$SKIP update check  --offline: not compared with GitHub"; return; fi
   if ! is_git_checkout; then echo "$SKIP update check  not a git checkout, so it cannot be compared with GitHub"; return; fi
-  if ! g remote get-url origin >/dev/null 2>&1; then echo "$SKIP update check  this checkout has no 'origin' to compare with"; return; fi
-  if ! fetch_main; then echo "$SKIP update check  offline or GitHub not reachable; using the ISAAC code as it is"; return; fi
+  ORIGIN_URL="$(g config --get remote.origin.url 2>/dev/null)" || { echo "$SKIP update check  this checkout has no 'origin' to compare with"; return; }
+  if ! fetch_main; then echo "$SKIP update check  $(fetch_failure); using the ISAAC code as it is"; return; fi
   local behind why
   behind="$(g rev-list --count "HEAD..origin/$MAIN_BRANCH" 2>/dev/null)" || {
     echo "$SKIP update check  could not compare with origin/$MAIN_BRANCH"; return; }
@@ -152,35 +248,51 @@ update_state() {
     ahead="$(g rev-list --count "origin/$MAIN_BRANCH..HEAD" 2>/dev/null || echo 0)"
     [[ "$branch" == "$MAIN_BRANCH" ]] || extra=" (on ${branch:-a detached commit}, not $MAIN_BRANCH)"
     [[ "$ahead" == "0" ]] || extra="$extra, plus $ahead local commit(s)"
-    echo "$OK update check     has everything on GitHub's $MAIN_BRANCH ($(g rev-parse --short HEAD))$extra"; return
+    echo "$OK update check     has everything on GitHub's $MAIN_BRANCH ($(g rev-parse --short HEAD))$extra$(origin_note)"; return
   fi
   why="$(update_refusal)"
-  echo "[behind $behind commits] update check  this ISAAC folder is $behind updates behind GitHub's $MAIN_BRANCH ($(g rev-parse --short HEAD) here). Update: scripts/setup_isaac_local.sh --update${why:+ (it would refuse now: $why)}"
+  [[ -n "$why" ]] || why="$(collision_refusal)"
+  echo "[behind $behind commits] update check  this ISAAC folder is $behind updates behind GitHub's $MAIN_BRANCH ($(g rev-parse --short HEAD) here)$(origin_note). Update: scripts/setup_isaac_local.sh --update${why:+ (it would refuse now: $why)}"
+}
+
+# why --update must refuse because of files git does not track (empty when none); names no file, only
+# how many and in which top-level folders, because their names can be data
+collision_refusal() {
+  local n=0 tops="" p top
+  while IFS= read -r -d '' p; do
+    n=$((n+1)); top="${p%%/*}"
+    [[ "$p" == */* ]] && top="$top/"
+    case ",$tops," in *",$top,"*) ;; *) tops="${tops:+$tops,}$top" ;; esac
+  done < <(incoming_collisions)
+  (( n == 0 )) && return
+  echo "the update would replace $n file(s) or folder(s) here that git does not track (in: ${tops//,/, }), which can be your own data. Move them out of the ISAAC folder first; to list them: git -C \"$CHECKOUT\" diff --name-only --diff-filter=A HEAD origin/$MAIN_BRANCH"
 }
 
 # --update: fast-forward to GitHub's main, then re-install the skill with the UPDATED script
 if [[ $UPDATE -eq 1 ]]; then
   refuse() { echo "Not updated: $1. Nothing was changed." >&2; exit 3; }
   is_git_checkout || refuse "$CHECKOUT is not a git checkout"
-  g remote get-url origin >/dev/null 2>&1 || refuse "this checkout has no 'origin' to update from"
-  fetch_main || refuse "GitHub could not be reached (offline?)"
+  ORIGIN_URL="$(g config --get remote.origin.url 2>/dev/null)" || refuse "this checkout has no 'origin' to update from"
+  fetch_main || refuse "$(fetch_failure)"
   why="$(update_refusal)"; [[ -z "$why" ]] || refuse "$why"
   before="$(g rev-parse HEAD)"
   behind="$(g rev-list --count "HEAD..origin/$MAIN_BRANCH")"
   if [[ "$behind" == "0" ]]; then
-    echo "Already up to date with GitHub's $MAIN_BRANCH ($(g rev-parse --short HEAD))."
+    echo "Already up to date with GitHub's $MAIN_BRANCH ($(g rev-parse --short HEAD))$(origin_note)."
   else
-    g merge --ff-only --quiet "origin/$MAIN_BRANCH" >/dev/null 2>&1 || refuse "the fast-forward failed (a file here would be overwritten); nothing was merged"
-    echo "Updated $behind commits: $(g rev-parse --short "$before") -> $(g rev-parse --short HEAD) (code only; no data was touched)."
+    why="$(collision_refusal)"; [[ -z "$why" ]] || refuse "$why"
+    # --no-overwrite-ignore: git otherwise replaces an IGNORED file (examples/ is ignored) without a word.
+    # The check above already refused; this is the second lock.
+    g merge --ff-only --no-overwrite-ignore --quiet "origin/$MAIN_BRANCH" >/dev/null 2>&1 \
+      || refuse "the fast-forward failed (a file here would have been overwritten); nothing was merged"
+    echo "Updated $behind commits: $(g rev-parse --short "$before") -> $(g rev-parse --short HEAD)$(origin_note) (code only; no data was touched)."
   fi
-  args=(--install-skill --skill-dir "$SKILL_DIR" --offline --skip-portal)
-  if g diff --quiet "$before" HEAD -- pyproject.toml scripts/install_local_cli.sh 2>/dev/null; then
-    args+=(--skip-cli)          # same dependencies: the editable install already runs the new code
-  else
-    echo "Its dependencies changed, so the ISAAC tools are refreshed too."
-    have_processing || args+=(--skip-processing)
+  # then the UPDATED script re-copies the skill (and nothing else: no download). The editable install
+  # already runs the new code; when its dependencies changed, the tools refresh is said, not run.
+  if ! g diff --quiet "$before" HEAD -- pyproject.toml scripts/install_local_cli.sh 2>/dev/null; then
+    echo "Its Python dependencies changed. To refresh the ISAAC tools (downloads packages from the Python package index): scripts/setup_isaac_local.sh --skip-portal$( have_processing || printf ' --skip-processing')"
   fi
-  exec bash "$CHECKOUT/scripts/setup_isaac_local.sh" "${args[@]}"
+  exec bash "$CHECKOUT/scripts/setup_isaac_local.sh" --refresh-skill --skill-dir "$SKILL_DIR"
 fi
 
 if [[ $CHECK_ONLY -eq 0 && $WITH_CLI -eq 1 ]]; then
@@ -228,19 +340,33 @@ if [[ $INSTALL_SKILL -eq 1 && $CHECK_ONLY -eq 0 ]]; then
   DEST="$SKILL_DIR/$SKILL_NAME"
   if [[ ! -f "$SRC/SKILL.md" ]]; then
     SKILL_STATE="$BAD the skill is missing from this checkout ($SRC)"; PROBLEMS=$((PROBLEMS+1))
+  elif [[ -d "$DEST" && "$(cd "$DEST" && pwd -P)" == "$(cd "$SRC" && pwd -P)" ]]; then
+    # --skill-dir is this checkout's own .claude/skills: that IS the source, never replaced
+    echo "== 4/4 Claude Code skill"
+    echo "$DEST is this checkout's own copy of the skill; it is always current, nothing to copy."
+    echo "Skill written to: $DEST/SKILL.md"
   else
     echo "== 4/4 Claude Code skill"
-    mkdir -p "$SKILL_DIR"
-    TMP="$(mktemp -d "$SKILL_DIR/.${SKILL_NAME}.XXXXXX")"
-    cp -R "$SRC/." "$TMP/"                       # a copy, never a link
+    copy_failed() { echo "error: could not copy the skill into $SKILL_DIR ($1); the copy there is unchanged." >&2; exit 1; }
+    mkdir -p "$SKILL_DIR" || copy_failed "cannot make the folder"
+    TMP="$(mktemp -d "$SKILL_DIR/.${SKILL_NAME}.XXXXXX")" || copy_failed "cannot write there"
+    cp -R "$SRC/." "$TMP/" || { rm -rf "$TMP"; copy_failed "copy failed"; }   # a copy, never a link
     chmod 755 "$TMP"
     printf '%s\n' "$CHECKOUT" > "$TMP/checkout-path.txt"
     rm -rf "$DEST"
-    mv "$TMP" "$DEST"
+    mv "$TMP" "$DEST" || copy_failed "could not move it into place"
     echo "Copied to $DEST"
+    # the exact file to re-read (a refreshed skill is followed from this path, wherever --skill-dir put it)
+    echo "Skill written to: $DEST/SKILL.md"
   fi
 fi
 [[ -n "$SKILL_STATE" ]] || SKILL_STATE="$(skill_state)"
+if [[ $REFRESH_SKILL -eq 1 ]]; then
+  # --refresh-skill: only the skill line (nothing else was touched); exit 0 when the copy is current
+  echo "$SKILL_STATE"
+  [[ "$SKILL_STATE" == "$OK"* ]] && exit 0
+  exit 1
+fi
 UPDATE_STATE="$(update_state)"
 
 # --- final checklist (what is true now, measured, not assumed) -------------------------------
