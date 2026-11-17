@@ -58,14 +58,13 @@ command and flag is in `reference/commands.md`; exit codes and what to say, in `
 
 Find the ISAAC folder: the path in `checkout-path.txt` beside this file. If there is no such file, ask
 the scientist where their ISAAC folder is (the one with `scripts/setup_isaac_local.sh`); if they have
-none, point them to `docs/local-skill-quickstart.md` and stop. Then run, from that folder,
-`scripts/setup_isaac_local.sh --check` (changes nothing): one `[ok]`/`[missing]` line each for the Python
-environment, the command, the processing extra and the portal check, then the skill copy in
-`~/.claude/skills` (or `--skill-dir`): `[ok]`, `[stale]` or `[skipped]` (none installed there). Use
-`<folder>/.venv/bin/isaac` as `<isaac>` and `<folder>/.venv/bin/python` as `<python>`.
+none, point them to `docs/local-skill-quickstart.md` and stop. `<skills>` is the folder holding this skill's folder (this copy may be in `~/.claude/skills` or a project's `.claude/skills`). Run, from the ISAAC folder,
+`scripts/setup_isaac_local.sh --check --skill-dir <skills>` (it changes no file in your ISAAC folder (it updates git's record of what's on GitHub) and sends no data): one
+`[ok]`/`[missing]` line each for the Python environment, the command, the processing extra and the portal check; this skill copy: `[ok]`, `[stale]` or `[skipped]`; the update check: `[ok]`, `[behind N commits]` or `[skipped]` (GitHub not reached: fine, say the reason it gives).
+`<isaac>` is `<folder>/.venv/bin/isaac`, `<python>` is `<folder>/.venv/bin/python`.
 
-- `[stale]`, or (`[skipped]`, or this copy runs from elsewhere) it differs (`reference/troubleshooting.md`)
-  → `scripts/setup_isaac_local.sh --install-skill`, restart Claude Code; do not continue on this copy.
+- `[stale]`, or (`[skipped]`, or this copy runs from elsewhere) it differs (`reference/troubleshooting.md`) → say "Your installed skill is out of date, I'm updating it", run `scripts/setup_isaac_local.sh --refresh-skill --skill-dir <skills>` (copies the skill only: no download, no install), Read the file its `Skill written to:` line names and follow THAT text from Step 0 on. **The re-read version wins wherever it differs from this one** (no restart). Refresh at most ONCE: if it fails, or `--check` still says `[stale]` after it, stop refreshing, tell the scientist the copy at that path could not be refreshed, and continue with this text.
+- `[behind N commits]` → ask once: "Your ISAAC folder is N updates behind. Update now? It only changes the ISAAC code, not your data." Yes → `scripts/setup_isaac_local.sh --update --skill-dir <skills>`: exit 0 → re-read as above; exit 3 → say the reason it gives and continue; any other non-zero exit → say it stopped and what its last line says, suggest `scripts/setup_isaac_local.sh --check`, and continue with the code as it is. No → continue, and say the version in use (the commit the line names).
 - command missing → the ONE fix is `scripts/setup_isaac_local.sh` (then `--install-skill` if there
   was no `checkout-path.txt`); stop.
 - processing or portal check missing → say what it costs ("curves and quality checks need
@@ -154,7 +153,7 @@ outside the bundle, confirm it is the data they approved (all in one folder: pas
 section of `reference/grouping-and-processing.md`. Page results with
 `<isaac> bundle list <bundle> processing-results --limit 20`. For each group show the verdict in words,
 glitch flags (with `glitch_check_few_scans` or `glitch_points_on_edge`, say its sentence instead), skipped scans,
-agreement with their own Athena output, and the plot (open the PNG with Read and describe it). Ask approve / reject / needs changes. **Scan selection is a proposal** (flag `scan_selection_proposed`, `qc.statements.scan_selection`): say which scans it proposes leaving out or looking at, and why, and ask about each; only on the scientist's word re-process with the `exclude_scans` snippet it gives, then ask about the new result. An edge-step change is an observation, never a reason to leave a scan out; the merge is always raw mu, never normalised data.
+agreement with their own Athena output, and the plot (open the PNG with Read and describe it; proposed scans are dotted or dash-dotted and named by scan number). Ask approve / reject / needs changes. `<isaac> bundle show <bundle> processing-result <id>` gives the two blocks below. **Scan selection is a proposal** (flag `scan_selection_proposed`; block `scan_selection`): say which scans it proposes leaving out or looking at, and why (`reasons`, `said`), and ask about each; only on the scientist's word re-process with the `exclude_scans` snippet in `qc.statements.scan_selection`, then ask about the new result. An edge-step change (`observations`) is never a reason to leave a scan out; the merge is always raw mu, never normalised data. **Their quick beamtime merge** (block `scientist_quick_merges`): say its verdict and key numbers as a ROUGH reference only (the scientist said those merges "could be not robust or rigorous enough"), never as the answer key.
 
 - **Approval is the scientist's call.** A `warn` is theirs to accept. A `fail` for `edge_step_implausible`,
   `no_edge` or `post_edge_not_at_1` is never offered for approval: offer reject or `needs_changes`. When
