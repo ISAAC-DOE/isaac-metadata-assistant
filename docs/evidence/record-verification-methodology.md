@@ -105,7 +105,7 @@ validator's message, because a jsonschema message embeds the offending value —
 recorded at `apps/api/isaac_api/db_recon.py:1349`.
 
 **Measured scope note:** the vendored v1.05 schema declares exactly **one** format, `date-time`, at six
-sites. The checker covers the complete declared set. A guard test fails if a future schema revision
+sites (seven since the 2026-11-16 re-vendoring, `DEC-95`, which added `system.session.started_utc`). The checker covers the complete declared set. A guard test fails if a future schema revision
 declares a format the shadow does not implement, so the coverage claim cannot go stale silently.
 
 ## 5. Terminal-outcome accounting

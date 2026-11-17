@@ -368,7 +368,7 @@ The orchestrator was Opus 5.5, under the `DEC-17` disclosed fallback.
 
 | ID | Decision | Status | Source | Reasoning and boundary |
 |---|---|---|---|---|
-| **DEC-76** | **The local skill exports to the schema the official ISAAC portal enforces**, pinned at upstream commit `a1cb1c8`. ISAAC's own deterministic validators run against that pinned schema, alongside the portal's validator run offline. The vendored v1.05 schema (July) stays the website's authority, unchanged. | DECIDED 2026-10-28 | orchestrator, under the owner's goal: export only after ISAAC and offline-portal validation | The vendored schema *forbids* `attribution.produced_by`; the portal *requires* it (`PRODUCED_BY_MISSING`). No record could pass both, so the goal was unsatisfiable as written. The truth plane is not edited. Every report names which schema each verdict used. Refreshing the vendored schema remains **Krish's decision**. |
+| **DEC-76** | **The local skill exports to the schema the official ISAAC portal enforces**, pinned at upstream commit `a1cb1c8`. ISAAC's own deterministic validators run against that pinned schema, alongside the portal's validator run offline. ~~The vendored v1.05 schema (July) stays the website's authority, unchanged.~~ **SUPERSEDED 2026-11-16 by `DEC-95` — struck, not deleted:** the vendored schema is now the portal's pinned `a1cb1c8` document, and it remains the website's authority. | DECIDED 2026-10-28 | orchestrator, under the owner's goal: export only after ISAAC and offline-portal validation | The vendored schema *forbids* `attribution.produced_by`; the portal *requires* it (`PRODUCED_BY_MISSING`). No record could pass both, so the goal was unsatisfiable as written. The truth plane is not edited. Every report names which schema each verdict used. Refreshing the vendored schema remains **Krish's decision** (taken 2026-11-16: `DEC-95`). |
 | **DEC-77** | **One ISAAC record per sample + technique + condition group, inside one experiment per beamtime folder.** Repeats, extra scans and repeated runs at the same conditions merge into that one record. It is not one record per file, and not one record per experiment. | DECIDED 2026-10-28 | owner and domain owner; the upstream record contract ("one result, one record") | The portal rejects a whole-experiment record (`DUPLICATE_DESCRIPTOR_NAME`). Groups are *proposed* by code and *confirmed* by a scientist. An unknown or differing condition splits a group and is never merged silently. |
 | **DEC-78** | **A record's spectrum is a processed product**: calibration, deglitch, merge, normalize, quality checks. It follows the versioned protocol `isaac.xas.v0` (`docs/xas-processing-protocol-v0.md`), whose status is `draft_unreviewed` until a beamline scientist approves it. | DECIDED 2026-10-28 | domain owner (Angel) | Glitches are flagged, never dropped by default. Every parameter is logged. Processed values are gated on a scientist's approval. Oscar's protocol supersedes `isaac.xas.v0` when it arrives. |
 | **DEC-79** | **The scientists' own processed outputs are preferred** (Athena `.prj`, XDI exports) where they exist. ISAAC's protocol is also run and compared against them. | DECIDED 2026-10-28 | owner | A disagreement is a review item, never an override. |
@@ -427,8 +427,33 @@ as well. The boot refuses the variable beside `ISAAC_BASE_PATH`.
 controls; regrouping from the browser (the screen names `isaac bundle group --regroup`); human
 browser and assistive-technology QA.
 
+### DEC-95
+*(2026-11-16; project owner Krish approved re-vendoring the official schema to the portal's pinned commit)*
+
+**Decided; independently reviewed (PR #323).** `schema/isaac_record_v1.json` is re-vendored verbatim
+from upstream `ISAAC-DOE/isaac-ai-ready-record` at `a1cb1c861f3e6eb506da33f27196b43312f240f6`
+(`a1cb1c8`), the commit the local import's offline portal check pins
+(`local_import/portal.PINNED_COMMIT`). This **supersedes `DEC-76`'s schema clause** ("The vendored
+v1.05 schema (July) stays the website's authority, unchanged"): the vendored schema stays the
+website's authority, and it is now the same document the skill and the portal validate against.
+
+- `isaac_record_version` is still 1.05. The new document is a strict superset of the July one: no
+  path removed; `attribution.produced_by`, `context.temperature_basis`, `context.modulation`,
+  `system.session` and others added; `temperature_K` may be null only with basis `not_reported`;
+  `cell_type` gains `not_reported`; `system.technique` 37 → 45 values. Every record valid before
+  stays valid; the skill's self-test records, invalid under July, are now valid.
+- The upstream examples are re-vendored at the same commit (10 → 14). Provenance and the
+  byte-identity check are in `schema/PROVENANCE.md`.
+- §13 truth-path changes the new fields required: `transform` merges the attribution block instead
+  of replacing it and writes `temperature_K: null` only for an answered `not_reported` basis; the
+  draft validator refuses `produced_by` inside the attribution block; the audit counts
+  `produced_by` (and the two new list fields) and skips nulls. Exports change only for drafts
+  carrying the new fields.
+- **Not changed:** the hosted website serves the July schema until it is redeployed from this
+  release. No UI captures the new fields.
+
 ### What `DEC-76`…`DEC-84` do NOT change
-- **The website's truth plane.** `schema/` and the `src/isaac_records` validators and export are unedited. The only change in `src/isaac_records/cli.py` is the additive `import` / `bundle` dispatch.
+- **The website's truth plane.** `schema/` and the `src/isaac_records` validators and export are unedited. *(True for `DEC-76`…`DEC-84`; `DEC-95` later re-vendored `schema/` and edited the truth plane, disclosed there.)* The only change in `src/isaac_records/cli.py` is the additive `import` / `bundle` dispatch.
 - **One hosted read changes, and it is a bug fix.** When an archive has acquisition files with the
   same name but different bytes in different folders, `historical_import.read_archive_at` now pairs
   each unit with its own file by position. Before, both units took the second file's path and

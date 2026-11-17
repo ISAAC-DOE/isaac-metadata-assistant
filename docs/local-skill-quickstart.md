@@ -94,8 +94,9 @@ rules before using real data (`docs/local-first-data-flows.md`). The skill asks 
 - **Spot checks are not verification.** Claude's independent reading covers a sample of key facts;
   the summary says how many.
 - **Names are not verified.** Decisions are recorded as `local_unverified`.
-- **One schema.** Records are checked against the schema the portal uses, and the ISAAC website
-  validates against the same document (the same upstream commit). It can say "temperature not
+- **One schema.** Records are checked against the schema the portal uses, and from this release on
+  the ISAAC website validates against the same document (the same upstream commit). A hosted
+  website still serves its older schema until it is redeployed with this release. It can say "temperature not
   reported" and who produced the data. An unknown temperature does not stop a record from being
   exported, and no temperature is guessed.
 - **Readers.** Built in: Beamline 15 SPEC scans and macros, SSRL EXAFS Data Collector text scans,
