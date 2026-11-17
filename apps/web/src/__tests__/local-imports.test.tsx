@@ -22,7 +22,9 @@ import {
   type LocalQuestion,
   currentAnswerText,
   countsText,
+  questionCardId,
 } from '../lib/localImports';
+import { cardTitle } from '../lib/plainQuestions';
 
 /**
  * Local Imports — the local-only questions screen and progress overview. SYNTHETIC
@@ -409,7 +411,7 @@ describe('the questions screen', () => {
   it('shows the fields a scientist needs, with every suggestion marked not confirmed', async () => {
     stubQuestions();
     renderAt(ROUTES.localImportBundle('synthetic-beamtime'));
-    const card = (await screen.findByRole('heading', { name: envQ.text })).closest('li') as HTMLElement;
+    const card = (await screen.findByRole('heading', { name: cardTitle(envQ) })).closest('li') as HTMLElement;
     const c = within(card);
     // beamline, beamtime and folder are said ONCE, in the bundle header, not on every card
     expect(screen.getByText(/^SYN_2099_beamtime · beamline SYN-1 \(candidate_extracted\) · /)).toBeInTheDocument();
@@ -460,7 +462,7 @@ describe('the questions screen', () => {
     });
     stubQuestions({}, [infoQ]);
     renderAt(ROUTES.localImportBundle('synthetic-beamtime'));
-    const card = (await screen.findByRole('heading', { name: infoQ.text })).closest('li') as HTMLElement;
+    const card = (await screen.findByRole('heading', { name: cardTitle(infoQ) })).closest('li') as HTMLElement;
     const c = within(card);
     expect(c.getByTestId('li-informational')).toHaveTextContent(COPY.informational);
     expect(c.queryByRole('button', { name: COPY.answer })).toBeNull();
@@ -478,15 +480,15 @@ describe('the questions screen', () => {
     expect((screen.getByLabelText('Element') as HTMLInputElement).value).toBe('Zz');
     expect((screen.getByLabelText('Edge') as HTMLSelectElement).value).toBe('K');
     // no counter position is pre-checked: which positions are counters is the scientist's answer
-    expect(screen.getByRole('checkbox', { name: 'Position 2' })).not.toBeChecked();
-    expect(screen.getByRole('checkbox', { name: 'Position 3' })).not.toBeChecked();
-    expect(screen.getByRole('button', { name: 'None of these is a counter' })).toBeInTheDocument();
+    expect(screen.getByRole('checkbox', { name: 'The second number' })).not.toBeChecked();
+    expect(screen.getByRole('checkbox', { name: 'The third number' })).not.toBeChecked();
+    expect(screen.getByRole('button', { name: COPY.counterNone })).toBeInTheDocument();
   });
 
   it('needs a name before it sends anything: the name field is focused and the error said again on every try', async () => {
     const calls = stubQuestions();
     renderAt(ROUTES.localImportBundle('synthetic-beamtime'));
-    const card = (await screen.findByRole('heading', { name: envQ.text })).closest('li') as HTMLElement;
+    const card = (await screen.findByRole('heading', { name: cardTitle(envQ) })).closest('li') as HTMLElement;
     const accept = within(card).getByRole('button', { name: `${COPY.acceptSuggestion}: ex_situ` });
     fireEvent.click(accept);
     const nameField = screen.getByLabelText(COPY.yourName);
@@ -507,7 +509,7 @@ describe('the questions screen', () => {
   it('after the name error, "Back to the question" returns to the control that was used, and stays once the name is typed', async () => {
     stubQuestions();
     renderAt(ROUTES.localImportBundle('synthetic-beamtime'));
-    const card = (await screen.findByRole('heading', { name: envQ.text })).closest('li') as HTMLElement;
+    const card = (await screen.findByRole('heading', { name: cardTitle(envQ) })).closest('li') as HTMLElement;
     const accept = within(card).getByRole('button', { name: `${COPY.acceptSuggestion}: ex_situ` });
     accept.focus();
     fireEvent.click(accept);
@@ -523,7 +525,7 @@ describe('the questions screen', () => {
   it('where the clicked button took no focus (Safari, Firefox on macOS), "Back to the question" returns to that question\'s own heading', async () => {
     stubQuestions();
     renderAt(ROUTES.localImportBundle('synthetic-beamtime'));
-    const heading = await screen.findByRole('heading', { name: envQ.text });
+    const heading = await screen.findByRole('heading', { name: cardTitle(envQ) });
     const card = heading.closest('li') as HTMLElement;
     // the click does not focus the button: the active element is <body>
     (document.activeElement as HTMLElement | null)?.blur();
@@ -536,7 +538,7 @@ describe('the questions screen', () => {
   it('"Back to the question" is dropped once the filters change', async () => {
     stubQuestions();
     renderAt(ROUTES.localImportBundle('synthetic-beamtime'));
-    const card = (await screen.findByRole('heading', { name: envQ.text })).closest('li') as HTMLElement;
+    const card = (await screen.findByRole('heading', { name: cardTitle(envQ) })).closest('li') as HTMLElement;
     const accept = within(card).getByRole('button', { name: `${COPY.acceptSuggestion}: ex_situ` });
     accept.focus();
     fireEvent.click(accept);
@@ -602,12 +604,12 @@ describe('the questions screen', () => {
       [`GET ${QPATH}?offset=2`]: () => ({ body: page(2, [], 2) }),
     });
     renderAt(ROUTES.localImportBundle('synthetic-beamtime'));
-    await screen.findByRole('heading', { name: envQ.text });
+    await screen.findByRole('heading', { name: cardTitle(envQ) });
     firstPage = false;
     fireEvent.click(screen.getByRole('button', { name: 'Next questions' }));
     // the empty page is replaced by the last real one; "Questions 3–2 of 2." is never left on screen
     await waitFor(() => expect(calls.filter((k) => k.startsWith(`GET ${QPATH}`)).length).toBe(3));
-    expect(await screen.findByRole('heading', { name: envQ.text })).toBeInTheDocument();
+    expect(await screen.findByRole('heading', { name: cardTitle(envQ) })).toBeInTheDocument();
     expect(screen.queryByText(/Questions 3–2 of 2/)).toBeNull();
   });
 
@@ -615,7 +617,7 @@ describe('the questions screen', () => {
     const calls = stubQuestions({}, [envQ]);
     renderAt(ROUTES.localImportBundle('synthetic-beamtime'));
     fireEvent.change(await screen.findByLabelText(COPY.yourName), { target: { value: 'Synthetic Scientist' } });
-    const card = screen.getByRole('heading', { name: envQ.text }).closest('li') as HTMLElement;
+    const card = screen.getByRole('heading', { name: cardTitle(envQ) }).closest('li') as HTMLElement;
     expect(within(card).getByRole('radio', { name: `${COPY.sameForAll} (5)` })).not.toBeChecked();
     expect(within(card).getByRole('radio', { name: COPY.thisGroupOnly })).not.toBeChecked();
     expect(within(card).getByText(COPY.suggestionsDiffer)).toBeInTheDocument();
@@ -642,7 +644,7 @@ describe('the questions screen', () => {
     const row = within(table).getByText('SYN_run_B', { selector: '.li-run-names' }).closest('tr') as HTMLElement;
     expect(row).toHaveTextContent('SYNTHETIC in situ cell');
     expect(row).toHaveTextContent('SYN_run_B.dat @ header line 2');
-    fireEvent.click(within(row).getByRole('button', { name: 'Accept in_situ for Record group g2' }));
+    fireEvent.click(within(row).getByRole('button', { name: 'Accept in_situ for SYN_run_B' }));
     // nothing is written by the click: a dry run first, for that group alone
     const preview = await screen.findByRole('group', { name: /This will write one answer to each of these/ });
     expect(posts).toHaveLength(1);
@@ -695,17 +697,19 @@ describe('the questions screen', () => {
     }, [envQ]);
     renderAt(ROUTES.localImportBundle('synthetic-beamtime'));
     fireEvent.change(await screen.findByLabelText(COPY.yourName), { target: { value: 'Synthetic Scientist' } });
-    const card = screen.getByRole('heading', { name: envQ.text }).closest('li') as HTMLElement;
+    const card = screen.getByRole('heading', { name: cardTitle(envQ) }).closest('li') as HTMLElement;
     fireEvent.click(within(card).getByRole('radio', { name: `${COPY.sameForAll} (5)` }));
     fireEvent.change(within(card).getByLabelText('Your answer'), { target: { value: 'in_situ' } });
     fireEvent.click(within(card).getByRole('button', { name: COPY.answer }));
     const preview = await within(card).findByRole('group', { name: /This will write one answer to each of these/ });
     expect(within(preview).getByTestId('li-preview-differs')).toHaveTextContent('1 of these 2 groups’ files suggest ex_situ, not in_situ');
-    const flagged = within(preview).getByText(/Record group g1/).closest('li') as HTMLElement;
+    // each group is named by its first file, never by its id
+    expect(preview).not.toHaveTextContent('Record group');
+    const flagged = within(preview).getByText('SYN_run_A', { selector: 'li' });
     expect(flagged).toHaveTextContent(COPY.filesSuggestOtherwise);
     expect(flagged).toHaveTextContent('notes/SYN_log.txt @ line 4');
     expect(flagged).toHaveTextContent('Run SYN_run_A'); // the RUN whose own file differs is named
-    expect(within(preview).getByText(/Record group g2/).closest('li')).not.toHaveTextContent(COPY.filesSuggestOtherwise);
+    expect(within(preview).getByText('SYN_run_B', { selector: 'li' })).not.toHaveTextContent(COPY.filesSuggestOtherwise);
     expect(posts).toEqual([
       { decision: 'correct', by: 'Synthetic Scientist', expected_version: VERSION, value: 'in_situ', dry_run: true },
     ]);
@@ -738,7 +742,7 @@ describe('the questions screen', () => {
     }, [envQ]);
     renderAt(ROUTES.localImportBundle('synthetic-beamtime'));
     fireEvent.change(await screen.findByLabelText(COPY.yourName), { target: { value: 'Synthetic Scientist' } });
-    const card = screen.getByRole('heading', { name: envQ.text }).closest('li') as HTMLElement;
+    const card = screen.getByRole('heading', { name: cardTitle(envQ) }).closest('li') as HTMLElement;
     fireEvent.click(within(card).getByRole('radio', { name: COPY.thisGroupOnly }));
     fireEvent.change(within(card).getByRole('combobox', { name: 'Which group' }), { target: { value: 'group:g2' } });
     expect(within(card).getByTestId('li-selected-group')).toHaveTextContent('in_situ');
@@ -771,7 +775,7 @@ describe('the questions screen', () => {
     fireEvent.click(screen.getByRole('button', { name: COPY.answer }));
     await waitFor(() => expect(reads).toBe(2));
     // said on the card that was refused
-    const card = screen.getByRole('heading', { name: tempQ.text }).closest('li') as HTMLElement;
+    const card = screen.getByRole('heading', { name: cardTitle(tempQ) }).closest('li') as HTMLElement;
     expect(await within(card).findByRole('alert')).toHaveTextContent(COPY.staleWrite);
     expect(within(card).getByRole('alert')).not.toHaveTextContent(/command|another window/);
     // once the re-read has ARRIVED, the card was not unmounted by it: what was typed is still there
@@ -801,10 +805,12 @@ describe('the questions screen', () => {
     );
     const [table] = screen.getAllByRole('table');
     const heads = within(table).getAllByRole('rowheader').map((h) => h.textContent);
-    expect(heads).toEqual(['SYN_run_Bgroup g2', 'SYN_run_Cgroup g3', 'SYN_run_Agroup g1']);
+    // led by run names; the group's id is never shown, only kept as the row's tooltip
+    expect(heads).toEqual(['SYN_run_B', 'SYN_run_C', 'SYN_run_A']);
     const first = within(table).getAllByRole('rowheader')[0];
     expect(first.firstElementChild).toHaveClass('li-run-names');
-    expect(first.querySelector('.li-group-id')).toHaveTextContent('group g2');
+    expect(first.querySelector('.li-group-id')).toBeNull();
+    expect(first).toHaveAttribute('title', 'group g2');
     for (const b of within(table).getAllByRole('button')) expect(b).toHaveClass('li-accept');
     // the group with nothing suggested is behind a disclosure with its count
     const summary = screen.getByText(`${COPY.nothingSuggestedRows} (1)`);
@@ -880,7 +886,7 @@ describe('audit fixes', () => {
     renderAt(ROUTES.localImportBundle('synthetic-beamtime'));
     fireEvent.change(await screen.findByLabelText(COPY.yourName), { target: { value: name } });
   }
-  const cardOf = (q: LocalQuestion) => screen.getByRole('heading', { name: q.text }).closest('li') as HTMLElement;
+  const cardOf = (q: LocalQuestion) => screen.getByRole('heading', { name: cardTitle(q) }).closest('li') as HTMLElement;
   const withoutScope = (q: LocalQuestion, scope: string): LocalQuestion => ({
     ...q,
     per_scope_targets: Object.fromEntries(Object.entries(q.per_scope_targets).filter(([k]) => k !== scope)),
@@ -998,7 +1004,7 @@ describe('audit fixes', () => {
     }, [q]);
     await open();
     const row = screen.getByText('SYN_run_F1, SYN_run_F2', { selector: '.li-run-names' }).closest('tr') as HTMLElement;
-    fireEvent.click(within(row).getByRole('button', { name: 'Accept ex_situ for Record group g6' }));
+    fireEvent.click(within(row).getByRole('button', { name: 'Accept ex_situ for SYN_run_F1' }));
     const preview = await screen.findByRole('group', { name: /This will write one answer to each of these/ });
     expect(posts).toEqual([expect.objectContaining({ only: 'group:g6', dry_run: true })]);
     const runs = within(preview).getByTestId('li-preview-runs');
@@ -1084,9 +1090,9 @@ describe('audit fixes', () => {
     await waitFor(() => expect(reads).toBe(2));
     await waitFor(() => expect(screen.getByTestId('li-announcement')).toHaveTextContent(COPY.refreshed));
     expect(screen.getByTestId('li-announcement')).toHaveTextContent(COPY.goneElsewhere);
-    expect(screen.queryByRole('heading', { name: tempQ.text })).toBeNull();
+    expect(screen.queryByRole('heading', { name: cardTitle(tempQ) })).toBeNull();
     // focus moves to the next open question, not the page heading
-    await waitFor(() => expect(screen.getByRole('heading', { name: absorberQ.text })).toHaveFocus());
+    await waitFor(() => expect(screen.getByRole('heading', { name: cardTitle(absorberQ) })).toHaveFocus());
   });
 
   it('F6: two failed re-reads in a row each say so — "Reading the questions again…" never sticks', async () => {
@@ -1133,7 +1139,7 @@ describe('audit fixes', () => {
       },
     }, [envQ]);
     await open();
-    const accept = screen.getByRole('button', { name: 'Accept in_situ for Record group g2' });
+    const accept = screen.getByRole('button', { name: 'Accept in_situ for SYN_run_B' });
     accept.focus();
     fireEvent.click(accept);
     const preview = await screen.findByRole('group', { name: /This will write one answer to each of these/ });
@@ -1188,8 +1194,9 @@ describe('audit fixes', () => {
     expect(page).not.toMatch(/answer slot|exposure\(s\)|blind cross-check|Blocking is judged against|result of record|\btargets\b/);
     expect(page).not.toMatch(/Nearest record|Fewest answers to one record/);
     const card = cardOf(counterQ);
-    expect(card).toHaveTextContent('That step is done in the command line');
-    const command = within(card).getByLabelText('Command that proposes the groups again');
+    expect(card).toHaveTextContent(COPY.counterAfter);
+    expect(card).not.toHaveTextContent('set_not_counter_positions');
+    const command = within(card).getByLabelText('Command that groups the files again');
     expect(command).toHaveTextContent('isaac bundle group "<folder of bundles>/synthetic-beamtime" --regroup');
     fireEvent.click(within(card).getByRole('button', { name: /Copy command/ }));
     await waitFor(() => expect(writeText).toHaveBeenCalledWith('isaac bundle group "<folder of bundles>/synthetic-beamtime" --regroup'));
@@ -1223,6 +1230,7 @@ describe('review round 2: the minimum’s unasked fields and the counts the spli
             ...progressBody.progress,
             questions: { total: 8, blocking: 1, conflicts_affecting_a_record: 0, optional: 4, conflicts_without_a_record_field: 2, outside_live_groups: 1 },
             minimum_for_one_group: minimum,
+            group_names: { g2: 'SYN_run_B' },
           },
         },
       },
@@ -1230,7 +1238,7 @@ describe('review round 2: the minimum’s unasked fields and the counts the spli
     renderAt(ROUTES.localImports);
     expect(await screen.findByTestId('li-not-counted')).toHaveTextContent(notCounted);
     expect(
-      screen.getByText(/group g2 needs 2 required fields no question asks yet: sample form, environment; plus: confirm the group\./),
+      screen.getByText(/Closest to done: SYN_run_B\. 2 required fields no question asks yet: sample form, environment\. Also needed: confirm the group\./),
     ).toBeInTheDocument();
   });
 
@@ -1239,11 +1247,11 @@ describe('review round 2: the minimum’s unasked fields and the counts the spli
     const body = questionsBody([envQ]);
     stubFetchRoutes({
       'GET /api/local-bundles': { body: listBody },
-      [`GET ${QPATH}`]: { body: { ...body, counts: { ...body.counts, conflicts_without_a_record_field: 2, outside_live_groups: 1 }, minimum_for_one_group: minimum } },
+      [`GET ${QPATH}`]: { body: { ...body, counts: { ...body.counts, conflicts_without_a_record_field: 2, outside_live_groups: 1 }, minimum_for_one_group: minimum, group_names: { g2: 'SYN_run_B' } } },
     });
     const view = renderAt(ROUTES.localImportBundle('synthetic-beamtime'));
     expect(await screen.findByTestId('li-not-counted')).toHaveTextContent(notCounted);
-    expect(screen.getByText(/needs 2 required fields no question asks yet: sample form, environment/)).toBeInTheDocument();
+    expect(screen.getByText(/Closest to done: SYN_run_B\. 2 required fields no question asks yet: sample form, environment/)).toBeInTheDocument();
     view.unmount();
     __resetLocalImportsAvailability();
     stubFetchRoutes({
@@ -1273,7 +1281,9 @@ describe('polish c7-w: the page says what the command line says', () => {
     return stubFetchRoutes({ 'GET /api/local-bundles': { body: listBody }, [`GET ${QPATH}`]: { body }, ...extra });
   }
   async function cardOf(q: LocalQuestion) {
-    return (await screen.findByRole('heading', { name: q.text })).closest('li') as HTMLElement;
+    // two cards may share a plain title (a beamtime question and one group's copy of it): found by the card's own id
+    await screen.findAllByRole('heading', { name: cardTitle(q) });
+    return document.getElementById(questionCardId(q.question_id)) as HTMLElement;
   }
 
   it('a deferred question says who deferred it and when, and Defer is given through the same answer path', async () => {
@@ -1288,11 +1298,13 @@ describe('polish c7-w: the page says what the command line says', () => {
     }, questionsBody([deferredQ]));
     renderAt(ROUTES.localImportBundle('synthetic-beamtime'));
     const card = await cardOf(tempQ);
-    expect(within(card).getByTestId('li-deferred')).toHaveTextContent('Deferred by Synthetic Scientist, 2099-01-02');
+    expect(within(card).getByTestId('li-deferred')).toHaveTextContent('Marked “I don’t know” by Synthetic Scientist, 2099-01-02. It stays open and still counts.');
     expect(within(card).getByText(COPY.deferredChip, { selector: '.li-chip' })).toBeInTheDocument();
     fireEvent.change(screen.getByLabelText(COPY.yourName), { target: { value: 'Synthetic Scientist' } });
     const defer = within(card).getByRole('button', { name: COPY.defer });
-    expect(defer).toHaveAccessibleDescription(COPY.deferHint);
+    // the explanation is said once for the page; each card's button points to it
+    expect(defer).toHaveAccessibleDescription(`“${COPY.defer}” means: ${COPY.deferHint}`);
+    expect(screen.getAllByTestId('li-decisions-hint')).toHaveLength(1);
     fireEvent.click(defer);
     await waitFor(() => expect(posts).toHaveLength(1));
     // one target: written at once, with the field, the name and the version, exactly as an answer is
@@ -1339,8 +1351,8 @@ describe('polish c7-w: the page says what the command line says', () => {
     renderAt(ROUTES.localImportBundle('synthetic-beamtime'));
     fireEvent.change(await screen.findByLabelText(COPY.yourName), { target: { value: 'Synthetic Scientist' } });
     const card = await cardOf(counterQ);
-    fireEvent.click(within(card).getByRole('checkbox', { name: 'Position 2' }));
-    fireEvent.click(within(card).getByRole('button', { name: 'The checked positions are run counters' }));
+    fireEvent.click(within(card).getByRole('checkbox', { name: 'The second number' }));
+    fireEvent.click(within(card).getByRole('button', { name: COPY.counterChecked }));
     const preview = await within(card).findByRole('group', { name: /This will write one answer to each of these/ });
     expect(within(preview).getByTestId('li-preview-would-say')).toHaveTextContent('Would record: SERVER-SAID positions 2 are counters.');
     expect(within(preview).getByTestId('li-preview-regroup')).toHaveTextContent('would join 2 of the current groups into 1');
@@ -1363,14 +1375,14 @@ describe('polish c7-w: the page says what the command line says', () => {
       warnings: ['SERVER-SAID: the file names state a temperature the record will not carry.'],
       processing_qc: 'its processing QC verdict is fail (SERVER-SAID reason)',
     };
-    stubWith({}, { ...questionsBody([envQ, tempQ]), minimum_for_one_group: minimum });
+    stubWith({}, { ...questionsBody([envQ, tempQ]), minimum_for_one_group: minimum, group_names: { g1: 'SYN_run_A' } });
     renderAt(ROUTES.localImportBundle('synthetic-beamtime'));
     const nearest = await screen.findByTestId('li-nearest');
-    expect(within(nearest).getByText(/group g1 needs 2 blocking answer\(s\) \(1 deferred\), plus: confirm the group\./)).toBeInTheDocument();
+    expect(within(nearest).getByText(/Closest to done: SYN_run_A\. 2 answers left \(1 marked “I don’t know”\)\. Also needed: confirm the group\./)).toBeInTheDocument();
     const listed = within(nearest).getByTestId('li-nearest-questions');
-    const link = within(listed).getByRole('link', { name: 'environment' });
+    const link = within(listed).getByRole('link', { name: 'measurement environment' });
     expect(link).toHaveAttribute('href', `#li-q-${envQ.question_id}`);
-    expect(link.closest('li')).toHaveTextContent('for group g1 (deferred)');
+    expect(link.closest('li')).toHaveTextContent('for SYN_run_A (not known yet)');
     // a question on another page is named, never linked to nothing
     expect(within(listed).queryByRole('link', { name: 'sample form' })).toBeNull();
     expect(within(listed).getByText(/sample form/).closest('li')).toHaveTextContent(COPY.notOnThisPage);
@@ -1378,7 +1390,7 @@ describe('polish c7-w: the page says what the command line says', () => {
     expect(within(nearest).getByText(/Processing QC: its processing QC verdict is fail/)).toBeInTheDocument();
     expect(within(nearest).getByText(/measurement\.series/)).toBeInTheDocument();
     fireEvent.click(link);
-    await waitFor(() => expect(screen.getByRole('heading', { name: envQ.text })).toHaveFocus());
+    await waitFor(() => expect(screen.getByRole('heading', { name: cardTitle(envQ) })).toHaveFocus());
   });
 
   it('a covered question links the beamtime question it names, in that question’s words', async () => {
@@ -1395,7 +1407,8 @@ describe('polish c7-w: the page says what the command line says', () => {
     stubWith({}, questionsBody([envQ, coveredQ]));
     renderAt(ROUTES.localImportBundle('synthetic-beamtime'));
     const card = await cardOf(coveredQ);
-    const link = within(card).getByRole('link', { name: `“${envQ.text}”` });
+    // the beamtime question is named as its own card names it (on this page: its plain title)
+    const link = within(card).getByRole('link', { name: `“${cardTitle(envQ)}”` });
     expect(link).toHaveAttribute('href', `#li-q-${envQ.question_id}`);
     expect(link.closest('.li-why')).toHaveTextContent('Not blocking: answer the experiment-wide question');
     expect(link.closest('.li-why')).toHaveTextContent('SERVER-SAID rest.');
@@ -1417,7 +1430,7 @@ describe('polish c7-w: the page says what the command line says', () => {
       },
     });
     renderAt(ROUTES.localImports);
-    expect(await screen.findByText('10 (1 blocking export, 2 conflicts affecting a record, 3 optional)')).toBeInTheDocument();
+    expect(await screen.findByText('10. 1 answer blocks a record. 2 disagreements change a record. 3 are optional.')).toBeInTheDocument();
     expect(screen.getByTestId('li-not-counted')).toHaveTextContent(`4 ${COPY.informationalCount}`);
     expect(screen.getByTestId('li-not-counted')).toHaveTextContent(`Of the open questions, 1 ${COPY.deferredCount}.`);
     expect(screen.getByTestId('li-held')).toHaveTextContent(held);
@@ -1493,13 +1506,13 @@ describe('polish c8-web: an answered question can be seen and changed, as `decid
   }
   async function answeredCard(q: LocalQuestion) {
     const list = await screen.findByRole('list', { name: COPY.answeredTitle });
-    return (await within(list).findByRole('heading', { name: q.text })).closest('li') as HTMLElement;
+    return (await within(list).findByRole('heading', { name: cardTitle(q) })).closest('li') as HTMLElement;
   }
 
   it('answered questions are read only when asked for, each with its current answers in plain words', async () => {
     const calls = stubWith({ [AQPATH]: { body: answeredBody([answeredEnv, answeredAbs]) } });
     renderAt(ROUTES.localImportBundle('synthetic-beamtime'));
-    await screen.findByRole('heading', { name: tempQ.text });
+    await screen.findByRole('heading', { name: cardTitle(tempQ) });
     // reading them records exposures, so nothing is asked until the person opens the section
     expect(calls.some((c) => c.startsWith(AQPATH))).toBe(false);
     await openAnswered();
@@ -1616,14 +1629,14 @@ describe('polish c8-web: an answered question can be seen and changed, as `decid
     await openAnswered();
     const card = await answeredCard(answeredAbs);
     fireEvent.click(within(card).getByRole('button', { name: COPY.changeAnswer }));
-    expect(within(card).getByRole('radio', { name: /Same for all groups/ })).toBeChecked();
+    expect(within(card).getByRole('radio', { name: new RegExp(COPY.sameForAll) })).toBeChecked();
     fireEvent.change(within(card).getByLabelText('Element'), { target: { value: 'Ww' } });
     fireEvent.change(within(card).getByLabelText('Edge'), { target: { value: 'K' } });
     fireEvent.click(within(card).getByRole('button', { name: COPY.answer }));
     const preview = await within(card).findByRole('group', { name: /This will write one answer to each of these/ });
-    expect(within(preview).getByTestId('li-preview-kept')).toHaveTextContent('Group g2 keeps Yy L3');
+    expect(within(preview).getByTestId('li-preview-kept')).toHaveTextContent('group g2 keeps Yy L3');
     fireEvent.click(within(preview).getByRole('button', { name: COPY.previewWrite }));
-    expect(await within(card).findByTestId('li-recorded-kept')).toHaveTextContent('Group g2 keeps Yy L3');
+    expect(await within(card).findByTestId('li-recorded-kept')).toHaveTextContent('group g2 keeps Yy L3');
     expect(within(card).getByText(/Answered: .*g2 keeps Yy L3/)).toBeInTheDocument();
   });
 
@@ -1730,9 +1743,9 @@ describe('skill rounds 5–7 on the page', () => {
     expect(card).not.toHaveTextContent('--only');
     // the per-group question is listed under it (once), and still answers on its own
     const nested = c.getByText(new RegExp(`^${COPY.startTimesEachGroup}`)).closest('details') as HTMLElement;
-    const inner = within(nested).getByRole('heading', { name: groupStartQ.text }).closest('li') as HTMLElement;
+    const inner = within(nested).getByRole('heading', { name: cardTitle(groupStartQ) }).closest('li') as HTMLElement;
     expect(within(inner).getByRole('button', { name: COPY.answer })).toBeInTheDocument();
-    expect(screen.getAllByRole('heading', { name: groupStartQ.text })).toHaveLength(1);
+    expect(screen.getAllByRole('heading', { name: cardTitle(groupStartQ) })).toHaveLength(1);
   });
 
   it('the start-time answer is previewed group by group, never said to have "no reading", and written on request', async () => {
@@ -1760,8 +1773,9 @@ describe('skill rounds 5–7 on the page', () => {
     const box = write.closest('.li-preview, [tabindex]') as HTMLElement;
     expect(posts[0]).toMatchObject({ decision: 'confirm', dry_run: true, expected_version: VERSION });
     expect(posts[0]).not.toHaveProperty('only');
-    expect(box).toHaveTextContent('Record group g1');
-    expect(box).toHaveTextContent('Record group g2');
+    expect(box).not.toHaveTextContent('Record group');
+    expect(box).toHaveTextContent('SYN_run_A');
+    expect(box).toHaveTextContent('SYN_run_B');
     expect(box).not.toHaveTextContent(COPY.previewNoReading);
     expect(box).not.toHaveTextContent('Value:');
     fireEvent.click(write);
@@ -1786,11 +1800,16 @@ describe('skill rounds 5–7 on the page', () => {
             { group_id: 'g2', verdict: 'incomplete', missing_required: ['sample.sample_form'], written_utc: '2099-01-01T00:00:00Z', older_than_bundle: false },
             { group_id: 'g3', verdict: 'exportable', missing_required: [], written_utc: '2099-01-01T00:00:00Z', older_than_bundle: false },
           ] },
+          group_names: { g1: 'SYN_run_A', g2: 'SYN_run_B', g3: 'SYN_run_C' },
         } },
       },
     });
     renderAt(ROUTES.localImports);
-    expect(await screen.findByTestId('li-cannot-export')).toHaveTextContent(/1 of the 2 live group\(s\) cannot become a record/);
+    // a plain sentence per reason first; the server's own sentence (with its reason code) is behind Details
+    const cannot = await screen.findByTestId('li-cannot-export');
+    expect(cannot).toHaveTextContent(/^1 group has no scans\./);
+    expect(within(cannot).getByText(COPY.details, { selector: 'summary' })).toBeInTheDocument();
+    expect(cannot).toHaveTextContent(/1 of the 2 live group\(s\) cannot become a record/);
     const merges = screen.getByTestId('li-athena-merges');
     expect(merges).toHaveTextContent(`${COPY.athenaMergesTitle} (3)`);
     expect(merges).toHaveTextContent('SYN merge 200mV');
@@ -1801,7 +1820,134 @@ describe('skill rounds 5–7 on the page', () => {
     const validation = screen.getByTestId('li-last-validation');
     expect(within(validation).getByText(`${COPY.lastValidation}: 2 incomplete, 1 exportable`)).toBeInTheDocument();
     expect(within(validation).getAllByRole('listitem')).toHaveLength(2);
-    expect(validation).toHaveTextContent('2 groups: g1, g2');
+    expect(validation).toHaveTextContent('2 groups: SYN_run_A, SYN_run_B');
     expect(validation).toHaveTextContent('1 of 3 reports are older than the bundle');
+  });
+});
+
+describe('plain words on the questions page (2026-11-17, owner: “reads like an engineer wrote it”)', () => {
+  const sampleQ = (id: string, partition: string, said: string) =>
+    question({
+      question_id: id,
+      target_field_path: 'sample.sample_form',
+      partition,
+      text: `What is the sample form (sample.sample_form)? No source in this import states it. Applies to 3 group(s) with the same sample reading (${said}, as the files write it) — answer once, or per group.`,
+      applies_to: { groups: 3, runs: 3, targets: 3 },
+    });
+  const jk1 = sampleQ('Q-sample0001', 'sample={"sample_name": "jk1", "sample_or_electrode_number": "06"}', "sample name 'JK1', sample or electrode number '06'");
+  const jk2 = sampleQ('Q-sample0002', 'sample={"sample_name": "jk2"}', "sample name 'JK2'");
+
+  function stubPage(qs: LocalQuestion[], over: Partial<ApiLocalQuestions> = {}) {
+    vi.stubEnv('VITE_ISAAC_LOCAL_IMPORTS', '1');
+    stubFetchRoutes({
+      'GET /api/local-bundles': { body: listBody },
+      [`GET ${QPATH}`]: { body: { ...questionsBody(qs), ...over } },
+    });
+  }
+
+  it('leads with one plain count line and a plain check line; the tier-3 counts and the rules id are behind Details', async () => {
+    const body = questionsBody([envQ]);
+    stubPage([envQ], {
+      counts: { ...body.counts, blocking: 110, optional: 485, informational: 361, conflicts_without_a_record_field: 189 },
+      blocking_basis: { schema: 'local_export_target', source: 'SERVER-SAID source', commit: null },
+    });
+    renderAt(ROUTES.localImportBundle('synthetic-beamtime'));
+    expect(await screen.findByTestId('li-count-line')).toHaveTextContent('110 answers block a record. 485 are optional.');
+    const more = screen.getByTestId('li-not-counted');
+    expect(more.tagName).toBe('DETAILS');
+    expect(more).not.toHaveAttribute('open');
+    expect(more).toHaveTextContent(`189 ${COPY.conflictsWithoutField}`);
+    expect(more).toHaveTextContent(`361 ${COPY.informationalCount}`);
+    expect(screen.getByText(new RegExp(COPY.checkedAgainst.replace('.', '\\.')))).toBeInTheDocument();
+    // the rules' internal name is only inside the closed disclosure
+    const code = screen.getByText('local_export_target');
+    expect(code.closest('details')).not.toBeNull();
+    expect(code.closest('details')).not.toHaveAttribute('open');
+  });
+
+  it('a question is asked in plain words; its field path and the full server wording are behind Details', async () => {
+    stubPage([envQ]);
+    renderAt(ROUTES.localImportBundle('synthetic-beamtime'));
+    const heading = await screen.findByRole('heading', { name: 'Was this measured in situ, operando or ex situ? None of your files say.' });
+    const card = heading.closest('li') as HTMLElement;
+    const details = within(card).getByTestId('li-question-details');
+    expect(details.tagName).toBe('DETAILS');
+    expect(details).not.toHaveAttribute('open');
+    expect(details).toHaveTextContent('context.environment');
+    expect(details).toHaveTextContent(envQ.text);
+    expect(details).toHaveTextContent('WHY-SAID-BY-SERVER');
+    // nothing outside Details names the field path
+    const outside = Array.from(card.querySelectorAll('code')).filter((c) => !c.closest('details'));
+    expect(outside.map((c) => c.textContent)).not.toContain('context.environment');
+  });
+
+  it('defer and reject are explained once for the page, not on every card', async () => {
+    stubPage([envQ, tempQ]);
+    renderAt(ROUTES.localImportBundle('synthetic-beamtime'));
+    const hint = await screen.findByTestId('li-decisions-hint');
+    expect(hint).toHaveTextContent('“I don’t know” means: I don’t know yet; it stays open.');
+    expect(hint).toHaveTextContent('“Reject” means: Nothing goes in this field.');
+    expect(screen.getAllByText(/it stays open\./)).toHaveLength(1);
+    for (const b of screen.getAllByRole('button', { name: COPY.defer })) expect(b).toHaveAttribute('aria-describedby', 'li-defer-hint');
+    for (const b of screen.getAllByRole('button', { name: COPY.reject })) expect(b).toHaveAttribute('aria-describedby', 'li-reject-hint');
+  });
+
+  it('the same question asked per sample is one card with a row per sample, each answered as its own question', async () => {
+    const posts: Record<string, unknown>[] = [];
+    vi.stubEnv('VITE_ISAAC_LOCAL_IMPORTS', '1');
+    stubFetchRoutes({
+      'GET /api/local-bundles': { body: listBody },
+      [`GET ${QPATH}`]: { body: questionsBody([jk1, jk2]) },
+      [APATH(jk2.question_id)]: (init) => {
+        posts.push(bodyOf(init));
+        return { body: recordedBody(jk2.question_id, ['miss-jk2']) };
+      },
+    });
+    renderAt(ROUTES.localImportBundle('synthetic-beamtime'));
+    const title = await screen.findByRole('heading', { level: 4, name: 'What form was the sample in? None of your files say.' });
+    const card = title.closest('li') as HTMLElement;
+    expect(card).toHaveAttribute('data-testid', 'li-repeated');
+    expect(card).toHaveTextContent('Asked once for each sample: 2 samples.');
+    expect(screen.getAllByTestId('li-repeated')).toHaveLength(1);
+    // each row is titled by its sample, in the files' own spelling
+    const row1 = within(card).getByRole('heading', { level: 5, name: 'Sample JK1, no. 06' }).closest('li') as HTMLElement;
+    const row2 = within(card).getByRole('heading', { level: 5, name: 'Sample JK2' }).closest('li') as HTMLElement;
+    expect(row1.id).toBe(questionCardId(jk1.question_id));
+    expect(row2.id).toBe(questionCardId(jk2.question_id));
+    // a row answers its own question, through the same path as any card
+    fireEvent.change(screen.getByLabelText(COPY.yourName), { target: { value: 'Synthetic Scientist' } });
+    fireEvent.change(within(row2).getByLabelText('Your answer'), { target: { value: 'SYN powder' } });
+    fireEvent.click(within(row2).getByRole('button', { name: COPY.answer }));
+    await waitFor(() => expect(posts).toHaveLength(1));
+    expect(posts[0]).toMatchObject({ decision: 'correct', value: 'SYN powder', by: 'Synthetic Scientist' });
+  });
+
+  it('the counter question asks about the number in plain words, with an example from the files', async () => {
+    const one = question({
+      ...counterQ,
+      positions: [1],
+      text: 'In this beamtime, is the 1st token of the file names a run counter? (e.g. the 1st token: [03]_01_SYN_acid_060mV (no two names here differ only there)). If none of the open positions is a counter, say so with set_not_counter_positions: grouping is unchanged.',
+    });
+    stubPage([one]);
+    renderAt(ROUTES.localImportBundle('synthetic-beamtime'));
+    const heading = await screen.findByRole('heading', { name: 'Is the first number in these file names a repeat counter?' });
+    const card = heading.closest('li') as HTMLElement;
+    expect(within(card).getByTestId('li-counter-example')).toHaveTextContent('For example: 03_01_SYN_acid_060mV (the number asked about is 03).');
+    expect(within(card).getByRole('button', { name: COPY.counterYes })).toBeInTheDocument();
+    expect(within(card).getByRole('button', { name: COPY.counterNo })).toBeInTheDocument();
+    // the decision's name is only in the full wording, behind Details
+    for (const el of within(card).getAllByText(/set_not_counter_positions/)) expect(el.closest('details')).not.toBeNull();
+  });
+
+  it('names groups by the name the server sends, never by their id', async () => {
+    stubPage([envQ], { group_names: { g1: 'SYN_sample_A_1p2V', g2: 'SYN_sample_B_1p2V' } });
+    renderAt(ROUTES.localImportBundle('synthetic-beamtime'));
+    await screen.findByLabelText(COPY.yourName);
+    const card = (await screen.findByRole('heading', { name: cardTitle(envQ) })).closest('li') as HTMLElement;
+    fireEvent.click(within(card).getByRole('radio', { name: COPY.thisGroupOnly }));
+    const options = within(within(card).getByRole('combobox', { name: 'Which group' })).getAllByRole('option').map((o) => o.textContent);
+    expect(options).toContain('SYN_sample_A_1p2V');
+    expect(options).toContain('SYN_sample_B_1p2V');
+    expect(options.join(' ')).not.toMatch(/Record group|\bg1\b/);
   });
 });

@@ -155,6 +155,9 @@ export interface LocalProgress {
   /** The scientist's own Athena merges that match no record group (`bundle list <dir> athena-merges`), read-only. */
   athena_merges?: LocalAthenaMerges | null;
   last_validation: { reports: LocalValidationReport[]; statement: string };
+  /** `{group_id: name}` for the groups this reply mentions: each group's first member file. Absent from an older
+   *  server, where a group is named by its first run instead. */
+  group_names?: Record<string, string>;
 }
 
 /** One of the scientist's Athena merges that matches no record group: a near group is a hint, never a match. */
@@ -395,6 +398,8 @@ export interface ApiLocalQuestions {
   omitted_after: number;
   minimum_for_one_group: LocalProgress['minimum_for_one_group'];
   questions: LocalQuestion[];
+  /** `{group_id: name}` for the groups this page mentions (see `LocalProgress.group_names`). */
+  group_names?: Record<string, string>;
   capture: { merge_candidates: LocalMergeCandidate[]; athena_selections: LocalAthenaSelection[] };
   exposures_recorded: number;
   identity: 'local_unverified';
@@ -726,7 +731,7 @@ export const LOCAL_IMPORTS_COPY = {
   otherReadings: 'Other readings and hints',
   allowedAnswers: 'Allowed answers',
   acceptSuggestion: 'Accept suggestion',
-  sameForAll: 'Same for all groups in this beamtime',
+  sameForAll: 'Same for all of these groups',
   thisGroupOnly: 'This group only',
   previewTitle: 'This will write one answer to each of these',
   noReadingChip: 'No Reading',
@@ -770,14 +775,19 @@ export const LOCAL_IMPORTS_COPY = {
   mergeThem: 'Merge these groups',
   mergeAfter:
     'A merge takes effect only once the groups are proposed again. That step is done in the command line, not on this page: run this command, then reload this page.',
-  counterAfter:
-    'The runs are regrouped by these positions only once the groups are proposed again. That step is done in the command line, not on this page: run this command, then reload this page.',
+  counterAfter: 'After you answer, group the files again on the command line, then reload this page:',
+  counterMeans: 'If it is, files whose names differ only in that number are put in one group, as repeats.',
+  counterYes: 'Yes, it counts repeats',
+  counterNo: 'No, it doesn’t',
+  counterWhich: 'Which of these numbers count repeats?',
+  counterChecked: 'The checked numbers count repeats',
+  counterNone: 'None of them does',
   copyCommand: 'Copy command',
   copied: 'Copied.',
   copyRefused: 'Your browser did not allow copying. Select the command and copy it.',
   selectAthena: 'Use this version',
   athenaQuestion: 'Which Athena version is the final result for',
-  nearestRecord: 'Closest to a finished record',
+  nearestRecord: 'Closest to done',
   unaskedRequiredOne: 'required field no question asks yet',
   unaskedRequiredMany: 'required fields no question asks yet',
   conflictsWithoutField: 'disagreement(s) about something no record field holds (settling one changes no record)',
@@ -791,12 +801,11 @@ export const LOCAL_IMPORTS_COPY = {
   nearestWarnings: 'Warnings',
   nearestMissingNow: 'Missing from its record now',
   notOnThisPage: 'not on this page of questions',
-  deferredChip: 'Deferred',
-  defer: 'I don’t know (defer)',
-  deferHint:
-    'Defer records that you do not know: the question stays open, marked deferred, and still counts. Answer it whenever you know.',
+  deferredChip: 'Not Known Yet',
+  defer: 'I don’t know',
+  deferHint: 'I don’t know yet; it stays open.',
   reject: 'Reject',
-  rejectHint: 'Reject records that no value goes into the record for what is asked here (an extracted value is not used).',
+  rejectHint: 'Nothing goes in this field.',
   coveredBy: 'Filled for every record by',
   wouldSay: 'What the command line says this would record',
   regroupPreview: 'On the next regroup',
@@ -826,6 +835,11 @@ export const LOCAL_IMPORTS_COPY = {
   startTimesNotReached: 'Not covered here — answer these groups on their own',
   startTimesEachGroup: 'Answer group by group instead',
   questionDetails: 'Full wording',
+  details: 'Details',
+  recordField: 'Record field',
+  countsDetails: 'More about these counts',
+  checkedAgainst: 'Checked against the ISAAC record rules.',
+  mergeAsk: 'Should these groups be one record? Merge them, or keep them apart.',
   runsListed: 'Runs',
   optionalTitle: 'Optional and for information',
   optionalLead: 'None of these blocks export.',
@@ -1016,23 +1030,30 @@ export function ianaZones(): string[] {
   }
 }
 
-/** The one sentence the screen says about the nearest record group (`minimum_for_one_group`): a
- *  decision already made is not in `plus_decisions`, so none is named twice, and a null group says
- *  that nothing is left here. The answers already deferred ("I don't know") are said among them. */
-export function nearestRecordText(m: NonNullable<LocalProgress['minimum_for_one_group']>): string {
-  if (m.group_id === null) return m.statement ?? 'No record group has anything left to answer here.';
-  // the required fields no question asks are NAMED, never counted as answers to give
+/** The one sentence the screen says about the nearest record group (`minimum_for_one_group`), led by the group's
+ *  name: "Closest to done: <name>. 7 answers left." A decision already made is not in `plus_decisions`, so none is
+ *  named twice, and a null group says that nothing is left here. The answers marked "I don't know" are said among
+ *  them, and the required fields no question asks are NAMED, never counted as answers to give. */
+export function nearestRecordText(m: NonNullable<LocalProgress['minimum_for_one_group']>, name: string): string {
+  if (m.group_id === null) return m.statement ?? 'No group has anything left to answer here.';
   const unasked = m.unasked_required ?? [];
   const answers = m.questions ? m.questions.length : m.blocking_questions;
   const deferred = (m.questions ?? []).filter((q) => q.deferred).length;
-  const parts =
-    answers > 0 || unasked.length === 0 ? [`${answers} blocking answer(s)${deferred > 0 ? ` (${deferred} deferred)` : ''}`] : [];
+  const parts: string[] = [];
+  if (answers > 0 || unasked.length === 0) {
+    parts.push(
+      `${answers} ${answers === 1 ? 'answer' : 'answers'} left` +
+        (deferred > 0 ? ` (${deferred} marked “${LOCAL_IMPORTS_COPY.defer}”)` : '') +
+        '.',
+    );
+  }
   if (unasked.length > 0) {
     const words = unasked.length === 1 ? LOCAL_IMPORTS_COPY.unaskedRequiredOne : LOCAL_IMPORTS_COPY.unaskedRequiredMany;
-    parts.push(`${unasked.length} ${words}: ${unasked.map((u) => fieldWords(u.path)).join(', ')}`);
+    parts.push(`${unasked.length} ${words}: ${unasked.map((u) => fieldWords(u.path)).join(', ')}.`);
   }
-  const plus = m.plus_decisions.length > 0 ? `${unasked.length > 0 ? ';' : ','} plus: ${m.plus_decisions.join('; ')}` : '';
-  return `group ${m.group_id} needs ${parts.join(' and ')}${plus}.${m.blocked ? ` ${m.blocked}.` : ''}`;
+  if (m.plus_decisions.length > 0) parts.push(`Also needed: ${m.plus_decisions.join('; ')}.`);
+  if (m.blocked) parts.push(`${m.blocked}.`);
+  return `${LOCAL_IMPORTS_COPY.nearestRecord}: ${name}. ${parts.join(' ')}`;
 }
 
 /** Last path segments that say nothing alone ("group", "name"): their parent is named with them. */
@@ -1075,10 +1096,10 @@ export function countsText(c: Partial<LocalQuestionCounts>): string {
   return `${c.blocking ?? 0} blocking export, ${conflicts} ${conflicts === 1 ? 'conflict' : 'conflicts'} affecting a record, ${c.optional ?? 0} optional`;
 }
 
-/** "Deferred by {by}, {date}" for a deferred question (the date of the latest defer, as recorded in UTC). */
+/** "Marked “I don’t know” by {by}, {date}" for a deferred question (the date of the latest defer, as recorded in UTC). */
 export function deferredText(d: LocalDeferral): string {
   const date = d.decided_utc ? d.decided_utc.slice(0, 10) : 'date not recorded';
-  return `Deferred by ${d.by ?? 'a name not recorded'}, ${date}`;
+  return `Marked “${LOCAL_IMPORTS_COPY.defer}” by ${d.by ?? 'a name not recorded'}, ${date}`;
 }
 
 /** One current answer in plain words: what was answered, by whom, when, and for how many targets —

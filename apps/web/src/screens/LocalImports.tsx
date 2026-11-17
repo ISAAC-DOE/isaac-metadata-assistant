@@ -21,7 +21,6 @@ import {
   LOCAL_LIMITS,
   answerText,
   clampText,
-  countsText,
   currentAnswerText,
   deferredText,
   fieldWords,
@@ -32,7 +31,6 @@ import {
   localReasonOf,
   nearestRecordText,
   notCountedText,
-  onlyWords,
   perGroupScopes,
   questionCardId,
   regroupCommand,
@@ -60,6 +58,26 @@ import {
   type LocalValueRule,
   type QuestionSection,
 } from '../lib/localImports';
+import {
+  cannotExportLines,
+  clusterRepeats,
+  counterExample,
+  fieldNoun,
+  countLine,
+  groupName,
+  onlyName,
+  plainQuestion,
+  positionWords,
+  sampleLabel,
+  scopeName,
+  cardTitle,
+  type GroupNames,
+  type QuestionCluster,
+} from '../lib/plainQuestions';
+
+/** `{group_id: name}` for the groups the page mentions, so every group is named, never shown by its id. */
+const GroupNamesCtx = createContext<GroupNames>({});
+const useGroupNames = () => useContext(GroupNamesCtx);
 
 /**
  * LOCAL IMPORTS — the import progress of every bundle in the folder this server was started
@@ -273,18 +291,21 @@ function ProgressBlock({ name }: { name: string }) {
   const p = progress.data.progress;
   const notCounted = notCountedText(p.questions);
   const cannot = p.cannot_export;
+  const names = p.group_names ?? {};
   return (
+    <GroupNamesCtx.Provider value={names}>
     <div className="li-progress">
       <dl className="li-dl">
         <dt>Questions open</dt>
         <dd>
           {p.questions && typeof p.questions.total === 'number'
-            ? `${p.questions.total} (${countsText(p.questions)})`
+            ? `${p.questions.total.toLocaleString('en-US')}. ${countLine(p.questions)}`
             : 'Not available for this bundle'}
           {notCounted && (
-            <div className="li-meta" data-testid="li-not-counted">
-              {notCounted}
-            </div>
+            <details className="li-details" data-testid="li-not-counted">
+              <summary>{COPY.countsDetails}</summary>
+              <p className="li-meta">{notCounted}</p>
+            </details>
           )}
         </dd>
         <dt>Record groups</dt>
@@ -296,7 +317,13 @@ function ProgressBlock({ name }: { name: string }) {
             : 'None proposed yet'}
           {cannot && cannot.total > 0 && cannot.statement && (
             <div className="li-meta" data-testid="li-cannot-export">
-              {COPY.cannotExport}: <InlineCode text={cannot.statement} />
+              {cannotExportLines(cannot.by_reason).join(' ')}
+              <details className="li-details">
+                <summary>{COPY.details}</summary>
+                <p className="li-meta">
+                  <InlineCode text={cannot.statement} />
+                </p>
+              </details>
             </div>
           )}
         </dd>
@@ -313,7 +340,7 @@ function ProgressBlock({ name }: { name: string }) {
         // the questions page shows it in full; here it is one line, opened on request
         <details className="li-details" data-testid="li-nearest-folded">
           <summary>
-            {COPY.nearestRecord}: {p.minimum_for_one_group.group_id ?? 'none'}
+            {COPY.nearestRecord}: {p.minimum_for_one_group.group_id === null ? 'none' : groupName(p.minimum_for_one_group.group_id, names)}
           </summary>
           <NearestRecord m={p.minimum_for_one_group} />
         </details>
@@ -333,11 +360,13 @@ function ProgressBlock({ name }: { name: string }) {
       {p.athena_merges && p.athena_merges.total > 0 && <AthenaMerges merges={p.athena_merges} />}
       {p.last_validation.reports.length > 0 && <LastValidation reports={p.last_validation.reports} />}
     </div>
+    </GroupNamesCtx.Provider>
   );
 }
 
 /** The scientist's Athena merges that match no record group (`bundle list <dir> athena-merges`): read-only. */
 function AthenaMerges({ merges }: { merges: NonNullable<LocalProgress['athena_merges']> }) {
+  const names = useGroupNames();
   return (
     <details className="li-details" data-testid="li-athena-merges">
       <summary>
@@ -352,7 +381,7 @@ function AthenaMerges({ merges }: { merges: NonNullable<LocalProgress['athena_me
             {m.near_groups.length > 0 && (
               <span className="li-meta">
                 {' '}
-                · near: {m.near_groups.map((g) => g.group_name ?? g.group_id).join(', ')} (a hint, not a match)
+                · near: {m.near_groups.map((g) => g.group_name ?? groupName(g.group_id, names)).join(', ')} (a hint, not a match)
               </span>
             )}
           </li>
@@ -373,6 +402,7 @@ function AthenaMerges({ merges }: { merges: NonNullable<LocalProgress['athena_me
  * than the bundle.
  */
 function LastValidation({ reports }: { reports: LocalProgress['last_validation']['reports'] }) {
+  const names = useGroupNames();
   const rows = new Map<string, { verdict: string; missing: string[]; groups: string[] }>();
   for (const r of reports) {
     const verdict = r.verdict ?? 'no verdict';
@@ -403,7 +433,7 @@ function LastValidation({ reports }: { reports: LocalProgress['last_validation']
             {row.missing.length ? ` — missing: ${row.missing.map(fieldWords).join(', ')}` : ''}
             <span className="li-meta">
               {' '}
-              · {row.groups.length === 1 ? `group ${row.groups[0]}` : `${row.groups.length} groups: ${namesText(row.groups, undefined, 3)}`}
+              · {row.groups.length === 1 ? groupName(row.groups[0], names) : `${row.groups.length} groups: ${namesText(row.groups.map((g) => groupName(g, names)), undefined, 3)}`}
             </span>
           </li>
         ))}
@@ -760,27 +790,38 @@ function QuestionsBody({
         </Heading>
         {s.id === 'settles-many' && <p className="li-note">{COPY.settlesManyLead}</p>}
         <ol className="li-list">
-          {s.questions.map((q) => (
-            <QuestionCard key={q.question_id} q={q} handlers={handlers} nested={nested.get(q.question_id)} />
-          ))}
+          {clusterRepeats(s.questions).map((x) =>
+            'by' in x ? (
+              <RepeatedCard key={`repeated:${x.questions[0].question_id}`} cluster={x} handlers={handlers} />
+            ) : (
+              <QuestionCard key={x.question_id} q={x} handlers={handlers} nested={nested.get(x.question_id)} />
+            ),
+          )}
         </ol>
       </section>
     );
   };
   const pageQuestions = useMemo(() => new Map(data.questions.map((q) => [q.question_id, q])), [data.questions]);
   return (
+    <GroupNamesCtx.Provider value={data.group_names ?? {}}>
     <PageQuestions.Provider value={pageQuestions}>
       <h2 id="li-questions-title" className="li-h2" tabIndex={-1} ref={headingRef}>
-        {COPY.questionsTitle}{' '}
-        <span className="li-count">
-          ({countsText(data.counts)})
-        </span>
+        {COPY.questionsTitle}
       </h2>
+      <p className="li-note" data-testid="li-count-line">
+        {countLine(data.counts)}
+      </p>
       {notCountedText(data.counts) && (
-        <p className="li-meta" data-testid="li-not-counted">
-          {notCountedText(data.counts)}
-        </p>
+        <details className="li-details" data-testid="li-not-counted">
+          <summary>{COPY.countsDetails}</summary>
+          <p className="li-meta">{notCountedText(data.counts)}</p>
+        </details>
       )}
+      {/* said ONCE for the page; every card's two buttons point here (aria-describedby) */}
+      <p className="li-hint" data-testid="li-decisions-hint">
+        <span id="li-defer-hint">“{COPY.defer}” means: {COPY.deferHint}</span>{' '}
+        <span id="li-reject-hint">“{COPY.reject}” means: {COPY.rejectHint}</span>
+      </p>
       {sections.length + (optionalCount > 0 ? 1 : 0) > 1 && <SectionJumps sections={sections} optional={optionalCount} />}
       {data.minimum_for_one_group && <NearestRecord m={data.minimum_for_one_group} />}
       {data.total === 0 && <p className="li-note">No open questions match.</p>}
@@ -814,6 +855,7 @@ function QuestionsBody({
       <AnsweredSection kind={kind} writes={writes} handlers={handlers} />
       <CaptureSection data={data} handlers={handlers} />
     </PageQuestions.Provider>
+    </GroupNamesCtx.Provider>
   );
 }
 
@@ -823,13 +865,20 @@ function BundleHead({ data }: { data: ApiLocalQuestions }) {
   return (
     <div className="li-bundle-head">
       <h2 className="li-h2">{b.name}</h2>
-      <p className="li-meta" title={data.blocking_basis.source}>
-        {bundleFacts(b.source_label, b.beamline)} · checked against the ISAAC record schema ({data.blocking_basis.schema})
+      <p className="li-meta">
+        {bundleFacts(b.source_label, b.beamline)} · {COPY.checkedAgainst}
       </p>
+      <details className="li-details">
+        <summary>{COPY.details}</summary>
+        <p className="li-meta">
+          Record rules: <code>{data.blocking_basis.schema}</code>
+          {data.blocking_basis.source ? <> · {data.blocking_basis.source}</> : null}
+        </p>
+      </details>
       {data.exposures_recorded > 0 && (
         <p className="li-meta">
-          Noted in the bundle that {data.exposures_recorded} suggestion(s) were shown to you, so a later check knows you
-          saw them.
+          ISAAC noted in the bundle that you were shown {data.exposures_recorded}{' '}
+          {data.exposures_recorded === 1 ? 'suggestion' : 'suggestions'}.
         </p>
       )}
     </div>
@@ -1051,6 +1100,7 @@ function CardLink({ id, children }: { id: string; children: ReactNode }) {
  * verdict when it failed, and every field its record is missing now.
  */
 function NearestRecord({ m }: { m: NonNullable<LocalProgress['minimum_for_one_group']> }) {
+  const names = useGroupNames();
   const qs = m.questions ?? [];
   const recommended = m.recommended ?? [];
   // the warnings are the recommendations' own words; said alone only when no recommendation carries them
@@ -1059,7 +1109,7 @@ function NearestRecord({ m }: { m: NonNullable<LocalProgress['minimum_for_one_gr
   return (
     <div className="li-progress" data-testid="li-nearest">
       <p className="li-note">
-        {COPY.nearestRecord}: <InlineCode text={nearestRecordText(m)} />
+        <InlineCode text={nearestRecordText(m, m.group_id === null ? '' : groupName(m.group_id, names))} />
       </p>
       {m.processing_qc && <p className="li-warning">Processing QC: {m.processing_qc}.</p>}
       {qs.length > 0 && (
@@ -1068,8 +1118,8 @@ function NearestRecord({ m }: { m: NonNullable<LocalProgress['minimum_for_one_gr
           <ul className="li-bullets" data-testid="li-nearest-questions">
             {qs.map((x) => (
               <li key={x.question_id}>
-                <CardLink id={x.question_id}>{x.fields.map(fieldWords).join(', ') || x.question_id}</CardLink>
-                {onlyWords(x.only) ? ` — for ${onlyWords(x.only)}` : ''}
+                <CardLink id={x.question_id}>{x.fields.map(fieldNoun).join(', ') || x.question_id}</CardLink>
+                {onlyName(x.only, names) ? ` — for ${onlyName(x.only, names)}` : ''}
                 {x.deferred ? ` (${COPY.deferredChip.toLowerCase()})` : ''}
               </li>
             ))}
@@ -1083,11 +1133,11 @@ function NearestRecord({ m }: { m: NonNullable<LocalProgress['minimum_for_one_gr
             {recommended.map((r, i) => (
               <li key={`${r.question_id ?? 'none'}-${i}`}>
                 {r.question_id ? (
-                  <CardLink id={r.question_id}>{r.fields.map(fieldWords).join(', ')}</CardLink>
+                  <CardLink id={r.question_id}>{r.fields.map(fieldNoun).join(', ')}</CardLink>
                 ) : (
-                  r.fields.map(fieldWords).join(', ')
+                  r.fields.map(fieldNoun).join(', ')
                 )}
-                {onlyWords(r.only) ? ` — for ${onlyWords(r.only)}` : ''}: <span className="li-warning"><InlineCode text={r.why_page ?? r.why} /></span>
+                {onlyName(r.only, names) ? ` — for ${onlyName(r.only, names)}` : ''}: <span className="li-warning"><InlineCode text={r.why_page ?? r.why} /></span>
               </li>
             ))}
           </ul>
@@ -1122,14 +1172,17 @@ function NearestRecord({ m }: { m: NonNullable<LocalProgress['minimum_for_one_gr
 
 /** `why`, with the beamtime question it names (`covered_by`) as a link to that card, in that question's words. */
 function WhyText({ q }: { q: LocalQuestion }) {
+  const page = useContext(PageQuestions);
   const cover = q.display.covered_by;
   const why = q.display.why ?? q.why;
   const parts = splitAtId(why, cover?.question_id);
   if (!cover || !cover.question_id || !parts) return <InlineCode text={why} />;
+  // named as its own card is titled, when it is on this page; else in the server's words
+  const covering = page?.get(cover.question_id);
   return (
     <>
       <InlineCode text={parts[0]} />
-      <CardLink id={cover.question_id}>“{cover.text}”</CardLink>
+      <CardLink id={cover.question_id}>“{covering ? cardTitle(covering) : cover.text}”</CardLink>
       <InlineCode text={parts[1]} />
     </>
   );
@@ -1327,6 +1380,7 @@ function PreviewBox({
   /** The question compares each run's own reading with the answer (a field value): only then is a run said to have none. */
   readings?: boolean;
 }) {
+  const names = useGroupNames();
   const differing = preview.by_scope.filter((g) => g.differs);
   const otherValues = [
     ...new Set(
@@ -1360,8 +1414,8 @@ function PreviewBox({
       <ul className="li-bullets">
         {preview.by_scope.map((g) => (
           <li key={g.scope} className={g.differs ? 'li-differs' : undefined}>
-            {g.label}
-            {g.run_names.length ? ` — ${namesText(g.run_names, g.run_count)}` : ''}
+            {scopeName({ ...g, kind: g.scope === 'experiment' ? 'experiment' : g.scope.startsWith('group:') ? 'group' : 'run' }, names)}
+            {g.run_names.length > 1 ? ` — ${namesText(g.run_names, g.run_count)}` : ''}
             {g.differs && (
               <>
                 {' '}
@@ -1409,7 +1463,7 @@ function PreviewBox({
           <ul className="li-bullets" data-testid="li-preview-kept">
             {preview.kept_per_group_answers.map((k) => (
               <li key={k.group_id}>
-                Group {k.group_id} keeps {k.element} {k.edge}
+                {groupName(k.group_id, names)} keeps {k.element} {k.edge}
               </li>
             ))}
           </ul>
@@ -1457,12 +1511,13 @@ function PerGroupRow({
   onAcceptOne: (g: LocalScope, value: unknown) => void;
   onAnswerThis: (g: LocalScope) => void;
 }) {
+  const names = useGroupNames();
+  const name = scopeName(g, names);
   const perRun = g.mixed && (g.per_target ?? []).length > 0;
   return (
     <tr>
-      <th scope="row" className="li-col-group">
+      <th scope="row" className="li-col-group" title={g.group_id ? `group ${g.group_id}` : undefined}>
         <span className="li-run-names">{namesText(g.run_names, g.run_count, 3)}</span>
-        <span className="li-group-id">{g.group_id ? `group ${g.group_id}` : g.label}</span>
       </th>
       <td className="li-col-suggestion">
         {perRun ? (
@@ -1491,14 +1546,14 @@ function PerGroupRow({
                 onClick={() => onAcceptOne(g, g.unanimous_value)}
               >
                 {confirm ? 'Confirm' : 'Accept'} {shownValue(g.unanimous_value)}
-                <span className="sr-only"> for {g.label}</span>
+                <span className="sr-only"> for {name}</span>
               </button>
             </li>
           )}
           <li>
             <button type="button" className="btn btn-secondary li-accept" disabled={busy} onClick={() => onAnswerThis(g)}>
               {COPY.answerThisGroup}
-              <span className="sr-only"> ({g.label})</span>
+              <span className="sr-only"> ({name})</span>
             </button>
           </li>
         </ul>
@@ -1622,6 +1677,7 @@ function QuestionCard({
   handlers,
   answered,
   nested,
+  row,
 }: {
   q: LocalQuestion;
   handlers: WriteHandlers;
@@ -1629,10 +1685,26 @@ function QuestionCard({
   answered?: LocalAnsweredQuestion;
   /** The per-group questions this beamtime question answers at once: listed under it, each answerable on its own. */
   nested?: LocalQuestion[];
+  /** A ROW of a per-sample card (`PerSampleCard`): the sample it is for, as its title; `chip` when its rows differ
+   *  in whether they block. The card above it asks the question once. */
+  row?: { label: string; chip: boolean };
 }) {
   const d = q.display;
   const startTimes = d.answer_kind === 'start_times';
   const uid = useId();
+  const names = useGroupNames();
+  const fullText = d.text ?? q.text;
+  // the plain layer (lib/plainQuestions): the server's own words stay one click away, under Details
+  const plain = startTimes ? null : plainQuestion(q);
+  // a question asked of one sample or one group says which, under its title (a row's title already is that)
+  const sample =
+    row !== undefined
+      ? null
+      : (sampleLabel(q) ??
+        (q.scope.startsWith('group:') && !startTimes
+          ? `For ${scopeName(d.scopes[0] ?? { kind: 'group', scope: q.scope, run_names: [], label: 'a group' }, names)}`
+          : null));
+  const Title = row !== undefined ? 'h5' : 'h4';
   // an answered card is its own card (the same question may come back as an open one, e.g. after a defer)
   const cardKey = answered ? `answered:${q.question_id}` : q.question_id;
   const [changing, setChanging] = useState(false);
@@ -1923,41 +1995,68 @@ function QuestionCard({
             {answerButton()}
           </AnswerForm>
         );
-      case 'counter_positions':
+      case 'counter_positions': {
+        const asked = q.positions ?? [];
+        const example = counterExample(fullText);
         return (
           <>
-            <fieldset className="li-fieldset">
-              <legend>Filename positions asked about (check the ones that are run counters)</legend>
-              {(q.positions ?? []).map((p) => (
-                <label key={p} className="li-check">
-                  <input
-                    type="checkbox"
-                    checked={positions.includes(p)}
-                    onChange={(e) =>
-                      setPositions((cur) => (e.target.checked ? [...cur, p].sort((a, b) => a - b) : cur.filter((x) => x !== p)))
-                    }
-                  />
-                  Position {p}
-                </label>
-              ))}
-            </fieldset>
-            <p className="li-actions">
-              <button
-                type="button"
-                className="btn btn-primary"
-                disabled={busy || positions.length === 0}
-                onClick={() => submit('set_counter_positions', { positions })}
-              >
-                The checked positions are run counters
-              </button>
-              <button type="button" className="btn btn-secondary" disabled={busy} onClick={() => submit('set_not_counter_positions')}>
-                None of these is a counter
-              </button>
-            </p>
+            {example && (
+              <p className="li-meta" data-testid="li-counter-example">
+                For example: <code>{example.name}</code> (the number asked about is {example.part}).
+              </p>
+            )}
+            <p className="li-hint">{COPY.counterMeans}</p>
+            {asked.length === 1 ? (
+              <p className="li-actions">
+                <button
+                  type="button"
+                  className="btn btn-primary"
+                  disabled={busy}
+                  onClick={() => submit('set_counter_positions', { positions: asked })}
+                >
+                  {COPY.counterYes}
+                </button>
+                <button type="button" className="btn btn-secondary" disabled={busy} onClick={() => submit('set_not_counter_positions')}>
+                  {COPY.counterNo}
+                </button>
+              </p>
+            ) : (
+              <>
+                <fieldset className="li-fieldset">
+                  <legend>{COPY.counterWhich}</legend>
+                  {asked.map((p) => (
+                    <label key={p} className="li-check">
+                      <input
+                        type="checkbox"
+                        checked={positions.includes(p)}
+                        onChange={(e) =>
+                          setPositions((cur) => (e.target.checked ? [...cur, p].sort((a, b) => a - b) : cur.filter((x) => x !== p)))
+                        }
+                      />
+                      The {positionWords(p)} number
+                    </label>
+                  ))}
+                </fieldset>
+                <p className="li-actions">
+                  <button
+                    type="button"
+                    className="btn btn-primary"
+                    disabled={busy || positions.length === 0}
+                    onClick={() => submit('set_counter_positions', { positions })}
+                  >
+                    {COPY.counterChecked}
+                  </button>
+                  <button type="button" className="btn btn-secondary" disabled={busy} onClick={() => submit('set_not_counter_positions')}>
+                    {COPY.counterNone}
+                  </button>
+                </p>
+              </>
+            )}
             <p className="li-hint">{COPY.counterAfter}</p>
-            <CommandBlock command={regroupCommand(handlers.name)} label="Command that proposes the groups again" />
+            <CommandBlock command={regroupCommand(handlers.name)} label="Command that groups the files again" />
           </>
         );
+      }
       case 'clock_zone':
         return (
           <AnswerForm onAnswer={() => submit('set_clock_time_zone', { value })}>
@@ -2059,25 +2158,28 @@ function QuestionCard({
       data-card-id={cardKey}
     >
       <div className="li-card-head">
-        <span className="li-chip">
-          {answered ? COPY.answeredChip : q.blocking ? COPY.chipBlocks : q.tier === 2 ? COPY.chipAffectsRecord : COPY.chipOptional}
-        </span>
+        {(row === undefined || row.chip) && (
+          <span className="li-chip">
+            {answered ? COPY.answeredChip : q.blocking ? COPY.chipBlocks : q.tier === 2 ? COPY.chipAffectsRecord : COPY.chipOptional}
+          </span>
+        )}
         {q.deferred && <span className="li-chip">{COPY.deferredChip}</span>}
         {/* the section heading names the kind; an answered card and a nested one are not under it */}
         {(answered !== undefined || q.answered_at_once_by !== undefined) && (
           <span className="li-meta">{KIND_LABEL[q.kind] ?? q.kind}</span>
         )}
       </div>
-      <h4 id={`${uid}-t`} className="li-h4 li-question-text" tabIndex={-1} ref={titleRef} data-li-title>
-        {startTimes ? (
-          startTitle(q)
-        ) : (
-          <InlineCode text={d.text ?? q.text} />
-        )}
-      </h4>
+      <Title id={`${uid}-t`} className={`${row !== undefined ? 'li-h5' : 'li-h4'} li-question-text`} tabIndex={-1} ref={titleRef} data-li-title>
+        {startTimes ? startTitle(q) : row !== undefined ? row.label : plain ?? <InlineCode text={fullText} />}
+      </Title>
+      {sample && (
+        <p className="li-meta" data-testid="li-sample">
+          {sample}
+        </p>
+      )}
       {q.deferred && (
         <p className="li-meta" data-testid="li-deferred" title={q.deferred.decided_utc ?? undefined}>
-          {deferredText(q.deferred)}. It is still asked and still counted.
+          {deferredText(q.deferred)}. It stays open and still counts.
         </p>
       )}
       {recorded && (
@@ -2091,7 +2193,7 @@ function QuestionCard({
           <ul className="li-bullets" data-testid="li-recorded-kept">
             {kept.map((k) => (
               <li key={k.group_id}>
-                Group {k.group_id} keeps {k.element} {k.edge}
+                {groupName(k.group_id, names)} keeps {k.element} {k.edge}
               </li>
             ))}
           </ul>
@@ -2114,19 +2216,31 @@ function QuestionCard({
         <StartTimesFacts q={q} />
       ) : (
         <>
-          <p className="li-meta li-facts">
-            {/* the field is named once: here only when the question's own words do not name it */}
-            {q.target_field_path && !(d.text ?? q.text).includes(q.target_field_path) && (
-              <>
-                <code>{q.target_field_path}</code>
-                {' · '}
-              </>
+          <p className="li-meta li-facts">{reachText(q)}</p>
+          {/* a question another one fills is said so, with a link to it: the one "why" a person acts on */}
+          {d.covered_by && (
+            <p className="li-why">
+              <WhyText q={q} />
+            </p>
+          )}
+          <details className="li-details" data-testid="li-question-details">
+            <summary>{COPY.details}</summary>
+            {q.target_field_path && (
+              <p className="li-meta">
+                {COPY.recordField}: <code>{q.target_field_path}</code>
+              </p>
             )}
-            {reachText(q)}
-          </p>
-          <p className="li-why">
-            <WhyText q={q} />
-          </p>
+            {(plain !== null || row !== undefined) && (
+              <p className="li-meta">
+                <InlineCode text={fullText} />
+              </p>
+            )}
+            {!d.covered_by && (
+              <p className="li-meta">
+                <WhyText q={q} />
+              </p>
+            )}
+          </details>
         </>
       )}
       {!startTimes && d.record_run_names.length > 0 && (
@@ -2236,7 +2350,8 @@ function QuestionCard({
                 <option value="">Choose a group…</option>
                 {groups.map((g) => (
                   <option key={g.scope} value={g.scope}>
-                    {g.label}: {namesText(g.run_names, g.run_count, 3)}
+                    {scopeName(g, names)}
+                    {g.run_count && g.run_count > 1 ? ` (${g.run_count} runs)` : ''}
                   </option>
                 ))}
               </select>
@@ -2265,7 +2380,7 @@ function QuestionCard({
                 type="button"
                 className="btn btn-secondary li-quiet"
                 disabled={busy}
-                aria-describedby={`${uid}-dh`}
+                aria-describedby="li-defer-hint"
                 title={COPY.deferHint}
                 onClick={() => submit('defer')}
               >
@@ -2277,7 +2392,7 @@ function QuestionCard({
                 type="button"
                 className="btn btn-secondary li-quiet"
                 disabled={busy}
-                aria-describedby={`${uid}-rh`}
+                aria-describedby="li-reject-hint"
                 title={COPY.rejectHint}
                 onClick={() => submit('reject')}
               >
@@ -2285,16 +2400,6 @@ function QuestionCard({
               </button>
             )}
           </p>
-          {otherDecisions.includes('defer') && (
-            <span id={`${uid}-dh`} className="sr-only">
-              {COPY.deferHint}
-            </span>
-          )}
-          {otherDecisions.includes('reject') && (
-            <span id={`${uid}-rh`} className="sr-only">
-              {COPY.rejectHint}
-            </span>
-          )}
         </div>
       )}
       </div>
@@ -2338,11 +2443,51 @@ function QuestionCard({
   );
 }
 
+/**
+ * THE SAME QUESTION, ASKED ONCE PER SAMPLE OR PER GROUP (e.g. the sample form for each sample the files name, or the
+ * cell type for each group): one card that asks it once, with a row per sample or group. Each row is that sample's or
+ * group's own question, answered through the same controls, preview and checks as any other card: only its title
+ * (the sample or group) and its chip (shown when the rows differ) change.
+ */
+function RepeatedCard({ cluster, handlers }: { cluster: QuestionCluster; handlers: WriteHandlers }) {
+  const uid = useId();
+  const names = useGroupNames();
+  const qs = cluster.questions;
+  const first = qs[0];
+  const uniform = qs.every((q) => q.blocking === first.blocking && q.tier === first.tier);
+  const rowLabel = (q: LocalQuestion) =>
+    cluster.by === 'sample'
+      ? (sampleLabel(q) ?? q.question_id)
+      : scopeName(q.display.scopes[0] ?? { kind: 'group', scope: q.scope, run_names: [], label: 'a group' }, names);
+  return (
+    <li className="li-card li-question li-repeated" aria-labelledby={`${uid}-t`} data-testid="li-repeated">
+      {uniform && (
+        <div className="li-card-head">
+          <span className="li-chip">{first.blocking ? COPY.chipBlocks : first.tier === 2 ? COPY.chipAffectsRecord : COPY.chipOptional}</span>
+        </div>
+      )}
+      <h4 id={`${uid}-t`} className="li-h4 li-question-text">
+        <InlineCode text={cardTitle(first)} />
+      </h4>
+      <p className="li-meta">
+        Asked once for each {cluster.by}: {qs.length} {cluster.by}s. Answer each one below.
+      </p>
+      <ol className="li-list li-repeated-rows">
+        {qs.map((q) => (
+          <QuestionCard key={q.question_id} q={q} handlers={handlers} row={{ label: rowLabel(q), chip: !uniform }} />
+        ))}
+      </ol>
+    </li>
+  );
+}
+
 /** Who a question reaches, in a few words: "9 group(s), 9 run(s)", with the values only where they differ. */
 function reachText(q: LocalQuestion): string {
   const { groups, runs, targets } = q.applies_to;
-  if (runs === 0) return groups > 0 ? `${groups} group(s) · the whole beamtime` : 'the whole beamtime';
-  return `${groups} group(s), ${runs} run(s)${targets !== runs ? `, ${targets} value(s)` : ''}`;
+  const n = (k: number, one: string) => `${k.toLocaleString('en-US')} ${one}${k === 1 ? '' : 's'}`;
+  if (runs === 0) return groups > 0 ? `${n(groups, 'group')} · the whole beamtime` : 'The whole beamtime';
+  // values are counted only where they outnumber the runs (a run with several values); fewer says nothing useful
+  return `For ${n(groups, 'group')}, ${n(runs, 'run')}${targets > runs ? `, ${n(targets, 'value')}` : ''}`;
 }
 
 /** The beamtime start-time question, asked as the choice it is. */
@@ -2372,8 +2517,8 @@ function StartTimesFacts({ q }: { q: LocalQuestion }) {
             : ''}
       </p>
       <p className="li-meta li-facts">
-        <code>{q.target_field_path}</code> · {q.applies_to.groups} group(s), {q.applies_to.runs} run(s)
-        {canExport !== undefined ? ` · ${canExport} of them can become records` : ''}
+        {reachText(q)}
+        {canExport !== undefined ? ` · ${canExport.toLocaleString('en-US')} of them can become records` : ''}
       </p>
       {d.suggestions.length > 0 && (
         <div className="li-examples">
@@ -2401,6 +2546,7 @@ function StartTimesFacts({ q }: { q: LocalQuestion }) {
 
 /** What the start-time card keeps one click away: the groups it does not reach, and its full wording. */
 function StartTimesMore({ q }: { q: LocalQuestion }) {
+  const names = useGroupNames();
   const notReached = q.not_reached ?? [];
   const text = q.display.text ?? q.text;
   return (
@@ -2413,15 +2559,20 @@ function StartTimesMore({ q }: { q: LocalQuestion }) {
           <ul className="li-bullets">
             {notReached.map((x) => (
               <li key={x.question_id}>
-                <CardLink id={x.question_id}>Group {x.group_id}</CardLink>: <InlineCode text={x.reason} />
+                <CardLink id={x.question_id}>{groupName(x.group_id, names)}</CardLink>: <InlineCode text={x.reason} />
               </li>
             ))}
           </ul>
         </details>
       )}
       {text && (
-        <details className="li-details">
-          <summary>{COPY.questionDetails}</summary>
+        <details className="li-details" data-testid="li-question-details">
+          <summary>{COPY.details}</summary>
+          {q.target_field_path && (
+            <p className="li-meta">
+              {COPY.recordField}: <code>{q.target_field_path}</code>
+            </p>
+          )}
           <p className="li-meta">
             <InlineCode text={text} />
           </p>
@@ -2526,25 +2677,36 @@ function useDecision(id: string, handlers: WriteHandlers) {
 
 function MergeCard({ m, handlers }: { m: LocalMergeCandidate; handlers: WriteHandlers }) {
   const { busy, record, feedback, cardRef } = useDecision(m.merge_candidate_id, handlers);
+  const names = useGroupNames();
   const [first, ...rest] = m.group_ids;
+  const named = m.group_ids.map((id) => groupName(id, names, m.groups.find((g) => g.group_id === id)?.run_names)).join(', ');
   return (
     <li className="li-card" data-card-id={m.merge_candidate_id} ref={cardRef}>
       <p className="li-question-text" tabIndex={-1} data-li-title>
-        {m.question ?? `Merge or keep apart: groups ${m.group_ids.join(', ')}`}
+        {COPY.mergeAsk}
       </p>
       <ul className="li-bullets">
         {m.groups.map((g) => (
           <li key={g.group_id}>
-            Group {g.group_id}: {namesText(g.run_names)}
+            {groupName(g.group_id, names, g.run_names)}: {namesText(g.run_names)}
           </li>
         ))}
       </ul>
+      <details className="li-details">
+        <summary>{COPY.details}</summary>
+        {m.question && (
+          <p className="li-meta">
+            <InlineCode text={m.question} />
+          </p>
+        )}
+        <p className="li-meta li-ids">Groups: {m.group_ids.join(', ')}</p>
+      </details>
       <p className="li-actions">
         <button
           type="button"
           className="btn btn-secondary"
           disabled={busy}
-          onClick={() => record({ target: m.merge_candidate_id, decision: 'keep_apart' }, `Recorded: ${m.group_ids.join(', ')} stay apart.`)}
+          onClick={() => record({ target: m.merge_candidate_id, decision: 'keep_apart' }, `Recorded: ${named} stay apart.`)}
         >
           {COPY.keepApart}
         </button>
@@ -2553,7 +2715,7 @@ function MergeCard({ m, handlers }: { m: LocalMergeCandidate; handlers: WriteHan
             type="button"
             className="btn btn-secondary"
             disabled={busy}
-            onClick={() => record({ target: first, decision: 'merge', merge_with: rest }, `Recorded: merge ${m.group_ids.join(', ')}.`)}
+            onClick={() => record({ target: first, decision: 'merge', merge_with: rest }, `Recorded: merge ${named}.`)}
           >
             {COPY.mergeThem}
           </button>

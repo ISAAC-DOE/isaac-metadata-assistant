@@ -853,3 +853,27 @@ def test_an_informational_question_is_shown_with_nothing_to_answer(client):
     assert info, "the fixture has questions on paths no answer can reach"
     assert all(q["display"]["answer_kind"] == "informational" for q in info)
     assert all(q["display"]["answer_kind"] != "informational" for q in qs if not q.get("informational"))
+
+
+def test_the_page_can_name_each_group_it_shows_by_its_first_file(client, root):
+    """2026-11-17 (plain-language pass): the questions and progress replies carry ``group_names`` — a name the scientist
+    knows each group by (its first member file, as export rows say it) — for exactly the groups they mention. Additive:
+    no id changes, and a group the reply does not mention is not named."""
+    from isaac_api.local_import import records as R
+
+    bundle = json.loads((root / "alpha" / "bundle.json").read_text(encoding="utf-8"))
+    labels = R.group_labels(bundle)
+    body = client.get("/api/local-bundles/alpha/questions").json()
+    names = body["group_names"]
+    mentioned = {sc["group_id"] for q in body["questions"] for sc in q["display"]["scopes"] if sc.get("group_id")}
+    if (body.get("minimum_for_one_group") or {}).get("group_id"):
+        mentioned.add(body["minimum_for_one_group"]["group_id"])
+    assert mentioned, "the synthetic bundle's questions name at least one group"
+    assert set(names) <= mentioned | {g for m in body["capture"]["merge_candidates"] for g in m["group_ids"]}
+    assert {g for g in mentioned if g in labels} <= set(names)
+    assert all(names[g] == labels[g] for g in names)
+    progress = client.get("/api/local-bundles/alpha/progress").json()["progress"]
+    assert all(progress["group_names"][g] == labels[g] for g in progress["group_names"])
+    minimum = progress.get("minimum_for_one_group") or {}
+    if minimum.get("group_id") in labels:
+        assert minimum["group_id"] in progress["group_names"]
