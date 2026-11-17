@@ -15,6 +15,13 @@ cloud model**, and **not uploading raw files is not the same as sending nothing 
 | **C: MCP transfer to ISAAC** | local bundle → remote MCP → ISAAC backend (SLAC) | Structured metadata, short source excerpts, hashes, relative file names, contributor names, scientist decisions | MCP reachability + login decisions **D1/D2** (Dean/Hao); classification of what may be stored on the server (**EXT-13**); a reviewed bundle-import tool | **design only** (`docs/mcp-staged-bundle-import-design.md`); not implemented, not deployed |
 | **D: the scientist's own website action — saving a term proposal** (not a flow of the skill) | the scientist loads the `isaac bundle propose-terms` drafts file on the Schema Proposals page and saves a proposal (their choice, never Claude's) | **The term, its counts and its file-name citations** go to the ISAAC server that page uses (the hosted server when they use the website); nothing before they save | Theirs to make, as for any proposal they write on the website; the skill says what saving sends before they save | implemented (the page and the drafts file); not a flow the skill runs |
 
+**Not a data flow: the setup update check.** `scripts/setup_isaac_local.sh --check` runs `git fetch` from the
+ISAAC folder's `origin` (GitHub) to say whether the folder is behind `main`, and `--update` (only on the scientist's
+yes in the skill) fast-forwards the ISAAC code. Both are code **downloads**: no file, name, value or bundle is sent
+(GitHub sees a request from the computer, as for any download). The check changes no file in the ISAAC folder (it
+updates git's record of what's on GitHub); `--update` refuses rather than replace a file git does not track, such as
+data in `examples/`. `--offline` skips it; when GitHub is not reached the check says `[skipped]` and nothing fails.
+
 ## Flow A — local deterministic parsing
 
 - Runs entirely on the scientist's machine with ISAAC's existing reconstruction code: the same
