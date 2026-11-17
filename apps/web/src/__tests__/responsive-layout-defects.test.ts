@@ -204,31 +204,11 @@ describe('F1 · Compare Runs no longer makes the whole page scroll sideways', ()
   });
 });
 
-describe('F2 · Load Materials reflows to one column instead of scrolling sideways', () => {
-  /*
-   * MEASURED, darwin @320: `.onramps` scrollWidth 468 in a clientWidth of 242,
-   * cards at x 39→261 and 275→507, and the overflow landing on
-   * `main#main.screen-main.centered` (496 / 298) — which is also the vertical
-   * scroller, so it offered no horizontal affordance. The page measured a clean
-   * 320 == 320, which is why the document-level probe never reported it. WCAG
-   * 1.4.10 Reflow.
-   */
-  it('.onramps no longer hard-codes two columns', () => {
-    const tracks = declaredValue('.onramps', 'grid-template-columns', TOP_LEVEL);
-    expect(tracks).not.toBeNull();
-    expect(tracks).not.toBe('1fr 1fr');
-  });
-
-  it('and states a minimum readable card width, so the track count follows the container', () => {
-    const tracks = declaredValue('.onramps', 'grid-template-columns', TOP_LEVEL)!;
-    expect(tracks).toMatch(/repeat\(\s*auto-fit\s*,\s*minmax\(/);
-    const floor = /minmax\(\s*(\d+)px/.exec(tracks);
-    expect(floor).not.toBeNull();
-    // Two 240px tracks plus the 14px gap need 494px, so 390 and 320 collapse to
-    // one column while 640 and up keep the two columns they already had.
-    expect(Number(floor![1])).toBeGreaterThanOrEqual(200);
-  });
-});
+/*
+ * ~~F2 · Load Materials reflows to one column instead of scrolling sideways~~ — retired
+ * 2026-11-16 with the page (`/load` redirects to My Experiments; `components/runner.css`
+ * and its `.onramps` grid are gone).
+ */
 
 /*
  * ~~F3 · the Governance & Safety banner wraps instead of shrinking to one word a
@@ -475,31 +455,44 @@ describe("I5 · the at-rule filter is required, and a fix hidden in an unreachab
 
   it("the reviewer's reproduction, on the REAL stylesheet's bytes and without touching disk", () => {
     /*
-     * The synthetic cases above are the mechanism. This one is the actual
-     * finding: `components/runner.css` as committed, with its `.onramps` fix
-     * MOVED into `@media (min-width: 3000px)` by a string transform. Nothing is
-     * written — mutating the file on disk would race every other suite reading
-     * the same `import.meta.glob`, and would race the Playwright job reading it
-     * through the dev server.
+     * The synthetic cases above are the mechanism. This one runs it on a committed
+     * stylesheet, with a real top-level fix MOVED into `@media (min-width: 3000px)` by a
+     * string transform. Nothing is written — mutating the file on disk would race every
+     * other suite reading the same `import.meta.glob`.
+     *
+     * RE-POINTED 2026-11-16. It was `components/runner.css`'s `.onramps` grid, the
+     * finding I5 was measured on; that file left with Load Materials. `.rc-tablewrap`'s
+     * `position: relative` in `components/run-compare.css` is the same shape (a
+     * declaration F1 needs at every width) on a stylesheet that ships.
      */
-    const [, runner] = Object.entries(cssFiles).find(([path]) =>
-      path.endsWith('components/runner.css')
+    const [, compare] = Object.entries(cssFiles).find(([path]) =>
+      path.endsWith('components/run-compare.css')
     )!;
-    const FIX = 'repeat(auto-fit, minmax(240px, 1fr))';
-    // The DECLARATION, not the comment above it that quotes the same string.
-    const DECLARED = `grid-template-columns: ${FIX};`;
-    expect(runner, 'the committed fix must be present for this transform to mean anything').toContain(
-      DECLARED
-    );
-    const sabotaged =
-      runner.replace(DECLARED, 'grid-template-columns: 1fr 1fr;') +
-      `\n@media (min-width: 3000px) { .onramps { grid-template-columns: ${FIX}; } }\n`;
-    const rules3000 = extractRules(sabotaged, 'components/runner.css');
+    const rules = extractRules(compare, 'components/run-compare.css');
+    expect(
+      declaredValue('.rc-tablewrap', 'position', TOP_LEVEL, rules),
+      'the committed fix must be present for this transform to mean anything'
+    ).toBe('relative');
+    // The transform is applied to the parsed rules of the real file (its bytes, read
+    // once): the one top-level rule that declares the fix loses it, and the fix is
+    // appended inside the unreachable band.
+    const target = rulesFor('.rc-tablewrap', rules).find(
+      (r) => r.atRules.length === 0 && /position\s*:\s*relative/.test(r.body)
+    )!;
+    const rules3000 = [
+      ...rules.map((r) =>
+        r === target ? { ...r, body: r.body.replace(/position\s*:\s*relative/, 'position: static') } : r
+      ),
+      ...extractRules(
+        '@media (min-width: 3000px) { .rc-tablewrap { position: relative; } }',
+        'components/run-compare.css'
+      ),
+    ];
 
-    // What F2 asks now: RED, because a real viewport gets two hard columns.
-    expect(declaredValue('.onramps', 'grid-template-columns', TOP_LEVEL, rules3000)).toBe('1fr 1fr');
-    // What F2 asked before I5: GREEN, on a product with the defect restored.
-    expect(declaredAnywhere('.onramps', 'grid-template-columns', rules3000)).toBe(FIX);
+    // What F1 asks now: RED, because a real viewport gets the defect.
+    expect(declaredValue('.rc-tablewrap', 'position', TOP_LEVEL, rules3000)).toBe('static');
+    // What F1 asked before I5: GREEN, on a product with the defect restored.
+    expect(declaredAnywhere('.rc-tablewrap', 'position', rules3000)).toBe('relative');
   });
 
   it('and a fix in a band users ARE in is still seen, so the filter is not just a blanket refusal', () => {

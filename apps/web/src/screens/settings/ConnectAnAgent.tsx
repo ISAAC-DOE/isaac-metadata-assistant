@@ -51,7 +51,7 @@ export interface ConnectAnAgentFacts {
   errorCodes: string[];
 }
 
-function mediaTypeSentence(mediaTypes: string[]): string {
+function mediaTypeSentence(mediaTypes: string[], listing = 'the Endpoint Explorer'): string {
   if (mediaTypes.length === 0) {
     return 'No operation in this contract declares a request-body media type, so nothing here expects one.';
   }
@@ -64,7 +64,7 @@ function mediaTypeSentence(mediaTypes: string[]): string {
   // Since the document carries no per-operation signal a caller could read off,
   // this sentence now states the safe rule and routes the reader to the operation
   // that does say — rather than generalising from one model to all of them.
-  return `Operations that declare a request body declare ${mediaTypes.join(', ')}. Send only the fields the contract names for that operation: some reject an unnamed key outright and others ignore it, so each operation's own description in the Endpoint Explorer is the authority on which.`;
+  return `Operations that declare a request body declare ${mediaTypes.join(', ')}. Send only the fields the contract names for that operation: some reject an unnamed key outright and others ignore it, so each operation's own description in ${listing} is the authority on which.`;
 }
 
 /**
@@ -90,8 +90,9 @@ export function ConnectAnAgent({
   open?: boolean;
   onOpenChange?: (open: boolean) => void;
   summaryId?: string;
-  /** Opens the Endpoint Explorer — the guide's first step is there. */
-  onOpenExplorer: () => void;
+  /** Opens the Endpoint Explorer — the guide's first step is there. Absent without the
+   *  developer flag, and then the guide points at the contract itself instead. */
+  onOpenExplorer?: () => void;
   /**
    * Render the guide without its drawer (2026-10-12): inside the API Access
    * widget it is the Program an Agent VIEW, which the reader opened by choosing
@@ -100,23 +101,27 @@ export function ConnectAnAgent({
    */
   bare?: boolean;
 }) {
+  /* Without the developer flag there is no Endpoint Explorer on screen (2026-11-16), so
+     the guide names the contract it is generated from instead of a tab that is not there. */
+  const explorer = onOpenExplorer !== undefined;
+  const listing = explorer ? 'the Endpoint Explorer' : 'the contract';
   const sections: { heading: string; body: string; action?: string }[] = [
     {
       heading: 'Choose an Endpoint',
-      body: "Start in the Endpoint Explorer, under Advanced. Each operation there carries its purpose, its declared parameters, its request body when it has one, and every response the contract documents — all generated from this app's own contract, so an agent never has to work from a guess about what exists.",
+      body: `${explorer ? 'Start in the Endpoint Explorer, under Advanced.' : "Start from this app's own contract, GET /api/openapi."} Each operation there carries its purpose, its declared parameters, its request body when it has one, and every response the contract documents — all generated from this app's own contract, so an agent never has to work from a guess about what exists.`,
       action: 'Open the Endpoint Explorer',
     },
     {
       heading: 'Set the Base URL',
-      body: `Call the paths exactly as the Endpoint Explorer lists them; each one is already complete. The samples write the origin as $${SAMPLE_BASE_ENV} and never hard-code one, because the correct origin is wherever this page is being served from — the caller's to supply, not this screen's to publish.`,
+      body: `Call the paths exactly as ${listing} lists them; each one is already complete. The samples write the origin as $${SAMPLE_BASE_ENV} and never hard-code one, because the correct origin is wherever this page is being served from — the caller's to supply, not this screen's to publish.`,
     },
     {
       heading: 'Configure Authentication',
-      body: `When a deployment enables authentication, every call carries an "Authorization: Bearer" header holding that deployment's credential; the liveness check is the one operation that stays reachable without it. Quick Start reports how many operations document a 401, and the Endpoint Explorer marks each operation.`,
+      body: `When a deployment enables authentication, every call carries an "Authorization: Bearer" header holding that deployment's credential; the liveness check is the one operation that stays reachable without it. Quick Start reports how many operations document a 401, and ${listing} marks each operation.`,
     },
     {
       heading: 'Send Structured Requests',
-      body: mediaTypeSentence(facts.requestMediaTypes),
+      body: mediaTypeSentence(facts.requestMediaTypes, listing),
     },
     {
       heading: 'Respect Read and Write Boundaries',
@@ -167,7 +172,7 @@ export function ConnectAnAgent({
           <section className="api-connect-section" key={section.heading}>
             <h4 className="api-connect-heading">{section.heading}</h4>
             <p>{section.body}</p>
-            {section.action && (
+            {section.action && onOpenExplorer && (
               <button type="button" className="settings-jump-btn" onClick={onOpenExplorer}>
                 {section.action}
               </button>

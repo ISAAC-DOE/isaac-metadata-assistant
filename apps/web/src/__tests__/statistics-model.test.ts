@@ -7,8 +7,6 @@ import {
   deriveApiSurface,
   deriveEvidenceTotals,
   deriveExportGate,
-  deriveImportSteps,
-  deriveImportTotals,
   deriveMemoryFacts,
   deriveOpenQuestionDistribution,
   deriveOpenQuestions,
@@ -930,73 +928,7 @@ describe('deriveRecentWork', () => {
 
 // --- historical imports ------------------------------------------------------
 
-describe('deriveImportTotals', () => {
-  const summary = (over: Record<string, unknown>) => ({
-    import_id: 'x',
-    label: 'l',
-    created_utc: '2026-07-01T00:00:00Z',
-    updated_utc: '2026-07-01T00:00:00Z',
-    furthest_step: 'new_import',
-    source_count: 0,
-    parsed_source_count: 0,
-    candidate_count: 0,
-    proposed_count: 0,
-    ...over,
-  });
-
-  it('counts sessions, sessions with a source, and sessions with a proposal', () => {
-    const totals = deriveImportTotals({
-      imports: [
-        summary({ source_count: 2, proposed_count: 1 }),
-        summary({ source_count: 1, proposed_count: 0 }),
-        summary({}),
-      ],
-      total: 3,
-    });
-    expect(totals).toEqual({
-      sessions: 3,
-      summariesReceived: 3,
-      sessionsWithSources: 2,
-      sessionsWithProposals: 1,
-    });
-  });
-
-  it("keeps the API's own total apart from what this page received", () => {
-    /* The same distinction `Total Records` keeps: a truncated list must not be
-       presented as the whole workspace. */
-    const totals = deriveImportTotals({ imports: [summary({})], total: 9 });
-    expect(totals.sessions).toBe(9);
-    expect(totals.summariesReceived).toBe(1);
-  });
-
-  it('a missing or non-numeric total becomes null, never 0', () => {
-    /* `0` would claim the workspace holds no import session; what is true is
-       that the response carried no usable total. */
-    expect(deriveImportTotals({ imports: [] }).sessions).toBeNull();
-    expect(deriveImportTotals({ imports: [], total: 'three' }).sessions).toBeNull();
-    expect(deriveImportTotals({ imports: [], total: Number.NaN }).sessions).toBeNull();
-  });
-
-  it('a malformed body degrades to nulls and zeros rather than throwing during render', () => {
-    /* There is no ErrorBoundary in this app, so a throw here would blank the
-       whole SPA rather than one section. */
-    for (const body of [null, undefined, 7, 'nope', [], {}, { imports: 'not a list' }]) {
-      const totals = deriveImportTotals(body);
-      expect(totals.sessions).toBeNull();
-      expect(totals.summariesReceived).toBe(0);
-      expect(totals.sessionsWithSources).toBe(0);
-    }
-  });
-
-  it('skips a non-object entry rather than counting it', () => {
-    const totals = deriveImportTotals({
-      imports: [null, 'x', summary({ source_count: 1 })],
-      total: 3,
-    });
-    expect(totals.summariesReceived).toBe(3);
-    expect(totals.sessionsWithSources).toBe(1);
-  });
-});
+// ~~deriveImportTotals~~ — removed 2026-11-16 with the Statistics imports widget.
 
 describe('deriveOpenQuestionDistribution', () => {
   it('counts records per open-question count, zero-filled between, capped at 5+', () => {
@@ -1033,34 +965,4 @@ describe('deriveOpenQuestionDistribution', () => {
   });
 });
 
-describe('deriveImportSteps', () => {
-  const workflow = [
-    { id: 'new_import', label: 'New Import' },
-    { id: 'sources', label: 'Sources' },
-    { id: 'parse', label: 'Parse' },
-  ];
-
-  it('counts sessions at their furthest step, in the served step order and wording', () => {
-    const steps = deriveImportSteps({
-      total: 3,
-      workflow,
-      imports: [{ furthest_step: 'parse' }, { furthest_step: 'new_import' }, { furthest_step: 'parse' }],
-    });
-    expect(steps.sessions).toBe(3);
-    expect(steps.received).toBe(3);
-    expect(steps.rows.map((r) => [r.label, r.value])).toEqual([
-      ['New Import', 1],
-      ['Sources', 0],
-      ['Parse', 2],
-    ]);
-  });
-
-  it('counts a step the list does not name under its own id, never dropping the session', () => {
-    const steps = deriveImportSteps({ total: 1, workflow, imports: [{ furthest_step: 'add_to_experiments' }] });
-    expect(steps.rows[steps.rows.length - 1]).toEqual({ key: 'add_to_experiments', label: 'Add To Experiments', value: 1 });
-  });
-
-  it('reads a malformed body as nothing received, and the total as unknown', () => {
-    expect(deriveImportSteps(null)).toEqual({ sessions: null, received: 0, rows: [] });
-  });
-});
+// ~~deriveImportSteps~~ — removed 2026-11-16 with the Statistics imports widget.

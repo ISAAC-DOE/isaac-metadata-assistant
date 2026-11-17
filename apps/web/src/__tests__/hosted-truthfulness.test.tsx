@@ -226,7 +226,7 @@ describe('user-facing copy — no content-based real/synthetic classification, a
     // A guard that silently scanned nothing would "pass" forever.
     expect(files.length).toBeGreaterThan(40);
     for (const covered of [
-      'screens/LoadMaterials.tsx',
+      'screens/HistoricalImportGuide.tsx', // was LoadMaterials.tsx, retired 2026-11-16
       'screens/GovernancePage.tsx',
       'lib/settingsContent.ts',
       'components/AdvisoryChip.tsx',

@@ -750,7 +750,8 @@ const RUN_MAGNITUDE = 'tens of seconds';
  * The first paragraph is `notReadyMessage('running')` VERBATIM — the same title
  * and the same body the shared not-ready panel rendered. It is the load-bearing
  * honesty in this state ("no earlier result is shown in its place"), it is
- * asserted in `record-verification.test.tsx` and in `e2e/specs/statistics-states.spec.ts`,
+ * asserted in `record-verification.test.tsx` (and was in `e2e/specs/statistics-states.spec.ts`,
+ * retired 2026-11-16 when Build & Verification went behind the developer flag),
  * and it is deliberately not re-authored here. What is ADDED is the part the
  * reader was missing: that nothing on this screen will change on its own, what
  * order of time a run takes, and the control — promoted to the primary

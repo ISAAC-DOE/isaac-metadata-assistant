@@ -75,8 +75,6 @@ const WIDE_WIDTHS = [1440, 1728] as const;
  */
 const MAX_DEAD_PX = 420;
 
-/** The import-session surface's id — shared by its test and its allowlist entry. */
-const IMPORT_SESSION_SURFACE = 'imports-session';
 
 /** Surfaces a scientist actually reads prose on. Kept small and explicit. */
 const PROSE_SURFACES: readonly { id: string; path: string; example: boolean }[] = [
@@ -129,59 +127,11 @@ function isAllowed(
 
 const KNOWN: Record<string, readonly (string | AllowedComposition)[]> = {
   /*
-   * THE IMPORT SESSION'S TWO NOTES ARE RECORDED AS *RIGHT AS THEY STAND* —
-   * which is what this allowlist is for, not a place to park a defect.
-   *
-   * Measured at 1280: `.hi-steps-disclosure` is 471px in a 926px container (455
-   * dead, 8 lines) and the durability `.hi-note` 471px in 928 (457 dead, 3
-   * lines). Both are capped by `--hi-prose: 68ch`, which computes to **471px**
-   * at this screen's font size — the `ch` unit is smaller here than it reads, so
-   * "68ch" is about 66 characters and not the generous measure it sounds like.
-   *
-   * WHY NOT FIXED: unlike the landing page, these two are NOTES UNDER A
-   * FULL-WIDTH DIAGRAM. The stepper above them spans the card; prose at a
-   * readable measure beneath a wide element, with space to its right, is
-   * ordinary editorial layout — not the defect the owner reported, which was a
-   * six-line paragraph standing as a page's main content in an empty card.
-   *
-   * AND THE THREE ALTERNATIVES WERE EACH MEASURED AND EACH WORSE. Capping
-   * `.hi-steps-wrap` narrows the stepper the notes belong to. Widening
-   * `--hi-prose` enough to satisfy this threshold at 1728 (container 1166) needs
-   * ~746px — about 107 characters, trading a whitespace problem for a legibility
-   * one, which is the trade that token's own comment already declined. Tuning
-   * MAX_DEAD_PX would stop it describing anything.
-   *
-   * If the stepper ever becomes narrow, delete these two lines and re-measure.
+   * ~~`imports-session` — the in-browser import session's `.hi-steps-disclosure`,
+   * `.hi-note` and `.hi-body`~~ — REMOVED 2026-11-16 with the import flow itself. The
+   * Historical Import guide that replaced it is measured as `imports` in
+   * `PROSE_SURFACES`, against the unchanged threshold, with no entry here.
    */
-  /*
-   * BOUNDED, not bare. The measured values at 1280 are 455 and 457 px; the
-   * ceiling adds the slack the viewport itself contributes between 1280 and
-   * 1728, which is the range this spec runs at. So the entry tolerates the
-   * layout as it stands and refuses a real worsening — the same two-way idea as
-   * `type-scale-and-spacing`'s ratchet. If these shrink, lower them.
-   */
-  [IMPORT_SESSION_SURFACE]: [
-    { selector: '.hi-steps-disclosure', maxDead: 720 },
-    { selector: '.hi-note', maxDead: 720 },
-    /*
-     * `.hi-body` IS THE SESSION'S SECTION LEAD PROSE, not a note under a
-     * diagram, so it does NOT get the reasoning the two above get — and it is
-     * bounded and named rather than quietly forgiven.
-     *
-     * Measured at 1728: 557px in a 1168px container, 3 and 5 lines, 611px dead
-     * (531 at 1440). Its container is `.hi-section`, which also holds the
-     * sources TABLE — the one element on the surface that genuinely needs the
-     * wide column — so capping the card would trade this defect for a worse
-     * one, and `.hi-body` has no wrapper of its own to cap.
-     *
-     * §10's remedy for a section lead is SHORTER COPY, which is a content
-     * decision about what each session section must say, and that is a slice
-     * with the owner rather than a CSS change inside an integration. Recorded
-     * with the number so a regression still fails; the bound is the 1728
-     * measurement plus the viewport slack this spec spans.
-     */
-    { selector: '.hi-body', maxDead: 640 },
-  ],
   /*
    * EMPTY, AND IT STARTED WITH FOUR ENTRIES. All four were measured on `main`
    * at 1728 px and all four are fixed in this same integration:
@@ -369,49 +319,8 @@ test.describe('wide viewports: prose does not strand a wide empty gutter @respon
     }
   }
 
-  /*
-   * THE IMPORT SESSION — reached by DOING, not by a path, which is why it was
-   * missing and why the densest prose on the surface went unmeasured.
-   *
-   * A session id is minted by `POST /api/imports`, so there is no static URL to
-   * put in `PROSE_SURFACES`. Worth its own case: this view holds an eight-line
-   * step disclosure and the durability note, and it is where a scientist spends
-   * the whole import.
-   *
-   * *** IT ALSO MAKES THE `imports-session` ALLOWLIST ENTRY LIVE. Before this
-   * test existed, that key exempted nothing — a documented exception guarding an
-   * unmeasured surface, which is worse than no entry, because it reads as
-   * coverage. ***
-   */
-  for (const width of WIDE_WIDTHS) {
-    test(`an import session at ${width} has no unrecorded dead gutter`, async ({ app, page }) => {
-      await page.setViewportSize({ width, height: 1000 });
-      await app.goto('/imports');
-      await expect(app.main()).toBeVisible();
-
-      // Start one through the real UI — there is no static path to a session.
-      await page.getByRole('button', { name: /Start an Import/i }).click();
-      // The stage in focus on a new session is Source Bundle (owner QA H1, 2026-09-22).
-      await expect(page.getByRole('heading', { name: 'Source Bundle' })).toBeVisible({
-        timeout: 20_000,
-      });
-
-      const findings = await page.evaluate(deadGutterProbe, MAX_DEAD_PX);
-      const unrecorded = findings.filter((f) => !isAllowed(KNOWN[IMPORT_SESSION_SURFACE], f));
-
-      expect(
-        unrecorded.map(
-          (f) =>
-            `${f.selector}: ${f.dead}px of empty gutter beside ${f.lines} lines ` +
-            `(paragraph ${f.paragraph}px inside container ${f.container}px) — "${f.text}"`,
-        ),
-        `At ${width}px, prose in an import session is stranded in a narrow column inside a ` +
-          `much wider box, beyond what KNOWN records for it. Shorten the copy first; then, per ` +
-          `composition, narrow the card or widen the measure. Do NOT raise MAX_DEAD_PX, and do ` +
-          `NOT raise an entry's maxDead to accommodate a regression.`,
-      ).toEqual([]);
-    });
-  }
+  /* ~~THE IMPORT SESSION — reached by doing~~ — removed 2026-11-16 with the in-browser
+     import flow; `/imports` is a static guide now and `PROSE_SURFACES` measures it. */
 
   /**
    * THE POSITIVE CONTROL, and this file is worth very little without it.

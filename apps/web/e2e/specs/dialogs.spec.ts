@@ -41,7 +41,7 @@ test.describe('@interaction ⌘K search dialog', () => {
     expect(name.length, 'the search dialog must have an accessible name').toBeGreaterThan(0);
 
     // Focus moves into the dialog, onto the query input.
-    const input = page.getByRole('searchbox', { name: /Search experiments and project memory/i });
+    const input = page.getByRole('searchbox', { name: /^Search experiments/i });
     await expect(input).toBeFocused();
 
     // Tab is contained: after many tabs, focus is still inside the dialog.
@@ -86,7 +86,7 @@ test.describe('@interaction ⌘K search dialog', () => {
   test('a query with no match states so rather than showing nothing', async ({ page, app }) => {
     await app.open(experiments);
     await page.locator('button.topbar-search').click();
-    const input = page.getByRole('searchbox', { name: /Search experiments and project memory/i });
+    const input = page.getByRole('searchbox', { name: /^Search experiments/i });
     await input.fill('zzzzzz-no-such-thing-zzzzzz');
     // The empty result must be *stated*. Any of the app's honest phrasings.
     await expect(page.getByRole('dialog')).toContainText(/no |nothing|0 result|not found/i, { timeout: 15_000 });

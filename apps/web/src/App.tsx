@@ -1,9 +1,8 @@
 import { BrowserRouter, Navigate, Route, Routes } from 'react-router-dom';
 import { DocumentTitle } from './lib/useDocumentTitle';
-import { ROUTE_PATTERNS, ROUTES } from './lib/routes';
+import { REDIRECT_ROUTE_PATTERNS, ROUTE_PATTERNS, ROUTES } from './lib/routes';
 import { ExperimentsHome } from './screens/ExperimentsHome';
-import { HistoricalImport } from './screens/HistoricalImport';
-import { LoadMaterials } from './screens/LoadMaterials';
+import { HistoricalImportGuide } from './screens/HistoricalImportGuide';
 import { RecordWorkbench } from './screens/RecordWorkbench';
 import { GuidedCompletion } from './screens/GuidedCompletion';
 import { EvidenceExplorer } from './screens/EvidenceExplorer';
@@ -15,6 +14,7 @@ import { SettingsPage } from './screens/SettingsPage';
 import { SchemaProposals } from './screens/SchemaProposals';
 import { LocalImports } from './screens/LocalImports';
 import { NotFound } from './screens/NotFound';
+import { devToolsEnabled } from './lib/devTools';
 
 /** The route table. Record sub-surfaces (complete/evidence/export) are nested
  * under /record/:id. Exported separately so tests can mount it under a router. */
@@ -36,13 +36,18 @@ export function AppRoutes() {
       <Routes>
         <Route path="/" element={<Navigate to={ROUTES.experiments} replace />} />
         <Route path={ROUTE_PATTERNS.experiments} element={<ExperimentsHome />} />
-        <Route path={ROUTE_PATTERNS.imports} element={<HistoricalImport />} />
-        <Route path={ROUTE_PATTERNS.load} element={<LoadMaterials />} />
+        {/* Historical import is done with the Claude Code skill; `/imports` is its guide,
+            and an old `?import=…&stage=…` link lands on it (`HistoricalImportGuide`). */}
+        <Route path={ROUTE_PATTERNS.imports} element={<HistoricalImportGuide />} />
+        {/* `/load` held only the walkthrough's Start button, which My Experiments has. */}
+        <Route path={REDIRECT_ROUTE_PATTERNS.load} element={<Navigate to={ROUTES.experiments} replace />} />
         <Route path={ROUTE_PATTERNS.record} element={<RecordWorkbench />} />
         <Route path={ROUTE_PATTERNS.complete} element={<GuidedCompletion />} />
         <Route path={ROUTE_PATTERNS.evidence} element={<EvidenceExplorer />} />
         <Route path={ROUTE_PATTERNS.export} element={<ExportReadiness />} />
-        <Route path={ROUTE_PATTERNS.memory} element={<ProjectMemory />} />
+        {/* Project Memory maps this repository's own docs: a developer tool, shown only
+            with `VITE_ISAAC_DEV_TOOLS=1` (`lib/devTools.ts`). */}
+        <Route path={ROUTE_PATTERNS.memory} element={<DevOnlyMemory />} />
         <Route path={ROUTE_PATTERNS.governance} element={<GovernanceRoute />} />
         <Route path={ROUTE_PATTERNS.statistics} element={<StatisticsPage />} />
         <Route path={ROUTE_PATTERNS.schemaProposals} element={<SchemaProposals />} />
@@ -70,6 +75,12 @@ export function AppRoutes() {
       </Routes>
     </>
   );
+}
+
+/** `/memory` with the developer flag; My Experiments without it. Decided at render, so a
+ *  test can turn the flag on with `vi.stubEnv`. */
+function DevOnlyMemory() {
+  return devToolsEnabled() ? <ProjectMemory /> : <Navigate to={ROUTES.experiments} replace />;
 }
 
 /** Router basename from Vite's base ('/' locally and under vitest; '/krish/'

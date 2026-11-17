@@ -2,18 +2,14 @@ import { describe, it, expect, afterEach, vi } from 'vitest';
 import { render, fireEvent, within } from '@testing-library/react';
 import { MemoryRouter, useLocation } from 'react-router-dom';
 import { AppRoutes } from '../App';
-import { RUN_COMMAND, setTutorialScope } from '../lib/api';
-import { __bootTutorialStore } from '../lib/tutorialController';
+import { RUN_COMMAND } from '../lib/api';
 import { NEEDSYOU_VISIBLE, NEEDSYOU_VISIBLE_GROUPS } from '../screens/RecordWorkbench';
 import {
-  EXP_ID,
   bundleRoutes,
-  demoRunDraftOnly,
   experimentSummary,
   exportedSummary,
   stubFetchDown,
   stubFetchRoutes,
-  uploadsBlocked,
 } from '../test/apiFixtures';
 import { selectValue } from '../test/controls';
 
@@ -124,56 +120,8 @@ describe('S1 · My Experiments renders live queue groups from injected data', ()
   });
 });
 
-describe('S2 · Load Materials', () => {
-  /* ~~"Try an Upload" and the 403 it showed~~ — retired 2026-11-02 with the "Can I Load
-     My Own Files?" widget and the GovernanceBanner (owner's direction). The screen
-     now asks the upload route nothing and offers no file control. */
-  it('offers no upload control and no file input, and asks the upload route nothing', async () => {
-    const hits = stubFetchRoutes({ 'POST /api/uploads': { status: 403, body: uploadsBlocked } });
-    const { container, queryByRole, getByRole } = renderAt('/load');
-    expect(container.querySelector('input[type="file"]')).toBeNull();
-    expect(queryByRole('button', { name: 'Try an Upload' })).toBeNull();
-    expect(getByRole('heading', { name: 'Guided Walkthrough' })).toBeInTheDocument();
-    await new Promise((r) => setTimeout(r, 20));
-    expect(hits).not.toContain('POST /api/uploads');
-  });
-
-  it('with the backend down, the screen still renders and shows no governance copy', () => {
-    stubFetchDown();
-    const { queryByText, getByRole } = renderAt('/load');
-    expect(getByRole('heading', { name: 'Guided Walkthrough' })).toBeInTheDocument();
-    expect(queryByText(/Blocked by governance/)).toBeNull();
-    expect(queryByText(new RegExp(uploadsBlocked.reason))).toBeNull();
-  });
-
-  it('the example run renders the real POST /api/demo/run steps — the old mock figures are gone', async () => {
-    stubFetchRoutes({ 'POST /api/demo/run': { body: demoRunDraftOnly } });
-    // INSIDE A WORKED EXAMPLE (B-05): outside one the card offers "Launch Guided Demo"
-    // instead, because the run endpoint refuses any unscoped request. This test used
-    // to press the run button from the ordinary workspace, which only ever "worked"
-    // because the server was stubbed to say yes.
-    setTutorialScope('session-for-load-tests');
-    __bootTutorialStore();
-    const { findByText, getByText, queryByText } = renderAt('/load');
-
-    fireEvent.click(getByText('Run the Worked Example'));
-
-    // the returned pipeline steps, verbatim details
-    expect(await findByText('Build Draft')).toBeInTheDocument();
-    expect(getByText('26 evidenced fields, 5 pending blocker(s)')).toBeInTheDocument();
-    expect(getByText('Validate Draft')).toBeInTheDocument();
-    expect(getByText('draft ok: true')).toBeInTheDocument();
-
-    // paused honestly + a route into the new record
-    expect(getByText('paused for your input · your turn')).toBeInTheDocument();
-    expect(getByText('Open the Record →')).toBeInTheDocument();
-    expect(getByText(EXP_ID)).toBeInTheDocument();
-
-    // inherited fix: the non-summing mock runner figures must not render
-    expect(queryByText('26 fields')).toBeNull();
-    expect(queryByText('12 verified · 3 inferred')).toBeNull();
-  });
-});
+// ~~S2 · Load Materials~~ — retired 2026-11-16: `/load` redirects to My Experiments, and
+// the walkthrough's Start button lives there (`create-experiment.test.tsx`).
 
 describe('S3 · Review Record (live bundle)', () => {
   // P33 S4 (D8) — the right rail is the assistant ONLY. The former right-rail

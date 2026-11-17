@@ -21,7 +21,6 @@ import {
   BarChartHorizontal,
   CircleHelp,
   History,
-  Inbox,
   LayoutList,
   ShieldCheck,
   Workflow,
@@ -37,7 +36,6 @@ import type { FetchState } from '../../lib/useFetch';
 import {
   EVIDENCE_CLASSES,
   deriveEvidenceTotals,
-  deriveImportSteps,
   deriveOpenQuestionDistribution,
   deriveOpenQuestions,
   deriveWorkflowStages,
@@ -55,7 +53,6 @@ import {
 type Fetched<T> = FetchState<T> & { reload: () => void };
 export type RecordsFetch = Fetched<{ records: RuntimeRecord[]; total: number }>;
 export type ActivityFetch = Fetched<ApiActivitySummary>;
-export type ImportsFetch = Fetched<unknown>;
 
 function count(n: number): string {
   return n.toLocaleString('en-US');
@@ -495,47 +492,8 @@ export function EvidenceWidget({ records }: { records: RecordsFetch }) {
   );
 }
 
-/* ---- Historical Imports ------------------------------------------------- */
-
-export function ImportsWidget({ imports }: { imports: ImportsFetch }) {
-  const steps = imports.status === 'data' ? deriveImportSteps(imports.data) : null;
-  return (
-    <Widget
-      id="stats-imports"
-      title="Historical Imports"
-      icon={<Inbox size={18} strokeWidth={2} aria-hidden="true" />}
-      info={<p>Each import session is counted once, at the furthest step it has reached.</p>}
-      headline={
-        steps !== null && steps.sessions !== null && steps.sessions > 0 ? (
-          <HeadlineFigure label="Import Sessions" value={count(steps.sessions)} />
-        ) : null
-      }
-      footer={<Link to={ROUTES.imports}>{LABELS.navImports}</Link>}
-    >
-      {imports.status === 'loading' && <LoadingPanel label="Loading the import sessions…" />}
-      {/* Its only reader, so a dead source states itself here as the full alarm. */}
-      {imports.status === 'error' && <BackendDown error={imports.error} onRetry={imports.reload} />}
-      {steps !== null && steps.received === 0 && <p className="stats-note">No import sessions yet.</p>}
-      {steps !== null && steps.received > 0 && (
-        <>
-          {steps.sessions !== null && steps.sessions !== steps.received && (
-            <UnavailableNote>
-              Showing {count(steps.received)} of {count(steps.sessions)} sessions.
-            </UnavailableNote>
-          )}
-          <StatsBarChart
-            caption={`Import sessions by furthest step, out of ${count(steps.received)}`}
-            captionHidden
-            rows={steps.rows.filter((row) => row.value > 0)}
-            unit="sessions"
-            total={steps.received}
-            categoryHeader="Furthest Step"
-          />
-        </>
-      )}
-    </Widget>
-  );
-}
+/* ~~---- Historical Imports ----~~ — the widget was removed 2026-11-16: it counted
+   `/api/imports` sessions, which nothing on the site creates now. */
 
 /* ---- the whole-workspace empty state ------------------------------------ */
 
@@ -566,19 +524,16 @@ export function EmptyWorkspaceWidget() {
  * one: Records + Open Questions, Activity + Kinds of Change, then three narrow.
  *
  * An EMPTY workspace collapses the five record-derived widgets into one empty
- * state, because five widgets each saying "no records yet" is noise. Imports stay:
- * a session can exist before any experiment does.
+ * state, because five widgets each saying "no records yet" is noise.
  */
 export function OverviewDashboard({
   records,
   activity,
-  imports,
   activityDays,
   onActivityDays,
 }: {
   records: RecordsFetch;
   activity: ActivityFetch;
-  imports: ImportsFetch;
   activityDays: number | undefined;
   onActivityDays: (days: number | undefined) => void;
 }) {
@@ -589,7 +544,6 @@ export function OverviewDashboard({
       {empty ? (
         <>
           <EmptyWorkspaceWidget />
-          <ImportsWidget imports={imports} />
         </>
       ) : (
         <>
@@ -603,7 +557,6 @@ export function OverviewDashboard({
           <ChangeKindsWidget activity={activity} />
           <WorkflowWidget records={records} />
           <EvidenceWidget records={records} />
-          <ImportsWidget imports={imports} />
         </>
       )}
     </div>

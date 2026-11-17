@@ -320,10 +320,16 @@ const CEILING = {
    * `.settings-tab-note` and `.onramp-warn` rules. Those took the counter past
    * the tolerance below main's 1015 (the earlier declutter PRs had already
    * removed the rest of the drop). Read from the counter.
+   *
+   * -> 971 (and `fontWeight` 282 -> 266, `lineHeight` 421 -> 392), LOWERED 2026-11-16
+   * in the same change that deleted the in-browser Historical Import flow
+   * (`historical-import.css`, `import-file-staging.css`, `bl15-review.css`) and Load
+   * Materials (`runner.css`). The new guide's sheet (`historical-import-guide.css`) is
+   * tokens only apart from 1px borders. Read from the counter.
    */
-  fontSize: 986,
-  fontWeight: 282,
-  lineHeight: 421,
+  fontSize: 971,
+  fontWeight: 266,
+  lineHeight: 392,
   /*
    * ~~spacing: 2400~~ -> 2368, LOWERED 2026-09-22 in the same change that removed
    * the literals (owner QA phase 2): the record-screen redesign replaced hand-set
@@ -346,8 +352,11 @@ const CEILING = {
    * literals under main's then-ceiling of 2318. Combined with this branch's
    * deletions the counter reads 2291 — still 27 below main's ceiling. Read from
    * the counter.
+   *
+   * -> 2239, LOWERED 2026-11-16 for the same deletion as `fontSize` above. Read from
+   * the counter.
    */
-  spacing: 2291,
+  spacing: 2239,
   /**
    * font-size declarations BELOW the 11px floor: 9.5px ×1, 10px ×14, 10.5px ×84.
    *
@@ -363,6 +372,8 @@ const CEILING = {
    * a one-declaration fix does not warrant moving both ends of a ratchet sized
    * for the palette-wide work that remains.
    */
+  /* 2026-11-16: the counter reads 90 after the Historical Import / Load Materials
+     deletion. The ceiling is kept, for the reason the note above gives. */
   belowFloor: 100,
   /** the three grandfathered non-standard weights: 650 ×54, 550 ×8, 620 ×5. */
   nonStandardWeight: 67,

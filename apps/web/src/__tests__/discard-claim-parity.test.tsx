@@ -277,7 +277,7 @@ describe('§1 the deletion this copy must not claim does not exist', () => {
    */
   it('every DELETE this client declares reaches no note, record, run, conflict, asset or answer', () => {
     /*
-     * NOT "there is no DELETE" — there are three, and stating the stronger claim
+     * NOT "there is no DELETE" — there is one (three until 2026-11-16), and stating the stronger claim
      * would have been the same kind of error this file exists to catch.
      *
      * What matters for §3 is that no note, record, run, conflict, asset or answer
@@ -296,11 +296,9 @@ describe('§1 the deletion this copy must not claim does not exist', () => {
 
     // The enumeration is still asserted — it is how a reviewer sees a new one —
     // but it is the LIST that is pinned, with each member's justification above.
-    expect(deletePaths.sort()).toEqual([
-      '/imports/${enc(importId)}',
-      '/imports/${enc(importId)}/sources/${enc(sourceId)}',
-      '/tutorial/sessions/${enc(sessionId)}',
-    ]);
+    // ONE since 2026-11-16: the two import-session DELETEs left the client with the
+    // in-browser import flow (`deleteImport`, `removeImportSource`).
+    expect(deletePaths.sort()).toEqual(['/tutorial/sessions/${enc(sessionId)}']);
     // Every DELETE is accounted for by the list — none is written some other way.
     expect(deleteCount).toBe(deletePaths.length);
 

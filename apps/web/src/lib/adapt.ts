@@ -10,7 +10,6 @@ import { duplicateDisplayTitles, isAmbiguousTitle } from './library';
 import type {
   AdvisoryResult,
   ApiAuditResponse,
-  ApiDemoStep,
   ApiDraftGroup,
   ApiEvidenceEntry,
   ApiExperimentStatus,
@@ -32,7 +31,6 @@ import type {
   PendingBlocker,
   QueueGroup,
   QueueGroupKey,
-  RunnerStage,
   SourceType,
   ValidationResult,
 } from './types';
@@ -1233,19 +1231,3 @@ export function provenanceFor(entry: EvidenceTrailEntry): string {
     : sentence;
 }
 
-// --- S2 demo runner -----------------------------------------------------
-
-/** Render the real demo/run steps as the staged progress list. */
-export function demoStepsToStages(steps: ApiDemoStep[]): RunnerStage[] {
-  return steps.map((s) => ({
-    key: s.name,
-    label: titleCase(s.name.replace(/_/g, ' ')),
-    command: s.name,
-    // `failed`, NOT `current`. `current` was collapsed into `done` by StagedRunner
-    // and rendered with the success check mark, so a step the server reported as
-    // `ok: false` was presented as passing beside its own failure detail. The API
-    // gives exactly one signal here — `ok` — and it now survives to the render.
-    state: s.ok ? 'done' : 'failed',
-    detail: s.detail,
-  }));
-}

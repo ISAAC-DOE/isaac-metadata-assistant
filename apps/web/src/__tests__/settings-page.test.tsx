@@ -1,4 +1,4 @@
-import { describe, it, expect, afterEach, vi } from 'vitest';
+import { describe, it, expect, afterEach, beforeEach, vi } from 'vitest';
 import { readFileSync, readdirSync, statSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import { render, screen, fireEvent, within, act, waitFor } from '@testing-library/react';
@@ -204,6 +204,20 @@ function accessibleTextOf(el: Element): string {
   clone.querySelectorAll('[aria-hidden="true"]').forEach((n) => n.remove());
   return clone.textContent ?? '';
 }
+
+
+/*
+ * THE DEVELOPER FLAG IS ON FOR THIS FILE (2026-11-16). It covers Settings' Advanced tab (the Endpoint Explorer, Technical Details, the Project Memory link), which a
+ * build shows only with `VITE_ISAAC_DEV_TOOLS=1` (`lib/devTools.ts`). What a build
+ * WITHOUT the flag shows — no such tab, and where its old `?tab=` lands — is pinned in
+ * `dev-tools-flag.test.tsx`.
+ */
+beforeEach(() => {
+  vi.stubEnv('VITE_ISAAC_DEV_TOOLS', '1');
+});
+afterEach(() => {
+  vi.unstubAllEnvs();
+});
 
 afterEach(() => {
   vi.unstubAllGlobals();

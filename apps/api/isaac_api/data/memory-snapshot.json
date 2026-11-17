@@ -2668,36 +2668,6 @@
         ]
       }
     },
-    "apps/web/src/components/StagedRunner.tsx": {
-      "community_id": "52",
-      "community_name": "Official schema v1.05 (39)",
-      "file_type": "code",
-      "local_reference": "apps/web/src/components/StagedRunner.tsx",
-      "node_count": 3,
-      "on_disk": false,
-      "path": "apps/web/src/components/StagedRunner.tsx",
-      "rationales": [],
-      "related": {
-        "concepts": [],
-        "files": [
-          {
-            "file_type": "code",
-            "path": "apps/web/src/components/icons.tsx",
-            "relation": "imports_from"
-          },
-          {
-            "file_type": "code",
-            "path": "apps/web/src/lib/types.ts",
-            "relation": "imports"
-          },
-          {
-            "file_type": "code",
-            "path": "apps/web/src/screens/LoadMaterials.tsx",
-            "relation": "imports"
-          }
-        ]
-      }
-    },
     "apps/web/src/components/StatusBar.tsx": {
       "community_id": "153",
       "community_name": "technique",
@@ -4159,81 +4129,6 @@
             "file_type": "code",
             "path": "apps/web/src/lib/useFetch.ts",
             "relation": "calls"
-          }
-        ]
-      }
-    },
-    "apps/web/src/screens/LoadMaterials.tsx": {
-      "community_id": "150",
-      "community_name": "Security & data-incident policy",
-      "file_type": "code",
-      "local_reference": "apps/web/src/screens/LoadMaterials.tsx",
-      "node_count": 4,
-      "on_disk": false,
-      "path": "apps/web/src/screens/LoadMaterials.tsx",
-      "rationales": [],
-      "related": {
-        "concepts": [],
-        "files": [
-          {
-            "file_type": "code",
-            "path": "apps/web/src/App.tsx",
-            "relation": "imports"
-          },
-          {
-            "file_type": "code",
-            "path": "apps/web/src/components/AppShell.tsx",
-            "relation": "imports"
-          },
-          {
-            "file_type": "code",
-            "path": "apps/web/src/components/FetchStates.tsx",
-            "relation": "imports"
-          },
-          {
-            "file_type": "code",
-            "path": "apps/web/src/components/GovernanceBanner.tsx",
-            "relation": "imports"
-          },
-          {
-            "file_type": "code",
-            "path": "apps/web/src/components/StagedRunner.tsx",
-            "relation": "imports"
-          },
-          {
-            "file_type": "code",
-            "path": "apps/web/src/components/TopBar.tsx",
-            "relation": "imports"
-          },
-          {
-            "file_type": "code",
-            "path": "apps/web/src/components/icons.tsx",
-            "relation": "imports_from"
-          },
-          {
-            "file_type": "code",
-            "path": "apps/web/src/lib/adapt.ts",
-            "relation": "calls"
-          },
-          {
-            "file_type": "code",
-            "path": "apps/web/src/lib/api.ts",
-            "relation": "imports"
-          },
-          {
-            "file_type": "code",
-            "path": "apps/web/src/lib/labels.ts",
-            "relation": "imports"
-          },
-          {
-            "file_type": "code",
-            "path": "apps/web/src/lib/routes.ts",
-            "relation": "imports"
-          },
-          {
-            "file_type": "code",
-            "path": "apps/web/src/lib/types.ts",
-            "relation": "imports"
           }
         ]
       }
@@ -9112,14 +9007,6 @@
       "path": "apps/web/src/components/SourcePreview.tsx"
     },
     {
-      "community_id": "52",
-      "community_name": "Official schema v1.05 (39)",
-      "file_type": "code",
-      "node_count": 3,
-      "on_disk": false,
-      "path": "apps/web/src/components/StagedRunner.tsx"
-    },
-    {
       "community_id": "153",
       "community_name": "technique",
       "file_type": "code",
@@ -9278,14 +9165,6 @@
       "node_count": 4,
       "on_disk": false,
       "path": "apps/web/src/screens/GuidedCompletion.tsx"
-    },
-    {
-      "community_id": "150",
-      "community_name": "Security & data-incident policy",
-      "file_type": "code",
-      "node_count": 4,
-      "on_disk": false,
-      "path": "apps/web/src/screens/LoadMaterials.tsx"
     },
     {
       "community_id": "108",
@@ -10328,11 +10207,11 @@
       },
       {
         "path": "apps/web/src/App.tsx",
-        "sha256": "8c37dcf7b03224fc045e24427baa7d92a70d801beea29b085096a27a4e4f8475"
+        "sha256": "091737adba987e2091b11b0a415ad64bb7b5a62d95266ec7b8f7fa2663cb11fe"
       },
       {
         "path": "apps/web/src/__tests__/api.test.ts",
-        "sha256": "a85387c7a2598fb232146996eed0672cd2afe14eb1420150c5a8c739c213b7e7"
+        "sha256": "a21203e9b689875dcb6a18500a03600c37dcda19cc146715c58587dbfd0ac87f"
       },
       {
         "path": "apps/web/src/__tests__/assistant.test.tsx",
@@ -10360,7 +10239,7 @@
       },
       {
         "path": "apps/web/src/__tests__/live-screens.test.tsx",
-        "sha256": "8f993bdf86e90d4f3964cbd0b51edde9b4f78dc15bc78097b39f5f51ca39219f"
+        "sha256": "3e2eda34259b08e1c2968abfb21f325230de9554e3be5431236365b7eceb4db5"
       },
       {
         "path": "apps/web/src/__tests__/memory-concepts.test.tsx",
@@ -10384,7 +10263,7 @@
       },
       {
         "path": "apps/web/src/__tests__/navigation.test.tsx",
-        "sha256": "16e867ed30efc09ba71aca5a5c59798297e274f69483e370b9c20058bfed8b91"
+        "sha256": "3c0fd8d1f2b3f65aa51b29af560da5be463d32e69a3f46be4d35509fdb104541"
       },
       {
         "path": "apps/web/src/__tests__/no-vertical-rail.test.ts",
@@ -10392,7 +10271,7 @@
       },
       {
         "path": "apps/web/src/__tests__/screens.test.tsx",
-        "sha256": "245f3062a0b9fbaa1e549293b9fda0f53436e02dd5ee0d2ce778beda8a5f729d"
+        "sha256": "a8d606de8af5faf911272d02de9fb47305eea60c1b2784c256f743dc04327f0c"
       },
       {
         "path": "apps/web/src/__tests__/signals.test.tsx",
@@ -10412,7 +10291,7 @@
       },
       {
         "path": "apps/web/src/components/AssistantPanel.tsx",
-        "sha256": "712087d7706baee11f3488ed0cc97455d996a22ddbd7cd6341fa1a40ea731027"
+        "sha256": "991f094673e60c1894f1d5453837031a20440feb1207b65c20d09c1986f47467"
       },
       {
         "path": "apps/web/src/components/CoverageBadge.tsx",
@@ -10460,7 +10339,7 @@
       },
       {
         "path": "apps/web/src/components/HelpPanel.tsx",
-        "sha256": "1c8623952f5c41dfa8c899447c51e2dec1f586afa4424b95aba98b2dc920b371"
+        "sha256": "9bac91f4ceec9ab264d944b1414c77e7a208a82fd62d234a4bee9bf41e4bacd6"
       },
       {
         "path": "apps/web/src/components/LeftNav.tsx",
@@ -10469,10 +10348,6 @@
       {
         "path": "apps/web/src/components/SourcePreview.tsx",
         "sha256": "756f02f7aab4104d8c5b16e1778ea116d96df7c51e5051497308bcdb70a1cdcf"
-      },
-      {
-        "path": "apps/web/src/components/StagedRunner.tsx",
-        "sha256": "57c420d404491ed24c201277eefbdbd401fe3b467bb2c989947ab20f6a44cc97"
       },
       {
         "path": "apps/web/src/components/StatusBar.tsx",
@@ -10500,11 +10375,11 @@
       },
       {
         "path": "apps/web/src/lib/adapt.ts",
-        "sha256": "4f9e68c07be66b34fc554ae86ae4bb5e441bb57c999e063d5482a7ba9bea061d"
+        "sha256": "c082f5c1d44307f4a822bc0c6e5fc0348590d0756442fb9f53284f4ef75111da"
       },
       {
         "path": "apps/web/src/lib/api.ts",
-        "sha256": "40070831fdb529d2b52b4b272c58d652d1cdfc0fc3c1ede37796b2a61a303738"
+        "sha256": "c3c1eb1c8b90aedc5123df8a026c4244c9b03a151db3307f70a375a8b76ed02d"
       },
       {
         "path": "apps/web/src/lib/assistant.ts",
@@ -10512,11 +10387,11 @@
       },
       {
         "path": "apps/web/src/lib/labels.ts",
-        "sha256": "fcbaa18ed0af922ba2129ea6d85cdd1097238ceed57de3bb24aa07886a2a99c0"
+        "sha256": "9e35b5ca0a549f04954df060aec17006ce01af5545fa7fe70ea0f86107f89f6c"
       },
       {
         "path": "apps/web/src/lib/routes.ts",
-        "sha256": "1e9a533e78620e35989df50ad04e62fd1fb95d96c6dddd52edfe384867609f99"
+        "sha256": "5b688a3882ed7c78289aa1e0896adeec53923312ca76d97b5b69072ef56775e5"
       },
       {
         "path": "apps/web/src/lib/status.ts",
@@ -10540,7 +10415,7 @@
       },
       {
         "path": "apps/web/src/screens/ExperimentsHome.tsx",
-        "sha256": "308b0732df27ec1d78ef6d34302c65fc9a814803a9c3f6104fc6e45b41778483"
+        "sha256": "7909c4c7e85a698d72c6ba645b1faa717ae2deabd6934df5314b6c7dd0651233"
       },
       {
         "path": "apps/web/src/screens/ExportReadiness.tsx",
@@ -10555,10 +10430,6 @@
         "sha256": "5443e992051bd9c3d7099c3b447284bdfd0ee02c5c5f437c0205f4514c50c1ec"
       },
       {
-        "path": "apps/web/src/screens/LoadMaterials.tsx",
-        "sha256": "d47b127b645eaabcdcff682b6eb5f6dfbe019a33c91774c00e69aa5f19c111a5"
-      },
-      {
         "path": "apps/web/src/screens/ProjectMemory.tsx",
         "sha256": "d9b22f03b4d159e7b8a98827d359e240e6b07a15a0e9aba976bfc5e1cdcda1aa"
       },
@@ -10568,11 +10439,11 @@
       },
       {
         "path": "apps/web/src/screens/SettingsPage.tsx",
-        "sha256": "0b643299557677f1ea64158e0dcd18e46463a2014efea6770bf2edb5cf7ec2a2"
+        "sha256": "e083d382d4b84e6816329ea645bfe0501630068fde5515f61c258b6172baa520"
       },
       {
         "path": "apps/web/src/test/apiFixtures.ts",
-        "sha256": "b6f965383f8d4e47681d00c226e1eeec0469a7f954165387380ef47f8901ea6b"
+        "sha256": "a81610d2f37e822c46fcaf58afdae46a591e0e415edd6099973aed737cf1d119"
       },
       {
         "path": "apps/web/src/test/setup.ts",
@@ -10772,7 +10643,7 @@
       },
       {
         "path": "docs/ui-local-dev.md",
-        "sha256": "f8a41ff57795e2670ec8403fc1428e74107aab27be05dcafe5741d3fc00e1512"
+        "sha256": "7c9467bf93292eab03ff3632f3a1c7ed2ca57b131cf551543de3943c57fbb229"
       },
       {
         "path": "pyproject.toml",
@@ -11011,8 +10882,8 @@
         "sha256": "0cf2bc6bfd0b19acb5a09eea5b1ba7e2b6c638fcf88641d67ca1454a23ad325a"
       }
     ],
-    "served_file_count": 200,
-    "served_manifest_fingerprint": "ec2c9827a8132c5dc5d0f7b714bc25b78f37651a74385b7bc70a42357bd0b55d"
+    "served_file_count": 198,
+    "served_manifest_fingerprint": "898a39244289fa84b0f6b6db373d9b4fd713fed8522a7655e6be8b0ff5a3661f"
   },
   "overview": {
     "built_at_commit": "caab1d0a69c1733524bda5dde495623bc4b7bad1",
@@ -11022,7 +10893,7 @@
     "graph_mtime": null,
     "manifest_file_count": 262,
     "node_count": 2988,
-    "served_file_count": 201
+    "served_file_count": 199
   },
   "served": [
     ".claude/skills/isaac-complete/SKILL.md",
@@ -11090,7 +10961,6 @@
     "apps/web/src/components/HelpPanel.tsx",
     "apps/web/src/components/LeftNav.tsx",
     "apps/web/src/components/SourcePreview.tsx",
-    "apps/web/src/components/StagedRunner.tsx",
     "apps/web/src/components/StatusBar.tsx",
     "apps/web/src/components/StatusChip.tsx",
     "apps/web/src/components/TopBar.tsx",
@@ -11111,7 +10981,6 @@
     "apps/web/src/screens/ExportReadiness.tsx",
     "apps/web/src/screens/GovernancePage.tsx",
     "apps/web/src/screens/GuidedCompletion.tsx",
-    "apps/web/src/screens/LoadMaterials.tsx",
     "apps/web/src/screens/ProjectMemory.tsx",
     "apps/web/src/screens/RecordWorkbench.tsx",
     "apps/web/src/screens/SettingsPage.tsx",

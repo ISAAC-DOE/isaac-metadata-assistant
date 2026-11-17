@@ -138,9 +138,9 @@ export const OVERFLOW_ALLOWANCES: readonly OverflowAllowance[] = [
     // 2026-11-02 (Task 2 review ruling): the Settings tab row is one line that
     // scrolls sideways when it does not fit, rather than relying on it fitting at
     // 320px on CI's wider font.
-    surfaces: ['settings', 'settings-api', 'settings-explorer'],
+    surfaces: ['settings', 'settings-api'],
     reason:
-      'The Settings page tablist is a single row of three tabs. When they do not fit, the row ' +
+      'The Settings page tablist is a single row of tabs. When they do not fit, the row ' +
       'scrolls sideways INSIDE its own box; each tab is a real button reached by the arrow keys ' +
       '(roving tabindex), focus scrolls the row, and the selected tab is scrolled into view on ' +
       'every change. The page itself never scrolls with it.',
@@ -180,13 +180,6 @@ export const HIDDEN_TEXT_ALLOWANCES: readonly OverflowAllowance[] = [
     surfaces: [ANY_SURFACE],
     reason: 'The app-wide visually-hidden utility. Supplies accessible names/units to screen readers only.',
     evidence: 'apps/web/src/styles/base.css:293-302 — `.sr-only { width: 1px; height: 1px; overflow: hidden; clip: rect(0,0,0,0); }`',
-  },
-  {
-    id: 'ALLOW-GRAPH-VISUALLY-HIDDEN',
-    match: '.memory-graph-visually-hidden',
-    surfaces: ['memory-graph'],
-    reason: 'Surface-local visually-hidden utility naming the graph search box and the graph command field.',
-    evidence: 'apps/web/src/screens/graph/graph.css:73-74 — "visually-hidden utility (this surface only)"',
   },
   {
     id: 'ALLOW-VALIDATOR-VISUALLY-HIDDEN',

@@ -718,6 +718,5 @@ export function onThisPage(pathname: string): string {
   if (path.startsWith(ROUTES.settings)) return LABELS.helpOnPageSettings;
   if (path.startsWith(ROUTES.governance)) return LABELS.helpOnPageGovernance;
   if (path.startsWith(ROUTES.memory)) return LABELS.helpOnPageMemory;
-  if (path.startsWith(ROUTES.load)) return LABELS.helpOnPageLoad;
   return LABELS.helpOnPageUnknown;
 }

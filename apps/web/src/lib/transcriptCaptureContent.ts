@@ -778,10 +778,10 @@ export const CAPTURE_COPY = {
   claudeStarterNoRun:
     'No run is chosen, so the instruction names none — say which run your notes describe.',
 
-  /* Scoped exactly as Historical Import scopes itself (`historicalImportContent.lead`):
-     one layout read, everything else a reference, every candidate a suggestion. */
+  /* 2026-11-16: a past beamtime's files are imported with the ISAAC skill in Claude
+     Code, on the scientist's own computer; Historical Import is the guide to it. */
   filesImportLine:
-    'Historical Import reads one file layout today and keeps anything else as a reference. Each value it finds is a suggestion you decide on.',
+    'To turn a past beamtime’s files into records, use the ISAAC skill in Claude Code. Historical Import shows how.',
   filesAssetsLine: 'To reference a single file from this record, add it under Asset References.',
   filesAssetsAction: 'Open Asset References',
 

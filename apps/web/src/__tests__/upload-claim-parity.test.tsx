@@ -1,10 +1,11 @@
 /*
- * R1b · ONE upload claim, four sites — and the ban on the absolute form.
+ * R1b · ONE upload claim, four sites (three since 2026-11-16, when Load Materials went) —
+ * and the ban on the absolute form.
  *
  * WHY THIS FILE EXISTS. Four surfaces describe the same boundary to a reader:
  *
  *   - `screens/GovernancePage.tsx`   → Governance & Safety → Policy
- *   - `screens/LoadMaterials.tsx`    → the approval-gated on-ramp's warning line
+ *   - ~~`screens/LoadMaterials.tsx`~~ → retired 2026-11-16 (`/load` redirects to My Experiments)
  *   - `lib/settingsContent.ts`       → Settings → Data & Privacy →
  *                                      `no-real-experiment-data`
  *   - `lib/mcpConnectContent.ts`     → Settings → Connect Your Agent, the
@@ -144,7 +145,6 @@ import { MemoryRouter } from 'react-router-dom';
 
 import { HelpPanel } from '../components/HelpPanel';
 import { SettingsPage } from '../screens/SettingsPage';
-import { LoadMaterials } from '../screens/LoadMaterials';
 import { ConnectAnAgent, type ConnectAnAgentFacts } from '../screens/settings/ConnectAnAgent';
 import { ConnectYourAgentPanel } from '../screens/settings/ConnectYourAgent';
 import { dataRows } from '../lib/settingsContent';
@@ -152,7 +152,7 @@ import { aboutResponse, assistantCompanionUnconfigured, healthSynthetic, stubFet
 import { __resetHealthCache } from '../lib/useHealth';
 import { MCP_CAPABILITIES_REFUSED, MCP_CONNECT_COPY } from '../lib/mcpConnectContent';
 import { CAPTURE_COPY } from '../lib/transcriptCaptureContent';
-import { IMPORT_COPY } from '../lib/historicalImportContent';
+import { GUIDE_COPY } from '../lib/historicalImportGuide';
 
 afterEach(() => {
   cleanup();
@@ -266,20 +266,7 @@ async function policyTabText(): Promise<string> {
   return container.querySelector('.settings-panel')?.textContent ?? '';
 }
 
-async function loadMaterialsWarnText(): Promise<string> {
-  /* ~~The "Can I Load My Own Files?" widget's `.onramp-warn`~~ — retired 2026-11-02.
-     The whole Load Materials page is the site now. */
-  const { container } = render(
-    <MemoryRouter
-      initialEntries={['/load']}
-      future={{ v7_startTransition: true, v7_relativeSplatPath: true }}
-    >
-      <LoadMaterials />
-    </MemoryRouter>,
-  );
-  await settle();
-  return container.querySelector('.load-page')?.textContent ?? '';
-}
+/* ~~`loadMaterialsWarnText`~~ — retired 2026-11-16 with the Load Materials page. */
 
 /**
  * The Connect Your Agent tab's refused-capability row, as the reader meets it.
@@ -368,7 +355,7 @@ const SITES: Site[] = [
   /* Labels renamed 2026-11-02 (final review Minor 4) to the surfaces that exist now,
      so a failure message sends the reader to a real screen. */
   ['Settings → Overview (the ?tab=privacy address)', policyTabText],
-  ['the Load Materials page', loadMaterialsWarnText],
+  /* ~~['the Load Materials page', …]~~ — retired 2026-11-16: `/load` redirects. */
   ['Settings → Overview → Data card', lift(noRealDataDetail)],
   ['Settings → Connect Your Agent → the no-upload capability row', mcpNoUploadRow],
 ];
@@ -386,32 +373,25 @@ const SITES: Site[] = [
  * capture disclosure was outside two bans that would have held it.
  */
 /**
- * EVERY authored string the Historical Import surface renders, joined as ONE
- * ban surface. **The EIGHTH site, added 2026-09-13 with the destination itself.**
+ * EVERY authored string the Historical Import guide renders, joined as ONE ban surface.
+ * The EIGHTH site, added 2026-09-13 with the in-browser import flow; since 2026-11-16 the
+ * page is the guide to importing with the Claude Code skill (`lib/historicalImportGuide.ts`).
  *
- * WHY IT IS HERE AT ALL. That surface exists to say what this build does and does
- * not do with files a scientist points at — which is exactly the claim class this
- * file was written for, and exactly the class that has shipped false four times.
- * Adding the site with the feature, rather than after a review catches it, is the
- * lesson §26's fourth site taught: it "arrived late, and it arrived false",
- * passing this guard untouched because nobody had widened the list.
- *
- * WHY IT IS NOT A MEMBER OF `SITES`, for the reason the fifth, sixth and seventh
- * are not. §2's `SHARED_CLAIM` requires READER VOCABULARY — the validator, the
- * campaign-sheet preview, the in-memory bound — and this surface has no business
- * carrying any of it: it is not about those two controls, it is about an import
- * source. Forcing it into `SITES` would fail on correct copy, which is the
- * failure direction a ratchet may not have.
- *
- * WHAT IT DOES JOIN is every VOCABULARY-FREE ban: §3 (no absolute "no file is
- * read"), §3b (no reader-noun denial), §5 (no "the route does not exist") and §7.
- * The strings are read from the module rather than rendered, which is why the
- * module exists.
+ * It stays a ban surface because it still tells a scientist what happens to their files —
+ * the exact claim class this file was written for. It is not a member of `SITES`, for the
+ * reason the fifth, sixth and seventh are not: §2's `SHARED_CLAIM` requires the in-app
+ * readers' vocabulary (the validator, the campaign-sheet preview), and a page about the
+ * skill has no business carrying it. It joins every VOCABULARY-FREE ban: §3, §3b, §5, §7.
  */
 function historicalImportCopy(): string {
-  return Object.values(IMPORT_COPY)
-    .filter((value): value is string => typeof value === 'string')
-    .join(' ');
+  const out: string[] = [];
+  const walk = (value: unknown): void => {
+    if (typeof value === 'string') out.push(value);
+    else if (Array.isArray(value)) value.forEach(walk);
+    else if (value && typeof value === 'object') Object.values(value).forEach(walk);
+  };
+  walk(GUIDE_COPY);
+  return out.join(' ');
 }
 
 const ALL_BAN_SURFACES: Site[] = [
@@ -421,7 +401,7 @@ const ALL_BAN_SURFACES: Site[] = [
      the tab was retired it scanned the SAME Data-card text as the SITES member above,
      under a second name. */
   ['Settings → API Access → Connect an Agent (the guide)', lift(connectAnAgentGuide)],
-  ['Historical Import: every authored string', lift(historicalImportCopy)],
+  ['Historical Import (the skill guide): every authored string', lift(historicalImportCopy)],
 ];
 
 // --- §1 the readers this ban is justified by ---------------------------------
@@ -451,14 +431,10 @@ const FILE_READING_CONTROLS: [string, string][] = [
   ['the campaign-sheet reconciliation preview', 'components/CsvReconcilePanel.tsx'],
 ];
 
-/**
- * Reads a chosen file but SENDS NOTHING. Kept apart from the two above so the
- * app-wide census can be exact without the Help copy having to claim that all
- * three behave alike.
+/*
+ * ~~`LOCAL_ONLY_FILE_CONTROLS` — the historical-import file staging panel~~ — removed
+ * 2026-11-16 with the in-browser import flow (`components/ImportFileStaging.tsx` is gone).
  */
-const LOCAL_ONLY_FILE_CONTROLS: [string, string][] = [
-  ['the historical-import file staging panel', 'components/ImportFileStaging.tsx'],
-];
 
 /**
  * FOUR ON 2026-10-30, AND THE FOURTH IS DIFFERENT IN KIND AGAIN. The Schema Proposals page
@@ -481,28 +457,6 @@ describe('R1b §1 · the file-reading controls exist, so the absolute claim is f
     expect(src).toMatch(/new FileReader\(\)/);
     // ...reached from a real file picker, so a user can actually get there.
     expect(src).toMatch(/type="file"/);
-  });
-
-  /*
-   * THE THIRD CONTROL, ASSERTED ON ITS OWN TERMS. It is not folded into the
-   * `it.each` above because that block requires `file.text()` or `new
-   * FileReader()` — loosening it to also accept `arrayBuffer()` would weaken a
-   * guard covering two components in order to describe a third. This case
-   * instead asserts the property that makes the third one safe.
-   */
-  it('the staging panel reads a file only on request, and can send nothing', () => {
-    const src = rawSource('components/ImportFileStaging.tsx');
-    // It reaches bytes, so it belongs in the census...
-    expect(src).toMatch(/arrayBuffer\(\)/);
-    expect(src).toMatch(/type="file"/);
-    // ...and it cannot transmit them: no client, no transport, by construction.
-    expect(src).not.toMatch(/from '\.\.\/lib\/api'/);
-    expect(src).not.toMatch(/\bfetch\s*\(/);
-    expect(src).not.toMatch(/XMLHttpRequest/);
-    expect(src).not.toMatch(/FormData/);
-    // ...and the reader is told so, in words, in the component itself (2026-11-02:
-    // one plain sentence, "the file itself stays on this computer").
-    expect(src).toMatch(/file itself stays on this computer/);
   });
 
   it('the Schema Proposals drafts loader reads the chosen file in the browser and parses it there', () => {
@@ -555,7 +509,12 @@ describe('R1b §1 · the file-reading controls exist, so the absolute claim is f
    * *** FOUR AS OF 2026-10-30 *** — `screens/SchemaProposals.tsx` joins (its own list above).
    *   ~~'EXACTLY these three non-test files declare a file input — no fourth control'~~
    */
-  it('EXACTLY these four non-test files declare a file input — no fifth control', () => {
+  /*
+   * *** THREE AGAIN AS OF 2026-11-16 *** — `components/ImportFileStaging.tsx` left with the
+   * in-browser import flow.
+   *   ~~'EXACTLY these four non-test files declare a file input — no fifth control'~~
+   */
+  it('EXACTLY these three non-test files declare a file input — no fourth control', () => {
     const ATTRIBUTE = 'type="file"';
     function walk(dir: string): string[] {
       const out: string[] = [];
@@ -585,7 +544,6 @@ describe('R1b §1 · the file-reading controls exist, so the absolute claim is f
         'and a removed one means the §3 ban rests on nothing (see §1 above).',
     ).toEqual([
       'components/CsvReconcilePanel.tsx',
-      'components/ImportFileStaging.tsx',
       'components/RecordValidator.tsx',
       'screens/SchemaProposals.tsx',
     ]);
@@ -596,7 +554,7 @@ describe('R1b §1 · the file-reading controls exist, so the absolute claim is f
     // two — summing them here is what stops a future slice adding a fourth to
     // whichever list happens to be less guarded.
     expect(
-      [...FILE_READING_CONTROLS, ...LOCAL_ONLY_FILE_CONTROLS, ...FILE_TO_PROPOSAL_CONTROLS]
+      [...FILE_READING_CONTROLS, ...FILE_TO_PROPOSAL_CONTROLS]
         .map(([, path]) => path)
         .sort(),
     ).toEqual(declaring);

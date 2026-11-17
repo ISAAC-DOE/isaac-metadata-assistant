@@ -204,9 +204,10 @@ describe('My Experiments · the empty state', () => {
      * one a reader cannot middle-click, bookmark or open in a new tab, so the
      * distinction is real and the assertion keeps it.
      */
-    expect(
-      within(section).getByRole('link', { name: LABELS.actionOpenHistoricalImport }),
-    ).toBeInTheDocument();
+    /* 2026-11-16: a text link to the Historical Import guide (importing a past
+       beamtime is the Claude Code skill's job), no longer a card. */
+    const guide = within(section).getByRole('link', { name: LABELS.actionImportPastBeamtime });
+    expect(guide).toHaveAttribute('href', '/imports');
     /*
      * THE RETIRED SENTENCE, ASSERTED ABSENT. "This deployment cannot yet create or
      * import a record" was true when it was written and became false the moment
@@ -218,7 +219,7 @@ describe('My Experiments · the empty state', () => {
     expect(section.textContent).not.toMatch(/Or, without starting the walkthrough/i);
   });
 
-  it('gives Create Experiment the strongest treatment and the other three a real one', async () => {
+  it('gives Create Experiment the strongest treatment and the others a real one', async () => {
     await openEmptyState(EPHEMERAL);
     const section = panel();
 
@@ -259,10 +260,13 @@ describe('My Experiments · the empty state', () => {
     expect(demo.textContent).toBe(LABELS.actionStart);
     expect(LABELS.actionStartTutorial.startsWith(LABELS.actionStart)).toBe(true);
 
-    const importLink = within(section).getByRole('link', { name: LABELS.actionOpenHistoricalImport });
-    expect(importLink).toHaveClass('btn-secondary');
-    expect(importLink.textContent).toBe(LABELS.actionOpen);
-    expect(LABELS.actionOpenHistoricalImport.startsWith(LABELS.actionOpen)).toBe(true);
+    /* Historical Import is a ghost text link under the cards since 2026-11-16, beside
+       the validator's, linking to the skill guide. */
+    const importLink = within(section).getByRole('link', { name: LABELS.actionImportPastBeamtime });
+    expect(importLink).toHaveClass('btn-ghost');
+    expect(importLink).not.toHaveClass('btn-primary');
+    expect(importLink.closest('.queue-empty-action')).toBeNull();
+    expect(importLink.getAttribute('href')).toBe('/imports');
 
     const validator = within(section).getByRole('button', { name: LABELS.actionOpenValidator });
     expect(validator, 'Open Validator became a second primary').not.toHaveClass('btn-primary');
@@ -286,8 +290,9 @@ describe('My Experiments · the empty state', () => {
      * assertion below protects is unchanged — one primary, three peers.
      */
     // THREE since 2026-11-02: the Schema Validator left its card for a text link.
+    // TWO since 2026-11-16: Historical Import left its card for a text link too.
     const cards = section.querySelectorAll('.queue-empty-action');
-    expect(cards).toHaveLength(3);
+    expect(cards).toHaveLength(2);
     for (const card of cards) {
       expect(card.querySelector('.queue-empty-action-title')).not.toBeNull();
       expect(card.querySelector('.queue-empty-hint')).not.toBeNull();
