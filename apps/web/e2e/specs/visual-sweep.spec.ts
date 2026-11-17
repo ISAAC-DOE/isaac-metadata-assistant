@@ -277,7 +277,7 @@ const EXPECTED_STATE_IDS = [
   'error',
   'settings',
   'settings-replay',
-  'endpoint-explorer',
+  // ~~'endpoint-explorer'~~ — retired 2026-11-16 (Settings → Advanced is behind the developer flag).
   'settings-connect',
   'statistics-general',
   'validator',
@@ -533,7 +533,13 @@ const STATES: readonly VisualState[] = [
       // are what is asserted.
       const choices = empty.getByRole('list', { name: 'Ways to begin' });
       await expect(choices).toBeVisible();
-      await expect(choices.getByRole('listitem')).toHaveCount(3);
+      // TWO cards since 2026-11-16 (Create Experiment, the walkthrough): Historical
+      // Import left its card for a text link to the skill guide, asserted below.
+      await expect(choices.getByRole('listitem')).toHaveCount(2);
+      await expect(empty.getByRole('link', { name: 'Import a Past Beamtime' })).toHaveAttribute(
+        'href',
+        /\/imports$/,
+      );
       // The empty state's own primary. It did not exist when this sweep was
       // written; the heading stood in for it because the screen offered nothing.
       // ~~`'Start Guided Walkthrough'`~~ (CI, PR #291): the control is named by this
