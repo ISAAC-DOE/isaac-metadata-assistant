@@ -31,8 +31,11 @@ COMMANDS
     carries the run's file ``stem`` (and ``path`` when two runs share a stem).
 
 ``isaac bundle show <dir> run|conflict|candidate|source|question <id>``
-    One object as JSON. ``processing-result <result_id>``: one processing result, compact (QC, flags,
-    steps' outcomes, Athena comparison and every Athena version with its id; lists are counted, not printed).
+    One object as JSON. ``processing-result <result_id> [--full]``: one processing result, compact (QC, flags,
+    steps' outcomes, Athena comparison and every Athena version with its id; lists are counted, not printed), its
+    ``scan_selection`` proposal (status, stable window, observations, each scan with a remark: proposal, reasons,
+    sentence) and its ``scientist_quick_merges`` (a rough reference: file, match, verdict, assumptions, key metrics);
+    ``--full`` adds every scan row and the metrics.
 
 ``isaac bundle check <dir>``
     Re-validate the bundle against v1: schema, bounds, references, and the state rule.
@@ -797,6 +800,10 @@ def _row(kind: str, obj: Mapping, group_status: Mapping | None = None) -> dict:
             "output_files": len(files),
             "plot": next((f.get("relative_path") for f in files if f.get("role") == "plot"), None),
             "athena_agreement": comparison.get("verdict"),
+            # the scientists' quick beamtime merges, a ROUGH reference (never the answer key), and the scan-selection
+            # proposal in a few words (never applied); the full blocks are in `bundle show <dir> processing-result <id>`
+            **({"quick_merge_agreement": qm} if (qm := quick_merge_agreement(obj)) else {}),
+            **({"scan_selection": sb} if (sb := scan_selection_brief(obj)) else {}),
             "athena_versions": len(obj.get("athena_versions") or ()),
             # the ids `decide --decision select_athena_version --value <version_id>` takes, with what names them
             **({"athena_version_choices": [_athena_version_brief(v) for v in obj["athena_versions"]]} if obj.get("athena_versions") else {}),
@@ -1365,7 +1372,173 @@ def _calibration_view(bundle: Mapping, r: Mapping) -> dict | None:
     return out | {"would_apply": would}
 
 
-def _processing_result_view(bundle: Mapping, r: Mapping) -> dict:
+#: ``show processing-result``: how many per-scan rows of a scan-selection proposal are printed (``--full`` prints all).
+#: Scans proposed for leaving out or for a look always come first; plain includes are said as one range line.
+SELECTION_ROWS_SHOWN = 20
+#: ... and how many of a group's linked quick merges.
+QUICK_MERGES_SHOWN = 10
+#: The quick-merge metrics ``show processing-result`` prints (the rest with ``--full``).
+_QUICK_MERGE_METRICS = ("rms_norm", "e0_delta_eV", "e0_isaac_eV", "e0_found_in_it_eV", "edge_step_isaac",
+                        "edge_step_scientist", "overlap_points", "points")
+#: The proposals a scan-selection row can carry that ask the scientist something.
+_SEL_EXCLUDE, _SEL_LOOK, _SEL_INCLUDE = "exclude_proposed", "needs_look", "include"
+
+
+def _selection_numbers(r: Mapping) -> list:
+    """The scan number of each row of ``r``'s scan-selection proposal (one row per input, in input order), or the
+    row's own ``scan``; ``None`` where no number is known."""
+    from . import bundle as B
+
+    rows = list(((r.get("scan_selection") or {}).get("scans")) or ())
+    inputs = list(r.get("inputs") or ())
+    numbers = B.input_scan_numbers(inputs)[0] if len(inputs) == len(rows) else [None] * len(rows)
+    out = []
+    for row, n in zip(rows, numbers):
+        own = row.get("scan")
+        out.append(n if isinstance(n, int) else own if isinstance(own, int) and not isinstance(own, bool) else None)
+    return out
+
+
+def _scans_named(nums: Sequence, files: Sequence[str]) -> str:
+    """Scans said by number ("1,3-4") when every one has a number and none repeats, else by file name."""
+    if nums and all(isinstance(n, int) for n in nums) and len(set(nums)) == len(nums):
+        return f"scan{'s' if len(nums) > 1 else ''} {_scan_ranges(nums)}"
+    return ", ".join(files)
+
+
+def scan_selection_brief(r: Mapping) -> str | None:
+    """A ``list processing-results`` row's scan-selection line: "proposes leaving out 3 of 9 merged scans (scans
+    1,3-4)", with the scans to look at; ``None`` for a result with no proposal."""
+    sel = r.get("scan_selection")
+    if not isinstance(sel, Mapping):
+        return None
+    if sel.get("status") != "evaluated":
+        return "not evaluated (nothing proposed)"
+    rows = list(sel.get("scans") or ())
+    nums = _selection_numbers(r)
+    merged = [k for k, x in enumerate(rows) if x.get("proposal") in (_SEL_INCLUDE, _SEL_LOOK, _SEL_EXCLUDE)]
+
+    def named(kind):
+        ks = [k for k in merged if rows[k].get("proposal") == kind]
+        return ks, _scans_named([nums[k] for k in ks], [str(rows[k].get("file")) for k in ks])
+
+    exc, exc_named = named(_SEL_EXCLUDE)
+    look, look_named = named(_SEL_LOOK)
+    parts = []
+    if exc:
+        parts.append(f"proposes leaving out {len(exc)} of {len(merged)} merged scans ({exc_named})")
+    if look:
+        parts.append(f"{len(look)} to look at ({look_named})")
+    line = "; ".join(parts) if parts else f"nothing proposed ({len(merged)} merged scans judged)"
+    return _short(line + ("; not applied" if parts else ""), 240)
+
+
+def quick_merge_agreement(r: Mapping) -> str | None:
+    """A ``list processing-results`` row's agreement with the scientists' quick beamtime merges (a ROUGH reference):
+    each linked merge's verdict, or ``None`` when none is linked."""
+    from .processing.quick_merge import RESULT_KEY
+
+    qms = [q for q in r.get(RESULT_KEY) or () if isinstance(q, Mapping)]
+    if not qms:
+        return None
+    return ", ".join(str(q.get("verdict")) for q in qms[:QUICK_MERGES_SHOWN]) + (
+        f", and {len(qms) - QUICK_MERGES_SHOWN} more" if len(qms) > QUICK_MERGES_SHOWN else "") + " (rough reference)"
+
+
+def _scan_selection_view(r: Mapping, *, full: bool = False) -> dict | None:
+    """``show processing-result``'s ``scan_selection``: status, the stable window, the edge-step observation, and per
+    scan its proposal, reasons and sentence. No metric unless ``full``; rows bounded by :data:`SELECTION_ROWS_SHOWN`
+    (the scans proposed for leaving out or a look first, plain includes said as one line)."""
+    sel = r.get("scan_selection")
+    if not isinstance(sel, Mapping):
+        return None
+    rows = list(sel.get("scans") or ())
+    nums = _selection_numbers(r)
+    out: dict = {"rule_id": sel.get("rule_id"), "status": sel.get("status"),
+                 **({"detail": sel["detail"]} if sel.get("detail") else {}),
+                 "open": bool(sel.get("open")), "applied": False,
+                 "series": sel.get("series_id") or sel.get("series_meaning"), "e0_series_eV": sel.get("e0_series_eV")}
+    counts: dict[str, int] = {}
+    for x in rows:
+        counts[str(x.get("proposal"))] = counts.get(str(x.get("proposal")), 0) + 1
+    out["counts"] = counts
+    of_file = {str(x.get("file")): n for x, n in zip(rows, nums)}
+    window = list(sel.get("stable_window") or ())
+    out["stable_window"] = (_scans_named([of_file.get(str(f), f if isinstance(f, int) else None) for f in window],
+                                         [str(f) for f in window]) if window else None)
+    if sel.get("evolving_metrics"):
+        out["evolving_metrics"] = list(sel["evolving_metrics"])
+    out["observations"] = list(sel.get("group_observations") or ())  # the edge-step observation: never a reason
+    if full:
+        out["edge_step_change"] = sel.get("edge_step_change")
+        out["merge_snr"] = sel.get("merge_snr")
+        out["change_point"] = sel.get("change_point")
+
+    def row(x, n):
+        return {"scan": n, "file": x.get("file"), "proposal": x.get("proposal"), "reasons": list(x.get("reasons") or ()),
+                "said": "; ".join(str(s) for s in x.get("said") or ()),
+                **({"exclude_as": x.get("exclude_as")} if x.get("proposal") in (_SEL_EXCLUDE, _SEL_LOOK) else {}),
+                **({"metrics": _compact(x.get("metrics") or {})} if full else {})}
+
+    rank = {_SEL_EXCLUDE: 0, _SEL_LOOK: 1}
+    order = sorted(range(len(rows)), key=lambda k: (rank.get(rows[k].get("proposal"), 2), k))
+    plain = [k for k in order if rows[k].get("proposal") == _SEL_INCLUDE and not rows[k].get("reasons")]
+    shown = order if full else [k for k in order if k not in plain]
+    if not full and plain:
+        out["included_without_remark"] = _scans_named([nums[k] for k in plain], [str(rows[k].get("file")) for k in plain])
+    cap = len(shown) if full else SELECTION_ROWS_SHOWN
+    out["scans"] = [row(rows[k], nums[k]) for k in sorted(shown[:cap])]
+    if len(shown) > cap:
+        out["scans_not_shown"] = len(shown) - cap
+        out["scans_not_shown_note"] = ("only scans with a remark are listed; the rest are counted here (pass --full "
+                                       "for every row); the qc.statements.scan_selection sentence names every scan "
+                                       "proposed for leaving out or a look")
+    return out
+
+
+def _quick_merges_view(r: Mapping, *, full: bool = False) -> list | None:
+    """``show processing-result``'s ``scientist_quick_merges``: each linked quick merge (a ROUGH reference, never the
+    answer key): file, how it was matched, role, verdict, assumptions and the key metrics."""
+    from .processing.quick_merge import RESULT_KEY
+
+    qms = [q for q in r.get(RESULT_KEY) or () if isinstance(q, Mapping)]
+    if not qms:
+        return None
+    rows = list(((r.get("scan_selection") or {}).get("scans")) or ())
+    of_file = {str(x.get("file")): n for x, n in zip(rows, _selection_numbers(r))}
+    out = []
+    for q in qms[: len(qms) if full else QUICK_MERGES_SHOWN]:
+        mb = q.get("matched_by") or {}
+        m = q.get("metrics") or {}
+        raw = q.get("raw_comparison") or {}
+        view = {
+            "processed_output_id": q.get("processed_output_id"), "file": q.get("relative_path"),
+            "matched_by": {k: mb.get(k) for k in ("rule_id", "run_id", "status") if mb.get(k) is not None},
+            "role": q.get("role"), "preferred_for_record": False, "treated_as_truth": False,
+            "verdict": q.get("verdict"), **({"reason": q["reason"]} if q.get("reason") else {}),
+            "normalization": q.get("normalization"), "assumptions": list(q.get("assumptions") or ()),
+            "metrics": ({k: v for k, v in m.items() if not isinstance(v, (list, dict))} if full
+                        else {k: m[k] for k in _QUICK_MERGE_METRICS if k in m}),
+            **({"raw_comparison": {k: raw.get(k) for k in ("median_ratio_to_isaac_merged_mu", "relative_rms_residual")}}
+               if raw else {}),
+            **({"tolerances": q["tolerances"]} if q.get("tolerances") else {}),
+            "statement": q.get("statement"),
+        }
+        hint = q.get("scan_subset_hint")
+        if isinstance(hint, Mapping):
+            left = [str(f) for f in hint.get("scans_not_in_it") or ()]
+            view["scan_subset_hint"] = {
+                **{k: hint.get(k) for k in ("tried", "subsets_tried", "subsets_that_rebuild", "applied") if k in hint},
+                **({"scans_not_in_it": _scans_named([of_file.get(f) for f in left], left)} if left else {}),
+                **({"statement": hint["statement"]} if hint.get("statement") else {}),
+            }
+        out.append(view)
+    if len(qms) > len(out):
+        out.append({"not_shown": len(qms) - len(out), "note": "pass --full to print every linked quick merge"})
+    return out
+
+
+def _processing_result_view(bundle: Mapping, r: Mapping, *, full: bool = False) -> dict:
     """One processing result, compact: what a reviewer needs to decide it and to pick an Athena version.
     Arrays (per-scan lists, flagged points) are counted, not printed; the result as the run first wrote it is in ``result_file`` (written once, never rewritten: the current
     sentences are in this output)."""
@@ -1415,7 +1588,7 @@ def _processing_result_view(bundle: Mapping, r: Mapping) -> dict:
         qc = {**qc, "statements": {k: (v.replace(f"it records the group as made from the file '{A_NULL}'",
                                                  "the project does not name its source file") if isinstance(v, str) else v)
                                    for k, v in said.items()}}
-    return _compact({
+    view = _compact({
         "result_id": B.processing_id(r),
         "group_id": r.get("group_id"),
         "group_status": status.get(r.get("group_id")),
@@ -1448,6 +1621,15 @@ def _processing_result_view(bundle: Mapping, r: Mapping) -> dict:
         "questions": r.get("questions") or [],
         "result_file": f"{run_dir}/result.json" if run_dir else None,
     })
+    # added after the compaction: bounded by their own row limits (SELECTION_ROWS_SHOWN, QUICK_MERGES_SHOWN), so
+    # ``--full`` can print every row without a long list being counted away
+    selection = _scan_selection_view(r, full=full)
+    if selection is not None:
+        view["scan_selection"] = selection
+    quick = _quick_merges_view(r, full=full)
+    if quick is not None:
+        view["scientist_quick_merges"] = quick
+    return view
 
 
 #: ``bundle list`` kinds printed one row per line (see :func:`_dumps_rows_inline`).
@@ -1474,7 +1656,7 @@ def cmd_bundle_show(args) -> int:
         if r is None:
             _err(f"No processing-result with id {args.id!r} in this bundle (`bundle list <dir> processing-results` lists them).")
             return EXIT_NOT_FOUND
-        print(json.dumps(_processing_result_view(bundle, r), indent=1, ensure_ascii=False))
+        print(json.dumps(_processing_result_view(bundle, r, full=getattr(args, "full", False)), indent=1, ensure_ascii=False))
         return EXIT_OK
     section, key = _SHOW_SECTION[args.kind]
     for obj in bundle.get(section) or ():
@@ -2439,6 +2621,9 @@ def build_parser(prog: str = "isaac") -> argparse.ArgumentParser:
     q.add_argument("bundle_dir")
     q.add_argument("kind", choices=SHOW_KINDS)
     q.add_argument("id")
+    q.add_argument("--full", action="store_true",
+                   help="processing-result only: every scan-selection row and linked quick merge, with their metrics "
+                        "(default: the scans with a remark and the key metrics)")
     q.set_defaults(func=cmd_bundle_show)
     q = bsub.add_parser("check", help="re-validate a bundle against v1")
     q.add_argument("bundle_dir")
