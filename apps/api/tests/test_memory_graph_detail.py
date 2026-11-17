@@ -55,9 +55,11 @@ REAL_RELATIONS = {
     "method", "indirect_call", "re_exports", "uses", "inherits", "shares_data_with",
 }
 
-#: Documented real counts of the committed deep artifact.
-REAL_NODES = 2612
-REAL_EDGES = 4067
+#: Documented real counts of the committed deep artifact. 2612 / 4067 before the
+#: 2026-11-16 targeted removal of StagedRunner.tsx and LoadMaterials.tsx
+#: (their 7 nodes and 34 edges left with them; no community emptied).
+REAL_NODES = 2605
+REAL_EDGES = 4033
 REAL_COMMUNITIES = 221
 
 
@@ -365,15 +367,15 @@ def test_base_graph_projection_is_unchanged_by_the_new_endpoint(tmp_path, monkey
         "communities", "meta",
     }
     assert base["meta"]["counts"] == {
-        "files": 201,
+        "files": 199,  # 201 before the 2026-11-16 targeted removal of StagedRunner.tsx and LoadMaterials.tsx
         "concepts": 19,
-        "reference_edges": 508,
+        "reference_edges": 494,  # 508 before it
         "files_with_references": base["meta"]["counts"]["files_with_references"],
         "isolated_files": base["meta"]["counts"]["isolated_files"],
         "communities_rendered": base["meta"]["counts"]["communities_rendered"],
     }
-    assert len(base["nodes"]) == 220
-    assert len(base["edges"]) == 508
+    assert len(base["nodes"]) == 218
+    assert len(base["edges"]) == 494
     # None of the deep layer's own keys leaked into the base response.
     base_keys = set(_walk_keys(base))
     assert base_keys.isdisjoint({"node_keys", "edge_keys", "community_names",
@@ -462,7 +464,8 @@ def test_real_artifact_counts_are_reported_exactly(tmp_path, monkeypatch):
     assert sum(counts["file_types"].values()) == REAL_NODES
     assert sum(counts["relations"].values()) == REAL_EDGES
     assert counts["file_types"] == {
-        "code": 1697, "concept": 18, "document": 691, "rationale": 206,
+        # code 1697 -> 1690: the 7 nodes of the two files removed 2026-11-16 were all code.
+        "code": 1690, "concept": 18, "document": 691, "rationale": 206,
     }
 
 
@@ -506,13 +509,13 @@ def test_provenance_states_the_point_in_time_honesty_contract(tmp_path, monkeypa
     assert provenance["served_content_scope"] == "served_files_only"
     assert provenance["served_content_basis"] == "ci_content_manifest"
     assert "separate axes" in provenance["note"]
-    # `served_file_count` counts the served PATH SET (201), which is deliberately
-    # one larger than the served CONTENT MANIFEST (200) — the manifest builder
+    # `served_file_count` counts the served PATH SET (199; 201 before 2026-11-16), which is deliberately
+    # one larger than the served CONTENT MANIFEST (198; 200 before) — the manifest builder
     # self-excludes any `*memory-snapshot.json` it would otherwise hash. The two
     # were being conflated, so the count must arrive with its scope named; a
     # reader must never have to guess which set a bare number describes.
     assert provenance["served_file_count_scope"] == "served_path_set"
-    assert provenance["served_file_count"] == 201
+    assert provenance["served_file_count"] == 199
     # ...and the response's own note repeats it in prose.
     assert "point-in-time" in body["note"]
     assert "not a map of the current repository HEAD" in body["note"]
@@ -539,7 +542,7 @@ def test_served_set_consistency_is_current_for_the_committed_pair(tmp_path, monk
     assert provenance["served_set_consistency"] == "current"
     assert provenance["snapshot_provider"] == "sanitized-snapshot"
     assert provenance["snapshot_built_at_commit"] == provenance["built_at_commit"]
-    assert provenance["served_file_count"] == 201
+    assert provenance["served_file_count"] == 199
 
 
 def test_served_set_consistency_reports_stale_for_a_mismatched_reader(tmp_path,
@@ -953,12 +956,12 @@ def test_every_node_source_file_is_inside_the_served_content_manifest(tmp_path,
     withholds."""
     body = _real_client(tmp_path, monkeypatch).get("/api/memory/graph/detail").json()
     manifest = _manifest_paths()
-    assert len(manifest) == 200
+    assert len(manifest) == 198  # 200 before the 2026-11-16 targeted removal of StagedRunner.tsx and LoadMaterials.tsx
     source_files = {row[3] for row in body["nodes"]}
     assert source_files, "no node carried a source_file — the check would be vacuous"
     outside = sorted(source_files - manifest)
     assert outside == [], f"nodes outside the served-content manifest: {outside}"
-    assert len(source_files) == 179
+    assert len(source_files) == 177  # 179 before the 2026-11-16 removal of two source files
 
 
 def test_no_node_exposes_a_gitignored_path(tmp_path, monkeypatch):
@@ -1362,7 +1365,7 @@ def test_committed_artifact_fingerprints_match_recomputed_values():
     assert artifact["served_path_set_fingerprint"] == (
         memory.compute_served_path_set_fingerprint(snapshot["served"])
     )
-    assert artifact["served_file_count"] == len(snapshot["served"]) == 201
+    assert artifact["served_file_count"] == len(snapshot["served"]) == 199
     # Both artifacts were generated from the SAME source-graph bytes at the SAME
     # indexed commit — the two cannot silently drift apart.
     assert artifact["source_graph_sha256"] == snapshot["source_graph_sha256"]
