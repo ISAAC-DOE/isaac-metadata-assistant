@@ -36,6 +36,11 @@ SKILL = REPO / ".claude" / "skills" / "isaac-historical-import"
 # --- HIGH: one file per scan ---------------------------------------------------------------------------------------
 
 
+#: pq-005/pq-007 (beamline scientist answers relayed by Krish, 17 Nov 2026): Athena is never used, so the Athena
+#: behaviour these tests checked no longer runs (processing reads no Athena project; no Athena result composes a record)
+ATHENA_RETIRED = pytest.mark.skip(reason="Athena is never used (pq-005/pq-007, 17 Nov 2026): retired behaviour")
+
+
 def _pair(inputs, chosen):
     isa = {"group_id": "g1", "source": "isaac_protocol", "run_id": "r-1", "inputs": inputs}
     ath = {"group_id": "g1", "source": "scientist_athena", "run_id": "r-1",
@@ -125,6 +130,7 @@ def _process(bdir, root):
     return run(bdir, root)
 
 
+@ATHENA_RETIRED
 @pytest.mark.parametrize("per_file", [True, False], ids=["one-file-per-scan", "stated-index"])
 def test_processing_numbers_the_scans_the_same_in_both_layouts(tmp_path, per_file):
     _processing()
@@ -146,6 +152,7 @@ def test_processing_numbers_the_scans_the_same_in_both_layouts(tmp_path, per_fil
     assert M.scan_subset_note({"processing_results": [isa, ath]}, ath) is None
 
 
+@ATHENA_RETIRED
 def test_processing_says_a_label_scan_the_run_does_not_list(tmp_path):
     _processing()
     bdir, root = _label_case(tmp_path, "01_SYN_ZZ1_2468")

@@ -4409,7 +4409,14 @@ _DISCLOSED_TRUTH_PATH_CHANGES: dict[str, str] = {
         "exit code. Without this, the command CLAUDE.md §1 tells users to run would exit "
         "0 on a record `isaac export` refuses. `portal_warnings` remains advisory and "
         "still cannot move the exit code; exactness is the only non-schema input added. "
-        "Covered by tests/test_schema_string_gate_exactness.py. Delete once landed."
+        "Covered by tests/test_schema_string_gate_exactness.py. Delete once landed. "
+        "ALSO (feat/earlier-answer-suggestions): `answer-memory` joins LOCAL_IMPORT_COMMANDS, so "
+        "`isaac answer-memory ...` is dispatched to the optional local-import package like `import`, "
+        "`bundle` and `process` (it failed with \"invalid choice\"), and the missing-package message "
+        "names it. Dispatch only: validate, export, audit and new-id are untouched, so exported records "
+        "and official schema compliance do not change. Covered by "
+        "apps/api/tests/test_local_import_answer_memory.py (the top-level entry, in-process and as a "
+        "subprocess) and test_local_import_propose_terms.py. Delete once landed."
     ),
     "src/isaac_records/draft_validator.py": (
         "A wrong-typed TOP-LEVEL container is now a FINDING instead of an exception. "

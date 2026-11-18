@@ -10687,7 +10687,7 @@
       },
       {
         "path": "src/isaac_records/cli.py",
-        "sha256": "caeaabde3e4fb1cf18a432479ee05f818b27bd6553446e700981809e5eedf628"
+        "sha256": "d52806ba44ad7964734ef4dbf0bc51471a787af23ef01d728f8866327d45009f"
       },
       {
         "path": "src/isaac_records/complete.py",
@@ -10883,7 +10883,7 @@
       }
     ],
     "served_file_count": 198,
-    "served_manifest_fingerprint": "7de8344c428e5df06250e015528ed6509b9630c432b2cd982dbd4873cf2bca08"
+    "served_manifest_fingerprint": "f041f7831594b732c178bdf8e01635c62a41175520f3d0d9559843d1b9080215"
   },
   "overview": {
     "built_at_commit": "caab1d0a69c1733524bda5dde495623bc4b7bad1",

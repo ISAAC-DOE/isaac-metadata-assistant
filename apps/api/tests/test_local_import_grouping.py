@@ -267,7 +267,8 @@ def test_every_key_has_exactly_one_class_and_unseen_keys_are_unknown():
     assert not set(G.UNKNOWN_KEYS) & (set(G.CONDITION_KEYS) | set(G.BOOKKEEPING_KEYS))
     assert G.classify_key("potential_magnitude") == "condition"
     assert G.classify_key("repeat_marker") == "bookkeeping"
-    assert G.classify_key("new_spot") == "unknown" and G.classify_key("step_number") == "unknown"
+    # pq-002/pq-003 (17 Nov 2026): a new spot is bookkeeping (it merges), a step number a condition (it never does)
+    assert G.classify_key("new_spot") == "bookkeeping" and G.classify_key("step_number") == "condition"
     assert G.classify_key("brand_new_concept") == "unknown"
     assert all(G.CONDITION_KEYS.values()) and all(G.BOOKKEEPING_KEYS.values()) and all(G.UNKNOWN_KEYS.values())
 
@@ -285,18 +286,19 @@ def test_bookkeeping_only_differences_make_one_group_and_ask_to_confirm_repeats(
 
 
 def test_an_unknown_key_difference_splits_and_offers_one_merge_candidate():
-    p = _propose([{"stem": "SYN_01", "conds": dict(BASE)}, {"stem": "SYN_02", "conds": dict(BASE, new_spot=("lit", "newSpot"))}])
+    # pq-002 made new_spot bookkeeping; an unclassified key still splits with one merge candidate
+    conds = dict(BASE, brand_new_concept=("lit", "zz"))
+    p = _propose([{"stem": "SYN_01", "conds": dict(BASE)}, {"stem": "SYN_02", "conds": conds}])
     g1, g2 = p["record_groups"]
     (mc,) = p["merge_candidates"]
     assert mc["group_ids"] == [g1["group_id"], g2["group_id"]] and mc["status"] == "proposed"
     (reason,) = mc["reasons"]
-    assert reason["code"] == "unknown_key_differs" and reason["key"] == "new_spot"
-    assert reason["values_by_group"] == {g1["group_id"]: None, g2["group_id"]: "newspot"}
-    assert "new spot" in reason["why_unknown"]
+    assert reason["code"] == "unknown_key_differs" and reason["key"] == "brand_new_concept"
+    assert reason["values_by_group"] == {g1["group_id"]: None, g2["group_id"]: "zz"}
     assert g1["merge_candidate_ids"] == [mc["merge_candidate_id"]] == g2["merge_candidate_ids"]
     assert mc["question"]["code"] == "merge_candidate" and mc["question"] in g1["questions"]
-    assert g2["basis"]["unclassified"]["new_spot"]["key_class"] == "unknown"
-    assert mc["merge_candidate_id"] == _propose([{"stem": "SYN_01", "conds": dict(BASE)}, {"stem": "SYN_02", "conds": dict(BASE, new_spot=("lit", "newSpot"))}])["merge_candidates"][0]["merge_candidate_id"]
+    assert g2["basis"]["unclassified"]["brand_new_concept"]["key_class"] == "unknown"
+    assert mc["merge_candidate_id"] == _propose([{"stem": "SYN_01", "conds": dict(BASE)}, {"stem": "SYN_02", "conds": conds}])["merge_candidates"][0]["merge_candidate_id"]
 
 
 def test_a_condition_difference_is_never_a_merge_candidate():

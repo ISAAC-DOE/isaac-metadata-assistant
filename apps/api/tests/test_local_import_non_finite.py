@@ -31,6 +31,11 @@ NUMERIC = ("context.electrochemistry.current_setpoint_mA_cm2", "context.electroc
 TOKENS = ("NaN", "Infinity", "-Infinity", "1e999")
 
 
+#: pq-005/pq-007 (beamline scientist answers relayed by Krish, 17 Nov 2026): Athena is never used, so the Athena
+#: behaviour these tests checked no longer runs (processing reads no Athena project; no Athena result composes a record)
+ATHENA_RETIRED = pytest.mark.skip(reason="Athena is never used (pq-005/pq-007, 17 Nov 2026): retired behaviour")
+
+
 @pytest.fixture()
 def grouped(tmp_path):
     src, b = _folder(tmp_path), tmp_path / "bundle"
@@ -190,6 +195,7 @@ def _prj_with(tmp_path, replacements):
     return bdir, root
 
 
+@ATHENA_RETIRED
 def test_a_nan_athena_parameter_becomes_null_and_is_named_on_the_result(tmp_path):
     from isaac_api.local_import.processing.cli_entry import run_process
 
@@ -203,6 +209,7 @@ def test_a_nan_athena_parameter_becomes_null_and_is_named_on_the_result(tmp_path
     assert normalize["params"]["step"] is None and normalize["params"]["flatten"] is None
 
 
+@ATHENA_RETIRED
 def test_a_nan_energy_shift_keeps_the_group_with_no_energy_axis_and_says_so(tmp_path):
     from isaac_api.local_import.processing.cli_entry import run_process
 
@@ -238,6 +245,7 @@ def _two_versions(tmp_path, nan_second):
     return bdir, root
 
 
+@ATHENA_RETIRED
 def test_a_nan_energy_shift_on_one_of_two_versions_never_makes_the_scientists_choice(tmp_path):
     from isaac_api.local_import.processing.cli_entry import run_process
 
@@ -288,6 +296,7 @@ def test_a_non_finite_e0_or_edge_step_is_named_on_the_athena_entry(tmp_path, mon
     assert {"e0_eV", "edge_step"} <= set(entry["non_finite_values"])
 
 
+@ATHENA_RETIRED
 def test_a_nan_in_the_scientists_curve_gives_a_null_noise_named_on_the_result(tmp_path, monkeypatch):
     np = pytest.importorskip("numpy", reason="needs the optional `processing` extra")
 

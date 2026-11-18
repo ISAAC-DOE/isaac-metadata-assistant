@@ -52,7 +52,8 @@ from . import athena as A
 from . import core as C
 from . import protocol as P
 from . import quick_merge as QM
-from .channels import MODE_TRANSMISSION, ChannelChoice, choose_channels, dead_candidates, needs_review_statement
+from .channels import (BL15_2_BEAMLINE_UNCONFIRMED_FLAG, BL15_2_ENERGY_MISSING_FLAG, MODE_TRANSMISSION, ChannelChoice,
+                       bl15_2_unconfirmed_statement, choose_channels, dead_candidates, needs_review_statement)
 from . import reference as REF
 from .edges import edge_energy
 from .readers import read_scan_file
@@ -674,6 +675,278 @@ def _csv(path: Path, header: Sequence[str], cols: Sequence, np) -> None:
     _write(path, ("\n".join(lines) + "\n").encode("utf-8"))
 
 
+#: BL15_2_ENERGY_RULE_ID: the beamline :func:`bl15_2_status` compares with (template.same_beamline spellings)
+BL15_2 = "BL15-2"
+
+
+def _scan_fingerprint(table) -> set[str]:
+    """The beamlines THIS scan's own header matches (bundle.ACQUISITION_FINGERPRINTS): the SPEC account its ``#C``
+    lines state and its column names. Empty when it states neither."""
+    accounts = set()
+    for line in getattr(table, "header_lines", None) or ():
+        text = str(line).strip()
+        if text.startswith("#C"):
+            account = B.spec_account(text[2:])
+            if account:
+                accounts.add(B._account_key(account))
+    cols = set(getattr(table, "labels", None) or ()) | set(getattr(table, "columns", None) or ())
+    return {fp["beamline"] for fp in B.ACQUISITION_FINGERPRINTS
+            if accounts & {a.casefold() for a in fp["spec_accounts"]} or cols & set(fp["channels"])}
+
+
+def _confirmed_beamlines(bundle: Mapping) -> list:
+    """The beamline values a scientist confirmed for ``system.facility.beamline`` (a confirmed candidate, or an
+    answered missing value), in bundle order; empty when nobody answered."""
+    from ..template import BEAMLINE_PATH
+
+    decision_of = B._decisions_by_target(bundle.get("scientist_decisions") or ())
+    out = []
+    for c in bundle.get("candidates") or ():
+        if c.get("target_field_path") == BEAMLINE_PATH and c.get("value_state") == B.STATE_SCIENTIST_CONFIRMED:
+            d = B.candidate_decision(bundle, c, decision_of, B.conflict_ids_by_candidate(bundle))
+            out.append(B.final_value(c.get("value"), d, c.get("readings")))
+    for m in bundle.get("missing_values") or ():
+        if m.get("target_field_path") == BEAMLINE_PATH and m.get("value_state") == B.STATE_SCIENTIST_CONFIRMED:
+            out.append(B.final_value(None, decision_of.get(("missing_value", m.get("value_id")))))
+    return [v for v in out if isinstance(v, str) and v.strip()]
+
+
+def _bundle_beamline_standing(ctx: _Ctx) -> dict:
+    """What the bundle as a whole says about the beamline, read once per run: the scientist's answer, the SPEC
+    fingerprint's matches and whether the folder's name disagrees with them."""
+    got = getattr(ctx, "_beamline_standing", None)
+    if got is not None:
+        return got
+    from ..template import same_beamline
+
+    bundle = ctx.bundle or {}
+    confirmed = _confirmed_beamlines(bundle)
+    fp = ((bundle.get("experiment") or {}).get("acquisition_system") or {}).get("fingerprint") or {}
+    names = {m.get("beamline") for m in fp.get("matches") or () if isinstance(m, Mapping) and m.get("beamline")}
+    folder_label = (bundle.get("source_root") or {}).get("label")
+    folder_bl = B._folder_beamline(folder_label) if folder_label else None
+    disagrees = fp.get("disagrees_with_folder_name") or (
+        {"folder_name": folder_label, "beamline": folder_bl} if folder_bl and not same_beamline(folder_bl, BL15_2) else None)
+    got = {"confirmed": confirmed, "confirmed_bl15_2": bool(confirmed) and all(same_beamline(v, BL15_2) for v in confirmed),
+           "names": names, "folder_beamline": folder_bl, "folder_disagrees": disagrees}
+    ctx._beamline_standing = got
+    return got
+
+
+def bl15_2_status(table, ctx: _Ctx) -> tuple[str | None, str | None]:
+    """``(known, hint)`` for one scan (:data:`channels.BL15_2_ENERGY_RULE_ID`): ``known`` says why the scan is KNOWN
+    to be a BL15-2 scan, ``hint`` why it MAY be one when that is not known; at most one is set. PER SCAN: a mixed
+    folder's scans differ.
+
+    KNOWN only on a scientist's beamline answer naming BL15-2, or unambiguous evidence: the bundle's SPEC fingerprint
+    matches BL15-2 alone, this scan's own header names no other beamline, and the folder's name names no other one.
+    The fingerprint is a HINT (bundle.ACQUISITION_FINGERPRINT_RULE_ID): one that also matches another beamline, a
+    folder name naming another one, or a BL15-2 folder name alone leaves the beamline unknown. A scientist's answer
+    naming another beamline, or a scan whose own header names only another beamline, is no BL15-2 scan."""
+    from ..template import same_beamline
+
+    st = _bundle_beamline_standing(ctx)
+    if st["confirmed"]:
+        if st["confirmed_bl15_2"]:
+            return f"the scientist confirmed the beamline as {st['confirmed'][-1]}", None
+        return None, None
+    own = _scan_fingerprint(table)
+    if own and BL15_2 not in own:
+        return None, None
+    names, folder = st["names"], st["folder_disagrees"]
+    if names == {BL15_2} and own <= {BL15_2} and not folder:
+        return "the beamtime's SPEC headers match the BL15-2 acquisition fingerprint alone", None
+    hints = []
+    if BL15_2 in names or BL15_2 in own:
+        others = sorted((names | own) - {BL15_2})
+        hints.append("the SPEC headers match the BL15-2 fingerprint" + (
+            f" and also {', '.join(others)}" if others else ""))
+    if folder:
+        hints.append(f"the folder's name '{folder['folder_name']}' names '{folder['beamline']}'")
+    elif st["folder_beamline"] and same_beamline(st["folder_beamline"], BL15_2):
+        hints.append(f"only the folder's name names '{st['folder_beamline']}'")
+    if not (BL15_2 in names or BL15_2 in own or (st["folder_beamline"] and same_beamline(st["folder_beamline"], BL15_2))):
+        return None, None  # nothing hints at BL15-2
+    return None, "; ".join(hints) + "; nobody has answered the beamline question (system.facility.beamline)"
+
+
+def bl15_2_kw(table, ctx: _Ctx) -> dict:
+    """:func:`channels.choose_channels` keywords for one scan from :func:`bl15_2_status`."""
+    known, hint = bl15_2_status(table, ctx)
+    return {"bl15_2": known, "bl15_2_hint": hint}
+
+
+def bl15_2_basis(table, ctx: _Ctx) -> str | None:
+    """Why a scan is KNOWN to be a BL15-2 scan (:func:`bl15_2_status`), or ``None``."""
+    return bl15_2_status(table, ctx)[0]
+
+
+def _absev_first(choice, tables, params: Mapping, role: str, sel, ctx: _Ctx):
+    """BL15_2_ENERGY_RULE_ID: when the group's choice is not read on ``absev`` but one of its scans has ``absev``, the
+    first such scan that forms a channel supplies the choice (absev, when a scan has it, is always the right axis); the
+    scans without it are then left out of the merge, each with its reason. ``choice`` itself otherwise."""
+    col = params["channels"].get("bl15_2_energy_column")
+    if not col or not _formed(choice) or choice.energy == col:
+        return choice
+    for k, (_, t) in enumerate(tables):
+        if t.has(col):
+            alt = choose_channels(t, params=params, role=role, bl15_selection=sel, **bl15_2_kw(t, ctx))
+            if _formed(alt):
+                alt.basis["chosen_from_scan_position"] = k
+                if k:
+                    alt.flags.append("channel_from_a_later_scan")
+                return alt
+    return choice
+
+
+def _bl15_2_unconfirmed(attempts, choice, ctx: _Ctx, params: Mapping) -> str | None:
+    """The sentence for :data:`BL15_2_BEAMLINE_UNCONFIRMED_FLAG` (``None`` when no merged scan needs it): each MERGED
+    scan with no ``absev`` whose beamline may be BL15-2 but is not known (:func:`bl15_2_status`, per scan)."""
+    col = params["channels"].get("bl15_2_energy_column")
+    if not col or choice.energy == col:
+        return None
+    hints = []
+    for entry, table, _sa, _code in attempts:
+        if table is None or table.has(col) or entry.get("skip_reason") or not entry.get("used", True):
+            continue
+        hint = bl15_2_status(table, ctx)[1]
+        if hint:
+            hints.append((entry, hint))
+    if not hints:
+        return None
+    return bl15_2_unconfirmed_statement(col, [_scan_file(e) for e, _ in hints], choice.energy, hints[0][1])
+
+
+def _bl15_2_missing(attempts, ctx: _Ctx, params: Mapping) -> list[tuple]:
+    """A BL15-2 scan without ``absev`` beside scans that have it: skip reason :data:`BL15_2_ENERGY_MISSING_FLAG`
+    (never read on another column) instead of the plain ``scan_lacks_chosen_columns``."""
+    col = params["channels"].get("bl15_2_energy_column")
+    out = []
+    for entry, table, sa, code in attempts:
+        if code == "scan_lacks_chosen_columns" and col and not table.has(col) and bl15_2_basis(table, ctx):
+            code = BL15_2_ENERGY_MISSING_FLAG
+        out.append((entry, table, sa, code))
+    return out
+
+
+def _bl15_2_missing_said(inputs: Sequence[Mapping], params: Mapping) -> str | None:
+    lacking = [i for i in inputs if i.get("skip_reason") == BL15_2_ENERGY_MISSING_FLAG]
+    if not lacking:
+        return None
+    col = params["channels"].get("bl15_2_energy_column")
+    names = ", ".join(_scan_file(i) for i in lacking[:10]) + (f" and {len(lacking) - 10} more" if len(lacking) > 10 else "")
+    return (f"{_n(len(lacking), 'BL15-2 scan')} {'has' if len(lacking) == 1 else 'have'} no '{col}' column, the BL15-2 "
+            f"energy axis (beamline scientist answers relayed by Krish, 17 Nov 2026): {names}. "
+            f"{'It is' if len(lacking) == 1 else 'They are'} left out of the merge, never read on another energy "
+            "column; a person checks the file.")
+
+
+#: pq-002 (beamline scientist answers relayed by Krish, 17 Nov 2026): a new spot is not a new result; each scan's spot
+#: (the stage motors its SPEC #P header states) is recorded beside it, never a condition
+_SPOT_MOTORS = ("Sx", "Sy", "Sz", "Sr")
+#: two stage positions closer than this on every motor are one spot
+SPOT_TOLERANCE = 0.01
+
+
+def _header_spot(header_lines: Sequence[str] | None, motor_lines: Sequence[str] | None = ()) -> tuple[dict | None, str | None]:
+    """``(spot, not_read)``: the stage position a scan's SPEC header states (``Sx Sy Sz Sr``), from keyed ``#P`` lines
+    (``#P0 … Sx=-27.25 …``) or, when none is keyed, from its ``#P<i>`` values named by the file's ``#O<i>`` motor
+    names (``bl15.spec.pair_motor_positions``, the root SPEC reader's rule). ``not_read`` says why a scan with ``#P``
+    lines gave no spot (``None`` when it gave one, or states no positions at all)."""
+    from ...bl15.spec import motor_name_lines, pair_motor_positions
+
+    out: dict = {}
+    keyed = False
+    for line in header_lines or ():
+        text = str(line).strip()
+        if not text.startswith("#P"):
+            continue
+        for k, v in _HEADER_KEY_VALUE.findall(text):
+            keyed = True
+            if k in _SPOT_MOTORS and k not in out:
+                try:
+                    out[k] = float(v)
+                except ValueError:
+                    pass
+    if out:
+        return out, None
+    lines = [str(x).strip() for x in motor_lines or ()]
+    positions = [x for x in lines if re.match(r"^#P\d+(\s|$)", x)]
+    if not positions:
+        return None, ("its #P lines name no stage motor (Sx, Sy, Sz, Sr)" if keyed else None)
+    names = motor_name_lines(lines)
+    if not names:
+        return None, "its #P positions have no #O motor-name lines to pair with"
+    refused = 0
+    for line in positions:
+        m = re.match(r"^#P(\d+)\s*(.*)$", line)
+        pairs = pair_motor_positions(names.get(int(m.group(1))), m.group(2).split())
+        if pairs is None:
+            refused += 1
+            continue
+        for k, v in pairs:
+            if k in _SPOT_MOTORS and k not in out:
+                try:
+                    out[k] = float(v)
+                except ValueError:
+                    pass
+    if out:
+        return out, None
+    if refused:
+        return None, (f"{_n(refused, '#P line')} {'does' if refused == 1 else 'do'} not pair with its #O line (the "
+                      "counts differ; never guessed)")
+    return None, "its #O motor names include no stage motor (Sx, Sy, Sz, Sr)"
+
+
+def _spot_labels(headers: Sequence[tuple]) -> list[tuple[dict | None, str | None]]:
+    """Each scan's ``(spot, not_read)`` from ``(header_lines, motor_lines)``: the stage motors its header states and a
+    label, ``spot 1``, ``spot 2`` … in order of first appearance in the group (``None`` and why, for a scan whose
+    header gives none; :func:`_header_spot`)."""
+    seen: list[dict] = []
+    out: list[tuple[dict | None, str | None]] = []
+    for h, motors in headers:
+        pos, why = _header_spot(h, motors)
+        if pos is None:
+            out.append((None, why))
+            continue
+        k = next((i for i, p in enumerate(seen) if set(p) == set(pos)
+                  and all(abs(p[m] - pos[m]) <= SPOT_TOLERANCE for m in pos)), None)
+        if k is None:
+            seen.append(pos)
+            k = len(seen) - 1
+        out.append(({**pos, "label": f"spot {k + 1}"}, None))
+    if seen:
+        # a scan with no stated position beside scans with one: its spot is not read, said (never silent)
+        out = [(sp, why or ("its header states no stage position" if sp is None else None)) for sp, why in out]
+    return out
+
+
+def _spots_statement(used_entries: Sequence[Mapping]) -> str | None:
+    """The spots this group's merged scans were measured at, in words (``None`` when no header states one)."""
+    by: dict[str, list[Mapping]] = {}
+    for e in used_entries:
+        if e.get("spot"):
+            by.setdefault(e["spot"]["label"], []).append(e)
+    unread = [e for e in used_entries if not e.get("spot") and e.get("spot_not_read")]
+    not_read = ("" if not unread else
+                f" Spot not read for {_n(len(unread), 'merged scan')}: "
+                + "; ".join(f"{_scan_file(e)} ({e['spot_not_read']})" for e in unread[:10])
+                + (f" and {len(unread) - 10} more" if len(unread) > 10 else "") + ".")
+    if not by:
+        return not_read.strip() or None
+    parts = []
+    for label, es in by.items():
+        sp = es[0]["spot"]
+        where = ", ".join(f"{m}={sp[m]:g}" for m in _SPOT_MOTORS if m in sp)
+        parts.append(f"{label} ({where}): {_n(len(es), 'scan')}")
+    if len(by) == 1:
+        which = "All merged scans with a stated position were" if unread else "All merged scans were"
+        return f"{which} measured at one spot: {parts[0]}.{not_read}"
+    return (f"The merged scans were measured at {len(by)} spots of the same sample under the same condition, merged "
+            "as raw mu to improve statistics (a new spot is not a new result; beamline scientist answers relayed by "
+            "Krish, 17 Nov 2026): " + "; ".join(parts) + "." + not_read)
+
+
 def _scan_attempts(tables, choice, np) -> list[tuple]:
     """``(entry, table, arrays | None, skip code | None)`` per readable scan under ``choice``."""
     out = []
@@ -708,7 +981,9 @@ def _fallback_from_transmission(attempts, choice, tables, role: str, sel, params
         return None
     found = None
     for k, (_, table) in enumerate(tables):
-        alt = choose_channels(table, params=params, role=role, bl15_selection=sel, exclude_modes=(MODE_TRANSMISSION,))
+        rule = choice.basis.get("energy_rule") or {}
+        alt = choose_channels(table, params=params, role=role, bl15_selection=sel, exclude_modes=(MODE_TRANSMISSION,),
+                              bl15_2=rule.get("bl15_2_basis"), bl15_2_hint=rule.get("beamline_unconfirmed"))
         if _formed(alt):
             found = (k, alt)
             break
@@ -1869,7 +2144,8 @@ def scan_selection_series(groups: Sequence[Mapping], ctx: _Ctx) -> dict:
             if tpl is None or not _is_energy_scan(tpl):
                 continue
             if choice is None:
-                c = choose_channels(table, params=ctx.params, role=g.get("role", "sample"), bl15_selection=sel)
+                c = choose_channels(table, params=ctx.params, role=g.get("role", "sample"), bl15_selection=sel,
+                                    **bl15_2_kw(table, ctx))
                 if not _formed(c):
                     continue
                 choice = c
@@ -2162,7 +2438,8 @@ def process_group(group: Mapping, ctx: _Ctx, athena_entry: Mapping | None = None
         return [out]
 
     role = group.get("role", "sample")
-    choice = choose_channels(tables[0][1], params=params, role=role, bl15_selection=sel)
+    choice = choose_channels(tables[0][1], params=params, role=role, bl15_selection=sel,
+                             **bl15_2_kw(tables[0][1], ctx))
     if not _formed(choice):
         # THE FIRST SCAN DOES NOT DECIDE ALONE. Every readable scan is asked; the first one
         # that forms a channel supplies the group's choice (scans without those columns are
@@ -2170,8 +2447,19 @@ def process_group(group: Mapping, ctx: _Ctx, athena_entry: Mapping | None = None
         # a scan whose signal-side candidate columns are PRESENT but not live is a real QC
         # failure (``signal_channel_dead``); otherwise the protocol does not apply.
         first = choice
-        choices = [first] + [choose_channels(t, params=params, role=role, bl15_selection=sel) for _, t in tables[1:]]
+        choices = [first] + [choose_channels(t, params=params, role=role, bl15_selection=sel,
+                                             **bl15_2_kw(t, ctx)) for _, t in tables[1:]]
         found = next(((k, c) for k, c in enumerate(choices) if _formed(c)), None)
+        if found is None and all(BL15_2_ENERGY_MISSING_FLAG in c.flags for c in choices):
+            # BL15_2_ENERGY_RULE_ID: every readable scan is a BL15-2 scan without absev: flagged, never read on energy
+            res["channel_choice"] = first.to_state()
+            res["review_flags"].append(BL15_2_ENERGY_MISSING_FLAG)
+            for entry, _t in tables:
+                entry["skip_reason"] = BL15_2_ENERGY_MISSING_FLAG
+            said = first.basis["energy_rule"]["statement"]
+            out = _fail(res, BL15_2_ENERGY_MISSING_FLAG, said)
+            out["qc"]["statements"] = {BL15_2_ENERGY_MISSING_FLAG: said}
+            return [out]
         if found is None:
             res["channel_choice"] = first.to_state()
             dead = {}
@@ -2187,7 +2475,8 @@ def process_group(group: Mapping, ctx: _Ctx, athena_entry: Mapping | None = None
         k, choice = found
         choice.basis["chosen_from_scan_position"] = k
         choice.flags.append("channel_from_a_later_scan")
-    attempts = _scan_attempts(tables, choice, np)
+    choice = _absev_first(choice, tables, params, role, sel, ctx)
+    attempts = _bl15_2_missing(_scan_attempts(tables, choice, np), ctx, params)
     fallback = _fallback_from_transmission(attempts, choice, tables, role, sel, params)
     fallback_flag = FALLBACK_FLAG
     if fallback is None:
@@ -2195,13 +2484,14 @@ def process_group(group: Mapping, ctx: _Ctx, athena_entry: Mapping | None = None
         fallback_flag = REFERENCE_FALLBACK_FLAG
     if fallback is not None:
         choice = fallback
-        attempts = _scan_attempts(tables, choice, np)
+        attempts = _bl15_2_missing(_scan_attempts(tables, choice, np), ctx, params)
     res["channel_choice"] = choice.to_state()
     res["review_flags"] += choice.flags
     scans_data, used_entries, headers = [], [], []
     too_few: list[int] = []  # the usable points of each scan skipped as too_few_points (said if no scan is left)
     usable: list[tuple] = []
     header_of: dict[int, Sequence[str]] = {id(entry): table.header_lines for entry, table, _, _ in attempts}
+    motors_of: dict[int, Sequence[str]] = {id(entry): getattr(table, "motor_lines", ()) for entry, table, _, _ in attempts}
     for entry, table, sa, code in attempts:
         code = code or C.unusable_reason(sa)
         if code:
@@ -2249,6 +2539,14 @@ def process_group(group: Mapping, ctx: _Ctx, athena_entry: Mapping | None = None
     hashed_cal = _said_reference(cal, calibrant)  # c12-cal: said in the result, not in the hashed files (no id moves)
     res["steps"].append(cal)
     res["review_flags"] += cal["flags"]
+    # pq-002: each merged scan's spot (the stage motors its header states), recorded beside it (never a condition);
+    # a scan whose spot could not be read says so (spot_not_read)
+    for e, (spot, why) in zip(used_entries, _spot_labels([(header_of.get(id(e)), motors_of.get(id(e)))
+                                                          for e in used_entries])):
+        if spot is not None:
+            e["spot"] = spot
+        elif why:
+            e["spot_not_read"] = why
     shifts = cal["outcome"]["per_scan_alignment_shifts_eV"] or [0.0] * len(scans_data)
     for sa, d in zip(scans_data, shifts):
         sa["energy"] = sa["energy"] + cal["outcome"]["applied_shift_eV"] + d
@@ -2557,6 +2855,21 @@ def process_group(group: Mapping, ctx: _Ctx, athena_entry: Mapping | None = None
     # c12-r: an approval the current rules did not apply is named (the flag alone said nothing of the approval), and a
     # params-file value the stricter-only rule ignored is said (after run_id: no id moves)
     cal_step = next((s_ for s_ in res["steps"] if s_.get("step") == "calibration"), None)
+    # after run_id (said only): the BL15-2 scans left out for having no absev, and the spots merged
+    absev_said = _bl15_2_missing_said(res["inputs"], params)
+    if absev_said:
+        res["qc"].setdefault("statements", {})[BL15_2_ENERGY_MISSING_FLAG] = absev_said
+        if BL15_2_ENERGY_MISSING_FLAG not in res["review_flags"]:
+            res["review_flags"].append(BL15_2_ENERGY_MISSING_FLAG)
+    unconfirmed_said = _bl15_2_unconfirmed(attempts, choice, ctx, params)
+    if unconfirmed_said:
+        # said only (after run_id): the scans read on another energy column while the beamline is not known
+        res["qc"].setdefault("statements", {})[BL15_2_BEAMLINE_UNCONFIRMED_FLAG] = unconfirmed_said
+        if BL15_2_BEAMLINE_UNCONFIRMED_FLAG not in res["review_flags"]:
+            res["review_flags"].append(BL15_2_BEAMLINE_UNCONFIRMED_FLAG)
+    spot_said = _spots_statement(used_entries)
+    if spot_said:
+        res["qc"].setdefault("statements", {})["spots_merged"] = spot_said
     not_applied = REF.approval_not_applied(cal_step, params["qc"]["warn_energy_shift_eV"]) if cal_step else None
     if not_applied:
         res["qc"].setdefault("statements", {})["calibration_approval_not_applied"] = not_applied
@@ -2804,6 +3117,8 @@ def _plot_scan_marks_unguarded(scans, used_entries, inputs, selection, *, excl: 
         labels = [f"scan {n}" for n in used]
     else:
         labels = [exclusion_name(e, inputs) for e in used_entries]
+    # pq-002: each scan's spot beside its name
+    labels = [lab + (f", {e['spot']['label']}" if e.get("spot") else "") for lab, e in zip(labels, used_entries)]
     rows = list((selection or {}).get("scans") or ()) if (selection or {}).get("status") == "evaluated" else []
     proposal_of = {id(e): x.get("proposal") for e, x in zip(inputs, rows)} if len(rows) == len(inputs) else {}
     proposals = [proposal_of.get(id(e)) for e in used_entries]
@@ -3219,6 +3534,22 @@ def _groups_for(bundle: Mapping, bundle_dir: Path) -> tuple[list[dict], list[dic
     return rec, G.propose_unread_acquisition_groups(bundle), origin
 
 
+#: pq-005/pq-007 (beamline scientist answers relayed by Krish, 17 Nov 2026): Athena projects are never read
+ATHENA_NEVER_RULE_ID = "isaac.processing.athena_never_used.v0"
+
+
+def athena_never_statement(projects: int, sections: Sequence[str] = ()) -> str:
+    """The one summary line about Athena: its project files are present files only; nothing is read from them."""
+    said = ("Athena: never used. Processing works from the raw scan files only (beamline scientist answers relayed by "
+            "Krish, 17 Nov 2026): an Athena project is never the result of record, never a source of processing "
+            "parameters and never an input to a QC verdict or an agreement check.")
+    if projects:
+        said += f" {_n(projects, 'Athena project file')} {'is' if projects == 1 else 'are'} listed as present files only."
+    if sections:
+        said += f" The params file's {', '.join(sections)} {'is' if len(sections) == 1 else 'are'} ignored."
+    return said
+
+
 def process_bundle(
     bundle_dir: Path,
     *,
@@ -3292,29 +3623,22 @@ def process_bundle(
     ctx.calibration_approvals = dict(calibration_approvals or {})
     ctx.exclusions = P.scan_exclusions(params)  # r4-a M6: scans a params file leaves out of a named group's merge
 
-    # Athena-first: read every project once, match by name.
+    # ATHENA IS NEVER USED (ATHENA_NEVER_RULE_ID; pq-005/pq-007, beamline scientist answers relayed by Krish, 17 Nov
+    # 2026): an Athena project is never read, so it is never the result of record, never a source of processing
+    # parameters and never an input to a QC verdict or an agreement check. Its files are only counted as present, and
+    # every Athena step below sees no Athena group (no match, version, tie, hint, set or E0 note).
     entries, a_notes, projects = [], [], A.find_projects(bundle)
     read_ok = 0
-    if athena and resolved["athena"]["enabled"] and root is not None:
-        for rel, sid in projects:
-            path = _resolve_source(root, rel)
-            if path is None or not path.is_file():
-                a_notes.append({"code": "athena_project_not_found", "prj_relative_path": rel})
-                continue
-            got, notes = A.load_project(path, rel, sid, np)
-            read_ok += 1 if got or not notes else 0
-            entries.extend(got)
-            a_notes.extend({"code": n.split(":", 1)[0], "detail": n} for n in notes if not n.startswith("athena_group_not_xmu"))
+    athena_sections = [k for k in (P.ATHENA_MATCH_SECTION, P.ATHENA_MATCH_NOT_SECTION, P.ATHENA_IGNORE_SECTION)
+                       if isinstance(params, Mapping) and params.get(k)]
     all_groups = [dict(g) for g in rec] + [dict(g) for g in unread]
     for g in all_groups:
         scans_, stems_, _ = group_scans(g, runs_by_key)
         g["_stems"], g["_has_scans"] = stems_, bool(scans_)
     # r6 G1: the Athena groups the SCIENTIST named for a group (params athena_match); never a near name
     # (with no Athena group read, each named tie is said as naming nothing)
-    ties, tie_rows = A.resolve_ties(P.athena_match_ties(params), entries, all_groups)
-    # review LOW 4: the scientist's "no" (params athena_match_not): that merge is no longer hinted for that group
-    nots, not_rows = A.resolve_ties(P.athena_match_ties(params, P.ATHENA_MATCH_NOT_SECTION), entries, all_groups,
-                                    not_this=True)
+    # (ATHENA_NEVER_RULE_ID: a params file's Athena sections are checked for their shape only and tie nothing)
+    ties, tie_rows, nots, not_rows = {}, [], {}, []
     for row in tie_rows:
         if row["status"] == "tied":
             ctx.athena_ties.setdefault(row["group_id"], []).append(
@@ -3322,7 +3646,7 @@ def process_bundle(
                  "athena_group": entries[row["entry_index"]]["group_name"]})
     matched, m_notes, versions = A.match_with_versions(all_groups, entries, np, ties=ties)
     # r7 K5: the scientist's merges set aside as no group's (params athena_ignore): no longer listed
-    ignored, ignore_rows = A.resolve_ignores(P.athena_ignores(params), entries, all_groups, tied=ties)
+    ignored, ignore_rows = set(), []
     unmatched = A.unmatched_merges(all_groups, entries, tied=ties, not_this=nots, ignored=ignored)
     # r7 K1: each names the live groups whose Athena groups are in the same project (where the merge was made)
     project_groups(unmatched, all_groups, entries, ties=ties)
@@ -3361,6 +3685,8 @@ def process_bundle(
         "source_root_available": root is not None,
         "software": _deps.versions(),
         "athena": {
+            "never_used": True,
+            "rule_id": ATHENA_NEVER_RULE_ID,
             "projects_found": len(projects),
             "projects_read": read_ok,
             "groups_read": len(entries),
@@ -3369,9 +3695,7 @@ def process_bundle(
             "record_groups_with_unselected_versions": len([g for g in versions if g in processed]),
             "notes": (a_notes + m_notes)[:500],
             "match_rule": A.MATCH_RULE_ID,
-            "statement": athena_match_statement(all_groups, entries, matched={**versions, **matched}, notes=m_notes,
-                                                processed=processed, stored=bundle.get("processing_results") or (),
-                                                ties=ties),
+            "statement": athena_never_statement(len(projects), athena_sections),
             # r6 G1: the scientist's merges that match no group by name, with near-name hints (never matched)
             **({"unmatched_merges": unmatched[:UNMATCHED_STORED], "unmatched_merges_total": len(unmatched)}
                if unmatched else {}),

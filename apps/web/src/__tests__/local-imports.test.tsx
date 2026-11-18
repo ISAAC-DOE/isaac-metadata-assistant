@@ -2099,3 +2099,117 @@ describe('plain words on the questions page (2026-11-17, owner: “reads like an
     for (const x of summaries) expect(x.querySelector('.sr-only')).not.toBeNull();
   });
 });
+
+describe('earlier answers (the opt-in answer memory): a hint with "Use this", never a value', () => {
+  const EARLIER_PELLET = {
+    field: 'sample.sample_form', value: 'pellet', entry_id: 'am-syn00000001', by: 'SYN Angel', date: '17 Nov 2099',
+    beamtime: 'SYN_2099_beamtime_A', matched_on: 'same sample syn1', disagrees: false,
+    said: 'Earlier answer: pellet — SYN Angel, 17 Nov 2099, beamtime SYN_2099_beamtime_A (same sample syn1)',
+  };
+  const EARLIER_POWDER = {
+    ...EARLIER_PELLET, value: 'powder', entry_id: 'am-syn00000002', by: 'SYN Bob', beamtime: 'SYN_2099_beamtime_C',
+    said: 'Earlier answer: powder — SYN Bob, 3 Oct 2099, beamtime SYN_2099_beamtime_C (same sample syn1)',
+  };
+  function formQ(earlier: (typeof EARLIER_PELLET)[]): LocalQuestion {
+    return question({
+      question_id: 'Q-form000001',
+      scope: 'group:g1',
+      target_field_path: 'sample.sample_form',
+      text: 'What is the sample form (sample.sample_form)?',
+      targets: [{ kind: 'missing_value', id: 'miss-0300' }],
+      per_scope_targets: { 'group:g1': ['miss-0300'] },
+      allowed_values: ['pellet', 'powder', 'film'],
+      display: display({
+        targets_described: 1,
+        targets_total: 1,
+        scopes: [{ scope: 'group:g1', kind: 'group', group_id: 'g1', label: 'Record group g1', target_count: 1, run_names: ['SYN_run_A'] }],
+        value_rule: { allowed: ['pellet', 'powder', 'film'], numeric: false, integer: false, in_schema: true, unit: null },
+        ...(earlier.length > 0
+          ? { earlier_answers: earlier.map((e) => ({ ...e, disagrees: earlier.length > 1 })), earlier_answers_statement: 'SERVER-SAID' }
+          : {}),
+      }),
+    });
+  }
+  function stubWith(q: LocalQuestion, posts: Record<string, unknown>[]) {
+    vi.stubEnv('VITE_ISAAC_LOCAL_IMPORTS', '1');
+    return stubFetchRoutes({
+      'GET /api/local-bundles': { body: listBody },
+      [`GET ${QPATH}`]: { body: questionsBody([q]) },
+      [APATH(q.question_id)]: (init) => {
+        posts.push(bodyOf(init));
+        return { body: recordedBody(q.question_id, ['miss-0300']) };
+      },
+    });
+  }
+  async function cardOf(q: LocalQuestion) {
+    await screen.findAllByRole('heading', { name: cardTitle(q) });
+    return document.getElementById(questionCardId(q.question_id)) as HTMLElement;
+  }
+
+  it('shows the earlier answer in plain words; "Use this" fills the box and sends nothing', async () => {
+    const posts: Record<string, unknown>[] = [];
+    const q = formQ([EARLIER_PELLET]);
+    const calls = stubWith(q, posts);
+    renderAt(ROUTES.localImportBundle('synthetic-beamtime'));
+    const card = await cardOf(q);
+    const block = within(card).getByTestId('li-earlier-answers');
+    expect(block).toHaveTextContent(COPY.earlierHeading);
+    expect(block).toHaveTextContent(EARLIER_PELLET.said);
+    expect(block).toHaveTextContent(COPY.earlierNote);
+    expect(within(block).queryByTestId('li-earlier-disagree')).toBeNull();
+    const box = within(card).getByLabelText('Your answer') as HTMLSelectElement;
+    expect(box.value).toBe('');
+    fireEvent.change(screen.getByLabelText(COPY.yourName), { target: { value: 'Synthetic Scientist' } });
+    const before = calls.length;
+    fireEvent.click(within(block).getByRole('button', { name: `${COPY.earlierUse}: pellet` }));
+    // the box holds the earlier value; nothing was sent and nothing was recorded
+    expect(box.value).toBe('pellet');
+    expect(within(card).getByTestId('li-card-status')).toHaveTextContent(COPY.earlierFilled);
+    expect(calls.slice(before).some((c) => c.startsWith('POST'))).toBe(false);
+    expect(posts).toHaveLength(0);
+    // the person answers: a normal `correct`, by them, saying it was confirmed from the earlier answer
+    fireEvent.click(within(card).getByRole('button', { name: COPY.answer }));
+    await waitFor(() => expect(posts).toHaveLength(1));
+    expect(posts[0]).toEqual({
+      decision: 'correct', value: 'pellet', by: 'Synthetic Scientist', expected_version: VERSION,
+      from_earlier_answer: 'am-syn00000001', dry_run: false,
+    });
+  });
+
+  it('an edited value is the person’s own: no earlier-answer provenance is sent', async () => {
+    const posts: Record<string, unknown>[] = [];
+    const q = formQ([EARLIER_PELLET]);
+    stubWith(q, posts);
+    renderAt(ROUTES.localImportBundle('synthetic-beamtime'));
+    const card = await cardOf(q);
+    fireEvent.change(screen.getByLabelText(COPY.yourName), { target: { value: 'Synthetic Scientist' } });
+    fireEvent.click(within(card).getByRole('button', { name: `${COPY.earlierUse}: pellet` }));
+    fireEvent.change(within(card).getByLabelText('Your answer'), { target: { value: 'film' } });
+    fireEvent.click(within(card).getByRole('button', { name: COPY.answer }));
+    await waitFor(() => expect(posts).toHaveLength(1));
+    expect(posts[0]).toEqual({ decision: 'correct', value: 'film', by: 'Synthetic Scientist', expected_version: VERSION, dry_run: false });
+  });
+
+  it('disagreeing earlier answers are all shown, said to disagree, and none is chosen', async () => {
+    const posts: Record<string, unknown>[] = [];
+    const q = formQ([EARLIER_PELLET, EARLIER_POWDER]);
+    stubWith(q, posts);
+    renderAt(ROUTES.localImportBundle('synthetic-beamtime'));
+    const card = await cardOf(q);
+    const block = within(card).getByTestId('li-earlier-answers');
+    expect(block).toHaveTextContent(EARLIER_PELLET.said);
+    expect(block).toHaveTextContent(EARLIER_POWDER.said);
+    expect(within(block).getByTestId('li-earlier-disagree')).toHaveTextContent('different answers for the sample form');
+    expect(within(block).getAllByRole('button', { name: new RegExp(`^${COPY.earlierUse}:`) })).toHaveLength(2);
+    expect((within(card).getByLabelText('Your answer') as HTMLSelectElement).value).toBe('');
+    expect(posts).toHaveLength(0);
+  });
+
+  it('a question without earlier answers shows no earlier-answer block', async () => {
+    const q = formQ([]);
+    stubWith(q, []);
+    renderAt(ROUTES.localImportBundle('synthetic-beamtime'));
+    const card = await cardOf(q);
+    expect(within(card).queryByTestId('li-earlier-answers')).toBeNull();
+  });
+});

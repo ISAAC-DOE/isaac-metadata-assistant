@@ -200,7 +200,9 @@ def test_a_standing_resolution_is_carried_and_has_a_conflict_entry(resolved_bund
 #: default=str)` with sha256. Branch HEAD reproduces both digests exactly.
 GOLDEN = {
     "bl15_synthetic_mini_corpus": ("6ec55ca84db75f43661f4daa247dfb9af7a5777f858795ac92d912dd81bae770", 5, 100),
-    "bl15_synthetic_semantics_corpus": ("acf0ba4acf87f144a66a6c817d796e935226610aab1c3b260a2ff2dd021a6fa2", 9, 200),
+    # re-pinned 17 Nov 2026: the corpus's .dat exports gained an `absev` column (pq-001); this build reproduces the
+    # main digest acf0ba4a… exactly on the corpus as it was, so only the fixture bytes moved it
+    "bl15_synthetic_semantics_corpus": ("8d873eb88aa6252be9a5cf78af6475b46d1cdfd436996b223185e440ff59a8b5", 9, 200),
 }
 
 

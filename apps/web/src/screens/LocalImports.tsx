@@ -65,6 +65,7 @@ import {
   clusterSize,
   questionWarnings,
   counterExample,
+  earlierAnswerLines,
   fieldNoun,
   countLine,
   groupName,
@@ -74,6 +75,7 @@ import {
   sampleLabel,
   scopeName,
   cardTitle,
+  type EarlierAnswerLine,
   type GroupNames,
   type QuestionCluster,
 } from '../lib/plainQuestions';
@@ -1741,6 +1743,21 @@ function QuestionCard({
   const [value, setValue] = useState('');
   const optionalFields = Object.keys(d.fields);
   const [field, setField] = useState(optionalFields[0] ?? '');
+  // EARLIER ANSWERS (opt-in answer memory): "Use this" only FILLS the answer box; the person still answers. While the
+  // box holds exactly that value, the answer says it was confirmed from the earlier one (`from_earlier_answer`).
+  const earlier = earlierAnswerLines(q);
+  const [fromEarlier, setFromEarlier] = useState<EarlierAnswerLine | null>(null);
+  const canUseEarlier = ['field_value', 'confirm_value', 'conflict', 'clock_zone', 'optional_values'].includes(d.answer_kind);
+  function fillFromEarlier(line: EarlierAnswerLine) {
+    if (d.answer_kind === 'optional_values') {
+      if (!optionalFields.includes(line.field)) return;
+      setField(line.field);
+    }
+    setValue(line.answer);
+    setFromEarlier(line);
+    setError(null);
+    setStatus(COPY.earlierFilled);
+  }
   const [positions, setPositions] = useState<number[]>([]);
   const [element, setElement] = useState(d.suggested_absorber?.element ?? '');
   const [edge, setEdge] = useState(d.suggested_absorber?.edge ?? '');
@@ -1863,6 +1880,13 @@ function QuestionCard({
       ...(d.answer_kind === 'optional_values' ? { field } : {}),
       ...extra,
       ...(extra.note !== undefined ? { note: clampText(extra.note, LOCAL_LIMITS.noteMax) } : {}),
+      // only while the box still holds exactly the earlier answer "Use this" filled in (an edit makes it the person's own)
+      ...(fromEarlier &&
+      (decision === 'correct' || decision === 'set_clock_time_zone') &&
+      extra.value === fromEarlier.answer &&
+      (d.answer_kind !== 'optional_values' || field === fromEarlier.field)
+        ? { from_earlier_answer: fromEarlier.entryId }
+        : {}),
     };
     // every answer that writes to more than one run — several groups, a group of several runs, an
     // accepted value, or targets this page did not describe one by one — is previewed first, listing
@@ -2401,6 +2425,36 @@ function QuestionCard({
             </>
           )}
         </fieldset>
+      )}
+
+      {earlier.lines.length > 0 && (
+        <div className="li-earlier" data-testid="li-earlier-answers">
+          <h5 className="li-h5">{COPY.earlierHeading}</h5>
+          {earlier.disagree && (
+            <p className="li-warning" data-testid="li-earlier-disagree">
+              {earlier.disagree}
+            </p>
+          )}
+          <ul className="li-bullets">
+            {earlier.lines.map((line) => (
+              <li key={`${line.field}:${line.entryId}`}>
+                <span>{line.text}</span>{' '}
+                {canUseEarlier && (
+                  <button
+                    type="button"
+                    className="btn btn-secondary li-quiet"
+                    disabled={busy}
+                    aria-label={`${COPY.earlierUse}: ${line.answer}`}
+                    onClick={() => fillFromEarlier(line)}
+                  >
+                    {COPY.earlierUse}
+                  </button>
+                )}
+              </li>
+            ))}
+          </ul>
+          <p className="li-hint">{COPY.earlierNote}</p>
+        </div>
       )}
 
       {answerControls}

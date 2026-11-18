@@ -127,7 +127,8 @@ def cmd_new_id(args, root: Path) -> int:
 #: Subcommands served by the OPTIONAL local-first import package
 #: (``isaac_api.local_import``, under ``apps/api``). Dispatched before this module's
 #: own parsing and imported lazily, so the four commands above never load it.
-LOCAL_IMPORT_COMMANDS = ("import", "bundle", "process")
+#: ``answer-memory``: the opt-in, per-computer memory of earlier beamtimes' answers (hints only).
+LOCAL_IMPORT_COMMANDS = ("import", "bundle", "process", "answer-memory")
 
 
 def _run_local_import(argv: list[str]) -> int:
@@ -137,7 +138,8 @@ def _run_local_import(argv: list[str]) -> int:
         if (exc.name or "").split(".")[0] != "isaac_api":
             raise
         print(
-            "`isaac import` and `isaac bundle` need the ISAAC local import package: "
+            "`isaac import`, `isaac bundle`, `isaac process` and `isaac answer-memory` need the ISAAC local "
+            "import package: "
             "run scripts/install_local_cli.sh from an ISAAC checkout.",
             file=sys.stderr,
         )

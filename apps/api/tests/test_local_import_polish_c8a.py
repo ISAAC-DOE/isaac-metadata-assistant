@@ -39,6 +39,11 @@ SENTENCE = {
 }
 
 
+#: pq-005/pq-007 (beamline scientist answers relayed by Krish, 17 Nov 2026): Athena is never used, so the Athena
+#: behaviour these tests checked no longer runs (processing reads no Athena project; no Athena result composes a record)
+ATHENA_RETIRED = pytest.mark.skip(reason="Athena is never used (pq-005/pq-007, 17 Nov 2026): retired behaviour")
+
+
 def _fail(bdir, reasons, statements=None) -> None:
     """Group g1 with ONE undecided ISAAC result p1 (a curve on disk) whose QC fails for ``reasons``."""
     _add_group(bdir, verdict="fail")
@@ -180,6 +185,7 @@ def _process(bdir, root):
     ([("02_SYN_ZZ1_A.001", 1e-2), ("02_SYN_ZZ1_A.002", 1.01e-2)], "per_scan_set"),
     ([("02_SYN_ZZ1_1-2", 1e-2)], "label"),
 ])
+@ATHENA_RETIRED
 def test_an_athena_curve_of_one_run_in_a_merged_group_names_it_is_a_subset_and_is_not_preferred(tmp_path, groups, basis):
     bdir, root = _merged(tmp_path, groups)
     isa, ath = _process(bdir, root)
@@ -197,6 +203,7 @@ def test_an_athena_curve_of_one_run_in_a_merged_group_names_it_is_a_subset_and_i
     assert note and "scans 1, 2 of run 02_SYN_ZZ1" in note and "2 of the 4 scan(s) ISAAC merged" in note
 
 
+@ATHENA_RETIRED
 def test_an_athena_curve_named_after_one_run_covers_only_that_run_and_a_one_run_group_is_unchanged(tmp_path):
     bdir, root = _merged(tmp_path, [("01_SYN_ZZ1", 1e-2)])  # named exactly after one run; its scans are not stated
     _, ath = _process(bdir, root)

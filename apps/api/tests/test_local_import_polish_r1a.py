@@ -35,6 +35,11 @@ LEGACY_OUTCOME_KEYS = [
 ]
 
 
+#: pq-005/pq-007 (beamline scientist answers relayed by Krish, 17 Nov 2026): Athena is never used, so the Athena
+#: behaviour these tests checked no longer runs (processing reads no Athena project; no Athena result composes a record)
+ATHENA_RETIRED = pytest.mark.skip(reason="Athena is never used (pq-005/pq-007, 17 Nov 2026): retired behaviour")
+
+
 def _processing():
     pytest.importorskip("numpy", reason="XAS processing tests need the optional `processing` extra (numpy)")
     pytest.importorskip("larch", reason="XAS processing tests need the optional `processing` extra (xraylarch)")
@@ -276,6 +281,7 @@ def _results(bdir, source):
     return [r for r in M.load(bdir)["processing_results"] if r["source"] == source]
 
 
+@ATHENA_RETIRED
 def test_choosing_an_athena_version_then_approving_it_gives_the_record_its_e0(tmp_path, capsys):
     _processing()
     from isaac_api.local_import import records as R
@@ -356,6 +362,7 @@ def _athena_results(payload):
     return [r for r in payload["processing_results"] if r["source"] == "scientist_athena"]
 
 
+@ATHENA_RETIRED
 def test_one_athena_e0_in_three_groups_whose_own_edges_differ_is_flagged(tmp_path):
     _processing()
     from isaac_api.local_import.processing import run as RUN
@@ -378,6 +385,7 @@ def test_one_athena_e0_in_three_groups_whose_own_edges_differ_is_flagged(tmp_pat
                for line in out["summary"]["lines"])
 
 
+@ATHENA_RETIRED
 def test_a_single_group_and_different_athena_e0s_are_not_flagged(tmp_path):
     _processing()
     from isaac_api.local_import.processing import run as RUN
