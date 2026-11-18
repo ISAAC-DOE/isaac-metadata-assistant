@@ -65,8 +65,7 @@ none, point them to `docs/local-skill-quickstart.md` and stop. `<skills>` is the
 
 - `[stale]`, or (`[skipped]`, or this copy runs from elsewhere) it differs (`reference/troubleshooting.md`) → say "Your installed skill is out of date, I'm updating it", run `scripts/setup_isaac_local.sh --refresh-skill --skill-dir <skills>` (copies the skill only: no download, no install), Read the file its `Skill written to:` line names and follow THAT text from Step 0 on. **The re-read version wins wherever it differs from this one** (no restart). Refresh at most ONCE: if it fails, or `--check` still says `[stale]` after it, stop refreshing, tell the scientist the copy at that path could not be refreshed, and continue with this text.
 - `[behind N commits]` → ask once: "Your ISAAC folder is N updates behind. Update now? It only changes the ISAAC code, not your data." Yes → `scripts/setup_isaac_local.sh --update --skill-dir <skills>`: exit 0 → re-read as above; exit 3 → say the reason it gives and continue; any other non-zero exit → say it stopped and what its last line says, suggest `scripts/setup_isaac_local.sh --check`, and continue with the code as it is. No → continue, and say the version in use (the commit the line names).
-- command missing → the ONE fix is `scripts/setup_isaac_local.sh` (then `--install-skill` if there
-  was no `checkout-path.txt`); stop.
+- command missing → the ONE fix is `scripts/setup_isaac_local.sh` (then `--install-skill` if there was no `checkout-path.txt`); stop.
 - processing or portal check missing → say what it costs ("curves and quality checks need
   `scripts/setup_isaac_local.sh --with-processing`"; "records cannot reach *exportable* without
   `scripts/install_portal_validator.sh`") and continue with whatever is available.
