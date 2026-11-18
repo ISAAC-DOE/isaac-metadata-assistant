@@ -598,11 +598,35 @@ NO_QUOTE_ROOT = ("Every finding's quote is checked against the imported folder b
 
 def quote_root(bundle: Mapping, explicit: str | Path | None) -> Path | None:
     """The folder a findings file's quotes are checked against: ``explicit`` (``--root``), else the bundle's recorded
-    ``source_root.local_root_hint`` (``import --record-local-root``), else ``None``."""
-    if explicit:
-        return Path(explicit).expanduser()
-    hint = (bundle.get("source_root") or {}).get("local_root_hint")
-    return Path(hint) if hint else None
+    ``source_root.local_root_hint`` (``import --record-local-root``), else ``None``.
+
+    ``--root`` IS TIED TO THE BUNDLE: when the bundle records its root, ``--root`` must be that folder; when it
+    records none, ``--root``'s name must be the imported folder's (``source_root.label``, a ZIP's name without
+    ``.zip``). Anything else is refused (exit 2), so a quote is never checked against some other folder's files. The
+    hash of every cited bundle source ties the content too (``reading_check``)."""
+    sr = bundle.get("source_root") or {}
+    hint = sr.get("local_root_hint")
+    if not explicit:
+        return Path(hint) if hint else None
+    root = Path(explicit).expanduser()
+    label = str(sr.get("label") or "")
+    if hint:
+        try:
+            same = root.resolve() == Path(hint).resolve()
+        except OSError:
+            same = False
+        if not same:
+            raise MutationRefused(
+                f"--root {root.name!r} is not the folder this bundle was imported from (it records that folder, named "
+                f"{Path(hint).name!r}): leave --root out to use it, or pass that folder. Nothing was checked or recorded.",
+                code=2)
+        return root
+    names = {label, label[:-4] if label.lower().endswith(".zip") else label}
+    if label and root.name not in names:
+        raise MutationRefused(
+            f"--root {root.name!r} is not the folder this bundle was imported from (that folder is named {label!r}): pass "
+            "the folder you imported. Nothing was checked or recorded.", code=2)
+    return root
 
 
 def check_readings(bundle: Mapping, findings: Mapping, root: Path) -> dict:
@@ -627,9 +651,13 @@ def annotate_from_readings(bundle_dir: Path, findings: Mapping, *, model_id: str
     whose quote was not found, and REFUSES to run at all when there is no folder to check against. The CLI has
     no way to skip it; ``check_quotes=False`` exists only for this package's synthetic tests of what follows
     the check."""
+    from . import scan_notes as SN
     from . import suggestions as S
 
+    current_bundle: list = []
+
     def plan(bundle):
+        current_bundle[:] = [bundle]
         quote_check = None
         if check_quotes:
             where = quote_root(bundle, root)
@@ -669,9 +697,11 @@ def annotate_from_readings(bundle_dir: Path, findings: Mapping, *, model_id: str
             by_field.setdefault(f["finding_id"], 0)
             by_field[f["finding_id"]] += 1
         refused = [s for s in out["skipped"] if s.get("refused")]
+        live = SN.live_run_ids(current_bundle[0])
         payload = {"applied": recorded, "interpretations": len(fresh), "already_recorded": repeated,
                    "targets_per_finding": by_field,
                    "scan_notes": notes_new, "scan_notes_already_recorded": notes_repeated,
+                   "scan_notes_on_runs_not_live": sum(1 for n in out.get("scan_notes") or () if set(n["run_ids"]) - live),
                    "refused": len(refused),
                    "refused_by_reason": {k: sum(1 for s in refused if s["refused"] == k) for k in sorted({s["refused"] for s in refused})},
                    "skipped": out["skipped"]}
@@ -694,8 +724,6 @@ def annotate_from_readings(bundle_dir: Path, findings: Mapping, *, model_id: str
         return summary(out, fresh, repeated, False, quote_check, new, len(planned) - new)
 
     def change(bundle):
-        from . import scan_notes as SN
-
         out, fresh, repeated, quote_check = plan(bundle)
         for t, f in fresh:
             kind, obj = resolve_target(bundle, t["id"])

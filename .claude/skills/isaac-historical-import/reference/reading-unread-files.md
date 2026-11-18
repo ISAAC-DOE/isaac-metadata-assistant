@@ -96,13 +96,20 @@ Write every finding to ONE JSON file (`isaac.reading_findings`) in a working fol
 
 - `stated`: the file says it. `inferred`: ONE written step from what it says. Nothing from
   what a lab "usually" does. A name in a file or folder name is evidence; say it is a name.
-- **The quote is checked when the file is loaded.** Copy it exactly from the file (spacing, quote marks
-  and dashes may differ; letters and case may not) and give the line it is on (`line N`, or `lines N-M`
-  for a quote over several lines; it must start within 3 lines). A `.docx/.pptx/.xlsx` quote is checked
-  against the extractor's text (any locator); a SPEC header quote against the `#` lines (`scan 5 #C`);
-  a PDF quote against its text layer (`page N` checks that page; another locator searches it all).
-  A scanned PDF page ("no text layer"), and a file outside the imported folder (`../`), cannot be
-  checked: quote a text copy of it, or tell the scientist what it says instead of writing a finding.
+- **The quote is checked when the file is loaded.** Copy at least 3 words (or 12 characters), or a
+  whole short line ("Ar sat") cited by its own `line N`, exactly from the file (spacing, quote marks and dashes may differ; letters and case may not). Cite the file
+  itself, by its path inside the imported folder, never the extractor's output in `<bundle>-notes/`.
+  - Text: the line it is on, `line N` (or `lines N-M`, at most 20 lines, for a quote over several);
+    it must start within 3 lines. A locator holding a number that is not a line fails.
+  - `.docx/.pptx/.xlsx`: `paragraph N`, `table N`, `slide N` or `sheet <name> row N` is checked on that
+    part of the extractor's text; any other locator is reported "found in document, locator not checked".
+  - SPEC headers: `scan 5 #C` checks that scan's `#` lines. PDF: `page N` checks that page; a locator
+    with no number searches every page.
+  - A scanned PDF page ("no text layer") or a file outside the imported folder (`../`) cannot be checked.
+    A transcription you make of one goes in `<bundle>-notes/` (never in the scientist's folder), and is
+    not citable: tell the scientist what it says as "my reading of <file>, page N", with no finding.
+  - A file under the folder that the import did not read (`source_not_imported` in the report) has no
+    hash tying it to the import: say so when you report what it holds.
 - **Naming runs.** `runs` takes each run's `stem` (the file name the scientist knows) or its `run_id`,
   both printed by `<isaac> bundle list <bundle> runs`; where two runs share a stem (the same name in
   two folders) the row also prints `path`, and that path or the `run_id` names one of them. Never use
@@ -171,7 +178,8 @@ See them with `<isaac> bundle list <bundle> scan-notes` and `<isaac> bundle show
 <isaac> bundle annotate <bundle> --from-readings <findings.json> --model "<model name>" --root <folder> --apply
 ```
 
-`<folder>` is the folder that was imported. `check-readings` and the preview report every quote as
+`<folder>` is the folder that was imported: when the bundle records it, `--root` may be left out and
+any other folder is refused; when not, a folder of another name is refused. `check-readings` and the preview report every quote as
 `pass` or `fail` (and where a quote was found when it is not near its locator). `--apply` records NO
 finding whose quote was not found, whose run reference names no run (or more than one), or whose value
 is not on its field's list (`refused_by_reason`); there is no way to skip the check. Fix the file and

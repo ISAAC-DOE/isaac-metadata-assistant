@@ -447,7 +447,8 @@ def readings_to_interpretations(bundle: Mapping, findings: Mapping, *, model_id:
             skipped.append({"finding": fid, "reason": f"unknown finding kind {str(f.get('kind'))[:40]!r}: a finding is a field reading or `{SN.KIND}`"})
             continue
         if f.get("kind") == SN.KIND:
-            entry, skip = SN.plan_scan_note(bundle, f, fid=fid, runs_by_ref=runs_by_ref, model_id=model_id)
+            entry, skip = SN.plan_scan_note(bundle, f, fid=fid, runs_by_ref=runs_by_ref, model_id=model_id,
+                                            canonical_path=(checked or {}).get("canonical_path"))
             if skip is not None:
                 skipped.append(skip)
             else:
@@ -553,7 +554,8 @@ def readings_to_interpretations(bundle: Mapping, findings: Mapping, *, model_id:
         if not targets:
             skipped.append({"finding": fid, "field_path": path, "reason": "no target for this field on the runs it names"})
             continue
-        rel = str(source["path"])
+        # the path as the folder spells it (`./a.txt`, `A.TXT` on a case-insensitive disk): its source id is found by it
+        rel = str((checked or {}).get("canonical_path") or source["path"])
         if not _cited_path_ok(rel):
             skipped.append({"finding": fid, "field_path": path,
                             "reason": "source.path must be relative to the imported folder (one leading ../ for a document beside it), never absolute"})

@@ -377,3 +377,201 @@ def test_an_older_bundle_without_scan_notes_still_validates_and_the_section_is_c
     bad = json.loads(json.dumps(held))
     bad["scan_notes"][0]["run_ids"] = ["run-999"]
     assert any("names a run not in this bundle" in e for e in B.validate_bundle(bad))
+
+
+# --- review fixes: locators, aliases, short quotes, documents, the root, conflicting notes -----------------------
+
+
+@pytest.mark.parametrize(("locator", "ok", "said"), [
+    ("lines 1-100000", False, "too wide"),
+    ("lines 1-21", False, "too wide"),
+    ("lines 1-20", True, None),
+    ("line10", True, None), ("Line #10", True, None), ("l. 10", True, None), ("L10", True, None),
+    ("row 10", True, None), ("ll. 9-11", True, None), ("Lines 8 to 12", True, None),
+    ("line30", False, "the quote is at line 10"),
+    ("step 27 of the table", False, "not a line reference"),
+    ("entry 3", False, "not a line reference"),
+])
+def test_a_line_locator_is_parsed_strictly_and_a_wide_or_unreadable_one_fails(beamtime, locator, ok, said):
+    bt, _ = beamtime
+    [r] = RC.check_findings([_finding(source={"path": "SYN_logbook.txt", "locator": locator})], bt)
+    assert (r["result"] == RC.PASS) is ok, r
+    if said:
+        assert said in r["reason"]
+
+
+def test_a_locator_without_any_number_still_searches_the_whole_file(beamtime):
+    bt, _ = beamtime
+    [r] = RC.check_findings([_finding(source={"path": "SYN_logbook.txt", "locator": "the sample section"})], bt)
+    assert r["result"] == RC.PASS and "whole file" in r["at"]
+
+
+@pytest.mark.parametrize("quote", ["in", "SYN_cell", "in situ"])
+def test_a_quote_too_short_to_tell_apart_fails(beamtime, quote):
+    bt, _ = beamtime
+    [r] = RC.check_findings([_finding(quote=quote)], bt)
+    assert r["result"] == RC.FAIL and "too short" in r["reason"]
+
+
+@pytest.mark.parametrize(("line", "quote", "locator", "ok"), [
+    ("Ar sat", "Ar sat", "line 5", True),                      # a whole short line, cited to it
+    ("  Purge Ar.  ", "Purge Ar.", "lines 4-6", True),         # in a range of at most 3 lines
+    ("Ar sat", "Ar sat", "lines 2-6", False),                  # a wider range
+    ("Ar sat", "Ar sat", "line 7", False),                     # near, but not the line cited
+    ("Ar sat", "Ar sat", "the gas remark", False),             # no line: a whole-file search
+    ("the electrolyte held 0.1 M K and a synthetic buffer", "K", "line 5", False),  # a fragment of a long line
+])
+def test_a_short_quote_passes_only_as_the_whole_line_it_cites(tmp_path, line, quote, locator, ok):
+    lines = [f"synthetic filler line {n}" for n in range(1, 11)]
+    lines[4] = line
+    (tmp_path / "SYN_short.txt").write_text("\n".join(lines) + "\n")
+    [r] = RC.check_findings([_finding(source={"path": "SYN_short.txt", "locator": locator}, quote=quote)], tmp_path)
+    assert (r["result"] == RC.PASS) is ok, r
+    if not ok:
+        assert "too short" in r["reason"]
+
+
+def test_path_aliases_of_an_imported_source_still_get_its_hash_check_and_source_id(beamtime):
+    bt, out = beamtime
+    bundle = _load(out)
+    src = next(s for s in bundle["sources"] if s["relative_path"] == "SYN_logbook.txt")
+    aliases = ["./SYN_logbook.txt", "SYN_logbook.txt/", ".//SYN_logbook.txt"]
+    if (bt / "syn_logbook.TXT").exists():  # a case-insensitive file system (macOS)
+        aliases.append("syn_logbook.TXT")
+    good = RC.check_findings([_finding(source={"path": a, "locator": "line 10"}) for a in aliases], bt, sources=bundle["sources"])
+    assert all(r["result"] == RC.PASS and r["canonical_path"] == "SYN_logbook.txt" and not r.get("source_not_imported")
+               for r in good)
+    done = M.annotate_from_readings(out, _file(_note(source={"path": "./SYN_logbook.txt", "locator": "line 20"})),
+                                    model_id="m", apply=True, root=bt)
+    [n] = _load(out)["scan_notes"]
+    assert done["scan_notes"] == 1 and n["source_id"] == src["source_id"] and n["source_path"] == "SYN_logbook.txt"
+    (bt / "SYN_logbook.txt").write_text("\n".join(LOGBOOK) + "\nan added synthetic line\n", encoding="utf-8")
+    bad = RC.check_findings([_finding(source={"path": a, "locator": "line 10"}) for a in aliases], bt, sources=bundle["sources"])
+    assert all(r["result"] == RC.FAIL and "changed since the import" in r["reason"] for r in bad)
+
+
+def test_a_file_the_import_did_not_read_is_marked_source_not_imported(beamtime):
+    bt, out = beamtime
+    (bt / "SYN_added_later.txt").write_text("SYN_cell was measured in situ, written after the import\n")
+    [r] = RC.check_findings([_finding(source={"path": "SYN_added_later.txt", "locator": "line 1"})], bt,
+                            sources=_load(out)["sources"])
+    assert r["result"] == RC.PASS and r["source_not_imported"] is True
+    report = RC.report([r], root_label=bt.name)
+    assert report["results"][0]["source_not_imported"] is True and report["source_not_imported"] == 1
+
+
+DOCX_SECTIONS = ("<w:p><w:r><w:t>Synthetic heading one</w:t></w:r></w:p>"
+                 "<w:p><w:r><w:t>Synthetic paragraph two says nothing</w:t></w:r></w:p>"
+                 "<w:p><w:r><w:t>Synthetic paragraph three says nothing</w:t></w:r></w:p>"
+                 "<w:p><w:r><w:t>SYN_cell was kept under synthetic argon</w:t></w:r></w:p>"
+                 "<w:tbl><w:tr><w:tc><w:p><w:r><w:t>File 27</w:t></w:r></w:p></w:tc>"
+                 "<w:tc><w:p><w:r><w:t>synthetic step table cell</w:t></w:r></w:p></w:tc></w:tr></w:tbl>")
+
+
+@pytest.mark.parametrize(("locator", "ok", "said"), [
+    ("paragraph 4", True, "paragraph 4"),
+    ("para. 4", True, "paragraph 4"),
+    ("paragraph 1", False, "paragraph 4"),
+    ("the argon remark", True, "locator not checked"),
+])
+def test_a_docx_paragraph_locator_is_honoured(beamtime, locator, ok, said):
+    bt, _ = beamtime
+    make_docx(bt / "SYN_sections.docx", body_xml=DOCX_SECTIONS)
+    [r] = RC.check_findings([_finding(source={"path": "SYN_sections.docx", "locator": locator},
+                                      quote="kept under synthetic argon")], bt)
+    assert (r["result"] == RC.PASS) is ok, r
+    assert said in (r.get("at") or r.get("reason"))
+
+
+def test_a_docx_table_and_an_xlsx_row_locator_are_honoured(beamtime):
+    pytest.importorskip("openpyxl")
+    from test_local_import_extract import make_xlsx
+
+    bt, _ = beamtime
+    make_docx(bt / "SYN_sections.docx", body_xml=DOCX_SECTIONS)
+    make_xlsx(bt / "SYN_sheet.xlsx", rows=6)
+    rows = RC.check_findings([
+        _finding(source={"path": "SYN_sections.docx", "locator": "table 1"}, quote="synthetic step table cell"),
+        _finding(source={"path": "SYN_sections.docx", "locator": "table 3"}, quote="synthetic step table cell"),
+        _finding(source={"path": "SYN_sheet.xlsx", "locator": "sheet Data row 4"}, quote="r4c1 | r4c2 | r4c3"),
+        _finding(source={"path": "SYN_sheet.xlsx", "locator": "row 5"}, quote="r4c1 | r4c2 | r4c3"),
+    ], bt)
+    assert [r["result"] for r in rows] == [RC.PASS, RC.FAIL, RC.PASS, RC.FAIL]
+    assert "row 4" in rows[3]["reason"]
+
+
+def test_root_must_be_the_folder_the_bundle_records_or_names(beamtime, tmp_path, capsys):
+    bt, out = beamtime
+    other = tmp_path / "SYN_other_folder"
+    other.mkdir()
+    (other / "SYN_logbook.txt").write_text("\n".join(LOGBOOK) + "\n")
+    findings = tmp_path / "f.json"
+    findings.write_text(json.dumps(_file(_finding())))
+    code, _ = _run(["bundle", "check-readings", str(out), str(findings), "--root", str(other)], capsys)
+    assert code == 2  # not the folder the bundle was imported from (its name differs)
+    with pytest.raises(M.MutationRefused, match="not the folder"):
+        M.annotate_from_readings(out, _file(_finding()), model_id="m", apply=True, root=other)
+    rec = tmp_path / "recorded"
+    assert _run(["import", str(bt), "--out", str(rec), "--record-local-root"], capsys)[0] == 0
+    twin = tmp_path / "twin" / bt.name
+    twin.mkdir(parents=True)
+    (twin / "SYN_logbook.txt").write_text("\n".join(LOGBOOK) + "\n")
+    code, _ = _run(["bundle", "check-readings", str(rec), str(findings), "--root", str(twin)], capsys)
+    assert code == 2  # same name, but not the recorded folder
+    code, _ = _run(["bundle", "check-readings", str(rec), str(findings)], capsys)
+    assert code == 0  # the recorded root is used
+
+
+def test_the_consent_reference_no_longer_says_to_cite_beside_folder_files():
+    text = (Path(__file__).resolve().parents[3] / ".claude/skills/isaac-historical-import/reference/"
+            "data-flow-and-consent.md").read_text(encoding="utf-8")
+    assert "../<name>" not in text
+
+
+def test_conflicting_scan_notes_for_one_run_are_flagged_in_the_accessor_show_and_list(beamtime, capsys):
+    bt, out = beamtime
+    notes = _file(
+        _note(action="exclude", scans=[3]),
+        _note(action="keep_only", scans=[3, 4], reason="keep 3 and 4"),
+        _note(action="start_from", scans=[5], source={"path": "SYN_logbook.txt", "locator": "line 21"}, quote="start from scan #5"),
+        _note(action="start_from", scans=[6], source={"path": "SYN_logbook.txt", "locator": "line 21"}, quote="start from scan #5"),
+    )
+    assert M.annotate_from_readings(out, notes, model_id="m", apply=True, root=bt)["scan_notes"] == 4
+    bundle = _load(out)
+    rid = next(r["run_id"] for r in bundle["runs"] if r["stem"] == "SYN_cell")
+    got = SN.scan_notes_for_run(bundle, rid)
+    ids = [n["scan_note_id"] for n in got]
+    assert all(n["conflicts"] for n in got)
+    assert any(c["with"] == ids[1] and "3" in c["why"] for c in got[0]["conflicts"])
+    assert any(c["with"] == ids[3] for c in got[2]["conflicts"])
+    pairs = SN.scan_note_conflicts(bundle, rid)
+    assert {frozenset((c["notes"][0], c["notes"][1])) for c in pairs} >= {frozenset(ids[:2]), frozenset(ids[2:])}
+    code, text = _run(["bundle", "show", str(out), "run", rid], capsys)
+    assert code == 0 and json.loads(text)["scan_note_conflicts"]
+    code, text = _run(["bundle", "list", str(out), "scan-notes"], capsys)
+    assert code == 0 and all(i["conflicts"] for i in json.loads(text)["items"])
+
+
+def test_a_scan_note_over_the_run_bound_is_refused_alone(beamtime, monkeypatch):
+    bt, out = beamtime
+    monkeypatch.setattr(SN, "MAX_RUNS_PER_NOTE", 1)
+    two = [r["run_id"] for r in _load(out)["runs"]][:2]
+    assert len(two) == 2
+    done = M.annotate_from_readings(out, _file(_note(applies_to={"scope": "runs", "runs": two}), _note()),
+                                    model_id="m", apply=True, root=bt)
+    assert done["scan_notes"] == 1
+    [s] = done["skipped"]
+    assert s["finding"] == "finding-001" and "split it" in s["reason"]
+
+
+def test_a_scan_note_on_a_run_outside_every_live_group_is_kept_and_marked(beamtime):
+    bt, out = beamtime
+    bundle = _load(out)
+    rid = next(r["run_id"] for r in bundle["runs"] if r["stem"] == "SYN_cell")
+    key = next(r["run_key"] for r in bundle["runs"] if r["run_id"] == rid)
+    gid = next(g["group_id"] for g in bundle["record_groups"] if key in g["member_run_keys"])
+    M.decide(out, target_ids=[gid], decision="reject", value=None, by="SYNTHETIC TEST", orcid=None)
+    done = M.annotate_from_readings(out, _file(_note()), model_id="m", apply=True, root=bt)
+    assert done["scan_notes"] == 1 and done["scan_notes_on_runs_not_live"] == 1
+    [n] = SN.scan_notes_for_run(_load(out), rid)
+    assert n["run_live"] is False

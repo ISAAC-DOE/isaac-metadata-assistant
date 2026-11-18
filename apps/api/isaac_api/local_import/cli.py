@@ -779,10 +779,6 @@ def _row(kind: str, obj: Mapping, group_status: Mapping | None = None) -> dict:
             "proposed_link": (obj["proposed_links"] or [None])[0],
             "link_note": (obj["link_note"] or {}).get("code"),
         }
-    if kind == "scan-notes":
-        from . import scan_notes as SN
-
-        return SN.list_row(obj, (group_status or {}).get("_stems") or {})
     if kind == "processing-results":
         # COMPACT: what a reviewer needs to pick and decide a result; the full result (inputs, steps,
         # every metric) stays in processing/processing_results.json and `bundle.json`
@@ -1125,8 +1121,11 @@ def cmd_bundle_list(args) -> int:
     page = rows[args.offset : args.offset + args.limit]
     status = {g["group_id"]: g.get("status") for g in bundle.get("record_groups") or ()}
     if args.kind == "scan-notes":
-        status = {"_stems": {r["run_id"]: r.get("stem") for r in bundle.get("runs") or ()}}
-    items = [_row(args.kind, r, status) for r in page]
+        from . import scan_notes as SN
+
+        items = [SN.list_row(bundle, r) for r in page]
+    else:
+        items = [_row(args.kind, r, status) for r in page]
     cannot_export: dict[str, int] = {}
     if args.kind == "groups":
         extras = group_list_extras(bundle)
@@ -1741,7 +1740,9 @@ def cmd_bundle_show(args) -> int:
                 from . import scan_notes as SN
 
                 if notes := SN.scan_notes_for_run(bundle, obj["run_id"]):
-                    obj = {**obj, "scan_notes": notes, "scan_notes_note": SN.NOTE}
+                    conflicts = SN.scan_note_conflicts(bundle, obj["run_id"])
+                    obj = {**obj, "scan_notes": notes, "scan_notes_note": SN.NOTE,
+                           **({"scan_note_conflicts": conflicts} if conflicts else {})}
             print(json.dumps(obj, indent=1, ensure_ascii=False))
             return EXIT_OK
     if args.kind == "question":

@@ -39,6 +39,8 @@ KIND = "scan_note"
 ACTIONS = ("exclude", "start_from", "keep_only", "flag")
 #: The bound on ``bundle["scan_notes"]`` (the schema's ``maxItems``).
 MAX_SCAN_NOTES = 20_000
+#: The most runs one note names (the schema's ``run_ids`` maxItems): a note naming more is refused ALONE.
+MAX_RUNS_PER_NOTE = 500
 #: The most scan numbers one note lists, and the largest scan number.
 MAX_SCANS = 500
 MAX_SCAN_NUMBER = 100_000
@@ -65,9 +67,24 @@ def _scans_problem(action: str, scans: Any) -> tuple[list[int] | None, str | Non
     return sorted(set(scans)), None
 
 
-def plan_scan_note(bundle: Mapping, finding: Mapping, *, fid: str, runs_by_ref: Mapping[str, set], model_id: str) -> tuple[dict | None, dict | None]:
+def live_run_ids(bundle: Mapping) -> set[str]:
+    """Runs in a live record group (every run before grouping)."""
+    from . import bundle as B
+
+    groups = bundle.get("record_groups") or ()
+    if not groups:
+        return {r["run_id"] for r in bundle.get("runs") or ()}
+    by_key = {r["run_key"]: r["run_id"] for r in bundle.get("runs") or ()}
+    return {by_key[k] for g in groups if g.get("status") in B.LIVE_GROUP_STATUSES
+            for k in g.get("member_run_keys") or () if k in by_key}
+
+
+def plan_scan_note(bundle: Mapping, finding: Mapping, *, fid: str, runs_by_ref: Mapping[str, set], model_id: str,
+                   canonical_path: str | None = None) -> tuple[dict | None, dict | None]:
     """``(entry, None)`` for a valid ``scan_note`` finding, or ``(None, skipped)``. Pure. The quote is checked by
-    the caller (:mod:`.reading_check`), as for every finding."""
+    the caller (:mod:`.reading_check`), as for every finding; ``canonical_path`` is the cited path as the folder
+    spells it (``reading_check.canonical_cited``), by which its source is found. A run outside every live group is
+    accepted: :func:`scan_notes_for_run` marks it (``run_live: false``)."""
 
     def skip(reason: str, refused: str | None = None) -> tuple[None, dict]:
         return None, {"finding": fid, "kind": KIND, "reason": reason, **({"refused": refused} if refused else {})}
@@ -103,8 +120,11 @@ def plan_scan_note(bundle: Mapping, finding: Mapping, *, fid: str, runs_by_ref: 
         return skip(f"a run reference names more than one run ({ambiguous[:3]}): name each by its run id or path",
                     "ambiguous_run")
     run_ids = sorted({rid for r in refs for rid in runs_by_ref[r]})
+    if len(run_ids) > MAX_RUNS_PER_NOTE:
+        return skip(f"the note names {len(run_ids)} runs, more than the {MAX_RUNS_PER_NOTE} one note may name: split it "
+                    "into notes of at most that many runs (only this note was left out)")
     src_by_path = {s.get("relative_path"): s.get("source_id") for s in bundle.get("sources") or ()}
-    rel = str(source["path"])
+    rel = str(canonical_path or source["path"])
     identity = {"run_ids": run_ids, "action": action, "scans": scans, "source_path": rel,
                 "locator": str(source["locator"]), "quote": quote}
     digest = hashlib.sha256(json.dumps(identity, sort_keys=True, ensure_ascii=False).encode()).hexdigest()[:16]
@@ -147,19 +167,65 @@ def record_scan_notes(bundle: dict, planned: list[dict]) -> tuple[int, int]:
     return new, len(planned) - new
 
 
+def _conflict(a: Mapping, b: Mapping) -> str | None:
+    """Why two notes on one run cannot both be followed, or ``None``. Two notes saying the same thing do not conflict;
+    an ``exclude`` beside a ``start_from`` does not either (both leave scans out). A ``flag`` changes nothing."""
+    acts = {a["action"], b["action"]}
+    sa, sb = set(a.get("scans") or ()), set(b.get("scans") or ())
+    if "flag" in acts:
+        return None
+    if acts == {"exclude", "keep_only"}:
+        both = sorted(sa & sb)
+        return f"scan(s) {', '.join(map(str, both))} both excluded and kept only" if both else None
+    if acts == {"keep_only"} and sa != sb:
+        return "two different keep-only lists"
+    if acts == {"start_from"} and sa != sb:
+        return f"two different first scans to keep ({min(sa)} and {min(sb)})"
+    if acts == {"start_from", "keep_only"}:
+        first = min(sa if a["action"] == "start_from" else sb)
+        kept = sb if a["action"] == "start_from" else sa
+        before = sorted(k for k in kept if k < first)
+        return (f"the keep-only list holds scan(s) {', '.join(map(str, before))}, before the first scan to keep ({first})"
+                if before else None)
+    return None
+
+
+def _notes_on(bundle: Mapping, run_id: str) -> list[Mapping]:
+    return [n for n in bundle.get("scan_notes") or () if isinstance(n, Mapping) and run_id in (n.get("run_ids") or ())]
+
+
+def scan_note_conflicts(bundle: Mapping, run_id: str) -> list[dict]:
+    """Every pair of notes on run ``run_id`` that cannot both be followed: ``[{"notes": [id, id], "why"}]``. The
+    scientist settles it; nothing here picks one."""
+    notes = _notes_on(bundle, run_id)
+    out = []
+    for i, a in enumerate(notes):
+        for b in notes[i + 1:]:
+            why = _conflict(a, b)
+            if why:
+                out.append({"notes": [a.get("scan_note_id"), b.get("scan_note_id")], "why": why})
+    return out
+
+
 def scan_notes_for_run(bundle: Mapping, run_id: str) -> list[dict]:
     """THE ACCESSOR the processing step calls: every scan note naming run ``run_id``, in the order recorded.
 
     Each is a copy: ``scan_note_id``, ``action`` (``exclude`` / ``start_from`` / ``keep_only`` / ``flag``),
     ``scans`` (the logbook's scan numbers; ``[]`` for ``flag``; one number for ``start_from``), ``reason``, the
-    citation (``source_path``, ``locator``, ``quote``), ``strength``, ``reasoning``, ``model_id``, ``recorded_utc``
-    and, when set, ``scan_count_note``. An AI reading, never a decision: a caller may propose a scan selection
-    from it, citing the ``scan_note_id``, and must never leave a scan out on its strength alone. ``[]`` for a
-    bundle without the section (older than 1.12.0) or a run no note names."""
+    citation (``source_path``, ``locator``, ``quote``), ``strength``, ``reasoning``, ``model_id``, ``recorded_utc``,
+    ``run_live`` (``False`` when the run is in no live record group now), ``conflicts`` (``[{"with": <note id>,
+    "why"}]``: the notes on this run it cannot be followed together with, :func:`scan_note_conflicts`; ``[]`` for
+    none) and, when set, ``scan_count_note``. An AI reading, never a decision: a caller may propose a scan selection
+    from it, citing the ``scan_note_id``, must say every conflict instead of choosing a side, and must never leave a
+    scan out on its strength alone. ``[]`` for a bundle without the section (older than 1.12.0) or a run no note names."""
+    live = run_id in live_run_ids(bundle)
+    with_: dict[str, list[dict]] = {}
+    for c in scan_note_conflicts(bundle, run_id):
+        a, b = c["notes"]
+        with_.setdefault(a, []).append({"with": b, "why": c["why"]})
+        with_.setdefault(b, []).append({"with": a, "why": c["why"]})
     out = []
-    for n in bundle.get("scan_notes") or ():
-        if not isinstance(n, Mapping) or run_id not in (n.get("run_ids") or ()):
-            continue
+    for n in _notes_on(bundle, run_id):
         out.append({
             "scan_note_id": n.get("scan_note_id"),
             "action": n.get("action"),
@@ -172,19 +238,30 @@ def scan_notes_for_run(bundle: Mapping, run_id: str) -> list[dict]:
             "reasoning": n.get("reasoning"),
             "model_id": (n.get("model") or {}).get("model_id"),
             "recorded_utc": n.get("recorded_utc"),
+            "run_live": live,
+            "conflicts": with_.get(n.get("scan_note_id"), []),
             **({"scan_count_note": n["scan_count_note"]} if n.get("scan_count_note") else {}),
         })
     return out
 
 
-def list_row(note: Mapping, stems: Mapping[str, str | None]) -> dict:
-    """``bundle list <dir> scan-notes``: one compact row."""
+def list_row(bundle: Mapping, note: Mapping) -> dict:
+    """``bundle list <dir> scan-notes``: one compact row, with the notes it conflicts with on any of its runs and its
+    runs that are in no live record group now."""
+    stems = {r["run_id"]: r.get("stem") for r in bundle.get("runs") or ()}
+    live = live_run_ids(bundle)
+    me = note.get("scan_note_id")
+    conflicts = sorted({other for rid in note.get("run_ids") or () for c in scan_note_conflicts(bundle, rid)
+                        if me in c["notes"] for other in c["notes"] if other != me})
+    not_live = [stems.get(r) or r for r in note.get("run_ids") or () if r not in live]
     return {
-        "scan_note_id": note.get("scan_note_id"),
+        "scan_note_id": me,
         "runs": [stems.get(r) or r for r in note.get("run_ids") or ()][:20],
         "action": note.get("action"),
         "scans": list(note.get("scans") or ())[:50],
         "reason": note.get("reason"),
         "cited": f"{note.get('source_path')} {note.get('locator')}",
         "strength": note.get("strength"),
+        "conflicts": conflicts,
+        **({"runs_not_live": not_live[:20]} if not_live else {}),
     }

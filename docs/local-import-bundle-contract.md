@@ -802,11 +802,18 @@ cell, atmosphere, reaction and reference electrode, and the logbook's notes on w
 took every quote as the reader gave it. Now:
 
 - **The quote check** (`reading_check.py`; `annotate --from-readings [--root <folder>]`, `bundle check-readings`).
-  Each finding's quote is held, whitespace-normalised (non-breaking spaces, curly quotes and dashes as their plain
-  forms; case kept), against the file it cites under the imported folder (`--root`, else
-  `source_root.local_root_hint`): within 3 lines of a `line N` / `lines N-M` locator for text (found elsewhere:
-  fails, saying the line it is on); in `extract`'s text for `.docx/.pptx/.xlsx`, produced again in a temporary
-  folder (no image written; every sheet paged to its end); in the `#` header lines (one scan's, for `scan N #C`)
+  Each finding's quote (at least 3 words or 12 characters; a shorter one only as at least 80 % of a text line its
+  `line N` / at-most-3-line locator names, never for a whole-file or whole-document search) is held, whitespace-normalised (non-breaking spaces,
+  curly quotes and dashes as their plain forms; case kept), against the file it cites under the imported folder
+  (`source_root.local_root_hint` when recorded, and then `--root` must be that folder; else `--root`, whose name must
+  be `source_root.label`'s). The cited path is resolved as the folder spells it (`./a`, `a/`, a case-only alias),
+  and the bundle source is found by that path, so its hash check always applies; a file under the folder that is no
+  source is reported `source_not_imported`. Text: within 3 lines of a `line N` / `lines N-M` (at most 20 lines)
+  locator, in any of the forms `line5`, `Line #5`, `l. 5`, `ll. 4-9`, `row 5` (found elsewhere: fails, saying the
+  line it is on); a locator holding any other number fails; one with no number searches the file. `.docx/.pptx/.xlsx`:
+  in `extract`'s text, produced again in a temporary folder (no image written; every sheet paged to its end), on the
+  `paragraph N` / `table N` / `slide N` / `[sheet S] row N` the locator names, else anywhere ("found in document,
+  locator not checked"); in the `#` header lines (one scan's, for `scan N #C`)
   for a SPEC header locator; in a `.pdf`'s text layer, read page by page with `pypdf` (the `reading` extra, which
   `scripts/setup_isaac_local.sh` installs): a `page N` locator is checked on that page (on another page: fails,
   naming it), any other locator searches every page and reports the page. A page with no text layer (a scan)
@@ -825,7 +832,11 @@ took every quote as the reader gave it. Now:
   `keep_only` list scan numbers, `start_from` exactly one, `flag` none (advice that changes nothing). Numbers are the
   file's own. Stored once (`scan_note_id`, a digest of runs, action, scans and citation) with its citation, `model`,
   `authority: ai_reading` and `recorded_utc`; a number past a run's `scan_count` adds `scan_count_note`. The
-  validator checks the shape per action and that every run and source it names is in the bundle. Read by
+  validator checks the shape per action and that every run and source it names is in the bundle. A note naming more
+  than 500 runs is refused alone; one on a run in no live group is kept, marked `run_live: false`. Notes on one run
+  that cannot both be followed (`exclude` and `keep_only` of one scan, two different `start_from` or `keep_only`, a
+  `keep_only` scan before a `start_from`) are listed as `conflicts` on each note, `scan_note_conflicts` on `show run`
+  and `conflicts` on `list scan-notes`; nothing picks one. Read by
   `scan_notes.scan_notes_for_run(bundle, run_id)` (the processing step's accessor), `bundle show <dir> run <id>`
   (`scan_notes`) and `bundle list <dir> scan-notes`. AN AI READING, NEVER A DECISION: no record reads it and no scan
   is left out by it; the processing step may cite it in a scan-selection proposal, which the scientist decides.

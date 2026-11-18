@@ -36,4 +36,5 @@ Offer to continue once they have permission.
 Do not route file text to another tool or service. Do not paste file contents into a message
 beyond the excerpt a question needs. Read only inside the folder the scientist approved. If a
 document beside it (a proposal, slides) looks relevant, name it and ask before opening it; their
-yes covers that one file. Cite it as `../<name>` only after they agree.
+yes covers that one file. A finding cannot cite it: quotes are checked only against files inside the
+imported folder. Tell the scientist what it says instead (with its page or line).
