@@ -950,46 +950,79 @@ def element_reference_token(name: str) -> str | None:
 
 
 #: THE XDC NOT-A-MEASUREMENT RULE (an SSRL EXAFS Data Collector run, BL4-3 style). The SPEC path marks an alignment
-#: file ``run_candidate: false`` from its content (the engine classifier); an XDC scan has no such classifier, so
+#: file ``run_candidate: false`` from its CONTENT (the engine classifier); an XDC scan has no such classifier, so
 #: measured on a real BL4-3 beamtime every alignment, foil and calibration run (26 of 53) was asked the sample and
-#: condition questions and an alignment scan was "the nearest group to a record". This rule marks such a run as not a
-#: measurement run, at import, from:
-#:
-#: * its NAME: a token starting ``align``, the token ``rough`` (``00_Tifoil_rough_072``), a token starting ``foil`` or
-#:   ``calib``, or an element + ``foil``/``calib`` token (:func:`element_reference_token`); never a name that also
-#:   writes a condition (a potential, pH, concentration, open circuit) or a foil-electrode word (``Nifoil_electrode``),
-#:   and never the broader reference words (``std``, ``standard``, ``ref``): a standard is measured as a result;
-#: * or EVERY scan's HEADER: a comment line that starts ``Alignment`` (the collector's alignment mode writes
-#:   "Alignment experiment"), an alignment-mode region or detector file (``align.argn``, ``*.adet``), or a comment line
-#:   that is only an element and ``foil`` (``Ti foil``, ``Cu foil reference``). A header on one scan of several is not
-#:   enough, and a region file NAMED for a foil (``TiEdge_Foil.rgn``) is not either: a sample may be run on it.
-#:
-#: A PROPOSAL like every role: grouping gives the run's group the role, and the scientist confirms or rejects it.
+#: condition questions and an alignment scan was "the nearest group to a record". This rule marks a run as not a
+#: measurement run, at import, ONLY from what EVERY scan's HEADER says: a comment line that starts ``Alignment``
+#: (the collector's alignment mode writes "Alignment experiment"), an alignment-mode region or detector file
+#: (``align.argn``, ``*.adet``), or a comment line that is only an element and ``foil`` (``Ti foil``,
+#: ``Cu foil reference``). A header on one scan of several is not enough, and a region file NAMED for a foil
+#: (``TiEdge_Foil.rgn``) is not either: a sample may be run on it. A NAME never takes a run out: it only proposes a
+#: role (:data:`XDC_NAME_ROLE_RULE_ID`), as a SPEC name does.
 XDC_NOT_MEASUREMENT_RULE_ID = "isaac.grouping.xdc_not_a_measurement.v1"
-_ALIGN_TOKEN = re.compile(r"^(?:align\w*|rough\d*)$")
-_CALIB_PREFIXES = ("foil", "calib")
+XDC_SOURCE_TYPE = "generic:ssrl_xdc_v1"
 _ALIGN_HEADER_LINE = re.compile(r"^\s*alignment\b", re.IGNORECASE)
 _ALIGN_HEADER_FILE = re.compile(r"(?:^align\w*\.\w+$|\.a(?:rgn|det)$)", re.IGNORECASE)
 _FOIL_HEADER_LINE = re.compile(
     r"^\s*(?P<el>[A-Z][a-z]?)\s*-?\s*foils?(?:\s+(?:ref|reference|calib|calibration|for\s+calibration|for\s+energy\s+calibration))?\s*$")
 
+#: THE XDC NAME ROLE RULE: what an XDC run's NAME proposes, a role only (``reference`` / ``alignment``, as
+#: :func:`role_from_name` does for SPEC): the run stays a measurement, its group can become a record, and the
+#: proposal is said as judged from the name (:data:`NAME_ROLE_NOTE`). Whole words only: ``align``/``alignment``,
+#: ``calib``/``calibration``, ``foil`` (each with a number, or an element glued on: ``Tifoil``, ``SCALIB``), and
+#: ``rough`` only beside a foil or an align word (``00_Tifoil_rough_072``); never ``aligned``, ``calibrated`` or
+#: ``roughness``. Never a name that puts the foil, a substrate or a support beside a sample word or a condition
+#: (``Cu_on_Ti_foil``, ``foil_supported_Pt_NPs``, ``NiFoil_pristine``, ``Cufoil_after_cycling``,
+#: ``Pt_foil_annealed_500C``, a potential, a pH, a concentration, an electrode word). The standard words (``std``,
+#: ``standard``, ``ref``, ``reference``) propose a reference as they do for SPEC: a standard is still measured.
+XDC_NAME_ROLE_RULE_ID = "isaac.grouping.xdc_name_role.v1"
+NAME_ROLE_NOTE = ("judged from the name only: say if this is a sample. Confirm the group and answer its questions and "
+                  "it becomes a record like any other; reject it to leave it out")
+_XDC_ALIGN_WORD = re.compile(r"^align(?:ment)?\d*$")
+_XDC_ROUGH_WORD = re.compile(r"^rough\d*$")
+_XDC_CALIB_REST = re.compile(r"calib(?:ration)?\d*")
+_XDC_FOIL_REST = re.compile(r"foils?\d*")
+#: a word beside the foil that makes the name a sample (a support, a substrate, a history or a state)
+_SAMPLE_BESIDE = re.compile(
+    r"^(?:on|onto|in|with|supported|support\w*|substrate\w*|pristine|fresh|after\w*|before\w*|anneal\w*|"
+    r"cycl\w*|calcin\w*|treated|oxidi[sz]ed|reduced|used|aged|nps?|nanoparticles?)$")
+_TEMPERATURE_TOKEN = re.compile(r"^\d+(?:[p.]\d+)?(?:c|k|degc|deg)$")
 
-def _name_not_measurement(stem: str) -> tuple[str, str] | None:
-    """``(role, token)`` the NAME half of :data:`XDC_NOT_MEASUREMENT_RULE_ID` reads, or ``None``."""
+
+def _xdc_word(tok: str, rest: re.Pattern, elements: Container[str] | None) -> bool:
+    """``tok`` is the word (``rest``) on its own, or glued onto an element symbol (``elements``; any of the 118 when
+    ``None``)."""
+    from .template import ELEMENT_SYMBOLS
+
+    if rest.fullmatch(tok):
+        return True
+    symbols = elements if elements is not None else {e.casefold() for e in ELEMENT_SYMBOLS} - _ELEMENT_CALIB_NOT
+    return any(tok[:n] in symbols and rest.fullmatch(tok[n:]) for n in (1, 2))
+
+
+def xdc_name_role(stem: str) -> tuple[str, str] | None:
+    """:data:`XDC_NAME_ROLE_RULE_ID`: ``(role, token)`` an XDC run's NAME proposes, or ``None``."""
     tokens = _name_tokens(stem)
-    if not tokens or any(_condition_shaped(t) for t in _stem_tokens(stem)):
+    if not tokens:
         return None
     for tok in tokens:
-        if _ALIGN_TOKEN.match(tok):
-            return ROLE_ALIGNMENT, tok
-    element = element_reference_token(stem)
-    if element is not None:
-        return ROLE_REFERENCE, element
-    for tok in tokens:
-        if tok.startswith(_CALIB_PREFIXES):
-            if any(t != tok and _FOIL_NOT_REFERENCE.match(t) for t in tokens):
-                return None
+        if tok in _REFERENCE_EXACT or tok.startswith(("reference", "standard")):
             return ROLE_REFERENCE, tok
+    if any(_condition_shaped(t) for t in _stem_tokens(stem)) or any(
+            _SAMPLE_BESIDE.match(t) or _TEMPERATURE_TOKEN.match(t) or _FOIL_NOT_REFERENCE.match(t) for t in tokens):
+        return None
+    foil = [t for t in tokens if _xdc_word(t, _XDC_FOIL_REST, _FOIL_ELEMENTS)]
+    align = [t for t in tokens if _XDC_ALIGN_WORD.match(t)]
+    if align:
+        return ROLE_ALIGNMENT, align[0]
+    rough = [t for t in tokens if _XDC_ROUGH_WORD.match(t)]
+    if rough and foil:
+        return ROLE_ALIGNMENT, rough[0]
+    calib = [t for t in tokens if _xdc_word(t, _XDC_CALIB_REST, None)]
+    if calib:
+        return ROLE_REFERENCE, calib[0]
+    if foil:
+        return ROLE_REFERENCE, foil[0]
     return None
 
 
@@ -1011,12 +1044,8 @@ def _header_not_measurement(statement: Mapping) -> str | None:
 def xdc_not_a_measurement(stem: str, statements: Sequence[Mapping]) -> dict | None:
     """:data:`XDC_NOT_MEASUREMENT_RULE_ID`: ``{rule_id, role, basis, ...}`` when an XDC run named ``stem`` whose scan
     headers say ``statements`` (the reader's statements: ``key``, ``literal``, ``source_relative_path``, ``locator``)
-    is an alignment, a reference foil or a calibration run, else ``None``. ``basis`` ``name_token`` (with the
-    ``token``) or ``scan_header`` (with each scan's ``evidence``: the first statement that says it)."""
-    named = _name_not_measurement(stem)
-    if named is not None:
-        return {"rule_id": XDC_NOT_MEASUREMENT_RULE_ID, "role": named[0], "basis": "name_token", "token": named[1],
-                "name": stem}
+    is an alignment, a reference foil or a calibration run BY EVERY SCAN'S HEADER, else ``None``: ``basis``
+    ``scan_header``, with each scan's ``evidence`` (the first statement that says it). ``stem`` is only recorded."""
     by_scan: dict[str, list[Mapping]] = {}
     for st in statements:
         path = st.get("source_relative_path")
@@ -1047,7 +1076,8 @@ def run_role(run: Mapping, sources_by_id: Mapping[str, Mapping] | None = None) -
        ``standard_or_reference`` -> reference.
     2. Otherwise a stem token: starting ``align``/``rough`` -> alignment; starting
        ``foil``/``calib``/``reference``/``standard`` or equal to ``ref``/``std`` -> reference; an element
-       symbol + ``calib``/``foil`` (``SCALIB``, ``FeFOIL``; :func:`role_from_name`) -> reference.
+       symbol + ``calib``/``foil`` (``SCALIB``, ``FeFOIL``; :func:`role_from_name`) -> reference. An XDC run instead:
+       its scan headers (:data:`XDC_NOT_MEASUREMENT_RULE_ID`), else its name (:data:`XDC_NAME_ROLE_RULE_ID`).
     3. Otherwise ``sample``.
     """
     stype = run.get("source_type")
@@ -1062,16 +1092,27 @@ def run_role(run: Mapping, sources_by_id: Mapping[str, Mapping] | None = None) -
             "classifier_reason": cls.get("reason"),
             "source_id": run.get("acquisition_source_id"),
         }
+    if stype == XDC_SOURCE_TYPE:
+        # XDC_NOT_MEASUREMENT_RULE_ID: every scan header says it is an alignment or a reference foil (the import
+        # marked it not a measurement run); else XDC_NAME_ROLE_RULE_ID: what its name PROPOSES, said as judged from it
+        said = (run.get("other_relationships") or {}).get("not_a_measurement")
+        if isinstance(said, Mapping) and said.get("basis") == "scan_header" and said.get("role") in (ROLE_ALIGNMENT, ROLE_REFERENCE):
+            return said["role"], {"rule_id": XDC_NOT_MEASUREMENT_RULE_ID, "basis": "scan_header",
+                                  "evidence": list(said.get("evidence") or ())[:3], "name": run.get("stem"),
+                                  "source_id": run.get("acquisition_source_id")}
+        name = str(run.get("stem") or run.get("label") or "")
+        named = xdc_name_role(name)
+        if named:
+            shared = name_role(name)
+            if shared is not None and (shared[0], shared[1]["token"]) == named:
+                # the SPEC rule reads the same word: its basis, unchanged (the groups row says it is judged from the name)
+                return named[0], {**shared[1], "name": run.get("stem"), "source_id": run.get("acquisition_source_id")}
+            return named[0], {"rule_id": XDC_NAME_ROLE_RULE_ID, "basis": "name_token", "token": named[1],
+                              "name": run.get("stem"), "source_id": run.get("acquisition_source_id")}
+        return ROLE_SAMPLE, {"rule_id": ROLE_RULE_ID, "basis": "default_sample", "source_type": stype}
     named = name_role(str(run.get("stem") or run.get("label") or ""))
     if named:
         return named[0], {**named[1], "name": run.get("stem"), "source_id": run.get("acquisition_source_id")}
-    # XDC_NOT_MEASUREMENT_RULE_ID: every scan header of an XDC run says it is an alignment or a reference foil (the
-    # import marked it not a measurement run); a name the rules above read keeps its own basis
-    said = (run.get("other_relationships") or {}).get("not_a_measurement")
-    if isinstance(said, Mapping) and said.get("basis") == "scan_header" and said.get("role") in (ROLE_ALIGNMENT, ROLE_REFERENCE):
-        return said["role"], {"rule_id": XDC_NOT_MEASUREMENT_RULE_ID, "basis": "scan_header",
-                              "evidence": list(said.get("evidence") or ())[:3], "name": run.get("stem"),
-                              "source_id": run.get("acquisition_source_id")}
     return ROLE_SAMPLE, {"rule_id": ROLE_RULE_ID, "basis": "default_sample", "source_type": stype}
 
 

@@ -117,10 +117,10 @@ def test_a_valueless_candidate_is_asked_for_its_value_and_never_offered_confirm(
     # a TEMPLATE: a placeholder, never a value the agent could run on a vague "yes"
     assert "--decision correct --value <value> " in tech["answer_command"]
     assert not any(v in tech["answer_command"] for v in tech["allowed_values"])
-    # the text the files hold for THIS question is a macro name (`ZzL3_xas` at Zz_XAS.mac line 3 `def`): never a
-    # technique hint (suggestions.TECHNIQUE_HINT_RULE_ID); the question says it left it out
-    assert not [h for h in tech["hints"] if h["kind"] in ("file_literal", "related_reading")]
-    assert tech["code_hints_left_out"] >= 1 and "macro or script names" in tech["text"] and "(see the hints)" not in tech["text"]
+    own = tech["hints"][0]  # the text the files hold for THIS question, cited
+    assert (own["kind"], own["literal"], own["relative_path"], own["locator"]) == ("file_literal", "ZzL3_xas", "Zz_XAS.mac", "line 3 `def`")
+    # it names a technique (XAS), so it is kept (suggestions.TECHNIQUE_HINT_RULE_ID); macro FILE names are left out
+    assert not [h for h in tech["hints"] if str(h.get("literal", "")).endswith(".mac")]
     sample = _q(p, SAMPLE_NAME)
     assert sample["text"].startswith("What is the name (sample.material.name)?") and sample["hints"][0]["literal"] == "ZZ1"
 

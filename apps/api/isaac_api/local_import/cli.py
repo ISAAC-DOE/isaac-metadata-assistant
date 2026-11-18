@@ -848,6 +848,7 @@ def group_list_extras(bundle: Mapping) -> dict[str, dict]:
     """``{group_id: fields}`` a ``bundle list <dir> groups`` row adds: a few member FILE NAMES (the run's stem,
     the name a scientist recognises), the scan count, the reader (the runs' source type) and, when known,
     ``cannot_export_reason``. File names and counts only — no parser value, so no exposure."""
+    from . import grouping as G
     from . import questions as Q
 
     runs = {r["run_key"]: r for r in bundle.get("runs") or ()}
@@ -877,6 +878,11 @@ def group_list_extras(bundle: Mapping) -> dict[str, dict]:
                                  "note": ("it merges scans read at different " + ", ".join(sorted({str(c) for c in care}))
                                           + f": check it before a bulk confirm (`isaac bundle show <bundle_dir> group "
                                           f"{g['group_id']}` gives the readings)")}
+        basis = g.get("role_basis") if isinstance(g.get("role_basis"), Mapping) else {}
+        if g.get("role") in (G.ROLE_REFERENCE, G.ROLE_ALIGNMENT) and basis.get("basis") in ("name_token", "element_name_token"):
+            # a role a NAME proposes (SPEC or XDC) is a proposal: said as judged from the name, never as a fact
+            row["role_proposed"] = {"role": g["role"], "judged_from": "file name", "token": basis.get("token"),
+                                    "note": G.NAME_ROLE_NOTE}
         reason = reasons.get(g["group_id"])
         if reason is not None:
             row["cannot_export_reason"] = reason

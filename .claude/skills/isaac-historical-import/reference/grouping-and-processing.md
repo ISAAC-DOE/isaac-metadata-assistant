@@ -63,11 +63,11 @@ Get the groups with `bundle list <bundle> groups` and one in full with `bundle s
   make one wrong record. `bundle show <bundle> merge-candidate <id>` shows its run labels (no values).
 - a merge candidate the scientist says is two distinct things →
   `<isaac> bundle decide <bundle> --target <mc id> --decision keep_apart --by "<name>"` (no group changes).
-- Say "7 of 12 groups confirmed" after each batch. A reference or alignment run is its own group. A BL4-3
-  (EXAFS Data Collector) run named as an alignment, a reference foil or a calibration (`align_data_071`,
-  `00_Tifoil_rough_072`, `31_Ti_foil_I1_120`), or whose every scan header says so (`Alignment experiment`, a
-  `Ti foil` comment line), is not a measurement run, as a SPEC alignment file is: its group says
-  `not_a_measurement_run` and the sample questions do not count it. A standard (`std_…`) stays a measurement.
+- Say "7 of 12 groups confirmed" after each batch. A reference or alignment run is its own group. A role
+  read from a NAME (`role_proposed` on the groups row: `align_data_071`, `31_Ti_foil_I1_120`) is a proposal:
+  say it is judged from the name and ask if it is a sample (confirm and answer it, and it becomes a record; or
+  reject it). A BL4-3 run whose every scan header says it is an alignment or a foil (`Alignment experiment`,
+  `align.argn`, a `Ti foil` comment line) is not a measurement run: its group says `not_a_measurement_run`.
 - Beamtime-wide notes are not group members.
 
 ## Processing (draft protocol `isaac.xas.v0`)

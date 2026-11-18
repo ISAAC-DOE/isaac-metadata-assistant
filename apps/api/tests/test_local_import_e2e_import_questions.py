@@ -2,7 +2,7 @@
 files only: every name is ``SYN``/``ZZ``-prefixed or an invented counter, every value is invented.
 
 1. **BL4-3 alignment, foil and calibration runs are not measurement runs.** An SSRL EXAFS Data Collector (XDC) run
-   named like an alignment (``align_data_071``, ``00_SYNfoil_rough_072``), a reference foil (``31_Ti_foil_I1_120``,
+   named like an alignment (``align_data_071``, ``00_Tifoil_rough_072``), a reference foil (``31_Ti_foil_I1_120``,
    ``01_Tifoil_calib_075``) or whose every scan header says so (``Alignment experiment``, an ``align.argn`` region
    file, a ``Ti foil`` comment line) is marked ``run_candidate: false`` at import, as the SPEC classifier marks an
    alignment file, so its group says ``cannot_export_reason: not_a_measurement_run``, record questions do not span
@@ -68,20 +68,28 @@ def _import_and_group(src: Path, out: Path, capsys) -> dict:
 
 # --- 1. XDC alignment, foil and calibration runs ------------------------------------------------------------------
 
+#: HEADER evidence only takes a run out of the measurements (run_candidate false)
 NOT_MEASUREMENT = {
-    "00_SYNfoil_rough_072": "alignment",      # name: `rough`
-    "01_Tifoil_calib_1x3mm_075": "reference",  # name: an element + foil, and calib
-    "31_Ti_foil_I1_120": "reference",          # name: a `foil` token
-    "align_data_071": "alignment",            # name: `align`
-    "SYNscan_090": "alignment",               # header only: every scan says "Alignment experiment" / align.argn
-    "SYNscan_091": "reference",               # header only: every scan's comment line is "Ti foil"
+    "SYNscan_090": "alignment",               # every scan says "Alignment experiment" / align.argn
+    "SYNscan_091": "reference",               # every scan's comment line is "Ti foil"
 }
+#: a NAME only PROPOSES a role (as for SPEC): the run stays a measurement and its group can become a record
+NAME_PROPOSED = {
+    "00_Tifoil_rough_072": "alignment",      # `rough` beside a foil token
+    "01_Tifoil_calib_1x3mm_075": "reference",  # an element + foil, and calib
+    "31_Ti_foil_I1_120": "reference",          # a `foil` token
+    "align_data_071": "alignment",            # `align`
+}
+#: names that put a foil, a substrate or a support beside a sample word or a condition, or only LOOK like a word
+#: of the rule: no proposal, plain samples
+SAMPLE_NAMES = ("Cu_on_Ti_foil_01", "SYN_Pt_foil_annealed_500C_02", "NiFoil_pristine", "Cufoil_after_cycling",
+                "foil_supported_Pt_NPs", "aligned_SYNCNT_03", "Pt_rough_02", "calibrated_ZnO_film")
 MEASUREMENT = ("03_SYNZZ_1x1mm_081", "29_SYN_std_ZZ_sucrose_116", "12_SYNZZ_Nifoil_electrode_1MKOH_500mV_093",
-               "SYNscan_092")
+               "SYNscan_092", "std_Ti_foil", *SAMPLE_NAMES, *NAME_PROPOSED)
 
 
 def _bl43(src: Path) -> Path:
-    for stem in ("00_SYNfoil_rough_072", "01_Tifoil_calib_1x3mm_075", "31_Ti_foil_I1_120", "align_data_071"):
+    for stem in (*NAME_PROPOSED, *SAMPLE_NAMES, "std_Ti_foil"):
         xdc(src / f"{stem}_A.001")
     xdc(src / "SYNscan_090_A.001", free_text=("Alignment experiment", "trans_e.adet"), region="align.argn",
         detector="xsp7sca1.adet")
@@ -101,7 +109,11 @@ def bl43(tmp_path, capsys):
     return _import_and_group(src, tmp_path / "out", capsys), tmp_path / "out"
 
 
-def test_xdc_alignment_foil_and_calibration_runs_are_not_run_candidates(bl43):
+def _group_of(data):
+    return {g["member_run_keys"][0].split(":", 1)[1]: g for g in data["record_groups"]}
+
+
+def test_only_header_evidence_takes_an_xdc_run_out_of_the_measurements(bl43):
     data, _ = bl43
     by_stem = {r["stem"]: r for r in data["runs"]}
     assert set(by_stem) == set(NOT_MEASUREMENT) | set(MEASUREMENT)
@@ -110,31 +122,56 @@ def test_xdc_alignment_foil_and_calibration_runs_are_not_run_candidates(bl43):
         assert run["run_candidate"] is False, stem
         said = run["other_relationships"]["not_a_measurement"]
         assert said["role"] == role and said["rule_id"] == G.XDC_NOT_MEASUREMENT_RULE_ID, stem
+        assert said["basis"] == "scan_header" and said["evidence"]
     for stem in MEASUREMENT:
         assert by_stem[stem]["run_candidate"] is True, stem
         assert "not_a_measurement" not in by_stem[stem]["other_relationships"], stem
     header = by_stem["SYNscan_090"]["other_relationships"]["not_a_measurement"]
-    assert header["basis"] == "scan_header" and header["evidence"]
     assert {e["source_relative_path"] for e in header["evidence"]} == {"SYNscan_090_A.001"}
-    # no missing value is asked of a run that is not a measurement
+    # no missing value is asked of a run that is not a measurement; a name-proposed run is asked as any other
     ids = {by_stem[s]["run_id"] for s in NOT_MEASUREMENT}
     assert not [m for m in data["missing_values"] if m["run_id"] in ids]
+    for stem in NAME_PROPOSED:
+        assert [m for m in data["missing_values"] if m["run_id"] == by_stem[stem]["run_id"]], stem
 
 
-def test_their_groups_take_the_role_and_say_not_a_measurement_run(bl43):
-    data, _ = bl43
-    role_of = {g["member_run_keys"][0].split(":", 1)[1]: g for g in data["record_groups"]}
-    for stem, role in NOT_MEASUREMENT.items():
-        assert role_of[stem]["role"] == role, stem
-    assert role_of["SYNscan_090"]["role_basis"]["basis"] == "scan_header"
+def test_a_name_only_proposes_a_role_said_as_judged_from_the_name(bl43):
+    data, out = bl43
+    role_of = _group_of(data)
+    rows = cli.group_list_extras(data)
     reasons = Q.cannot_export_reasons(data)
-    for stem in NOT_MEASUREMENT:
+    for stem, role in NAME_PROPOSED.items():
+        g = role_of[stem]
+        assert g["role"] == role and g["role_basis"]["basis"] in ("name_token", "element_name_token"), stem
+        assert rows[g["group_id"]]["role_proposed"] == {"role": role, "judged_from": "file name",
+                                                         "token": g["role_basis"]["token"], "note": G.NAME_ROLE_NOTE}
+        assert g["group_id"] not in reasons, stem  # it can still become a record
+    assert "say if this is a sample" in G.NAME_ROLE_NOTE
+    for stem in SAMPLE_NAMES:
+        assert role_of[stem]["role"] == "sample", stem
+        assert "role_proposed" not in rows[role_of[stem]["group_id"]], stem
+    assert role_of["std_Ti_foil"]["role"] == "reference"  # a standard: proposed as one, still a measurement
+    for stem, role in NOT_MEASUREMENT.items():
+        assert role_of[stem]["role"] == role and role_of[stem]["role_basis"]["basis"] == "scan_header", stem
         assert reasons.get(role_of[stem]["group_id"]) == "not_a_measurement_run", stem
     for stem in MEASUREMENT:
         assert role_of[stem]["group_id"] not in reasons, stem
 
 
-def test_record_questions_span_only_the_measurement_groups_and_the_nearest_group_is_a_sample(bl43):
+def test_a_name_proposed_group_the_scientist_confirms_is_composed_like_any_record(bl43):
+    data, out = bl43
+    g = _group_of(data)["31_Ti_foil_I1_120"]
+    M.decide(out, target_ids=[g["group_id"]], decision="confirm", value=None, by=WHO, orcid=None)
+    data = M.load(out)
+    assert g["group_id"] not in Q.not_a_measurement_groups(data)
+    assert g["group_id"] not in Q.cannot_export_reasons(data)
+    payload = Q.consolidate(data)
+    reached = {sc[len("group:"):] for q in payload["questions"] if q.get("target_field_path") == "sample.material.name"
+               for sc in q["per_scope_targets"] if sc.startswith("group:")}
+    assert g["group_id"] in reached  # its sample question is asked, so an answer reaches its record
+
+
+def test_record_questions_skip_only_header_excluded_groups_and_the_nearest_group_is_a_sample(bl43):
     data, _ = bl43
     payload = Q.consolidate(data)
     measured = {g["group_id"] for g in data["record_groups"]
@@ -156,31 +193,44 @@ def test_the_summary_says_why_a_run_is_not_a_run(bl43):
     assert "not a run (alignment)" in summary and "not a run (reference)" in summary
 
 
+@pytest.mark.parametrize("stem, expected", [
+    ("align_data_071", "alignment"),
+    ("SYN_alignment_3", "alignment"),
+    ("00_Zrfoil_rough_072", "alignment"),
+    ("align_rough_01", "alignment"),
+    ("01_Tifoil_calib_1x3mm_075", "reference"),
+    ("31_Ti_foil_I2_120", "reference"),
+    ("00_S_SYN_calib_001", "reference"),
+    ("SCALIB_901", "reference"),
+    ("08_std_ZZSO4_sucrose_029", "reference"),  # a standard: the shared reference words, still a measurement
+    ("std_Ti_foil", "reference"),
+    *[(stem, None) for stem in SAMPLE_NAMES],
+    ("12_SYN_Nifoil_electrode_1MKOH_500mV", None),
+    ("O4_01_SYNNPs_pH2_400mV_calib", None),
+    ("SYN_roughness_study", None),
+    ("SYN_rough_002", None),
+    ("SYNsample_01", None),
+    ("ZZcalibration_curve_sample", None),
+])
+def test_the_xdc_name_rule_proposes_only_whole_words_and_never_beside_a_sample_word(stem, expected):
+    got = G.xdc_name_role(stem)
+    assert (got or (None,))[0] == expected
+    assert G.xdc_not_a_measurement(stem, []) is None  # a name alone never takes a run out
+
+
 @pytest.mark.parametrize("stem, statements, expected", [
-    ("align_data_071", [], "alignment"),
-    ("00_Zzfoil_rough_072", [], "alignment"),
-    ("SYN_rough_002", [], "alignment"),
-    ("01_Tifoil_calib_1x3mm_075", [], "reference"),
-    ("31_Ti_foil_I2_120", [], "reference"),
-    ("00_S_SYN_calib_001", [], "reference"),
-    ("SCALIB_901", [], "reference"),
-    # not a measurement-free name: a standard, a foil electrode with a condition, a condition beside `calib`
-    ("08_std_ZZSO4_sucrose_029", [], None),
-    ("12_SYN_Nifoil_electrode_1MKOH_500mV", [], None),
-    ("O4_01_SYNNPs_pH2_400mV_calib", [], None),
-    ("SYN_roughness_study", [], None),
-    ("SYNsample_01", [], None),
     # header evidence: every scan must carry it
     ("SYN_01", [{"key": "free_text", "literal": "Alignment experiment", "source_relative_path": "a.001", "locator": "line:9"}], "alignment"),
     ("SYN_01", [{"key": "region_file", "literal": "align.argn", "source_relative_path": "a.001", "locator": "line:5"}], "alignment"),
     ("SYN_01", [{"key": "header_line_8_literal", "literal": "Alignment experiment", "source_relative_path": "a.001", "locator": "line:8"}], "alignment"),
+    ("std_Ti_foil", [{"key": "free_text", "literal": "Ti foil", "source_relative_path": "a.001", "locator": "line:10"}], "reference"),
     ("SYN_01", [{"key": "free_text", "literal": "Cu foil", "source_relative_path": "a.001", "locator": "line:10"}], "reference"),
     ("SYN_01", [{"key": "free_text", "literal": "SYN sample A next to the Ti foil", "source_relative_path": "a.001", "locator": "line:10"}], None),
     ("SYN_01", [{"key": "region_file", "literal": "TiEdge_Foil.rgn", "source_relative_path": "a.001", "locator": "line:5"}], None),
     ("SYN_01", [{"key": "free_text", "literal": "Alignment experiment", "source_relative_path": "a.001", "locator": "line:9"},
                 {"key": "free_text", "literal": "SYN sample", "source_relative_path": "a.002", "locator": "line:9"}], None),
 ])
-def test_the_rule_reads_names_and_headers_conservatively(stem, statements, expected):
+def test_the_header_rule_needs_every_scan(stem, statements, expected):
     got = G.xdc_not_a_measurement(stem, statements)
     assert (got or {}).get("role") == expected
 
@@ -189,15 +239,25 @@ def test_the_rule_reads_names_and_headers_conservatively(stem, statements, expec
 
 
 @pytest.mark.parametrize("literal, locator, path, code", [
-    ("IrL3_xas", "line 1 `def`", "Ir_XAS.mac", True),
+    # code that names no technique: left out
     ("trigger", "line 1 `def`", "trigger.mac", True),
     ("extract_voltage_and_save(target_directory,", "line 5 `def`", "extract_names.py", True),
-    ("Pt_XAS.mac", "line 1 `qdo` (before any newfile declaration)", "run34.mac", True),
+    ("list_folders_to_csv", "line 9 `def`", "extract_names.py", True),
     ("syn_helper", "line 4", "notes.txt", True),
+    ("scans/SYN_run/plot.py", "line 2", "notes.txt", True),
+    ("1x1 mm beam", "line:9", "SYN_A.001", False),  # no technique word, but no code either: kept
+    # a technique word, found FIRST, keeps the hint however it is written
+    ("IrL3_xas", "line 1 `def`", "Ir_XAS.mac", False),
+    ("Pt_XAS.mac", "line 1 `qdo` (before any newfile declaration)", "run34.mac", True),  # a macro file: a path
+    ("HERFD_XAS", "line:9", "SYN_A.001", False),
+    ("Kbeta_XES", "filename token 1", "SYN_Kbeta_XES_01", False),
+    ("cyclic_voltammetry", "line:9", "SYN_A.001", False),  # the schema's own values
+    ("uv_vis", "line:9", "SYN_A.001", False),
+    ("XANES,EXAFS", "line:9", "SYN_A.001", False),
+    ("fluorescence XAS (Lytle)", "line:9", "SYN_A.001", False),
     ("XAS", "filename token 2", "SYN_XAS_01", False),
     ("HERFD-XAS", "line:9", "SYN_A.001", False),
     ("Pt L3 XANES in fluorescence", "line:9", "SYN_A.001", False),
-    ("1x1 mm beam", "line:9", "SYN_A.001", True),
 ])
 def test_a_technique_hint_is_kept_only_when_it_names_a_technique(literal, locator, path, code):
     assert S.technique_hint_is_code({"literal": literal, "locator": locator, "relative_path": path}) is code
@@ -223,8 +283,13 @@ def test_no_technique_question_shows_a_macro_name_as_a_hint_and_ids_are_unchange
             assert h["kind"] not in ("file_literal", "related_reading", "reading") or not S.technique_hint_is_code(h), h
         hidden += q.get("code_hints_left_out", 0)
         if q.get("code_hints_left_out"):
-            assert "macro or script name" in q["text"] and "see the hints" not in q["text"]
+            assert "macro or script name" in q["text"]
+            if not [h for h in q["hints"] if h["kind"] in ("file_literal", "related_reading", "reading")]:
+                assert "see the hints" not in q["text"]
     assert hidden
+    # a macro name that NAMES a technique is kept (a technique word is looked for first), cited where it was read
+    kept = [h for q in tech for h in q["hints"] if h["kind"] == "file_literal"]
+    assert ("ZzL3_xas", "Zz_XAS.mac", "line 3 `def`") in {(h["literal"], h["relative_path"], h["locator"]) for h in kept}
 
 
 # --- 3. a file-name number is not an electrode before anyone says so ------------------------------------------------

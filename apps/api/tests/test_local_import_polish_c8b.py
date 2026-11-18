@@ -387,9 +387,7 @@ def test_token_volts_reads_only_the_spelling():
 
 def test_an_optional_value_of_a_run_no_live_group_holds_is_asked_in_its_own_run_question(grouped):
     b = M.load(grouped)
-    # the OCV run's group, rejected (the alignment run asks nothing since grouping.XDC_NOT_MEASUREMENT_RULE_ID: it is
-    # no measurement run, so it holds no value to ask)
-    [align] = [g for g in b["record_groups"] if g["member_run_keys"][0].endswith(":SYN_cat_OCV_103")]
+    [align] = [g for g in b["record_groups"] if g.get("role") == "alignment"]
     M.decide(grouped, target_ids=[align["group_id"]], decision="reject", value=None, by=BY, orcid=None)
     b = M.load(grouped)
     rid = align["member_run_ids"][0]
@@ -415,9 +413,7 @@ def test_no_question_id_changes_or_disappears(grouped, monkeypatch):
     """Against the bucketing before c8-b (the move switched off), after a rejection leaves a run in no live group:
     every id is still asked, and each kept question keeps its id with only the outside targets gone."""
     b = M.load(grouped)
-    # the OCV run's group, rejected (the alignment run asks nothing since grouping.XDC_NOT_MEASUREMENT_RULE_ID: it is
-    # no measurement run, so it holds no value to ask)
-    [align] = [g for g in b["record_groups"] if g["member_run_keys"][0].endswith(":SYN_cat_OCV_103")]
+    [align] = [g for g in b["record_groups"] if g.get("role") == "alignment"]
     M.decide(grouped, target_ids=[align["group_id"]], decision="reject", value=None, by=BY, orcid=None)
     b = M.load(grouped)
     now = {q["question_id"]: q for q in Q.consolidate(b)["questions"]}
@@ -427,4 +423,4 @@ def test_no_question_id_changes_or_disappears(grouped, monkeypatch):
     old_answered = {q["question_id"] for q in Q.consolidate(b, include_answered=True)["questions"]}
     assert set(old) <= set(now) and old_answered <= now_answered
     moved = [qid for qid in old if {t["id"] for t in old[qid]["targets"]} != {t["id"] for t in now[qid]["targets"]}]
-    assert moved  # the experiment's optional question gave up the rejected run's targets
+    assert moved  # the experiment's optional question gave up the alignment run's targets
