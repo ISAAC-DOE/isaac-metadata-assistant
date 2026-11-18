@@ -386,7 +386,10 @@ def survey_files(files: list[FileInfo], docs: list[str] = (), folder: str = "") 
     align = [f for f in data if f.role == "alignment" or (f.role is None and (
         re.search(r"align", f.name, re.I) or (f.n_all > 3 * max(1, len(f.scans)) and f.n_all > 30)))]
     samples = [f for f in data if f not in align]
-    edge = identify_edge([s for f in samples[:12] for s in f.scans[:2]])
+    # ISAAC (PROVENANCE.md M8): the edge is the SAMPLES' edge. A caller-labelled foil file (role "foil": a separate
+    # foil scan, which may be another element's foil, e.g. a Pt foil in an Ir L3 beamtime) never decides it
+    edge_files = [f for f in samples if f.role != "foil"] or samples
+    edge = identify_edge([s for f in edge_files[:12] for s in f.scans[:2]])
     rep["edge"] = edge
     if not edge:
         warns.append("no tabulated edge inside the scan range")

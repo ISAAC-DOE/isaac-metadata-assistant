@@ -2038,11 +2038,23 @@ def _scan_template(header_lines: Sequence[str] | None) -> tuple[str, str] | None
     return None
 
 
-def _is_energy_scan(template: tuple[str, str] | None) -> bool:
-    """A scan whose ``#S`` line scans ``energy`` (``gscan energy``, ``ascan energy``); a motor scan (``ascan Sz``,
-    ``a2scan``, ``loopscan``) is ``not_an_energy_scan``. A scan with no ``#S`` line is taken as the energy scan the
-    channel choice already found."""
-    return template is None or template[1] == "energy"
+#: the SPEC motors an energy scan steps (``energy``; ``mono`` on BL6-2c and the older BL15-2 SPEC files, which have no
+#: ``energy`` or ``absev`` column; ``absev``, the BL15-2 encoder): a multi-region ``gscan`` of one of them is an energy scan
+ENERGY_SCAN_MOTORS = ("energy", "mono", "absev")
+
+
+def _is_energy_scan(template: tuple[str, str] | None, energy_column: str | None = None) -> bool:
+    """A scan whose ``#S`` line scans ``energy`` (``gscan energy``, ``ascan energy``), a ``gscan`` of an energy motor
+    (:data:`ENERGY_SCAN_MOTORS`: ``gscan mono`` on BL6-2c 2018 and BL15-2 2019), or scans the motor that IS the chosen
+    energy column (``energy_column``, the channel choice's: ``ascan mono`` read on ``mono``); a motor scan (``ascan Sz``,
+    ``a2scan``, ``loopscan``, an ``ascan mono`` beside an ``absev`` energy column) is ``not_an_energy_scan``. A scan
+    with no ``#S`` line is taken as the energy scan the channel choice already found."""
+    if template is None:
+        return True
+    command, motor = template
+    if motor == "energy" or (energy_column is not None and motor == energy_column):
+        return True
+    return command == "gscan" and motor in ENERGY_SCAN_MOTORS
 
 
 def _header_setup(header_lines: Sequence[str] | None) -> dict:
@@ -2161,14 +2173,18 @@ def scan_selection_series(groups: Sequence[Mapping], ctx: _Ctx) -> dict:
             if table is None or table.error:
                 continue
             tpl = _scan_template(table.header_lines)
-            if tpl is None or not _is_energy_scan(tpl):
+            if tpl is None:
                 continue
             if choice is None:
                 c = choose_channels(table, params=ctx.params, role=g.get("role", "sample"), bl15_selection=sel,
                                     **bl15_2_kw(table, ctx))
                 if not _formed(c):
                     continue
+                if not _is_energy_scan(tpl, c.energy):
+                    continue
                 choice = c
+            if not _is_energy_scan(tpl, choice.energy):
+                continue
             try:
                 sa = C.scan_arrays(table, choice, np)
             except C.StepError:
@@ -2209,13 +2225,14 @@ def scan_selection_series(groups: Sequence[Mapping], ctx: _Ctx) -> dict:
 
 def _propose_scan_selection(group: Mapping, ctx: _Ctx, scans: Sequence[Mapping], used_entries: Sequence[dict],
                             scans_data: Sequence[Mapping], header_of: Mapping[int, Sequence[str]],
-                            inputs: Sequence[dict], cal: Mapping, mode: str | None = None) -> dict | None:
+                            inputs: Sequence[dict], cal: Mapping, mode: str | None = None,
+                            energy_column: str | None = None) -> dict | None:
     """The group's scan-selection proposal (:func:`core.scan_selection`), shaped for the result: every listed input
     with its proposal, reasons and sentences, named by file; the group's trend, change point, stable window, edge-step
     observation and merged edge SNR. ``None`` only when it cannot be evaluated at all (it is then not said)."""
     try:
         return _propose_scan_selection_unguarded(group, ctx, scans, used_entries, scans_data, header_of, inputs, cal,
-                                                 mode=mode)
+                                                 mode=mode, energy_column=energy_column)
     except Exception as exc:  # noqa: BLE001 - review M4: a proposal that cannot be made is said, never a failure
         return _not_evaluated_selection(f"{type(exc).__name__}: {exc}"[:300])
 
@@ -2228,7 +2245,7 @@ def _not_evaluated_selection(detail: str) -> dict:
 def _propose_scan_selection_unguarded(group: Mapping, ctx: _Ctx, scans: Sequence[Mapping],
                                       used_entries: Sequence[dict], scans_data: Sequence[Mapping],
                                       header_of: Mapping[int, Sequence[str]], inputs: Sequence[dict], cal: Mapping,
-                                      mode: str | None = None) -> dict | None:
+                                      mode: str | None = None, energy_column: str | None = None) -> dict | None:
     np = ctx.np
     if (getattr(ctx, "scan_series", None) or {}).get("error"):
         return _not_evaluated_selection("the scan-template series pass failed (" + ctx.scan_series["error"]
@@ -2244,7 +2261,7 @@ def _propose_scan_selection_unguarded(group: Mapping, ctx: _Ctx, scans: Sequence
         evaluated, not_energy = [], {}
         for e, sa in zip(used_entries, scans_data):
             tpl = _scan_template(header_of.get(id(e)))
-            if not _is_energy_scan(tpl):
+            if not _is_energy_scan(tpl, energy_column):
                 not_energy[id(e)] = tpl
                 continue
             evaluated.append({"key": id(e), "number": num_of[id(e)] if by_number else pos_of[id(e)],
@@ -2412,7 +2429,48 @@ def _read_scan_table(s: Mapping, ctx: _Ctx, shared_sids: Mapping[Any, int]):
     table = (read_scan_file(path, scan=s["scan_index"]) if ctx.scan_reader is read_scan_file and in_file
              and isinstance(s.get("scan_index"), int) and not isinstance(s.get("scan_index"), bool)
              else ctx.scan_reader(path))
+    _acquisition_motor_names(table, s, ctx)
     return table, None
+
+
+#: pq-002 (spots): a per-scan split copy of a SPEC file (``<run>_dir/<run>_001.txt``) carries its ``#P<i>`` positions but
+#: no ``#O<i>`` motor-name lines; the names are the run's own acquisition SPEC file's (the file-level ``#O`` lines
+#: before its first ``#S``, the reader's rule), hash-checked against the bundle
+MOTOR_NAMES_FROM_ACQUISITION = "motor_names_from_acquisition_file"
+
+
+def _acquisition_motor_names(table, s: Mapping, ctx: _Ctx) -> None:
+    if table is None or getattr(table, "error", None) or table.format_id != "spec_columns":
+        return
+    lines = list(getattr(table, "motor_lines", ()) or ())
+    if any(x.startswith("#O") for x in lines) or not any(re.match(r"^#P\d+(\s|$)", x) for x in lines):
+        return
+    run = ctx.runs_by_key.get(s.get("run_key")) or {}
+    sid = run.get("acquisition_source_id")
+    if not sid or sid == s.get("source_id"):
+        return
+    cache = getattr(ctx, "_acq_motor_names", None)
+    if cache is None:
+        cache = ctx._acq_motor_names = {}
+    if sid not in cache:
+        cache[sid] = []
+        src = ctx.sources.get(sid) or {}
+        path = _resolve_source(ctx.root, src.get("relative_path") or "") if ctx.root and src.get("relative_path") else None
+        if path is not None and path.is_file() and path.stat().st_size <= 512 * 1024 * 1024:
+            expected = src.get("content_sha256")
+            if not expected or _cached_sha(ctx, path) == expected:
+                names = []
+                with path.open(errors="replace") as fh:
+                    for raw in fh:
+                        line = raw.strip()
+                        if line.startswith("#S"):
+                            break
+                        if re.match(r"^#O\d+(\s|$)", line):
+                            names.append(line)
+                cache[sid] = names
+    if cache[sid]:
+        table.motor_lines = list(cache[sid]) + lines
+        table.notes.append(MOTOR_NAMES_FROM_ACQUISITION)
 
 
 def process_group(group: Mapping, ctx: _Ctx, athena_entry: Mapping | None = None, athena_versions: Sequence[Mapping] | None = None) -> list[dict]:
@@ -2574,7 +2632,8 @@ def process_group(group: Mapping, ctx: _Ctx, athena_entry: Mapping | None = None
     # series' one parameter set, only to judge it. It changes nothing that is merged or hashed (merged.csv, run_id);
     # it is attached to the result after the run id (:func:`_attach_scan_selection`)
     selection = (_propose_scan_selection(group, ctx, scans, used_entries, scans_data, header_of, res["inputs"], cal,
-                                         mode=choice.mode) if SCAN_SELECTION_ENABLED else None)
+                                         mode=choice.mode, energy_column=choice.energy)
+                 if SCAN_SELECTION_ENABLED else None)
 
     try:
         grid, ginfo = C.common_grid(scans_data, np)

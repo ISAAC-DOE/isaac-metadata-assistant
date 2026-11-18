@@ -1,4 +1,4 @@
-"""ISAAC's local modifications of the vendored xas-analysis engine (src/xas_analysis/PROVENANCE.md M1-M5).
+"""ISAAC's local modifications of the vendored xas-analysis engine (src/xas_analysis/PROVENANCE.md M1-M8).
 
 Synthetic spectra only (unmistakably fake: SYN_ names, a smooth logistic edge at the tabulated Ir L3 energy)."""
 import warnings
@@ -174,3 +174,20 @@ def test_reduce_skips_a_transmission_sample(tmp_path):
         warnings.simplefilter("ignore")
         res2 = reduce(tmp_path / "r2.yaml")
     assert len(res2["samples"]) == 2 and not res2["skipped_samples"]
+
+
+def test_a_caller_labelled_foil_never_decides_the_edge():
+    """M8: a separate foil scan of ANOTHER element (a SYN Pt L3 foil in an Ir L3 beamtime), passed with role "foil"
+    so the foil timeline can see it, never decides the samples' edge."""
+    rng = np.random.default_rng(4)
+    foil = FileInfo(path="f", name="SYN_Ptfoil", fmt="spec", role="foil")
+    E = np.arange(11400.0, 11800.0, 0.5)
+    I0 = np.full(E.size, 1e5)
+    I1 = I0 * np.exp(-(0.3 + 2.0 / (1 + np.exp(-(E - 11564.0) / 0.8))))
+    foil.scans = [ScanInfo("SYN_Ptfoil", 1, datetime(2025, 4, 12, 8, 0), E, {"I0": I0, "I1": I1})]
+    smp = FileInfo(path="s", name="SYN_sample", fmt="spec", role="sample")
+    smp.scans = [_scaninfo("SYN_sample", n, 0.0, datetime(2025, 4, 12, 10, n), rng) for n in (1, 2, 3)]
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore")
+        rep = survey_files([foil, smp], [], "synthetic")
+    assert (rep["edge"]["element"], rep["edge"]["core"]) == ("Ir", "L3")

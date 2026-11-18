@@ -65,3 +65,9 @@ the beamline scientists' rules (17 Nov 2026) are never Athena, and no dead-time 
   AND offset; without it the screen is unchanged. Test: `::test_affine_shape_screen_never_calls_an_intensity_change_shape`.
 - **M5 an undated alignment scan no longer crashes the survey** (`survey.py`): the edge-scan finding formatted
   `s.time` with `%m-%d`, a `TypeError` for a scan without a `#D` date. Test: `::test_survey_undated_alignment_scan`.
+- **M8 the edge is the samples' edge** (`survey.py survey_files`). ISAAC now hands the survey the scans of separate
+  foil groups (role `foil`) so its foil timeline can be reached; `identify_edge` took the first 12 non-alignment files,
+  so a foil of another element scanned early (a Pt L3 foil in an Ir L3 beamtime) could decide the edge. A caller-
+  labelled foil file is left out of the edge identification when any other file exists; nothing else changes (a file
+  whose role is guessed from its name, the package's own `survey(folder)`, is treated as before).
+  Test: `::test_a_caller_labelled_foil_never_decides_the_edge`.

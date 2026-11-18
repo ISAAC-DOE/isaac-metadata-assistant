@@ -88,6 +88,20 @@ MAX_SHIFT_EV = {"glitch_I0": 1.0, "ref_foil": 2.0, "foil_timeline": 2.0, "none":
 #: normalisation window variants for the uncertainty note (normalization.md: "window choice: A spread 9-15 %")
 WINDOW_VARIANTS = {"pre_hi": (-10.0, 0.0), "post_lo": (0.0, 15.0, 25.0), "post_hi": (-50.0, 0.0)}
 WINDOW_SPREAD_WARN = 0.20
+#: TENDER FLUORESCENCE (the engine's normalization.md, "Tender fluorescence (S K, BL4-3): background options"): below
+#: about 3-4 keV a gas I0 counts ~ E^-3, so IF/I0 rises as (E/E_edge)^p over the WHOLE signal, the pre-edge carries a
+#: falling scatter tail and a resonant-Raman foot about 25 eV before the edge. The documented options are used, with
+#: the documented window (the pre-edge window ends before the foot). They apply to a fluorescence edge under
+#: ``max_edge_eV``, or to any edge whose post-edge IF/I0 RISES with E (a linear fit over the post-edge window climbs
+#: by at least ``rise_min`` of the edge step) while the cross-section falls. Measured on five real beamtimes: tender
+#: S K post-edges climb about +17-20 % of the step; hard-edge HERFD post-edges stay under +14 % (their EXAFS), and the
+#: few above +20 % are distorted spectra.
+TENDER = {"max_edge_eV": 4000.0, "rise_min": 0.20, "pre_hi_below_edge_eV": 24.0,
+          "options": {"response_power": 3.0, "step_slope": 1, "pre_tail": True}}
+TENDER_RULE_ID = "isaac.xas.tender_fluorescence.v1"
+#: the glitch windows kept out of the normalisation windows: the beamtime's I0 glitch (and every other dip most scans
+#: share), +- max(this many FWHM, ``min_half_eV``) around its centre
+GLITCH_EXCLUDE = {"fwhm": 1.5, "min_half_eV": 1.0}
 POST_LEVEL_RANGE = (0.0, 2.0)          # core.POST_EDGE_LEVEL_RANGE: norm / McMaster mu over the post-edge window
 EDGE_MIN_NOISE_MULTIPLE = 5.0          # core.EDGE_MIN_NOISE_MULTIPLE
 DROP_REASON = "dropped_by_scan_decision"
@@ -117,13 +131,21 @@ DECISION_RULE = {
         "Every scan gets keep or drop, with its reasons and evidence. A scan is DROPPED when (a) a logbook scan note "
         "says so (exclude, start_from, keep_only; a note read from the logbook as 'inferred' applies too, marked "
         "so; a 'flag' note changes nothing and is shown); or (b) the stability analysis "
-        "(isaac.xas.scan_selection_proposal.v0) puts it before the stable window (the sample was still changing); "
-        "or (c) the engine's screening flags it: aborted or low coverage (under 90 % of the group's grid), a failed "
-        "anchor (no fit, a shift beyond the limit, or more than 5 robust sigmas from the group's median, floor 30 "
-        "meV), an off-shape scan (its IF/I0, scaled to the group's median, departs more than 6 robust sigmas and 1.5 "
-        "times the median, and more than twice its own counting noise), or a dead channel that shows no edge at "
-        "all. Otherwise it is KEPT. An intensity drop alone never drops a scan: a weaker or noisier scan is kept "
-        "and said. Scans that differ are judged by SPOT first (isaac.xas.spot_decision.v1): when they all sit at spots no kept "
+        "(isaac.xas.scan_selection_proposal.v0) puts it before the stable window (the sample was still changing) "
+        "beyond the noise (an offset of the evolving normalised-shape metric within the stability rule's floor and 3 "
+        "x the scans' own sd is kept and said); or (c) the engine's screening flags it: aborted (under 90 % of the "
+        "group's grid AND not covering the pre-edge window through the post-edge window: a shorter scan that covers "
+        "them is complete), a failed anchor (no fit, a shift beyond the limit, or more than 5 robust sigmas from the "
+        "group's median, floor 30 meV), an off-shape scan (its IF/I0, scaled to the group's median, departs more than "
+        "6 robust sigmas and 1.5 times the median, and more than twice its own counting noise), a ratio-shape or "
+        "post-edge-drift flag whose NORMALISED shape is distorted (after a free scale and offset it still departs 5 % "
+        "of the edge step; a within-scan step collapse is shape, a uniformly weaker scan is not), or a dead channel "
+        "that shows no edge at all; or (d) beam damage at each spot (isaac.xas.dose_damage.v1: at two or more spots "
+        "the later scans change normalised shape from the first one there, the same way, beyond the noise: the first "
+        "scan per spot is kept). Otherwise it is KEPT. An intensity drop alone never drops a scan: a weaker or noisier "
+        "scan is kept and said. A single-point I0 dropout (under 1 % of its neighbours) excludes that POINT from the "
+        "scan's contribution, said, never interpolated, never the scan. "
+        "Scans that differ are judged by SPOT first (isaac.xas.spot_decision.v1): when they all sit at spots no kept "
         "scan shares, the spot is what differs, not the sample's evolution; the majority of consistent spots is kept, a "
         "differing spot whose shape differs is dropped with a spot reason, and an even split keeps every spot and flags "
         "'spots disagree'. A scientist's set_scan_decision on a scan overrides all of this, and is shown as theirs."),
@@ -132,6 +154,8 @@ DECISION_RULE = {
                 "screening": "xas-analysis screen_report (report-only) + this rule's intensity guard",
                 "input": "the scan could not be read or formed (its skip reason)",
                 "params_file": "the params file's exclude_scans",
+                "dose": "isaac.xas.dose_damage.v1 (later scans at a spot change shape)",
+                "merge": "a point excluded from the scan's contribution (an I0 dropout), said, never a drop",
                 "scientist": "a set_scan_decision decision"},
 }
 
@@ -174,7 +198,7 @@ class _Sc:
 
     def __init__(self, rec: Mapping):
         self.Energy_eV = rec["E"]
-        self.IF, self.I0, self.I1, self.I2 = rec["IF"], rec["I0"], rec.get("I1"), rec.get("I2")
+        self.IF, self.I0, self.I1, self.I2 = rec.get("IF"), rec["I0"], rec.get("I1"), rec.get("I2")
         self.num = rec["num"]
         self.date = rec["time"].strftime("%a %b %d %H:%M:%S %Y") if rec.get("time") else ""
 
@@ -254,8 +278,13 @@ def read_group(g: Mapping, ctx) -> dict:
     if not tables:
         out["scope"] = "no readable scan"
         return out
+    numbers, _basis = B.input_scan_numbers(out["inputs"], run_of)
+    num_of = {id(e): n for e, n in zip(out["inputs"], numbers)}
+    stem_of = {k: (ctx.runs_by_key.get(k) or {}).get("stem") for k in set(run_of.values())}
     if out["role"] == "alignment":
         out["scope"] = "an alignment group (motor and foil scans): not a sample spectrum the engine reduces"
+        # the survey still sees its energy scans (edge scans, foils): never a record, but evidence for the reference
+        out["recs"] = _survey_recs(tables, out["role"], sel, ctx, num_of, stem_of)
         return out
     if any(f not in ENGINE_FORMATS for f in out["formats"]):
         out["scope"] = (f"format {', '.join(f for f in out['formats'] if f not in ENGINE_FORMATS)} is not one the engine "
@@ -272,15 +301,20 @@ def read_group(g: Mapping, ctx) -> dict:
         out["scope"] = "no absorption channel could be formed (v0 says why)"
         return out
     choice = R._absev_first(choice, tables, params, role, sel, ctx)
+    attempts = R._bl15_2_missing(R._scan_attempts(tables, choice, np), ctx, params)
+    # v0's own fallback (run._fallback_from_transmission): a standard taken in transmission first whose I1 is not
+    # positive in any scan was measured in fluorescence; v0 reduces it as SCA / I0 fluorescence, and so does v1
+    fallback = R._fallback_from_transmission(attempts, choice, tables, role, sel, params)
+    if fallback is not None:
+        choice = fallback
+        attempts = R._bl15_2_missing(R._scan_attempts(tables, choice, np), ctx, params)
     out["choice"] = choice
     if choice.mode != MODE_FLUORESCENCE:
         out["scope"] = (f"measured in {choice.mode} (mu = {choice.signal_name}): the engine reduces fluorescence / "
                         "HERFD (IF/I0) only; transmission-mode samples are NOT SUPPORTED in its scope")
+        # a foil (or any transmission group) is never a v1 record, but the survey sees its scans: the foil timeline
+        out["recs"] = _survey_recs(tables, role, sel, ctx, num_of, stem_of, choice=choice)
         return out
-    attempts = R._bl15_2_missing(R._scan_attempts(tables, choice, np), ctx, params)
-    numbers, _basis = B.input_scan_numbers(out["inputs"], run_of)
-    num_of = {id(e): n for e, n in zip(out["inputs"], numbers)}
-    stem_of = {k: (ctx.runs_by_key.get(k) or {}).get("stem") for k in set(run_of.values())}
     for k, (entry, table, sa, code) in enumerate(attempts):
         code = code or C.unusable_reason(sa)
         if code:
@@ -297,7 +331,7 @@ def read_group(g: Mapping, ctx) -> dict:
                    run_key=entry.get("run_key"), header=table.header_lines, time=_scan_time(table.header_lines),
                    motor_lines=tuple(getattr(table, "motor_lines", ()) or ()),
                    template=R._scan_template(table.header_lines))
-        if not R._is_energy_scan(rec["template"]):
+        if not R._is_energy_scan(rec["template"], choice.energy):
             entry["skip_reason"] = "not_an_energy_scan"
             continue
         out["recs"].append(rec)
@@ -307,19 +341,64 @@ def read_group(g: Mapping, ctx) -> dict:
     return out
 
 
-def _arrays(table, choice, np) -> dict | None:
-    """Sorted, duplicate-averaged E, IF, I0, I1, I2, sec of one scan (finite E, I0 > 0, finite IF)."""
+def _survey_recs(tables, role: str, sel, ctx, num_of: Mapping, stem_of: Mapping, *, choice=None) -> list[dict]:
+    """The energy scans of a group that is never a v1 record (an alignment group, a foil or other transmission
+    group), as the survey reads them: E, I0, I1, I2 and the scan time (no fluorescence signal: ``IF`` is None). The
+    survey's foil timeline and its edge-scan findings need them (calibration.md: separate foil scans in the folder ->
+    ``foil_timeline``). Motor scans are left out (:func:`run._is_energy_scan`)."""
+    from . import run as R
+
+    np, params = ctx.np, ctx.params
+    out = []
+    for k, (entry, table) in enumerate(tables):
+        if table.format_id not in ENGINE_FORMATS:
+            continue
+        c = choice
+        if c is None or not (table.has(c.energy) and table.has(c.i0 or "")):
+            c = None
+            for rl in dict.fromkeys((role, "reference", "sample")):
+                cc = R.choose_channels(table, params=params, role=rl, bl15_selection=sel, **R.bl15_2_kw(table, ctx))
+                if cc.energy is not None and cc.i0 and table.has(cc.i0):
+                    c = cc
+                    break
+        if c is None:
+            continue
+        template = R._scan_template(table.header_lines)
+        if not R._is_energy_scan(template, c.energy):
+            continue
+        rec = _arrays(table, c, np, signal=False)
+        if rec is None:
+            continue
+        n = num_of.get(id(entry))
+        stem = stem_of.get(entry.get("run_key")) or PurePosixPath(str(entry.get("relative_path"))).stem
+        rec.update(entry=entry, num=n if isinstance(n, int) else k + 1, stem=stem,
+                   scan_id=f"{stem}#{n}" if isinstance(n, int) else f"{stem}#pos{k + 1}", run_key=entry.get("run_key"),
+                   header=table.header_lines, time=_scan_time(table.header_lines), template=template,
+                   motor_lines=tuple(getattr(table, "motor_lines", ()) or ()), survey_only=True)
+        out.append(rec)
+    return out
+
+
+def _arrays(table, choice, np, *, signal: bool = True) -> dict | None:
+    """Sorted, duplicate-averaged E, IF, I0, I1, I2, sec of one scan (finite E, I0 > 0, finite IF). ``signal=False``
+    (a foil or alignment scan the survey reads): no fluorescence signal, ``IF`` is None."""
     cols = table.columns
     E = np.asarray(cols[choice.energy], float)
-    IF = np.sum([np.asarray(cols[c], float) for c in choice.signal_columns], axis=0)
+    if signal:
+        IF = np.sum([np.asarray(cols[c], float) for c in choice.signal_columns], axis=0)
+    else:
+        IF = np.zeros(E.size)
     I0 = np.asarray(cols[choice.i0], float)
     extra = {}
     for name, cands in (("I1", ("I1", "It", "IT")), ("I2", ("I2", "Iref", "IR")), ("sec", ("sec", "Seconds", "Real time clock"))):
         c = next((c for c in cands if table.has(c)), None)
         extra[name] = np.asarray(cols[c], float) if c else None
-    ok = np.isfinite(E) & np.isfinite(IF) & np.isfinite(I0) & (I0 > 0)
+    fin = np.isfinite(E) & np.isfinite(IF) & np.isfinite(I0)
+    drop = i0_dropouts(E, I0, fin, np)
+    ok = fin & (I0 > 0) & ~drop
     if ok.sum() < C.MIN_SCAN_POINTS:
         return None
+    dropouts = [{"E_eV": float(e), "I0": float(c)} for e, c in sorted(zip(E[drop], I0[drop]))]
     order = np.argsort(E[ok], kind="stable")
     E = E[ok][order]
     arr = {"IF": IF[ok][order], "I0": I0[ok][order]}
@@ -332,7 +411,37 @@ def _arrays(table, choice, np) -> dict | None:
             if v is not None:
                 arr[k] = np.bincount(inverse, weights=np.nan_to_num(v)) / counts
         E = uniq
-    return {"E": E, **arr}
+    if not signal:
+        arr["IF"] = None
+    return {"E": E, **arr, "i0_dropouts": dropouts}
+
+
+#: SINGLE-POINT I0 DROPOUTS: a point whose I0 is under this fraction of the median of its ``half`` neighbours on each
+#: side is non-physical (I0 = 1 count among ~34 000). That POINT is excluded from the scan's contribution to the
+#: average (the other scans cover that energy), disclosed, never interpolated, and never drops the scan
+I0_DROPOUT = {"frac": 0.01, "half": 5}
+I0_DROPOUT_CODE = "i0_dropout_point_excluded"
+
+
+def i0_dropouts(E, I0, fin, np):
+    """Boolean mask of the :data:`I0_DROPOUT` points of one scan (``fin``: the finite points, in file order)."""
+    mask = np.zeros(E.size, bool)
+    idx = np.flatnonzero(fin)
+    if idx.size < 2 * I0_DROPOUT["half"] + 1:
+        return mask
+    order = idx[np.argsort(E[idx], kind="stable")]
+    v = I0[order].astype(float)
+    h = I0_DROPOUT["half"]
+    pad = np.r_[np.full(h, np.nan), np.where(v > 0, v, np.nan), np.full(h, np.nan)]
+    win = np.lib.stride_tricks.sliding_window_view(pad, 2 * h + 1).copy()
+    win[:, h] = np.nan                                  # the point itself is not its own neighbour
+    n = np.isfinite(win).sum(axis=1)
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore", RuntimeWarning)
+        med = np.nanmedian(win, axis=1)
+    hit = (n >= h) & np.isfinite(med) & (v < I0_DROPOUT["frac"] * med)
+    mask[order[hit]] = True
+    return mask
 
 
 def _transmission_check(gread: Mapping, E_edge: float | None) -> dict | None:
@@ -353,7 +462,8 @@ def _scaninfo(rec: Mapping, gread: Mapping):
     for k in ("I1", "I2"):
         if rec.get(k) is not None:
             ch[k] = rec[k]
-    ch[re.sub(r"[()/]", "_", name)] = rec["IF"]
+    if rec.get("IF") is not None:            # a foil / alignment scan the survey reads has no fluorescence signal
+        ch[re.sub(r"[()/]", "_", name)] = rec["IF"]
     return ScanInfo(gread["stems"][0] if gread["stems"] else gread["group_id"], int(rec["num"]), rec.get("time"),
                     rec["E"], ch)
 
@@ -460,8 +570,8 @@ def _survey(reads: Mapping, groups: Sequence[Mapping], ctx, *, exclude: frozense
             frole = "reference" if role == "reference" else "sample"
         elif role == "alignment" and gr.get("recs"):
             frole = "alignment"
-        elif role == "reference" and R._names_a_foil(gr.get("stems") or ()) and gr.get("recs"):
-            frole = "foil"
+        elif R._names_a_foil(gr.get("stems") or ()) and gr.get("recs"):
+            frole = "foil"                   # a separate foil scan: a foil-timeline candidate (calibration.md)
         else:
             frole = None
         logs += _logs(gr, ctx) if gr.get("inputs") else []
@@ -861,34 +971,87 @@ def _pick_template(ordered: Sequence[Mapping], info: Mapping, route: Mapping, np
 
 
 def _foil_timeline(route: Mapping, bt: Mapping, reads: Mapping) -> dict:
-    """foil_timeline: the engine's foil anchors (inflection of the foil scans' transmission ratio) in time; a scan's
-    anchor is linear in time between them (constant beyond the first and last)."""
-    from xas_analysis.calib import find_inflection_point
-    from xas_analysis.pipeline import _ref_signal_terms
+    """foil_timeline, as the engine's own ``pipeline.foil_timeline`` does it: every scan of every foil the survey kept
+    (one detector position, the foils before the mono calibration left out; ``survey.recommend``) is anchored by the
+    route's method, ``shape`` (the whole foil edge shifted onto the first foil scan, free scale and offset, over
+    ``shape_window_eV``; anchor = that template's inflection - the shift) or ``inflection``; a scan's anchor is then
+    linear in time between the foil anchors (constant before the first and after the last). The reference anchor is
+    the median anchor of the foil ``reference_foil`` names (an index into the foil LIST, default the first)."""
+    import numpy as np
+    from xas_analysis.pipeline import _ref_signal_terms, anchor_signal, make_anchor_fn
 
-    rows = []
     gid_of = bt.get("file_groups") or {}
-    for f in route.get("foils") or ():
-        gr = reads.get(gid_of.get(f.get("spec")))
-        if not gr:
-            continue
+    foils = list(route.get("foils") or ())
+    fw = route.get("foil_window_eV") or [-np.inf, np.inf]
+    method = route.get("method", "shape")
+    per: list[tuple[dict, list[dict]]] = []
+    for f in foils:
+        gr = reads.get(gid_of.get(f.get("spec"))) or {}
         num, den = _ref_signal_terms(f.get("ref_signal", "ln(I0/I1)"))
-        import numpy as np
-
-        for r in gr["recs"]:
-            a_, b_ = r.get(num), r.get(den)
-            if a_ is None or b_ is None or not r.get("time"):
-                continue
-            with np.errstate(all="ignore"):
-                y = np.log(a_ / b_)
-            a, i = find_inflection_point(r["E"], y, route.get("foil_window_eV") or [-np.inf, np.inf], sign=1)
-            if i.get("ok") and a == a:
-                rows.append((r["time"].timestamp(), float(a), r["scan_id"]))
-    rows.sort()
+        recs = [r for r in gr.get("recs") or () if r.get(num) is not None and r.get(den) is not None]
+        per.append((f, recs))
+    first = next(((f, rs[0]) for f, rs in per if rs), None)
+    if first is None:
+        return {"anchor_eV": None, "timeline": [], "scans": [], "statement": "no foil scan could be read"}
+    f0, t0 = first
+    fc0 = {"mode": "ref_foil", "ref_signal": f0.get("ref_signal", "ln(I0/I1)"), "window_eV": f0.get("window_eV", fw),
+           "method": "inflection"}
+    with warnings.catch_warnings(), np.errstate(all="ignore"):
+        warnings.simplefilter("ignore")
+        t_anchor, _ti = make_anchor_fn(fc0)(_Sc(t0))
+        template = (np.asarray(t0["E"], float), anchor_signal(_Sc(t0), fc0))
+        rows, rejected = [], []
+        for k, (f, recs) in enumerate(per):
+            fc = {**fc0, "ref_signal": f.get("ref_signal", fc0["ref_signal"]), "window_eV": f.get("window_eV", fw)}
+            if method == "shape" and t_anchor == t_anchor:
+                fn = make_anchor_fn({**fc, "method": "shape", "shape_window_eV": route.get("shape_window_eV") or fw,
+                                     "max_shift_eV": float(route.get("max_shift_eV") or 2.0)}, template, t_anchor)
+            else:
+                fn = make_anchor_fn(fc)
+            for r in recs:
+                try:
+                    a, info = fn(_Sc(r))
+                except Exception as exc:  # noqa: BLE001 - a foil scan whose anchor cannot be found is said
+                    a, info = None, {"ok": False, "reason": f"{type(exc).__name__}: {exc}"[:200]}
+                a = _f(a)
+                if a is None or not info.get("ok") or not r.get("time"):
+                    rejected.append({"scan": r["scan_id"], "foil": f.get("spec"),
+                                     "reason": "no scan time" if a is not None and info.get("ok") else
+                                     (info.get("reason") or "the anchor fit was not ok")})
+                    continue
+                rows.append({"t": r["time"].timestamp(), "anchor_eV": a, "scan": r["scan_id"], "foil": f.get("spec"),
+                             "foil_index": k})
+    rows.sort(key=lambda x: x["t"])
     if not rows:
-        return {"anchor_eV": None, "timeline": [], "statement": "no foil scan gave a usable anchor"}
-    return {"anchor_eV": rows[min(int(route.get("reference_foil", 0)), len(rows) - 1)][1],
-            "timeline": [{"time": datetime.fromtimestamp(t).isoformat(), "anchor_eV": a, "scan": s} for t, a, s in rows]}
+        return {"anchor_eV": None, "timeline": [], "scans": [], "rejected": rejected,
+                "statement": "no foil scan gave a usable anchor"}
+    want = int(route.get("reference_foil", 0) or 0)
+    ref_rows = [x for x in rows if x["foil_index"] == want]
+    moved = None
+    if not ref_rows:
+        k = min(x["foil_index"] for x in rows)
+        ref_rows = [x for x in rows if x["foil_index"] == k]
+        moved = (f"the reference foil {foils[want].get('spec') if want < len(foils) else want} gave no usable anchor; "
+                 f"the reference is the next foil, {foils[k].get('spec')}")
+    ref_foil = foils[ref_rows[0]["foil_index"]].get("spec")
+    anchor = float(np.median([x["anchor_eV"] for x in ref_rows]))
+    tl = [{"time": datetime.fromtimestamp(x["t"]).isoformat(), "anchor_eV": x["anchor_eV"], "scan": x["scan"],
+           "foil": x["foil"]} for x in rows]
+    span = max(x["anchor_eV"] for x in rows) - min(x["anchor_eV"] for x in rows)
+    out = {"anchor_eV": anchor, "timeline": tl, "scans": [x["scan"] for x in ref_rows],
+           "anchors": [x["anchor_eV"] for x in ref_rows], "statistic": "median",
+           "reference_name": ref_foil, "reference_group_id": gid_of.get(ref_foil),
+           "template_scan": t0["scan_id"], "template_anchor_eV": _f(t_anchor), "method": method,
+           "rejected": rejected,
+           "statement": (f"Foil timeline: {len(rows)} foil scans of {len({x['foil'] for x in rows})} foils "
+                         f"({', '.join(dict.fromkeys(x['foil'] for x in rows))}), anchored by the {method} fit"
+                         + (f" onto {t0['scan_id']}" if method == "shape" else "")
+                         + f"; the anchors span {1000 * span:.0f} meV over the beamtime; each scan's anchor is linear "
+                         f"in time between them. Reference: {ref_foil} ({anchor:.4f} eV)."
+                         + (f" {len(rejected)} foil scan(s) gave no usable anchor." if rejected else ""))}
+    if moved:
+        out["reference_moved"] = moved
+    return out
 
 
 def _anchor_one(fn, rec: Mapping, route: Mapping) -> tuple[float | None, bool, dict]:
@@ -1088,9 +1251,24 @@ def process_group_v1(group: Mapping, ctx) -> list[dict]:
                                      "reduction engine (Oscar's validated package) and the ISAAC adapter. A draft "
                                      "until the ISAAC processing reviewers (Oscar and Angel) review the adapter.")}
     res["review_flags"] = ["protocol_draft_unreviewed"]
-    res["measurement_mode"] = measurement_mode_block(gr.get("mode_check"))
-    if res["measurement_mode"]["mode"] != "fluorescence":
+    E_edge0 = absorber.get("E_edge_eV")
+    below = E_edge0 is not None and gr["recs"] and all(float(r["E"][-1]) < float(E_edge0) for r in gr["recs"])
+    res["measurement_mode"] = measurement_mode_block(gr.get("mode_check"), below_edge=(
+        (max(float(r["E"][-1]) for r in gr["recs"]), float(E_edge0), absorber, len(gr["recs"])) if below else None))
+    if res["measurement_mode"]["mode"] == BELOW_EDGE:
+        res["review_flags"].append(BELOW_EDGE_FLAG)
+    elif res["measurement_mode"]["mode"] != "fluorescence":
         res["review_flags"].append("measurement_mode_unknown")
+    if R.FALLBACK_FLAG in (gr["choice"].flags or ()):
+        res["review_flags"].append(R.FALLBACK_FLAG)        # v0's own fallback, never silent
+    if below:
+        res["channel_choice"] = gr["choice"].to_state()
+        res["inputs"] = gr["inputs"]
+        said = _below_edge_said(max(float(r["E"][-1]) for r in gr["recs"]), float(E_edge0), absorber, len(gr["recs"]))
+        out = R._fail(res, BELOW_EDGE_FLAG, said)
+        out["qc"]["statements"] = {BELOW_EDGE_FLAG: said}
+        _finish_ids(out, group)
+        return [out]
     if ((bt.get("routes") or [{}])[0].get("route") or {}).get("mode") == "none":
         res["review_flags"].append(NO_REFERENCE_FLAG)        # loud, and a bulk approval is refused for it
     res["channel_choice"] = gr["choice"].to_state()
@@ -1120,15 +1298,17 @@ def process_group_v1(group: Mapping, ctx) -> list[dict]:
         with warnings.catch_warnings():
             warnings.simplefilter("ignore")
             Y, _ri = align_and_resample(r["E"], np.c_[r["IF"], r["I0"], sec], 0.0, float(al["shift_eV"]), target)
+        _exclude_dropout_points(Y, r, float(al["shift_eV"]), target, np)
         a = AlignedScan(r["num"], target, Y[:, 0], Y[:, 1], Y[:, 2], _f(al["anchor_eV"]) if al["anchor_eV"] is not None else 0.0,
                         float(al["shift_eV"]), True, True, key=r["scan_id"])
         r["aligned"] = a
         aligned.append(a)
     # --- screening (report-only: this rule decides)
     win = [E_edge + SCREEN_WINDOW_EV[0], E_edge + SCREEN_WINDOW_EV[1]] if E_edge else [-np.inf, np.inf]
+    screen_cfg = {**SCREENING, "window_eV": win, **ratio_screens(E_edge, target, bt)}
     with warnings.catch_warnings(), np.errstate(all="ignore"):
         warnings.simplefilter("ignore")
-        flags = screen_report(aligned, {**SCREENING, "window_eV": win}) if aligned else []
+        flags = screen_report(aligned, screen_cfg) if aligned else []
     by_scan: dict[str, list[dict]] = {}
     for f in flags:
         by_scan.setdefault(f["key"], []).append(f)
@@ -1137,8 +1317,14 @@ def process_group_v1(group: Mapping, ctx) -> list[dict]:
     # --- logbook notes
     notes, notes_said = _logbook(ctx, gr, recs)
     # --- the rule
+    complete = complete_window(absorber, bt, float(target[0]), float(target[-1]))
+    rs = screen_cfg.get("ratio_shape") or {}
     table = decide_scans(recs, by_scan, stability, notes, scientist_scan_decisions(ctx.bundle, group["group_id"]),
-                         inputs, target, win, np)
+                         inputs, target, win, np, complete_eV=complete, E_edge=E_edge,
+                         ratio_win=rs.get("window_eV"), ratio_exclude=rs.get("exclude_eV") or ())
+    dose = apply_dose_damage(table, recs, stability, np, E_edge)
+    if dose:
+        res["dose_damage"] = dose
     spots = apply_spots(table, recs, stability, np)
     if spots:
         res["spots"] = spots
@@ -1183,6 +1369,21 @@ def process_group_v1(group: Mapping, ctx) -> list[dict]:
                                                                   "error)", "grid": "the group's modal scan grid, shifted"},
                          "outcome": {"n_scans": len(kept), "points": int(E.size), "grid_from_scan": grid_rec["scan_id"]},
                          "flags": [] if len(kept) > 1 else ["single_scan_no_merge"]})
+    short = _incomplete(E, complete, E_edge, absorber, len(kept))
+    if short is not None:
+        # the range is the reason (no edge step to measure a mode on either): not "mode unknown"
+        res["review_flags"] = [f for f in res["review_flags"] if f != "measurement_mode_unknown"]
+        out = R._fail(res, short[0], short[1])
+        out["qc"]["statements"] = {short[0]: short[1], DECISIONS_KEY: table["statement"]}
+        _finish_ids(out, group)
+        return [out]
+    excluded_points = [{"scan_id": r["scan_id"], **d, "said": dropout_said(d)} for r in kept for d in r.get("i0_dropouts") or ()]
+    if excluded_points:
+        res["point_exclusions"] = {"rule": I0_DROPOUT, "points": excluded_points,
+                                   "statement": "; ".join(f"{x['scan_id']}: {x['said']}" for x in excluded_points[:20])
+                                   + (f"; and {len(excluded_points) - 20} more" if len(excluded_points) > 20 else "")
+                                   + ". Each such point is left out of its scan's contribution to the average (the "
+                                     "other scans cover that energy); it is never interpolated, and the scan is kept."}
     nm = normalize_once(E, y, n, absorber, bt, np)
     res[NORMALIZATION_KEY] = {k: v for k, v in nm.items() if k not in ("norm", "mu", "bg")}
     if nm.get("error"):
@@ -1215,7 +1416,7 @@ def process_group_v1(group: Mapping, ctx) -> list[dict]:
     R._write(gdir / "qc.json", R._json_bytes({"group_id": group["group_id"], **res["qc"], "protocol_status": PROTOCOL_STATUS}))
     R._write(gdir / "params.json", R._json_bytes({
         "protocol_id": PROTOCOL_ID, "protocol_version": PROTOCOL_VERSION, "protocol_status": PROTOCOL_STATUS,
-        "engine": res[ENGINE_KEY], "screening": {**SCREENING, "window_eV": win},
+        "engine": res[ENGINE_KEY], "screening": screen_cfg,
         "decision_rule": DECISION_RULE, "channel_choice": res["channel_choice"], "absorber": absorber,
         "normalization": res[NORMALIZATION_KEY], "beamtime_fingerprint": bt.get("fingerprint"),
         "energy_reference": res[REFERENCE_KEY]}))
@@ -1271,9 +1472,60 @@ def process_group_v1(group: Mapping, ctx) -> list[dict]:
     return [res]
 
 
-def measurement_mode_block(mc: Mapping | None) -> dict:
+def dropout_said(d: Mapping) -> str:
+    return f"point excluded: I0 dropout ({d['I0']:.0f} counts at {d['E_eV']:.2f} eV)"
+
+
+def _exclude_dropout_points(Y, r: Mapping, shift: float, target, np) -> None:
+    """:data:`I0_DROPOUT`: the grid points that the excluded raw point would have fed (between its kept neighbours)
+    are NaN in this scan's contribution, so the average there comes from the other scans: never interpolated across."""
+    Es = np.asarray(r["E"], float) + shift
+    for d in r.get("i0_dropouts") or ():
+        e = float(d["E_eV"]) + shift
+        below, above = Es[Es < e], Es[Es > e]
+        lo = float(below.max()) if below.size else e - 1e-9
+        hi = float(above.min()) if above.size else e + 1e-9
+        m = (target > lo) & (target < hi)
+        Y[m, :] = np.nan
+        d["grid_points_excluded"] = int(m.sum())
+
+
+#: a group whose scans all END below the absorption edge: no edge to measure a mode on (never "mode unknown")
+BELOW_EDGE = "below_edge"
+BELOW_EDGE_FLAG = "scan_never_reaches_edge"
+#: a group whose merged scans do not cover the pre-edge window through the post-edge window: nothing to normalise
+INCOMPLETE_CODE = "scan_range_incomplete"
+
+
+def _below_edge_said(end: float, E_edge: float, absorber: Mapping, n: int) -> str:
+    return (f"{'this scan never reaches' if n == 1 else 'these scans never reach'} the absorption edge "
+            f"({'it ends' if n == 1 else 'they end'} at {end:.1f} eV; the {absorber.get('element')} "
+            f"{absorber.get('edge')} edge is at {E_edge:.1f} eV): there is no edge to normalise")
+
+
+def _incomplete(E, complete, E_edge, absorber: Mapping, n_kept: int) -> tuple[str, str] | None:
+    """``(code, plain reason)`` when the merged scans cannot be normalised for their range (an aborted one-scan
+    group, a short check scan, a scan that ends below the edge), never a raw fitting error; else None."""
+    if not E.size or complete is None:
+        return None
+    lo, hi = float(E[0]), float(E[-1])
+    if E_edge is not None and hi < float(E_edge):
+        return BELOW_EDGE_FLAG, _below_edge_said(hi, float(E_edge), absorber, n_kept)
+    if lo > complete[0] or hi < complete[1]:
+        who = "the only scan" if n_kept == 1 else f"the {n_kept} merged scans"
+        return INCOMPLETE_CODE, (f"{who} cover{'s' if n_kept == 1 else ''} {lo:.1f}-{hi:.1f} eV, not the pre-edge "
+                                 f"window through the post-edge window ({complete[0]:.1f}-{complete[1]:.1f} eV): an "
+                                 "aborted scan or a short check scan, with no edge step to normalise")
+    return None
+
+
+def measurement_mode_block(mc: Mapping | None, below_edge: tuple | None = None) -> dict:
     """What the engine's measurement-mode check said, in plain words (review of 2ddb27e7, MEDIUM 5): v1 runs on a
-    fluorescence reading and on an UNKNOWN one (then flagged: v1 reduced it as fluorescence / HERFD anyway)."""
+    fluorescence reading and on an UNKNOWN one (then flagged: v1 reduced it as fluorescence / HERFD anyway). Scans
+    that end below the edge (``below_edge``: (end, E_edge, absorber)) say so, never "unknown"."""
+    if below_edge is not None:
+        said = _below_edge_said(*below_edge)
+        return {"mode": BELOW_EDGE, "statement": said[:1].upper() + said[1:] + "."}
     if not mc:
         return {"mode": None, "statement": ("The measurement mode was not checked (no tabulated edge for the check): v1 "
                                             "reduced it as fluorescence / HERFD (IF/I0) anyway; check the mode.")}
@@ -1334,7 +1586,8 @@ def _stability(group, ctx, gr, recs, inputs) -> dict:
     if len(used) < 1:
         return {"status": "not_evaluated", "rows": {}}
     sel = R._propose_scan_selection(group, ctx, scans, used, data, header_of, inputs,
-                                    {"outcome": {"applied_shift_eV": 0.0}}, mode=gr["choice"].mode)
+                                    {"outcome": {"applied_shift_eV": 0.0}}, mode=gr["choice"].mode,
+                                    energy_column=gr["choice"].energy)
     rows = {}
     if sel:
         for x in sel.get("scans") or ():
@@ -1395,8 +1648,12 @@ def _logbook(ctx, gr, recs) -> tuple[dict, dict]:
     return by_scan, said
 
 
-def decide_scans(recs, screen_flags, stability, notes, overrides, inputs, target, win, np) -> dict:
-    """THE RULE (:data:`DECISION_RULE_ID`): keep or drop for every scan, with its reasons and evidence."""
+def decide_scans(recs, screen_flags, stability, notes, overrides, inputs, target, win, np, *,
+                 complete_eV: Sequence[float] | None = None, E_edge: float | None = None,
+                 ratio_win: Sequence[float] | None = None, ratio_exclude: Sequence = ()) -> dict:
+    """THE RULE (:data:`DECISION_RULE_ID`): keep or drop for every scan, with its reasons and evidence.
+    ``complete_eV``: the edge-relative span a complete scan covers (:func:`complete_window`); ``E_edge``,
+    ``ratio_win`` and ``ratio_exclude``: what the normalised-shape guard of the ratio screens measures over."""
     rows, by_id = [], {}
     stab_rows = (stability or {}).get("rows") or {}
     matched: set[str] = set()
@@ -1412,14 +1669,28 @@ def decide_scans(recs, screen_flags, stability, notes, overrides, inputs, target
         if st:
             reasons = list(st.get("reasons") or ())
             if "before_stable_window" in reasons:
-                drop.append({"source": "stability", "code": "before_stable_window",
-                             "said": "; ".join(st.get("said") or ()) or "the sample was still changing",
-                             "evidence": {"stable_window": stability.get("stable_window"),
-                                          "evolving_metrics": stability.get("evolving_metrics")}})
+                item = {"source": "stability", "code": "before_stable_window",
+                        "said": "; ".join(st.get("said") or ()) or "the sample was still changing",
+                        "evidence": {"stable_window": stability.get("stable_window"),
+                                     "evolving_metrics": stability.get("evolving_metrics")}}
+                # the SAME noise-based threshold as the shape guard (metric_shifts): an offset of the evolving
+                # normalised-shape metric within the noise is not a change (a 0.05 eV white-line offset, no trend)
+                evaluated, moved = beyond_noise(sid, stability, np)
+                if evaluated and not moved:
+                    noted.append({**item, "code": "change_within_noise", "decides": False,
+                                  "said": f"{item['said']}; but within the noise (the shape guard's threshold: "
+                                          "the stability rule's floor and 3 x the scans' own sd): kept"})
+                else:
+                    if moved:
+                        item["evidence"]["normalised_shape"] = moved
+                    drop.append(item)
             other = [x for x in reasons if x != "before_stable_window"]
             if other and st.get("proposal") in ("needs_look", "exclude_proposed"):
                 noted.append({"source": "stability", "code": ",".join(other), "said": "; ".join(st.get("said") or ()),
                               "decides": False})
+        for d in r.get("i0_dropouts") or ():
+            noted.append({"source": "merge", "code": I0_DROPOUT_CODE, "decides": False, "said": dropout_said(d),
+                          "evidence": {"E_eV": d["E_eV"], "I0": d["I0"], "rule": I0_DROPOUT}})
         al = r.get("alignment") or {}
         if not al.get("ok"):
             code = al.get("code") or FIT_FAILED[0]
@@ -1451,6 +1722,29 @@ def decide_scans(recs, screen_flags, stability, notes, overrides, inputs, target
                                           f"({noise:.2e}): fewer counts, not another shape; kept (an intensity effect "
                                           "never drops a scan)"})
                     continue
+            if test == "coverage" and complete_eV is not None:
+                span = _finite_span(r, np)
+                item["evidence"]["covers_eV"] = span
+                item["evidence"]["complete_eV"] = list(complete_eV)
+                if span and span[0] <= complete_eV[0] and span[1] >= complete_eV[1]:
+                    noted.append({**item, "code": "shorter_but_complete", "decides": False,
+                                  "said": f"{f['reason']}, but it covers {span[0]:.0f}-{span[1]:.0f} eV, the pre-edge "
+                                          f"window through the post-edge window ({complete_eV[0]:.0f}-"
+                                          f"{complete_eV[1]:.0f} eV): a shorter, complete scan, kept"})
+                    continue
+            if test in ("ratio_shape", "post_drift"):
+                dist = shape_distortion(r, recs, ratio_win or win, E_edge, np, exclude=ratio_exclude)
+                item["evidence"]["normalised_distortion"] = dist
+                if dist is None or not dist["distorted"]:
+                    noted.append({**item, "code": "intensity_not_shape", "decides": False,
+                                  "said": f"{f['reason']}; after a free scale and offset its normalised shape is the "
+                                          "others' (" + (f"residual {100 * dist['max_residual']:.1f} % of the edge step, "
+                                                         f"threshold {100 * dist['threshold']:.1f} %" if dist else
+                                                         "not measurable") + "): an intensity effect, kept"})
+                    continue
+                item["said"] = (f"{f['reason']}; its NORMALISED shape is distorted (after a free scale and offset it "
+                                f"departs {100 * dist['max_residual']:.1f} % of the edge step from the other scans, "
+                                f"threshold {100 * dist['threshold']:.1f} %)")
             if test == "dead_channel":
                 snr = _edge_snr(r, win, np)
                 item["evidence"]["edge_snr"] = snr
@@ -1748,6 +2042,139 @@ def apply_spots(table: dict, recs: Sequence[Mapping], stability: Mapping, np) ->
     return block
 
 
+#: WITHIN-SPOT DOSE DAMAGE (isaac.xas.dose_damage.v1). The measure: a later scan at a spot against the FIRST scan there,
+#: in NORMALISED shape: the later scan is put on the first one's scale by a free scale and offset fitted over the
+#: pre-edge and the post-edge (an intensity change or a background is never shape), and the mean difference over the
+#: white-line window (the group's white-line energy +- ``wl_half_eV``) is said in edge-step units, with its noise (the
+#: point-to-point scatter of the difference over the window, / sqrt(n)). A spot is DAMAGED when every later scan there
+#: differs that way beyond max(``floor``, ``noise_mult`` x its noise), in one direction. The rule fires when at two or
+#: more spots, and more than half of the spots measured more than once, the damage goes the same way (none the other
+#: way), AND the change does not simply go on across spots: of the moves from one spot's last scan to the next spot's
+#: first scan (in time), fewer than half continue it beyond the noise (a fresh spot starts afresh; a sample still
+#: changing would carry on). Then the first scan per spot is kept and the later ones are dropped. Never triggered by
+#: intensity; one noisy spot never triggers it; a scientist's set_scan_decision overrides.
+DOSE = {"wl_half_eV": 4.0, "floor": 0.01, "noise_mult": 3.0, "pre_eV": -10.0, "post_eV": 30.0}
+DOSE_RULE_ID = "isaac.xas.dose_damage.v1"
+DOSE_CODE = "beam_damage_at_spot"
+DOSE_SAID = "beam damage at each spot: later scans at the same spot change shape"
+
+
+def _norm_difference(f: Mapping, s: Mapping, E_edge: float, win: Sequence[float], np) -> tuple[float, float] | None:
+    """``(mean difference, its noise)`` of scan ``s`` against scan ``f`` in normalised shape over ``win`` (:data:`DOSE`)."""
+    a, b = f.get("aligned"), s.get("aligned")
+    if a is None or b is None:
+        return None
+    with np.errstate(all="ignore"), warnings.catch_warnings():
+        warnings.simplefilter("ignore")
+        yf, ys, E = a.IF / a.I0, b.IF / b.I0, a.E
+        ok = np.isfinite(yf) & np.isfinite(ys)
+        pre, post = ok & (E < E_edge + DOSE["pre_eV"]), ok & (E > E_edge + DOSE["post_eV"])
+        w = ok & (E >= win[0]) & (E <= win[1])
+        if pre.sum() < 2 or post.sum() < 3 or w.sum() < 5:
+            return None
+        fit = pre | post
+        (c, k), *_ = np.linalg.lstsq(np.c_[ys[fit], np.ones(fit.sum())], yf[fit], rcond=None)
+        step = float(np.median(yf[post]) - np.median(yf[pre]))
+        if not step > 0:
+            return None
+        d = (c * ys[w] + k - yf[w]) / step
+        return float(np.mean(d)), float(np.std(np.diff(d)) / np.sqrt(2.0) / np.sqrt(w.sum()))
+
+
+def apply_dose_damage(table: dict, recs: Sequence[Mapping], stability: Mapping, np, E_edge: float | None = None) -> dict | None:
+    """:data:`DOSE_RULE_ID` on the decision table (changed in place); the block said on the result, or None."""
+    if E_edge is None:
+        return None
+    spot = _spots_of(recs)
+    rows = table["by_id"]
+    stab = (stability or {}).get("rows") or {}
+    # the scans the rule judges: at a stated spot, aligned, and not dropped for a reason of their own (aborted, no
+    # energy reference, a logbook note), in time order
+    judged = [r for r in recs if spot.get(r["scan_id"]) and r.get("aligned") is not None
+              and not any(y["code"] not in DIFFERS_CODES for y in rows[r["scan_id"]]["reasons"])]
+    judged.sort(key=lambda r: (r.get("time") or datetime.max, r["num"]))
+    by_spot: dict[str, list] = {}
+    for r in judged:
+        by_spot.setdefault(spot[r["scan_id"]]["label"], []).append(r)
+    repeat = {lab: rs for lab, rs in by_spot.items() if len(rs) >= 2}
+    if len(repeat) < 2:
+        return None
+    wle = [((stab.get(r["scan_id"]) or {}).get("metrics") or {}).get("wl_e_eV") for r in judged]
+    wle = [float(v) for v in wle if isinstance(v, (int, float)) and v == v]
+    centre = float(np.median(wle)) if wle else float(E_edge) + 3.0
+    win = [centre - DOSE["wl_half_eV"], centre + DOSE["wl_half_eV"]]
+
+    def beyond(x):
+        return x is not None and abs(x[0]) > max(DOSE["floor"], DOSE["noise_mult"] * x[1])
+
+    damage: dict[str, dict] = {}
+    for lab, rs in repeat.items():
+        ds = [_norm_difference(rs[0], r, float(E_edge), win, np) for r in rs[1:]]
+        signs = {int(np.sign(x[0])) for x in ds if beyond(x)}
+        if ds and all(beyond(x) for x in ds) and len(signs) == 1:
+            damage[lab] = {"direction": signs.pop(), "differences": [x[0] for x in ds], "noise": [x[1] for x in ds]}
+    hit = None
+    for sign in (-1, 1):
+        same = [lab for lab, d in damage.items() if d["direction"] == sign]
+        against = [lab for lab, d in damage.items() if d["direction"] == -sign]
+        if len(same) >= 2 and 2 * len(same) > len(repeat) and not against:
+            hit = (sign, same)
+            break
+    if hit is None:
+        return None
+    sign, spots_k = hit
+    # a sample still changing carries the change on to the next spot; a fresh spot starts afresh
+    order = list(dict.fromkeys(spot[r["scan_id"]]["label"] for r in judged))
+    moves = []
+    for la, lb in zip(order, order[1:]):
+        x = _norm_difference(by_spot[la][-1], by_spot[lb][0], float(E_edge), win, np)
+        if x is not None:
+            moves.append({"from": by_spot[la][-1]["scan_id"], "to": by_spot[lb][0]["scan_id"], "difference": x[0],
+                          "noise": x[1], "continues": beyond(x) and int(np.sign(x[0])) == sign})
+    if moves and 2 * sum(m["continues"] for m in moves) >= len(moves):
+        return None
+    parts = []
+    for lab in sorted(spots_k, key=lambda x: int(x.split()[-1])):
+        d = damage[lab]
+        parts.append(f"{lab} " + ", ".join(f"{100 * v:+.1f} % (noise {100 * n:.1f} %)"
+                                            for v, n in zip(d["differences"], d["noise"])))
+    what = (f"{DOSE_SAID} (the white line {'falls' if sign < 0 else 'rises'} after the first scan at {len(spots_k)} of "
+            f"{len(repeat)} spots measured more than once, in normalised shape over {win[0]:.1f}-{win[1]:.1f} eV, in "
+            f"edge-step units: {'; '.join(parts)}; a fresh spot starts afresh); the first scan per spot is kept")
+    dropped, cleared = [], []
+    for lab in spots_k:
+        rs = repeat[lab]
+        x0 = rows[rs[0]["scan_id"]]
+        old = [y for y in x0["reasons"] if y["code"] in DIFFERS_CODES]
+        if old:
+            # the first scan at a damaged spot is the undamaged one: what made it "differ" is the dose on the others
+            x0["reasons"] = [y for y in x0["reasons"] if y["code"] not in DIFFERS_CODES]
+            x0["notes"] = list(x0["notes"]) + [{"source": "dose", "code": "first_scan_at_spot_kept", "decides": False,
+                                                "said": f"the first scan at {lab}: kept ({DOSE_SAID})",
+                                                "was_said": "; ".join(y["said"] for y in old)}]
+            x0["rule_decision"] = "drop" if x0["reasons"] else "keep"
+            if x0["decided_by"] == "rule":
+                x0["decision"] = x0["rule_decision"]
+                x0["merged"] = x0["decision"] == "keep" and x0.get("shift_eV") is not None
+            cleared.append(x0["scan_id"])
+        for r in rs[1:]:
+            x = rows[r["scan_id"]]
+            old = [y for y in x["reasons"] if y["code"] in DIFFERS_CODES]
+            x["reasons"] = [y for y in x["reasons"] if y["code"] not in DIFFERS_CODES] + [
+                {"source": "dose", "code": DOSE_CODE, "rule": DOSE_RULE_ID, "said": what,
+                 "evidence": {"spot": spot[r["scan_id"]], "first_scan_at_spot": rs[0]["scan_id"],
+                              "window_eV": win, "replaces": [y["code"] for y in old]}}]
+            x["rule_decision"] = "drop"
+            if x["decided_by"] == "rule":
+                x["decision"], x["merged"] = "drop", False
+            dropped.append(x["scan_id"])
+    _recount(table)
+    return {"rule_id": DOSE_RULE_ID, "rule": DOSE, "window_eV": win,
+            "spots": sorted(spots_k, key=lambda x: int(x.split()[-1])), "spots_measured_more_than_once": len(repeat),
+            "per_spot": damage, "moves_between_spots": moves, "dropped": dropped, "first_scans_cleared": cleared,
+            "statement": what[:1].upper() + what[1:] + "."}
+
+
 def _earliest(flagged: Sequence[str], recs: Sequence[Mapping], rows: Mapping) -> bool:
     """Are the differing scans the FIRST scans of their run (a contiguous run from the start, in time order by #D,
     then scan number)? Scans dropped for another reason only (aborted, no energy reference, a logbook note) are
@@ -1808,6 +2235,88 @@ def metric_shifts(sid: str, stability: Mapping | None, np) -> list[dict]:
                     if k == "delta_eV" else f"white-line height {d:+.3g}")
             out.append({"metric": k, "difference": d, "threshold": thr, "said": said + f" (threshold {thr:.2g})"})
     return out
+
+
+def beyond_noise(sid: str, stability: Mapping | None, np) -> tuple[bool, list[dict]]:
+    """``(evaluated, moved)`` for a scan the stability analysis puts before the stable window: its evolving
+    normalised-shape metrics (else every shape metric) against the stable scans', by :func:`metric_shifts`' threshold
+    (the stability rule's floor and 3 x the difference's sd). Not evaluated (no metrics): the stability rule stands."""
+    rows = (stability or {}).get("rows") or {}
+    if not ((rows.get(sid) or {}).get("metrics")):
+        return False, []
+    moved = metric_shifts(sid, stability, np)
+    evo = set((stability or {}).get("evolving_metrics") or ())
+    if evo & set(SHAPE_METRICS):
+        moved = [m for m in moved if m["metric"] in evo]
+    elif evo:
+        return False, []                     # evolving in a metric the guard does not measure: the rule stands
+    return True, moved
+
+
+#: the normalised-shape guard of the ratio screens: a ratio_shape / post_drift flag drops a scan only when, after a
+#: free scale AND offset onto the other scans' median (an intensity change and a background are not shape), the
+#: smoothed residual still departs more than ``min_frac`` of the edge step and ``noise_mult`` times its own noise (the
+#: largest of many smoothed points of pure noise reaches about 3 x: 5 x, as the package's own mad 5)
+DISTORTION = {"min_frac": 0.05, "noise_mult": 5.0, "smooth_pts": 5}
+
+
+def shape_distortion(r: Mapping, recs: Sequence[Mapping], win, E_edge, np, *, exclude: Sequence = ()) -> dict | None:
+    a = r.get("aligned")
+    others = [x["aligned"] for x in recs if x is not r and x.get("aligned") is not None]
+    if a is None or len(others) < 2:
+        return None
+    with np.errstate(all="ignore"), warnings.catch_warnings():
+        warnings.simplefilter("ignore")
+        y = a.IF / a.I0
+        ref = np.nanmedian(np.array([o.IF / o.I0 for o in others]), axis=0)
+        E = a.E
+        e0 = float(E_edge) if E_edge else float(np.nanmedian(E))
+        pre, post = (E < e0 - 10) & np.isfinite(ref), (E > e0 + 30) & np.isfinite(ref)
+        if pre.sum() < 2 or post.sum() < 3:
+            return None
+        step = float(np.median(ref[post]) - np.median(ref[pre]))
+        ok = np.isfinite(y) & np.isfinite(ref)
+        for lo, hi in exclude or ():
+            ok &= ~((E >= lo) & (E <= hi))
+        # the scale is set by the edge step (pre-edge AND post-edge in the fit: over a flat post-edge alone an offset
+        # would absorb a collapse), the distortion is measured over the post-edge part of the ratio window (the edge
+        # region is the shape screen's)
+        m = ok & (E > e0 + 30) & (E >= win[0]) & (E <= win[1])
+        fit = m | (ok & pre)
+        n = DISTORTION["smooth_pts"]
+        if not step > 0 or m.sum() < 2 * n + 3 or (fit & pre).sum() < 2:
+            return None
+        A = np.c_[y[fit], np.ones(fit.sum())]
+        (c, b), *_ = np.linalg.lstsq(A, ref[fit], rcond=None)
+        res = (c * y[m] + b - ref[m]) / step
+        sm = np.convolve(res, np.ones(n) / n, "valid")
+        noise = float(np.std(np.diff(res, 2)) / np.sqrt(6.0) / np.sqrt(n))
+    worst = float(np.max(np.abs(sm)))
+    thr = max(DISTORTION["min_frac"], DISTORTION["noise_mult"] * noise)
+    return {"max_residual": worst, "threshold": thr, "distorted": worst > thr, "scale": float(c), "offset": float(b),
+            "window_eV": [float(win[0]), float(win[1])], "rule": DISTORTION}
+
+
+def _finite_span(r: Mapping, np) -> list[float] | None:
+    a = r.get("aligned")
+    if a is None:
+        return None
+    with np.errstate(all="ignore"):
+        ok = np.isfinite(a.IF / a.I0)
+    return [float(a.E[ok].min()), float(a.E[ok].max())] if ok.any() else None
+
+
+def complete_window(absorber: Mapping, bt: Mapping, E_lo: float, E_hi: float) -> list[float] | None:
+    """What a COMPLETE scan covers, edge-relative: from 10 eV before the end of the pre-edge window to 50 eV into the
+    post-edge window (the span normalize_once needs to keep the beamtime's window): a shorter scan that covers it is
+    complete, whatever the group's longest grid."""
+    from xas_analysis.recipe_init import norm_range
+
+    el, ed, E_edge = absorber.get("element"), absorber.get("edge"), absorber.get("E_edge_eV")
+    if E_edge is None:
+        return None
+    rng = ((bt.get("windows") or {}).get(f"{el} {ed}") or {}).get("range") or norm_range(float(E_edge), E_lo, E_hi)
+    return [float(rng[1]) - 10.0, float(rng[2]) + 50.0]
 
 
 def decisions_statement(rows: Sequence[Mapping], stale: Sequence[Mapping] = ()) -> str:
@@ -1872,8 +2381,72 @@ def _edge_snr(r: Mapping, win, np) -> float | None:
     return abs(step) / noise if noise > 0 else float("inf")
 
 
-def normalize_once(E, y, n, absorber: Mapping, bt: Mapping, np) -> dict:
-    """The kept scans' raw average, normalised ONCE: Victoreen + McMaster (``mback_xrs``, bg_decreasing default)."""
+def glitch_exclusions(bt: Mapping, extra: Sequence[Sequence[float]] = ()) -> list[list[float]]:
+    """``[[lo, hi], ...]`` kept out of the normalisation (and ratio-screen) windows: the beamtime's I0 glitch (the
+    consensus centre, or the survey's), every other dip most scans share (``other_dips_eV``), both +- max(1.5 FWHM,
+    1 eV), and ``extra`` (glitches flagged in the merge). A glitch is FLAGGED and kept out of the fits, never removed
+    from the data."""
+    out = []
+    cons = (bt or {}).get("consensus") or {}
+    g = (bt or {}).get("glitch") or {}
+    fwhm = float(cons.get("fwhm_eV") or g.get("fwhm_eV") or 0.5)
+    half = max(GLITCH_EXCLUDE["fwhm"] * fwhm, GLITCH_EXCLUDE["min_half_eV"])
+    cal = (bt or {}).get("calibration") or {}
+    centres = []
+    c = cons.get("center_eV") if cons.get("center_eV") is not None else g.get("E_eV")
+    if c is not None and (cal.get("mode") == "glitch_I0" or cons.get("found")):
+        centres.append(float(c))
+        if int(cal.get("glitch_dips", 1)) == 2 and cal.get("shape_window_eV"):
+            w = cal["shape_window_eV"]                # a doublet: its whole fit window (both dips)
+            out.append([round(float(w[0]) + 1.5, 2), round(float(w[1]) - 1.5, 2)])
+    centres += [float(x) for x in cons.get("other_dips_eV") or ()]
+    out += [[round(x - half, 2), round(x + half, 2)] for x in centres]
+    out += [[float(a), float(b)] for a, b in extra]
+    merged: list[list[float]] = []
+    for lo, hi in sorted(out):                 # overlapping windows are one window
+        if merged and lo <= merged[-1][1]:
+            merged[-1][1] = max(merged[-1][1], hi)
+        else:
+            merged.append([lo, hi])
+    return merged
+
+
+def tender_choice(E, y, E_edge: float | None, rng: Sequence[float], np) -> dict:
+    """:data:`TENDER`: does this fluorescence curve need the tender options, and why (``{"tender": bool, "why": ...,
+    "post_rise": ...}``)."""
+    out: dict = {"rule_id": TENDER_RULE_ID, "tender": False, "post_rise": None}
+    if E_edge is None:
+        out["why"] = "no tabulated edge"
+        return out
+    E, y = np.asarray(E, float), np.asarray(y, float)
+    post = (E >= rng[2]) & (E <= rng[3]) & np.isfinite(y)
+    pre = (E >= rng[0]) & (E <= rng[1]) & np.isfinite(y)
+    if post.sum() >= 5 and pre.sum() >= 3:
+        step = float(np.median(y[post]) - np.median(y[pre]))
+        slope = float(np.polyfit(E[post], y[post], 1)[0])
+        if step > 0:
+            out["post_rise"] = slope * float(rng[3] - rng[2]) / step
+    if E_edge < TENDER["max_edge_eV"]:
+        out.update(tender=True, why=(f"fluorescence at a tender edge ({E_edge:.0f} eV, under about "
+                                     f"{TENDER['max_edge_eV'] / 1000:g} keV)"))
+    elif out["post_rise"] is not None and out["post_rise"] >= TENDER["rise_min"]:
+        out.update(tender=True, why=(f"the post-edge IF/I0 rises with E (+{100 * out['post_rise']:.0f} % of the edge "
+                                     "step over the post-edge window) while the cross-section falls"))
+    else:
+        out["why"] = (f"a hard-X-ray edge ({E_edge:.0f} eV) whose post-edge does not rise"
+                      + (f" ({100 * out['post_rise']:+.0f} % of the step)" if out["post_rise"] is not None else ""))
+    return out
+
+
+def tender_window(rng: Sequence[float], E_edge: float) -> list[float]:
+    """The tender window rule (normalization.md): the pre-edge window ends before the resonant-Raman foot."""
+    return [rng[0], round(min(float(rng[1]), E_edge - TENDER["pre_hi_below_edge_eV"]), 1), rng[2], rng[3]]
+
+
+def normalize_once(E, y, n, absorber: Mapping, bt: Mapping, np, *, exclude_extra: Sequence = ()) -> dict:
+    """The kept scans' raw average, normalised ONCE: Victoreen + McMaster (``mback_xrs``, bg_decreasing default),
+    with the tender-fluorescence options when :func:`tender_choice` says so, and the glitch windows kept out of the
+    fit windows (:func:`glitch_exclusions`)."""
     from xas_analysis.model.mback_xrs import mback_xrs
     from xas_analysis.recipe_init import norm_range
 
@@ -1899,6 +2472,31 @@ def normalize_once(E, y, n, absorber: Mapping, bt: Mapping, np) -> dict:
         lo, hi = max(fixed[0], round(float(E[0]) + 1, 1)), min(fixed[3], round(float(E[-1]) - 1, 1))
         if lo <= fixed[1] - 10 and hi >= fixed[2] + 50:
             rng, basis = [lo, fixed[1], fixed[2], hi], ("beamtime" if [lo, hi] == [fixed[0], fixed[3]] else "beamtime_clipped")
+    tender = tender_choice(E, y, float(E_edge), rng, np)
+    opts: dict = {}
+    if tender["tender"]:
+        opts = dict(TENDER["options"])
+        rng = tender_window(rng, float(E_edge))
+        tender["options"] = opts
+        tender["window_eV"] = rng
+        tender["statement"] = (f"Tender-fluorescence normalisation ({TENDER_RULE_ID}): {tender['why']}, so the engine's "
+                               "documented options are used (normalization.md, 'Tender fluorescence'): the I0 response "
+                               f"(E/E_edge)^{opts['response_power']:g} divides the whole signal, a falling pre-edge "
+                               "tail and a linear step factor (step_slope 1) are fitted, and the pre-edge window ends "
+                               f"{TENDER['pre_hi_below_edge_eV']:g} eV below the edge (before the resonant-Raman foot): "
+                               f"window {rng}.")
+    else:
+        tender["statement"] = f"Standard normalisation (no tender options): {tender['why']}."
+    excl = [w for w in glitch_exclusions(bt, exclude_extra)
+            if w[1] >= rng[0] and w[0] <= rng[3] and not (w[0] > rng[1] and w[1] < rng[2])]
+    if excl:
+        opts["exclude_eV"] = excl
+    out["tender"] = tender
+    out["exclude_eV"] = excl
+    if excl:
+        out["exclude_statement"] = (f"Kept out of the normalisation windows (glitches, flagged, never removed from the "
+                                    f"data): {', '.join(f'{a:g}-{b:g} eV' for a, b in excl)}.")
+    out["options"] = opts
     out["window_eV"] = rng
     out["window_basis"] = {
         "beamtime": "the beamtime's one window for this edge (recipe_init.norm_range on the modal grid): the same for "
@@ -1907,11 +2505,11 @@ def normalize_once(E, y, n, absorber: Mapping, bt: Mapping, np) -> dict:
                             "pre-edge end and post-edge start are the series' own)",
         "group": "the group's own window (its scans do not cover the beamtime's): recipe_init.norm_range"}[basis]
     out["window_fixed_for_series"] = basis in ("beamtime", "beamtime_clipped")
-    out["params"] = {"model": "victoreen", "element": el, "core": ed, "range": rng, "bg_decreasing": True}
+    out["params"] = {"model": "victoreen", "element": el, "core": ed, "range": rng, "bg_decreasing": True, **opts}
     with warnings.catch_warnings(), np.errstate(all="ignore"):
         warnings.simplefilter("ignore")
         try:
-            r = mback_xrs(el, E, y, rng, ed)
+            r = mback_xrs(el, E, y, rng, ed, **opts)
         except Exception as exc:  # noqa: BLE001
             out["error"] = f"{type(exc).__name__}: {exc}"[:300]
             return out
@@ -1928,7 +2526,7 @@ def normalize_once(E, y, n, absorber: Mapping, bt: Mapping, np) -> dict:
                     if w[1] <= w[0] + 5 or w[3] <= w[2] + 30:
                         continue
                     try:
-                        a = _f(mback_xrs(el, E, y, w, ed).info["A_edge"])
+                        a = _f(mback_xrs(el, E, y, w, ed, **opts).info["A_edge"])
                     except Exception:  # noqa: BLE001
                         a = None
                     if a:
@@ -2008,6 +2606,17 @@ def _qc(res, recs, kept, table, nm, E, y, e0, absorber, bt, np):
     if table.get("overrides_not_applied"):
         reasons_warn.append("override_not_applied")
         st["override_not_applied"] = "; ".join(x["said"] for x in table["overrides_not_applied"])
+    if res.get("point_exclusions"):
+        st["point_exclusions"] = res["point_exclusions"]["statement"]
+    if res.get("dose_damage"):
+        st["dose_damage"] = res["dose_damage"]["statement"]
+    if (nm.get("tender") or {}).get("statement"):
+        st["normalization_options"] = nm["tender"]["statement"]
+    if nm.get("exclude_statement"):
+        st["normalization_excluded"] = nm["exclude_statement"]
+    if R_FALLBACK in (res.get("review_flags") or ()):
+        reasons_warn.append(R_FALLBACK)
+        st[R_FALLBACK] = ((res.get("channel_choice") or {}).get("basis") or {}).get("fallback_from", {}).get("statement")
     mc = res.get("measurement_mode") or {}
     if mc.get("mode") in ("unknown", None):
         reasons_warn.append("measurement_mode_unknown")
@@ -2023,6 +2632,28 @@ def _qc(res, recs, kept, table, nm, E, y, e0, absorber, bt, np):
     st[DECISIONS_KEY] = table["statement"]
     verdict = "fail" if reasons_fail else ("warn" if reasons_warn else "pass")
     return verdict, reasons_fail + reasons_warn, st, metrics
+
+
+R_FALLBACK = "channel_fallback_transmission_not_positive"     # run.FALLBACK_FLAG
+
+
+def ratio_screens(E_edge: float | None, target, bt: Mapping) -> dict:
+    """The engine's ratio_shape and post_drift screens (pipeline._screen), edge-relative (the package author's
+    BL6-2c recipe, Pt L3: ratio window E_edge + 6 eV to the grid end, 5 %; post-edge levels E_edge + 60..95 eV vs the
+    last 40 eV, 15 % of the step), the glitch windows kept out. Report-only, as every screen: a flag drops a scan only
+    when its NORMALISED shape is distorted (:data:`DISTORTION`)."""
+    if E_edge is None or target is None or len(target) < 10:
+        return {}
+    lo, hi = float(target[0]), float(target[-1])
+    out: dict = {}
+    if hi - 5 > E_edge + 6 + 30:
+        out["ratio_shape"] = {"window_eV": [round(E_edge + 6, 1), round(hi - 5, 1)],
+                              "exclude_eV": glitch_exclusions(bt), "mad": 5, "min_frac": 0.05, "smooth_pts": 5}
+    a1, b1, a2, b2 = E_edge + 60, E_edge + 95, hi - 45, hi - 5
+    if a2 > b1 + 20 and lo < E_edge - 15:
+        out["post_drift"] = {"windows": [[round(a1, 1), round(b1, 1)], [round(a2, 1), round(b2, 1)]],
+                             "pre_eV": [round(lo + 1, 1), round(E_edge - 10, 1)], "mad": 5, "min_frac": 0.15}
+    return out
 
 
 def _shift_table(recs, bt) -> dict:
@@ -2099,8 +2730,10 @@ def _quick_merges(group, ctx, recs, kept, E, y, nm, e0, absorber, np) -> list[di
     nmv = {"resolved_params": rp, "e0_eV": e0v, "edge_step": nm["A_edge"], "norm": nm["norm"]}
     M = np.array([np.interp(E, r["aligned"].E, r["aligned"].IF / r["aligned"].I0, left=np.nan, right=np.nan) for r in kept])
 
+    opts = nm.get("options") or {}
+
     def normalizer(e, yy):
-        r = mback_xrs(absorber["element"], e, yy, rng, absorber["edge"])
+        r = mback_xrs(absorber["element"], e, yy, rng, absorber["edge"], **opts)
         return np.asarray(r.norm_xas, float), float(r.info["A_edge"])
 
     return QM.compare_group(group, ctx, grid_ok=E, mean=y, nm=nmv, M=M, grid=E, used_entries=[r["entry"] for r in kept],
@@ -2258,6 +2891,8 @@ def show_blocks(r: Mapping, *, full: bool = False) -> dict:
                                 "absorber": f"{nm.get('element')} {nm.get('edge')} ({nm.get('absorber_basis')})",
                                 "window_eV": nm.get("window_eV"), "window_basis": nm.get("window_basis"),
                                 "edge_step_A": nm.get("A_edge"),
+                                "tender": (nm.get("tender") or {}).get("statement"),
+                                **({"excluded": nm["exclude_statement"]} if nm.get("exclude_statement") else {}),
                                 "uncertainty": (nm.get("uncertainty") or {}).get("statement"),
                                 **({"error": nm["error"]} if nm.get("error") else {})}
     return out

@@ -58,38 +58,46 @@ def scan_cols(seed, *, d=0.0, chem=0.0, scale=1.0, noise=2e-3, foil=False, glitc
     return cols
 
 
-def _spec(cols, n, hour, sz=3.0):
+SCAN_CMD = "gscan energy 11165 11205 5 11240 0.25 11500 4 0.5"
+#: the #O motor names of a SPEC file whose per-scan split copies state their #P positions without names
+O_LINE = "#O0   dummy0    emiss    filter        Sx        Sy        Sz        Sr"
+
+
+def _spec(cols, n, hour, sz=3.0, *, command=SCAN_CMD, positional=False):
     names = list(cols)
+    p0 = f"#P0 4 9175.4 10 1 2 {sz:g} 0" if positional else f"#P0 dummy0=4 emiss=9175.4 filter=10 Sx=1 Sy=2 Sz={sz:g} Sr=0"
     lines = ["#C SYNTHETIC FIXTURE -- NOT INSTRUMENT OUTPUT. Every value is invented.",
-             f"#S {n}  gscan energy 11165 11205 5 11240 0.25 11500 4 0.5",
-             f"#D Sat Apr 12 {hour:02d}:{n:02d}:00 2025", f"#P0 dummy0=4 emiss=9175.4 filter=10 Sx=1 Sy=2 Sz={sz:g} Sr=0",
+             f"#S {n}  {command}",
+             f"#D Sat Apr 12 {hour:02d}:{n:02d}:00 2025", p0,
              "#L " + "  ".join(names)]
     for row in zip(*(cols[k] for k in names)):
         lines.append(" ".join(f"{v:.6f}" for v in row))
     return "\n".join(lines) + "\n"
 
 
-def write_beamtime(root, runs):
+def write_beamtime(root, runs, *, command=SCAN_CMD, positional=False, ext="dat"):
     """``runs``: [(stem, hour, [cols, ...]) or (stem, hour, [cols, ...], [Sz per scan])]: each run an acquisition file
-    of #S blocks beside its per-scan files (a 4th item: each scan's stage Sz, its spot)."""
+    of #S blocks beside its per-scan files (a 4th item: each scan's stage Sz, its spot). ``positional``: the per-scan
+    files state #P positions WITHOUT motor names, which only the acquisition file's #O line gives."""
     for stem, hour, scans, *spot in runs:
         d = root / f"{stem}_dir"
         d.mkdir(parents=True)
         blocks = []
         sz = spot[0] if spot else [3.0] * len(scans)
         for j, c in enumerate(scans, start=1):
-            text = _spec(c, j, hour, sz[j - 1])
-            (d / f"{stem}_{j:03d}.dat").write_text(text)
+            text = _spec(c, j, hour, sz[j - 1], command=command, positional=positional)
+            (d / f"{stem}_{j:03d}.{ext}").write_text(text)
             blocks.append(text)
-        (root / stem).write_text(f"#F {stem}\n#E 1\n\n" + "\n".join(blocks))
+        head = f"#F {stem}\n#E 1\n" + (O_LINE + "\n" if positional else "") + "\n"
+        (root / stem).write_text(head + "\n".join(blocks))
 
 
-def imported(tmp_path, runs, *, process=True):
+def imported(tmp_path, runs, *, process=True, **kw):
     from isaac_api.local_import import cli
     from isaac_api.local_import import mutations as M
 
     root = tmp_path / "SYN_beamtime"
-    write_beamtime(root, runs)
+    write_beamtime(root, runs, **kw)
     out = tmp_path / "out"
     assert cli.main(["import", str(root), "--out", str(out)]) == 0
     M.group(out)
@@ -952,3 +960,345 @@ def test_the_noise_guard_never_keeps_a_scan_whose_white_line_moved():
     metrics["SYN_D#6"]["metrics"]["wl_e_eV"] = 11218.06           # within the threshold: noise, kept
     row = _decide(recs, flags, {"rows": metrics})["by_id"]["SYN_D#6"]
     assert row["decision"] == "keep" and row["notes"][0]["code"] == "noisier_not_off_shape"
+
+
+# --- coverage of the end-to-end findings on real beamtimes (18 Nov 2026), each on SYN data ----------------------------
+
+
+def _mono_only(cols):
+    """A SYN scan as the older SPEC files write it (BL6-2c 2018, BL15-2 2019): the energy is the scanned ``mono`` motor,
+    the time ``Seconds``; no ``energy`` or ``absev`` column, and no BL15-2 detector name."""
+    return {"mono": cols["absev"], "I0": cols["I0"], "I1": cols["I1"], "FF1": cols["vortDT"], "Seconds": cols["sec"]}
+
+
+def test_a_gscan_of_mono_or_of_the_chosen_energy_column_is_an_energy_scan():
+    from isaac_api.local_import.processing import run as R
+
+    assert R._is_energy_scan(("gscan", "mono")) and R._is_energy_scan(("gscan", "energy"))
+    assert R._is_energy_scan(("ascan", "mono"), "mono")            # the motor IS the chosen energy column
+    assert not R._is_energy_scan(("ascan", "mono"), "absev")       # a mono motor scan beside an absev axis
+    assert not R._is_energy_scan(("ascan", "Sz"), "mono")
+
+
+def test_a_gscan_mono_beamtime_runs_on_v1_and_is_aligned(tmp_path):
+    runs = [("01_SYN_ZZ1_060mV", 9, [_mono_only(scan_cols(10 + k, d=d)) for k, d in enumerate(REF_D)]),
+            ("02_SYN_ZZ2_060mV", 11, [_mono_only(scan_cols(20 + k, d=d)) for k, d in enumerate(SMP_D)])]
+    bdir, _ = imported(tmp_path, runs, command="gscan mono 11165 11205 5 11240 0.25 11500 4 0.5")
+    res = v1_results(bdir)
+    assert len(res) == 2, "both groups run on isaac.xas.v1"
+    smp = by_run(res, "02_SYN_ZZ2")
+    assert smp[EX.REFERENCE_KEY]["routes"][0]["mode"] == "glitch_I0"
+    assert not any("not_an_energy_scan" in str(i.get("skip_reason")) for i in smp["inputs"])
+    ref_mean = float(np.mean(REF_D))
+    for r, ds in ((by_run(res, "01_SYN_ZZ1"), REF_D), (smp, SMP_D)):
+        assert max(abs(e) for e in _shift_errors(r, ds, ref_mean)) < 5.0
+
+
+# --- the foil timeline: separate foil scans, one detector position, the foils before the calibration left out --------
+
+
+def _foil_scan(seed, d, *, on_i2=False, n_points=None):
+    """A SYN transmission foil scan (no fluorescence channel): the foil edge at the tabulated edge + ``d``; on I1
+    (ln(I0/I1)), or ``on_i2`` in another detector position (ln(I1/I2), its edge distorted)."""
+    c = scan_cols(seed, d=d, glitch=False, fluo=False, n_points=n_points)
+    t = c["absev"] - d
+    muf = 0.3 + 0.8 / (1 + np.exp(-(t - E_EDGE) / 0.9))
+    if on_i2:
+        c["I1"] = 0.6 * c["I0"]
+        c["I2"] = c["I1"] * np.exp(-(0.3 + 0.8 / (1 + np.exp(-(t - E_EDGE - 1.4) / 2.5))))
+    else:
+        c["I1"] = c["I0"] * np.exp(-muf)
+        c["I2"] = np.full(c["I0"].size, 2.0)                # a dark chamber beyond the foil
+    return c
+
+
+def _drift(hour):
+    """The SYN mono drift: +0.30 eV over hours 9 -> 15."""
+    return 0.05 * (hour - 9)
+
+
+def _foil_beamtime():
+    return [("00_SYN_Irfoil_calib_a", 7, [_foil_scan(1, -1.9)]),                    # before the mono calibration
+            ("01_SYN_Irfoil_calib_b", 8, [_foil_scan(2, _drift(8))]),
+            ("02_SYN_ZZ2_060mV", 9, [scan_cols(20 + k, glitch=False, d=_drift(9)) for k in range(3)]),
+            ("03_SYN_ZZ3_060mV", 12, [scan_cols(30 + k, glitch=False, d=_drift(12)) for k in range(3)]),
+            ("04_SYN_Irfoil_I2", 13, [_foil_scan(4, _drift(13), on_i2=True)]),     # another detector position
+            ("05_SYN_ZZ5_060mV", 14, [scan_cols(50 + k, glitch=False, d=_drift(14)) for k in range(3)]),
+            ("06_SYN_Irfoil_I1", 15, [_foil_scan(6, _drift(15))])]
+
+
+def test_separate_foil_scans_give_a_foil_timeline_on_the_package_rules(tmp_path):
+    bdir, _ = imported(tmp_path, _foil_beamtime())
+    payload = json.loads((bdir / "processing" / "processing_results.json").read_text())
+    bt = payload[EX.BEAMTIME_KEY]
+    assert bt["calibration"]["mode"] == "foil_timeline", bt["calibration"]
+    used = [f["spec"] for f in bt["calibration"]["foils"]]
+    assert used == ["01_SYN_Irfoil_calib_b", "06_SYN_Irfoil_I1"], used    # one position; the last pre-sample foil
+    route = bt["routes"][0]
+    assert route["reference_name"] == "01_SYN_Irfoil_calib_b" and route["method"] == "shape"
+    assert [x["foil"] for x in route["timeline"]] == used
+    res = v1_results(bdir)
+    assert len(res) == 3
+    for stem, hour in (("02_SYN_ZZ2", 9), ("03_SYN_ZZ3", 12), ("05_SYN_ZZ5", 14)):
+        rows = by_run(res, stem)[EX.SHIFTS_KEY]["rows"]
+        want = _drift(8) - _drift(hour)                       # linear in time between the foils, on the reference foil
+        for x in rows:
+            assert x["route"] == "foil_timeline" and abs(1000 * (x["shift_eV"] - want)) < 12.0, (stem, x)
+
+
+def _foil_reads(foils):
+    """Minimal reads for :func:`engine_xas._foil_timeline`: ``foils`` = [(name, [(hour, d, grid step)])]."""
+    from datetime import datetime as dt
+
+    reads, groups = {}, {}
+    for name, scans in foils:
+        recs = []
+        for j, (hour, d, step) in enumerate(scans, start=1):
+            E = np.arange(11165.0, 11400.0, step)
+            t = E - d
+            I0 = np.full(E.size, 1e5)
+            I1 = I0 * np.exp(-(0.3 + 0.8 / (1 + np.exp(-(t - E_EDGE) / 0.9))))
+            recs.append({"E": E, "I0": I0, "I1": I1, "I2": I1 * 0.5, "IF": None, "num": j,
+                         "scan_id": f"{name}#{j}", "time": dt(2025, 4, 12, hour, j)})
+        reads[f"rg-{name}"] = {"recs": recs}
+        groups[name] = f"rg-{name}"
+    return reads, {"file_groups": groups}
+
+
+def test_the_foil_timeline_anchors_by_shape_and_indexes_the_foil_list():
+    # the reference foil (index 0) is scanned AFTER the other one; a coarse 1 eV grid on the edge, where the inflection
+    # is quantised and the shape fit is not
+    reads, bt = _foil_reads([("SYN_foilB", [(12, 0.20, 1.0), (12, 0.20, 1.0)]), ("SYN_foilA", [(9, 0.0, 0.25)])])
+    route = {"mode": "foil_timeline", "method": "shape", "reference_foil": 0,
+             "foils": [{"spec": "SYN_foilB", "ref_signal": "ln(I0/I1)"}, {"spec": "SYN_foilA", "ref_signal": "ln(I0/I1)"}],
+             "foil_window_eV": [E_EDGE - 6, E_EDGE + 6], "shape_window_eV": [E_EDGE - 8, E_EDGE + 24], "max_shift_eV": 2.0}
+    out = EX._foil_timeline(route, bt, reads)
+    assert out["reference_name"] == "SYN_foilB" and out["scans"] == ["SYN_foilB#1", "SYN_foilB#2"]
+    tl = {x["scan"]: x["anchor_eV"] for x in out["timeline"]}
+    assert len(tl) == 3
+    assert abs(1000 * ((tl["SYN_foilB#1"] - tl["SYN_foilA#1"]) - 0.20)) < 5.0      # the true 0.20 eV, by shape
+    assert out["anchor_eV"] == pytest.approx(tl["SYN_foilB#1"], abs=1e-3)
+
+
+# --- normalisation: tender fluorescence options, glitches kept out of the windows ------------------------------------
+
+
+def _mcmaster(el, core, E):
+    from xas_analysis.model.mback import atomic_step
+    from xas_analysis.physics.mcmaster import element
+
+    e = element(el)
+    edge = e["K_edge"] if core == "K" else e["L_edge"][2]
+    mu, _ = atomic_step(e["Z"], E / 1000, edge)
+    return mu, 1000 * edge
+
+
+def test_tender_fluorescence_uses_the_documented_options_and_says_so():
+    E = np.arange(2390.0, 2816.0, 1.0)
+    mu, e0 = _mcmaster("S", "K", E)
+    u = E / e0 - 1
+    F = (E / e0) ** 3.0                                     # the gas I0 response: IF/I0 rises with E
+    raw = F * (0.05 + 0.4 * np.exp(-(E - 2391) / 40.0) + 2.5 * (1 + 1.2 * u) * mu)
+    nm = EX.normalize_once(E, raw, np.ones(E.size), {"element": "S", "edge": "K", "E_edge_eV": e0, "basis": "SYN"},
+                           {"windows": {}}, np)
+    assert nm["tender"]["tender"] is True and nm["options"]["response_power"] == 3.0
+    assert nm["options"]["step_slope"] == 1 and nm["options"]["pre_tail"] is True
+    assert nm["window_eV"][1] == pytest.approx(e0 - 24.0, abs=0.1)
+    assert nm["A_edge"] == pytest.approx(2.5, rel=0.02)
+    assert "Tender-fluorescence normalisation" in nm["tender"]["statement"]
+    hard = EX.tender_choice(E + 9000, raw / F, 11564.0, [11400, 11550, 11620, 11800], np)
+    assert hard["tender"] is False
+
+
+def test_the_glitch_window_is_kept_out_of_the_normalisation():
+    E = np.arange(11540.0, 11806.0, 1.0)
+    mu, e0 = _mcmaster("Pt", "L3", E)
+    clean = 0.02 + 0.7 * mu
+    dip = clean.copy()
+    dip[(E >= 11701) & (E <= 11704)] += 0.6                # a glitch residue in IF/I0, in the post-edge window
+    bt = {"windows": {}, "calibration": {"mode": "glitch_I0"},
+          "consensus": {"found": True, "center_eV": 11702.5, "fwhm_eV": 1.0}}
+    absorber = {"element": "Pt", "edge": "L3", "E_edge_eV": e0, "basis": "SYN"}
+    nm = EX.normalize_once(E, dip, np.ones(E.size), absorber, bt, np)
+    ref = EX.normalize_once(E, clean, np.ones(E.size), absorber, {"windows": {}}, np)
+    assert nm["exclude_eV"] and nm["exclude_eV"][0][0] <= 11701 and nm["exclude_eV"][0][1] >= 11704
+    assert nm["A_edge"] == pytest.approx(ref["A_edge"], rel=1e-3)
+    assert "never removed" in nm["exclude_statement"]
+
+
+# --- a standard v0 reduces as fluorescence (its transmission fails) is on v1 too -------------------------------------
+
+
+def test_a_standard_whose_transmission_fails_is_reduced_as_fluorescence_on_v1(tmp_path):
+    std = []
+    for k in range(3):
+        c = scan_cols(70 + k)
+        c["I1"] = np.full(c["I0"].size, -5.0)               # I1 negative everywhere: transmission cannot be formed
+        std.append(c)
+    runs = _two_groups() + [("03_SYN_IrO2_std_005", 13, std)]
+    bdir, _ = imported(tmp_path, runs)
+    r = by_run(v1_results(bdir), "03_SYN_IrO2_std")
+    assert r["protocol_id"] == "isaac.xas.v1"
+    assert "channel_fallback_transmission_not_positive" in r["review_flags"]
+    assert "channel_fallback_transmission_not_positive" in r["qc"]["reasons"]
+
+
+# --- spots in SPEC split files; within-spot dose damage ---------------------------------------------------------------
+
+
+def test_spots_of_split_files_take_the_motor_names_from_the_acquisition_file(tmp_path):
+    sz = [-7.45] * 2 + [-7.15] * 2
+    runs = [("01_SYN_ZZ1_060mV", 9, [scan_cols(10 + k, d=d) for k, d in enumerate(REF_D)]),
+            ("02_SYN_ZZ2_060mV", 11, [scan_cols(40 + k) for k in range(4)], sz)]
+    bdir, _ = imported(tmp_path, runs, positional=True, ext="txt")
+    r = by_run(v1_results(bdir), "02_SYN_ZZ2")
+    rows = {x["scan"]: x for x in r[EX.DECISIONS_KEY]["rows"]}
+    assert [rows[k].get("spot") for k in (1, 2, 3, 4)] == ["spot 1", "spot 1", "spot 2", "spot 2"]
+    assert [x["name"] for x in r["spots"]["spots"]] == ["spot Sz -7.45", "spot Sz -7.15"]
+
+
+def _dose_run(wl_of, scale_of=None, noise_of=None):
+    """4 spots x 2 scans (A1 A2 B1 B2 ...); ``wl_of(k)``: the white-line height of scan k (0-based)."""
+    sz = [-7.45, -7.45, -7.15, -7.15, -6.85, -6.85, -6.55, -6.55]
+    cols = [scan_cols(110 + k, wl=wl_of(k), scale=(scale_of or (lambda k: 1.0))(k),
+                      noise=(noise_of or (lambda k: 2e-3))(k)) for k in range(8)]
+    return _spot_run(sz, cols)
+
+
+def test_later_scans_at_each_spot_that_change_shape_are_beam_damage(tmp_path, capsys):
+    from isaac_api.local_import import cli
+
+    bdir, _ = imported(tmp_path, _dose_run(lambda k: 3.0 if k % 2 == 0 else 2.55))
+    r = by_run(v1_results(bdir), "02_SYN_ZZ2")
+    rows = {x["scan"]: x for x in r[EX.DECISIONS_KEY]["rows"]}
+    for k in (1, 3, 5, 7):
+        assert rows[k]["decision"] == "keep", (k, rows[k]["reasons"])
+    for k in (2, 4, 6, 8):
+        assert rows[k]["decision"] == "drop" and [y["code"] for y in rows[k]["reasons"]] == [EX.DOSE_CODE], \
+            (k, rows[k]["reasons"])
+        assert "beam damage at each spot: later scans at the same spot change shape" in rows[k]["reasons"][0]["said"]
+    assert r["dose_damage"]["rule_id"] == EX.DOSE_RULE_ID and len(r["dose_damage"]["spots"]) >= 2
+    assert "dose_damage" in r["qc"]["statements"]
+    # overridable: a scientist keeps scan 2
+    assert cli.main(["bundle", "decide", str(bdir), "--target", r["group_id"], "--decision", "set_scan_decision",
+                     "--value", "keep", "--scans", "02_SYN_ZZ2_060mV#2", "--note", "SYN: keep it", "--by", "SYN"]) == 0
+    from isaac_api.local_import import mutations as M
+
+    M.process(bdir, source=str(tmp_path / "SYN_beamtime"))
+    r = by_run(v1_results(bdir), "02_SYN_ZZ2")
+    row = next(x for x in r[EX.DECISIONS_KEY]["rows"] if x["scan"] == 2)
+    assert row["decision"] == "keep" and row["decided_by"] == "scientist" and row["rule_decision"] == "drop"
+
+
+@pytest.mark.parametrize("case", ["one_noisy_spot", "intensity_only", "still_changing"])
+def test_dose_damage_never_fires_on_one_spot_on_intensity_or_on_an_evolution(tmp_path, case):
+    if case == "one_noisy_spot":
+        runs = _dose_run(lambda k: 2.55 if k == 7 else 3.0, noise_of=lambda k: 1.2e-2 if k == 7 else 2e-3)
+    elif case == "intensity_only":
+        runs = _dose_run(lambda k: 3.0, scale_of=lambda k: 1.0 if k % 2 == 0 else 0.6)
+    else:                       # the white line falls scan after scan, across spots: the sample, not the dose
+        runs = _dose_run(lambda k: 3.0 - 0.15 * k)
+    bdir, _ = imported(tmp_path, runs)
+    r = by_run(v1_results(bdir), "02_SYN_ZZ2")
+    assert "dose_damage" not in r
+    said = json.dumps(r[EX.DECISIONS_KEY]["rows"])
+    assert "beam damage" not in said
+    if case == "still_changing":
+        return
+    rows = {x["scan"]: x for x in r[EX.DECISIONS_KEY]["rows"]}
+    assert all(rows[k]["decision"] == "keep" for k in range(1, 7)), {k: x["reasons"] for k, x in rows.items()}
+    if case == "intensity_only":
+        assert all(x["decision"] == "keep" for x in rows.values())
+
+
+# --- single-point I0 dropouts: the POINT is excluded, said, never interpolated; the scan is kept ----------------------
+
+
+def test_a_single_point_i0_dropout_is_excluded_from_that_scans_contribution(tmp_path):
+    scans = [scan_cols(120 + k) for k in range(5)]
+    j = int(np.flatnonzero(GRID >= 11300.0)[0])
+    scans[2]["I0"] = scans[2]["I0"].copy()
+    scans[2]["I0"][j] = 1.0                                   # one count among ~1e5
+    runs = [("01_SYN_ZZ1_060mV", 9, [scan_cols(10 + k, d=d) for k, d in enumerate(REF_D)]),
+            ("02_SYN_ZZ2_060mV", 11, scans)]
+    bdir, _ = imported(tmp_path, runs)
+    r = by_run(v1_results(bdir), "02_SYN_ZZ2")
+    rows = {x["scan"]: x for x in r[EX.DECISIONS_KEY]["rows"]}
+    assert rows[3]["decision"] == "keep"
+    note = next(n for n in rows[3]["notes"] if n["code"] == EX.I0_DROPOUT_CODE)
+    assert note["said"] == f"point excluded: I0 dropout (1 counts at {GRID[j]:.2f} eV)"
+    assert r["point_exclusions"]["points"][0]["scan_id"] == "02_SYN_ZZ2_060mV#3"
+    merged = next(f for f in r["outputs"]["files"] if f["role"] == "merged")["relative_path"]
+    m = np.genfromtxt(bdir / merged, delimiter=",", names=True, skip_header=1)
+    k = int(np.argmin(np.abs(m["energy_eV"] - GRID[j] - (rows[3]["shift_eV"] or 0))))
+    assert m["n_scans"][k] == 4.0                             # the other scans cover that energy
+    nb = np.median(m["mu_mean"][k - 3:k + 4])
+    assert abs(m["mu_mean"][k] - nb) < 0.02 * nb              # no spike in the merge
+
+
+# --- the ratio screens drop only a NORMALISED-shape distortion ---------------------------------------------------------
+
+
+def test_a_within_scan_step_collapse_drops_and_a_uniformly_weaker_scan_does_not(tmp_path):
+    scans = [scan_cols(130 + k) for k in range(6)]
+    collapse = GRID > 11330.0
+    scans[2]["vortDT"] = np.where(collapse, 0.55, 1.0) * scans[2]["vortDT"]    # the signal collapses mid-scan
+    scans[4] = scan_cols(134, scale=0.5, bg=0.3)                                 # uniformly weaker, on a background
+    runs = [("01_SYN_ZZ1_060mV", 9, [scan_cols(10 + k, d=d) for k, d in enumerate(REF_D)]),
+            ("02_SYN_ZZ2_060mV", 11, scans)]
+    bdir, _ = imported(tmp_path, runs)
+    r = by_run(v1_results(bdir), "02_SYN_ZZ2")
+    rows = {x["scan"]: x for x in r[EX.DECISIONS_KEY]["rows"]}
+    assert rows[3]["decision"] == "drop", rows[3]
+    codes = {y["code"] for y in rows[3]["reasons"]}
+    assert codes & {"post_drift", "ratio_shape"}, rows[3]["reasons"]
+    assert any("NORMALISED shape is distorted" in y["said"] for y in rows[3]["reasons"])
+    assert rows[5]["decision"] == "keep", rows[5]
+    assert all(rows[k]["decision"] == "keep" for k in (1, 2, 4, 5, 6))
+
+
+# --- coverage is edge-relative; an aborted group says so ----------------------------------------------------------------
+
+
+def test_a_shorter_scan_that_covers_the_windows_is_complete(tmp_path):
+    n = int(np.flatnonzero(GRID >= 11400.0)[0])               # ends ~125 eV past the post-edge start: under 90 %
+    scans = [scan_cols(140 + k) for k in range(4)] + [scan_cols(145, n_points=n)]
+    runs = [("01_SYN_ZZ1_060mV", 9, [scan_cols(10 + k, d=d) for k, d in enumerate(REF_D)]),
+            ("02_SYN_ZZ2_060mV", 11, scans)]
+    bdir, _ = imported(tmp_path, runs)
+    r = by_run(v1_results(bdir), "02_SYN_ZZ2")
+    row = next(x for x in r[EX.DECISIONS_KEY]["rows"] if x["scan"] == 5)
+    assert row["decision"] == "keep", row["reasons"]
+    assert "shorter_but_complete" in {n["code"] for n in row["notes"]}, row["notes"]
+
+
+@pytest.mark.parametrize("end, code, said", [
+    (11232.0, "scan_range_incomplete", "not the pre-edge window through the post-edge window"),
+    (11208.0, "scan_never_reaches_edge", "this scan never reaches the absorption edge")])
+def test_a_one_scan_short_group_says_why_never_a_raw_error(tmp_path, end, code, said):
+    n = int(np.flatnonzero(GRID >= end)[0]) + 1
+    runs = _two_groups() + [("03_SYN_ZZ3_060mV", 13, [scan_cols(150, n_points=n)])]
+    bdir, _ = imported(tmp_path, runs)
+    r = next(x for x in v1_results(bdir) if x["inputs"][0]["relative_path"].startswith("03_SYN_ZZ3"))
+    assert r["failure"]["code"] == code, r["failure"]
+    assert said in r["failure"]["detail"] and "Error" not in r["failure"]["detail"]
+    assert "measurement_mode_unknown" not in r["review_flags"]
+
+
+# --- "still changing" needs a change beyond the noise ----------------------------------------------------------------
+
+
+def test_before_the_stable_window_within_the_noise_is_kept():
+    recs = [_rec(f"SYN_E#{k}", k, seed=k) for k in range(1, 7)]
+    metrics = {f"SYN_E#{k}": {"metrics": {"wl_e_eV": 11218.0, "sd_wl_e_eV": 0.02, "wl_h": 2.0, "sd_wl_h": 0.01,
+                                          "delta_eV": 0.0, "sd_delta_eV": 0.02},
+                              "reasons": ["before_stable_window"] if k <= 2 else [],
+                              "proposal": "exclude_proposed" if k <= 2 else "keep",
+                              "said": ["the sample was still changing (wl_e_eV)"] if k <= 2 else []}
+               for k in range(1, 7)}
+    metrics["SYN_E#1"]["metrics"]["wl_e_eV"] = 11217.95          # 0.05 eV: within the noise
+    metrics["SYN_E#2"]["metrics"]["wl_e_eV"] = 11217.40          # 0.6 eV: a real change
+    stab = {"rows": metrics, "stable_window": ["SYN_E_003.dat"], "evolving_metrics": ["wl_e_eV"]}
+    row = _decide(recs, stability=stab)["by_id"]
+    assert row["SYN_E#1"]["decision"] == "keep" and row["SYN_E#1"]["notes"][0]["code"] == "change_within_noise"
+    assert row["SYN_E#2"]["decision"] == "drop" and row["SYN_E#2"]["reasons"][0]["code"] == "before_stable_window"

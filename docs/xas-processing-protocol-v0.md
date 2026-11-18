@@ -134,6 +134,46 @@ with no energy anchor is shown as "kept by the scientist but cannot be merged" a
 now is (after a regroup or a split) is listed as "override not applied: ..." in the result and in `bundle show`. The
 scientist still approves each curve before it goes into a record.
 
+**What an end-to-end run on five real beamtimes changed (18 Nov 2026; each item has a synthetic test).**
+- *Energy scans:* a `gscan` of `mono` (BL6-2c 2018, BL15-2 2019: no `energy` or `absev` column, time in `Seconds`), or
+  a scan of the motor that IS the chosen energy column, is an energy scan; an `ascan mono` beside an `absev` axis is
+  still a motor scan.
+- *Scope:* a standard that v0 reduces as SCA/I0 fluorescence because its transmission cannot be formed (v0's own
+  `channel_fallback_transmission_not_positive`) is on v1 too, flagged and warned.
+- *The foil timeline is reachable:* the survey now sees the energy scans of alignment groups and of foil groups, which
+  never become records. Its rules apply (one detector position: the ratio most foil files share; of the foils before
+  the first sample scan only the last, the earlier ones may precede the mono calibration). Every scan of every kept foil
+  is anchored by the route's method (`shape`: the whole foil edge shifted onto the first foil scan, free scale and
+  offset; anchor = that template's inflection - the shift), a scan's anchor is linear in time between the foil anchors,
+  and the reference is the median anchor of the foil `reference_foil` names (an index into the foil list). A survey
+  foil of another element never decides the samples' edge (PROVENANCE.md M8).
+- *Normalisation:* fluorescence at a tender edge (under 4 keV), or a post-edge IF/I0 that rises with E (+10 % of the
+  step over the post-edge window), uses the engine's documented tender options (normalization.md: `response_power 3`,
+  `step_slope 1`, `pre_tail`, the pre-edge window ending 24 eV below the edge, before the resonant-Raman foot), said in
+  `normalization.tender`. The beamtime's I0 glitch (+- max(1.5 FWHM, 1 eV); a doublet's whole fit window) and every
+  other dip most scans share are kept out of the fit windows (`normalization.exclude_eV`), never removed from the data.
+- *Decisions:* "before the stable window" drops only when the evolving normalised-shape metric moved beyond the shape
+  guard's noise threshold (the stability rule's floor, 3 x the scans' own sd), else it is kept and said
+  (`change_within_noise`). Coverage is edge-relative: a scan under 90 % of the group's grid that covers 10 eV before the
+  end of the pre-edge window to 50 eV into the post-edge window is complete (`shorter_but_complete`). The engine's
+  `ratio_shape` (E_edge + 6 eV to the grid end, 5 %) and `post_drift` (E_edge + 60..95 eV vs the last 40 eV, 15 %)
+  screens run, glitch windows excluded; a flag drops only when, after a free scale and offset fitted over the pre-edge
+  and post-edge, the smoothed residual still departs 5 % of the edge step and 3 x its noise (a within-scan step collapse
+  is shape; a uniformly weaker scan, or one on a background, is not: `intensity_not_shape`). WITHIN-SPOT DOSE DAMAGE
+  (`isaac.xas.dose_damage.v1`): when at two or more spots (and more than half of the spots measured more than once) every
+  later scan differs from the first scan there in one normalised-shape metric, the same way, beyond the noise, the
+  first scan per spot is kept and the others dropped with "beam damage at each spot: later scans at the same spot change
+  shape"; never on intensity, never on one spot, and overridable.
+- *Spots* of SPEC split files (`<run>_dir/*.txt`: `#P` positions, no `#O` names) pair with the `#O` motor names of the
+  run's acquisition SPEC file (hash-checked; v0 and v1).
+- *Single-point I0 dropouts* (I0 under 1 % of the median of its 5 neighbours each side): that POINT is excluded from its
+  scan's contribution to the average (the grid points it would feed are left to the other scans), said as "point
+  excluded: I0 dropout (n counts at E eV)" on the scan and in `point_exclusions`; never interpolated, never the scan.
+- *Plain failures:* a group whose scans end below the edge fails `scan_never_reaches_edge` ("this scan never reaches
+  the absorption edge"), never `measurement_mode_unknown`; one whose merged scans do not cover the pre-edge window
+  through the post-edge window (an aborted one-scan group, a short spot check) fails `scan_range_incomplete` in plain
+  words, never a raw fitting error.
+
 **The glitch consensus `isaac.xas.glitch_consensus.v1`** (review of the first v1 build: one scan without the glitch
 made the survey place it 2.4 eV off and drop every scan; two of nine made the beamtime "no reference"; one scan
 shifted 1.6 eV gave wrong shifts to the others). The survey samples a few scans per file and their median, so a
