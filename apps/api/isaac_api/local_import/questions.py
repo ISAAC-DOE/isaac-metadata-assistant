@@ -477,15 +477,47 @@ def confirm_value_shown(bundle: Mapping, q: Mapping) -> list[str]:
     return [c["candidate_id"] for c in _confirmable_candidates(q.get("targets") or (), cand_by_id, B._writable_paths())]
 
 
-def _sample_reading_text(groups: Sequence[str], written: Mapping[str, Sequence[tuple[str, str]]]) -> str:
+def _ordinal(n: int) -> str:
+    return f"{n}{'th' if 10 <= n % 100 <= 20 else {1: 'st', 2: 'nd', 3: 'rd'}.get(n % 10, 'th')}"
+
+
+def sample_number_words(stem: str, witness: Mapping | None, *, electrode_position: int | None = None) -> tuple[str, str] | None:
+    """How a question names a ``sample_or_electrode_number`` reading of the run named ``stem`` (``witness``: one of its
+    evidence entries): ``None`` keeps "sample or electrode number", which the reading is only where the files settle it —
+    a name that LEADS with its run number and has this number second (``05_06_…``: the importer's ordinal rule,
+    confirmed by the domain owner, DEC-47), or the position a scientist said is the electrode. Otherwise
+    ``("file-name number", where it sits; that nobody said yet what it is)``: measured on a real BL6-2c beamtime, the
+    ordinal rule read the run counter ``10`` of ``PtCCNPs_on_Au_3_10_m1000mV`` (electrode 3) as the electrode, and
+    the question called it the electrode number."""
+    from . import grouping as G
+
+    ev = witness or {}
+    own = str(ev.get("relative_path") or "").rsplit("/", 1)[-1] == stem
+    pos = G.name_token_position(stem, ev.get("locator")) if own else None
+    toks = G._stem_tokens(stem)
+    if pos is not None and (pos == electrode_position or (pos == 2 and toks and toks[0].isdigit())):
+        return None
+    pending = "whether it names an electrode or counts runs is not yet said"
+    if pos is not None:
+        return "file-name number", f"the {_ordinal(pos)} token of {stem}; {pending}"
+    where = str(ev.get("relative_path") or "").rsplit("/", 1)[-1]
+    return "file-name number", (f"read from the file name {where}; " if where else "") + pending
+
+
+def _sample_reading_text(groups: Sequence[str], written: Mapping[str, Sequence[tuple]]) -> str:
     """The sample reading a partition's groups share, as the FILES write it (the partition key is lowercased):
-    "sample name 'ZZ1', sample or electrode number '01'"; a key the groups spell differently lists each spelling."""
+    "sample name 'ZZ1', sample or electrode number '01'"; a key the groups spell differently lists each spelling.
+    An entry may carry a third item, a note said after the spellings (:func:`sample_number_words`)."""
     spellings: dict[str, list[str]] = {}
+    notes: dict[str, str] = {}
     for gid in groups:
-        for key, literal in written.get(gid) or ():
+        for key, literal, *note in written.get(gid) or ():
             if literal not in spellings.setdefault(key, []):
                 spellings[key].append(literal)
+            if note and note[0] and key not in notes:
+                notes[key] = note[0]
     return ", ".join(f"{key.replace('_', ' ')} " + " or ".join(_quoted(s) for s in lits[:3]) + ("…" if len(lits) > 3 else "")
+                     + (f" ({notes[key]})" if key in notes else "")
                      for key, lits in spellings.items())
 
 
@@ -586,7 +618,12 @@ def consolidate(bundle: Mapping, *, compositions_out: dict | None = None, includ
     # their sample questions (never across a differing reading; never for an empty basis).
     sample_key_of_group: dict[str, str] = {}
     # ...and that reading as the FILES write it (the key above is lowercased), for the question's text (LOW5)
-    sample_written_of_group: dict[str, list[tuple[str, str]]] = {}
+    sample_written_of_group: dict[str, list[tuple]] = {}
+    from .grouping import SAMPLE_NUMBER_KEY, own_name_witnesses
+    from .labels import answered_electrode_position
+
+    electrode_at = answered_electrode_position(bundle)
+    stem_of_run = {r["run_id"]: str(r.get("stem") or "") for r in bundle["runs"]}
     for g in groups:
         sample = (g.get("basis") or {}).get("sample")
         if isinstance(sample, Mapping) and sample:
@@ -598,7 +635,14 @@ def consolidate(bundle: Mapping, *, compositions_out: dict | None = None, includ
                 lit = next((lits[0] for i in ids or () if (lits := (cand_by_id.get(i) or {}).get("observed_literals"))), None)
                 shown = lit if lit is not None else canon[k]
                 if shown is not None and not isinstance(shown, (list, dict)):
-                    written.append((k, str(shown)))
+                    words = None
+                    if k == SAMPLE_NUMBER_KEY and ids:
+                        # never "electrode" for a number the files do not settle as one (sample_number_words)
+                        c = cand_by_id.get(ids[0]) or {}
+                        stem = stem_of_run.get(c.get("run_id"), "")
+                        witness = next(iter(own_name_witnesses(c, stem)), None) or next(iter(c.get("evidence") or ()), None)
+                        words = sample_number_words(stem, witness, electrode_position=electrode_at)
+                    written.append((words[0], str(shown), words[1]) if words else (k, str(shown)))
             sample_written_of_group[g["group_id"]] = written
 
     # what the FILES record for each field (a differing recorded condition blocks experiment-wide
@@ -1085,6 +1129,12 @@ def consolidate(bundle: Mapping, *, compositions_out: dict | None = None, includ
                               # a reading of the same field ELSEWHERE in the import (another run or group) is
                               # context, not this question's own evidence
                               "of_this_question": c["candidate_id"] in mine})
+        # TECHNIQUE_HINT_RULE_ID: a macro or script name is never a technique hint (the reading stays evidence)
+        hints, code_left_out = S.technique_hints(path, hints)
+        if code_left_out:
+            if not any(h.get("kind") in S.LITERAL_HINT_KINDS for h in hints):
+                text = text.replace(" (see the hints)", "", 1)
+            text += S.technique_hints_left_out_sentence(code_left_out)
         text += _asked_again_text(q["asked_again"], {path: enum})
         value_arg = "<value>" + (" --json" if numeric else "")
         qid = _qid(scope, kind, path, partition or "")
@@ -1126,6 +1176,7 @@ def consolidate(bundle: Mapping, *, compositions_out: dict | None = None, includ
             "targets": q["targets"],
             "per_scope_targets": q["per_scope_targets"],
             "hints": hints,
+            **({"code_hints_left_out": code_left_out} if code_left_out else {}),
             "allowed_values": enum,
             # r5e M5: the deprecated terms the list still holds (allowed; never offered)
             **({"deprecated_values": dv} if (dv := deprecated_terms(path, enum)) else {}),
@@ -1162,6 +1213,7 @@ def consolidate(bundle: Mapping, *, compositions_out: dict | None = None, includ
         reaches = bool(required) or (bool(affects) and no_field is None)
         qid = _qid(scope, "resolve_conflict", cf["conflict_id"])
         answer = _conflict_answer(qid, cf, path, enum, writable, related, source_path_of, _is_numeric(_node(schema, path)) if path else False)
+        conflict_hints, code_left_out = S.technique_hints(path, answer["hints"])  # TECHNIQUE_HINT_RULE_ID
         n_groups = len({group_of[r] for r in cf_runs if r in group_of})
         applies = {"groups": n_groups, "runs": len(cf_runs), "targets": 1}
         if not cf["run_ids"] and reaches and has_groups:
@@ -1190,11 +1242,13 @@ def consolidate(bundle: Mapping, *, compositions_out: dict | None = None, includ
                 "text": (f"The sources disagree ({cf['kind']}{', ' + str(cf['subject']) if cf['subject'] else ''}). "
                          # r5f M7: a macro-versus-file-name set-point conflict says what it found (names, run, time slot)
                          + (f"{cf['explanation']} " if cf["kind"] == B.MACRO_SETPOINT_CONFLICT_KIND and cf.get("explanation") else "")
-                         + answer["text"] + _asked_again_text(again, {path: enum} if path else {})),
+                         + answer["text"] + (S.technique_hints_left_out_sentence(code_left_out) if code_left_out else "")
+                         + _asked_again_text(again, {path: enum} if path else {})),
                 "applies_to": applies,
                 "targets": [{"kind": "conflict", "id": cf["conflict_id"]}],
                 "per_scope_targets": {scope: [cf["conflict_id"]]},
-                "hints": answer["hints"],
+                "hints": conflict_hints,
+                **({"code_hints_left_out": code_left_out} if code_left_out else {}),
                 "allowed_values": enum,
                 **answer["fields"],
                 "answer_command": answer["command"],
@@ -4057,7 +4111,9 @@ def minimum_answers_for_one_group(payload: Mapping, bundle: Mapping, scope: str 
                     warned_done.append(r["why"])
             stated_done += stated
             continue
-        rank = (bool(hard), soft is not None, need + len(plus), n)
+        # c-e2e: among groups that need as many answers, a SAMPLE group comes before a reference or alignment group
+        # (measured: a real BL4-3 beamtime named an alignment scan "the nearest group to a record")
+        rank = (bool(hard), soft is not None, need + len(plus), (g.get("role") or "sample") != "sample", n)
         if best is None or rank < best["rank"]:
             best = {"rank": rank, "group_id": gid, "need": need, "plus": plus, "questions": list(chosen.values()),
                     "unasked": unasked, "hard": hard, "soft": soft, "missing": [m["path"] for m in list(rep.get("missing_required") or ()) + _companions_missing(rep)],
