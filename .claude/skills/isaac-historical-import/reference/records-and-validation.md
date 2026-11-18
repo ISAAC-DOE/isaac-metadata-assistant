@@ -73,8 +73,10 @@ A record built from an approved `isaac.xas.v1` result (the vendored xas-analysis
 made, in fields the official schema has:
 
 - `measurement.series`: `<group>_normalized` (the normalised curve) and `<group>_merged`, the merged RAW average it
-  was normalised from (IF/I0 in `arb`, role `derived_signal`, with its standard error and the scans averaged at each
-  energy, role `quality_monitor`). Each series has a one-line `notes`.
+  was normalised from (IF/I0 in `arb`, role `derived_signal`, with the scans averaged at each energy, role
+  `quality_monitor`). Its standard error is given only where two or more scans contribute (the engine writes 0 where
+  one scan does, which is no measured spread): a channel of the merged series when that is every energy, else its
+  own series `<group>_merged_stderr` on those energies, else none. Each series has a one-line `notes`.
 - `measurement.processing.steps`: `energy_alignment`, `spectrum_merging`, `normalization`. v1 aligns each scan to one
   beamtime reference and applies no absolute calibration (the mono is staff-calibrated), so `calibration` is not listed.
 - `descriptors.outputs[].generated_by`: agent `isaac.xas.v1`; `version` names the protocol, the adapter rule and the
@@ -88,7 +90,9 @@ made, in fields the official schema has:
   versions, `energy` (absolute calibration, alignment, the reference evidence), the per-scan shift table, the decision
   table (each scan: keep or drop, who decided, reason codes, reasons and remarks with their evidence), the merge,
   normalisation parameters, excluded points, QC, and `artifacts` (params.json, scan_decisions.json, merged.csv,
-  normalized.csv, plot.png, qc.json), each with its path relative to the bundle and its sha256 (`matches_file`). The
+  normalized.csv, plot.png, qc.json), each with its path relative to the bundle and its sha256 (`matches_file`); a
+  path that is not bundle-relative is left out with a note. The block's `generated_by` is the record's own (none,
+  with `generated_by_note`, when the record has no descriptors output); `summary` always says the processing. The
   same files are copied beside the record in `<ULID>.artifacts/`.
 
 A record of any other result (`isaac.xas.v0`) is written as before: the normalised series, its steps and E0. No

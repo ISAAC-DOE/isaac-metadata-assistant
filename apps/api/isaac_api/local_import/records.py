@@ -203,19 +203,21 @@ def _compose_merged_series(draft: dict, used: dict, files: Sequence[Mapping], bu
     if fpath is None or hashlib.sha256(fpath.read_bytes()).hexdigest() != merged.get("sha256"):
         used["merged_series"] = "not used: the merged file is missing or its sha256 differs"
         return None
-    series, said = PV.merged_series(group_id, fpath)
+    series, said, stderr = PV.merged_series(group_id, fpath)
     if series is None:
         used["merged_series"] = said
         return None
-    draft["series"].append(series)
-    draft["block_evidence"][f"series:{series['series_id']}"] = [
-        conf,
-        {"source_type": "document", "source_file": merged["relative_path"], "locator": f"sha256 {merged['sha256']}",
-         "quote": said},
-    ]
+    for one in series:
+        draft["series"].append(one)
+        draft["block_evidence"][f"series:{one['series_id']}"] = [
+            conf,
+            {"source_type": "document", "source_file": merged["relative_path"], "locator": f"sha256 {merged['sha256']}",
+             "quote": said},
+        ]
     used["merged_series"] = merged["relative_path"]
-    used["merged_series_id"] = series["series_id"]
-    return series["series_id"]
+    used["merged_series_id"] = series[0]["series_id"]
+    used["merged_stderr"] = stderr
+    return series[0]["series_id"]
 
 
 def step_was_applied(step: Mapping) -> bool:
@@ -1059,7 +1061,8 @@ def compose_group(bundle: Mapping, group: Mapping, bundle_dir: Path, index: dict
             evidence = [conf]
             if PV.is_v1(r):
                 # the full story of the curve, in the record (generated_by) and in the sidecar (processing block)
-                generated_by = PV.generated_by(r, merged_series_id=used.get("merged_series_id"))
+                generated_by = PV.generated_by(r, merged_series_id=used.get("merged_series_id"),
+                                               merged_stderr=used.get("merged_stderr"))
                 definition = ("E0 of the merged, normalised curve (larch find_e0), reported by the scientist-approved "
                               f"{PV.V1_PROTOCOL_ID} processing result.")
                 used["provenance"] = {"generated_by_version": generated_by["version"]}
@@ -3104,7 +3107,7 @@ def processing_sidecar(bundle: Mapping, bundle_dir: Path, group_id: str, composi
     gb = next((o.get("generated_by") for o in outputs if (o.get("generated_by") or {}).get("agent") == PV.V1_PROTOCOL_ID),
               None)
     return PV.sidecar_block(result, Path(bundle_dir), group_id=group_id, generated=gb,
-                            merged_series_id=used.get("merged_series_id"))
+                            merged_series_id=used.get("merged_series_id"), merged_stderr=used.get("merged_stderr"))
 
 
 def _remove_withdrawn_copy(out: Path, record_id: str) -> list[str]:
@@ -3292,6 +3295,10 @@ def export_records(bundle_dir: Path, out: Path, *, run_portal=None) -> dict:
         _atomic_write(sidecar_path, (json.dumps(sidecar, indent=2) + "\n").encode("utf-8"))
         artifacts = []
         for f, src in sources:
+            if PV.bundle_relative(f.get("relative_path")) is None:
+                # never echoed: a path outside the bundle is not written into the reply
+                artifacts.append({"role": f.get("role"), "refused": PV.UNSAFE_PATH_NOTE})
+                continue
             if src is None:
                 artifacts.append({"relative_path": f.get("relative_path"), "refused": "outside the bundle, missing, or sha256 mismatch"})
                 continue

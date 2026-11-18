@@ -34,6 +34,11 @@ SIDECAR_FORMAT = "isaac.processing_provenance.v1"
 ENGINE_PROVENANCE_FILE = "src/xas_analysis/PROVENANCE.md"
 #: merged.csv's columns (engine_xas.process_group_v1)
 MERGED_COLUMNS = ("energy_eV", "mu_mean", "mu_stderr", "n_scans")
+#: the merged series' channel notes
+STDERR_NOTE = "Standard error of the mean at each energy where two or more scans contribute."
+SCANS_AVERAGED_NOTE = ("How many scans contribute at each energy: fewer at the ends of the grid, where a scan's shift "
+                       "onto the energy reference leaves it short of the grid, and where an I0 dropout point was left "
+                       "out.")
 #: why the edge step is not a descriptor
 EDGE_STEP_NOT_A_DESCRIPTOR = ("the edge step is stated here, not as a descriptor: the ISAAC descriptor vocabulary has "
                               "no edge-step name")
@@ -137,7 +142,7 @@ def _steps(result: Mapping) -> dict[str, Mapping]:
     return {s.get("step"): s for s in result.get("steps") or () if isinstance(s, Mapping)}
 
 
-def summary(result: Mapping, *, merged_series_id: str | None = None) -> str:
+def summary(result: Mapping, *, merged_series_id: str | None = None, merged_stderr: str | None = None) -> str:
     """The compact plain-English story of the curve, for ``generated_by.notes``."""
     from .processing import engine_xas as EX
 
@@ -152,7 +157,10 @@ def summary(result: Mapping, *, merged_series_id: str | None = None) -> str:
     parts.append(_decisions_sentence(result.get("scan_decisions") or {}))
     grid = f" on the energy grid of kept scan {merge['grid_from_scan']}" if merge.get("grid_from_scan") else ""
     parts.append(f"Merge: uniform mean of the raw IF/I0 of the {merge.get('n_scans', '?')} merged scans{grid}"
-                 + (f" (series {merged_series_id}, with its standard error)" if merged_series_id else "")
+                 + (f" (series {merged_series_id}" + {"all": ", with its standard error",
+                                                       "partial": ", with its standard error where two or more scans "
+                                                                  "contribute"}.get(merged_stderr, "") + ")"
+                    if merged_series_id else "")
                  + "; normalised once afterwards (normalised curves are never merged).")
     w = nm.get("window_eV")
     windows = (f"pre-edge {w[0]:g}-{w[1]:g} eV, post-edge {w[2]:g}-{w[3]:g} eV"
@@ -184,9 +192,23 @@ def summary(result: Mapping, *, merged_series_id: str | None = None) -> str:
     return " ".join(parts)
 
 
-def generated_by(result: Mapping, *, merged_series_id: str | None = None) -> dict:
+def generated_by(result: Mapping, *, merged_series_id: str | None = None, merged_stderr: str | None = None) -> dict:
     return {"agent": V1_PROTOCOL_ID, "version": version_text(result),
-            "notes": summary(result, merged_series_id=merged_series_id)}
+            "notes": summary(result, merged_series_id=merged_series_id, merged_stderr=merged_stderr)}
+
+
+def bundle_relative(raw: Any) -> str | None:
+    """``raw`` when it is a bundle-relative POSIX path (not empty, not absolute, no ``..``, no backslash, no drive
+    letter), else ``None``: a path written into the sidecar or an export row never points outside the bundle."""
+    from . import bundle as B
+
+    safe = B._safe_relative(raw) if isinstance(raw, str) and raw.strip() else None
+    if safe is None or safe in (".", "") or ":" in safe.split("/")[0]:
+        return None
+    return safe
+
+
+UNSAFE_PATH_NOTE = "its relative_path is left out: not a bundle-relative path (absolute, '..', or a drive)"
 
 
 def _read_columns(path: Path, names: Sequence[str]) -> dict[str, list[float | None]] | str:
@@ -216,33 +238,55 @@ def _read_columns(path: Path, names: Sequence[str]) -> dict[str, list[float | No
     return cols
 
 
-def merged_series(group_id: str, path: Path) -> tuple[dict | None, str]:
-    """``(series, what was used)`` for the merged RAW average, or ``(None, why not)``."""
+def merged_series(group_id: str, path: Path) -> tuple[list[dict] | None, str, str | None]:
+    """``(series, what was used, stderr)`` for the merged RAW average, or ``(None, why not, None)``.
+
+    ``stderr``: ``"all"`` (the standard error is a channel of the merged series), ``"partial"`` (only some points
+    have one: it is its own series, ``<group>_merged_stderr``, on those energies) or ``None`` (no point has one).
+    A point where fewer than 2 scans contribute has NO standard error: the engine writes 0 there
+    (``xas_analysis.average``: var / max(1, n - 1)), which is not a measured spread, so it is never written as one.
+    """
     cols = _read_columns(path, MERGED_COLUMNS)
     if isinstance(cols, str):
-        return None, f"not used: {cols}"
+        return None, f"not used: {cols}", None
     E, mu, err, n = (cols[c] for c in MERGED_COLUMNS)
     if any(v is None for v in E) or any(v is None for v in mu) or any(v is None for v in n):
-        return None, "not used: a blank energy, mean or scan count"
+        return None, "not used: a blank energy, mean or scan count", None
+    defined = [i for i in range(len(E)) if n[i] >= 2 and err[i] is not None]
+    stderr = "all" if len(defined) == len(E) else ("partial" if defined else None)
     channels = [{"name": "absorption", "unit": "arb", "role": "derived_signal", "values": mu,
                  "notes": "Raw fluorescence IF/I0, the uniform mean over the merged scans; not normalised."}]
-    said = "with its standard error and scan count"
-    if all(v is not None for v in err):
+    if stderr == "all":
         channels.append({"name": "absorption_stderr", "unit": "arb", "role": "quality_monitor", "values": err,
-                         "notes": "Standard error of the mean at each energy."})
-    else:
-        said = "with its scan count; the standard error is not given (undefined where one scan contributes)"
+                         "notes": STDERR_NOTE})
     channels.append({"name": "scans_averaged", "unit": "count", "role": "quality_monitor", "values": n,
-                     "notes": "How many scans contribute at each energy (fewer where an I0 dropout point was left out)."})
-    series = {
+                     "notes": SCANS_AVERAGED_NOTE})
+    out = [{
         "series_id": f"{group_id}_merged",
         "independent_variables": [{"name": "incident_energy", "unit": "eV", "values": E}],
         "channels": channels,
         "notes": ("The merged raw average this record's normalised curve was made from: each kept scan shifted onto "
                   "one beamtime energy reference and interpolated once onto one grid, then averaged (raw IF/I0). "
-                  "It is normalised once, into the normalised series."),
-    }
-    return series, f"{len(E)} points, {said}"
+                  "It is normalised once, into the normalised series."
+                  + {"all": "", "partial": f" Its standard error is series {group_id}_merged_stderr (only the "
+                                           "energies where two or more scans contribute).",
+                     None: " No standard error is given: one scan contributes at every energy."}[stderr]),
+    }]
+    if stderr == "partial":
+        out.append({
+            "series_id": f"{group_id}_merged_stderr",
+            "independent_variables": [{"name": "incident_energy", "unit": "eV", "values": [E[i] for i in defined]}],
+            "channels": [{"name": "absorption_stderr", "unit": "arb", "role": "quality_monitor",
+                          "values": [err[i] for i in defined], "notes": STDERR_NOTE}],
+            "notes": (f"The standard error of series {group_id}_merged, at the {len(defined)} of its {len(E)} energies "
+                      "where two or more scans contribute. Where fewer than 2 scans contribute there is no standard "
+                      "error, so those energies are left out (never written as 0)."),
+        })
+    said = {"all": "with its standard error and scan count",
+            "partial": (f"with its scan count, and its standard error at the {len(defined)} of {len(E)} points where "
+                        "two or more scans contribute"),
+            None: "with its scan count; the standard error is not given (one scan contributes at every point)"}[stderr]
+    return out, f"{len(E)} points, {said}", stderr
 
 
 def normalized_series_note(result: Mapping, merged_series_id: str | None) -> str:
@@ -275,8 +319,8 @@ def _decision_row(x: Mapping) -> dict:
     }.items() if v is not None}
 
 
-def sidecar_block(result: Mapping, bundle_dir: Path, *, group_id: str, generated: Mapping | None = None,
-                  merged_series_id: str | None = None) -> dict:
+def sidecar_block(result: Mapping, bundle_dir: Path, *, group_id: str, generated: Mapping | None,
+                  merged_series_id: str | None = None, merged_stderr: str | None = None) -> dict:
     """The evidence sidecar's ``processing`` block for an approved v1 result (read from the result as stored)."""
     from .processing import engine_xas as EX
     from .records import contained_file
@@ -291,13 +335,12 @@ def sidecar_block(result: Mapping, bundle_dir: Path, *, group_id: str, generated
     files.sort(key=lambda f: (order.get(f.get("role"), len(order)), str(f.get("relative_path"))))
     artifacts = []
     for f in files:
-        rel = str(f.get("relative_path") or "")
+        rel = bundle_relative(f.get("relative_path"))
         src = contained_file(Path(bundle_dir), rel) if rel else None
         actual = _sha256_of(src) if src is not None else None
-        artifacts.append({"role": f.get("role"), "relative_path": rel, "sha256": f.get("sha256"),
-                          "matches_file": actual is not None and actual == f.get("sha256")})
+        artifacts.append({"role": f.get("role"), **({"relative_path": rel} if rel else {"note": UNSAFE_PATH_NOTE}),
+                          "sha256": f.get("sha256"), "matches_file": actual is not None and actual == f.get("sha256")})
     story = EX.energy_story(result)
-    gb = dict(generated or generated_by(result, merged_series_id=merged_series_id))
     return {
         "format": SIDECAR_FORMAT,
         "result_id": result.get("result_id"),
@@ -309,7 +352,11 @@ def sidecar_block(result: Mapping, bundle_dir: Path, *, group_id: str, generated
                      "engine": eng.get("engine"), "engine_version": eng.get("engine_version"),
                      "engine_source": eng.get("engine_source"), "engine_provenance": ENGINE_PROVENANCE_FILE,
                      "decision_rule_id": table.get("rule_id")},
-        "generated_by": gb,
+        # exactly the record's generated_by: none when the record has no descriptors output (no numeric E0)
+        **({"generated_by": dict(generated)} if generated else
+           {"generated_by_note": ("the record has no descriptors output (no numeric E0), so no generated_by; the "
+                                  "processing summary is below")}),
+        "summary": summary(result, merged_series_id=merged_series_id, merged_stderr=merged_stderr),
         "energy": {
             "absolute_calibration": story["absolute_calibration"],
             "alignment": story["alignment"],

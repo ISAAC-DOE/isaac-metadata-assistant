@@ -260,3 +260,95 @@ def test_a_record_from_a_v0_result_is_exported_as_before(bdir, tmp_path):
     assert "calibration" in record["measurement"]["processing"]["steps"]
     assert "processing" not in sidecar
     assert not PV.is_v1(p1)
+
+
+# --- review of PR #334 ------------------------------------------------------------------------------------------------
+
+def _merged_csv(path: Path, n: list[float], err: list[float]) -> Path:
+    rows = [f"{11200 + i:.6f},{0.1 + 0.01 * i:.8g},{e:.8g},{k:.8g}" for i, (k, e) in enumerate(zip(n, err))]
+    path.write_text("# SYNTHETIC FIXTURE\nenergy_eV,mu_mean,mu_stderr,n_scans\n" + "\n".join(rows) + "\n")
+    return path
+
+
+def _all_channels(series_list):
+    return {c["name"]: (s, c) for s in series_list for c in s["channels"]}
+
+
+def test_no_standard_error_is_claimed_where_one_scan_contributes(tmp_path):
+    """MEDIUM: the engine writes err = 0 where ONE scan contributes (average.py: var / max(1, n - 1)). A standard
+    error of 0 there is a claim the data does not support: those points carry no standard error."""
+    series, said, stderr = PV.merged_series("g", _merged_csv(tmp_path / "m.csv", [1, 2, 3, 3, 2, 1], [0, .1, .2, .2, .1, 0]))
+    ch = _all_channels(series)
+    s, c = ch["absorption_stderr"]
+    assert s["series_id"] == "g_merged_stderr" and len(c["values"]) == 4 and 0 not in c["values"]
+    assert s["independent_variables"][0]["values"] == [11201.0, 11202.0, 11203.0, 11204.0]
+    assert "fewer than 2 scans" in s["notes"] and stderr == "partial"
+    main = next(x for x in series if x["series_id"] == "g_merged")
+    assert [x["name"] for x in main["channels"]] == ["absorption", "scans_averaged"]
+    assert len(main["channels"][0]["values"]) == 6
+    # every point from two or more scans: the channel sits in the merged series itself
+    series, said, stderr = PV.merged_series("g", _merged_csv(tmp_path / "m2.csv", [2, 3, 2], [.1, .2, .1]))
+    assert [s["series_id"] for s in series] == ["g_merged"] and stderr == "all"
+    assert "absorption_stderr" in [c["name"] for c in series[0]["channels"]]
+    # one scan everywhere: no standard error at all, and the words say so
+    series, said, stderr = PV.merged_series("g", _merged_csv(tmp_path / "m3.csv", [1, 1, 1], [0, 0, 0]))
+    assert "absorption_stderr" not in _all_channels(series) and stderr is None
+    assert "standard error" in said and "not given" in said
+
+
+def test_the_notes_say_the_standard_error_only_when_the_record_has_it(engine_run):
+    _eng, r, _ = engine_run
+    assert "with its standard error" in PV.summary(r, merged_series_id="g_merged", merged_stderr="all")
+    partial = PV.summary(r, merged_series_id="g_merged", merged_stderr="partial")
+    assert "standard error where two or more scans contribute" in partial
+    none = PV.summary(r, merged_series_id="g_merged", merged_stderr=None)
+    assert "standard error" not in none
+
+
+def test_the_scan_count_note_names_both_reasons_for_fewer_scans(tmp_path):
+    series, _, _ = PV.merged_series("g", _merged_csv(tmp_path / "m.csv", [2, 3, 2], [.1, .2, .1]))
+    note = _all_channels(series)["scans_averaged"][1]["notes"]
+    assert "I0 dropout" in note and "ends of the grid" in note
+
+
+@pytest.mark.parametrize("bad", ["../outside.csv", "/abs/merged.csv", "C:/x/merged.csv", "a\\..\\b.csv", ""])
+def test_an_unsafe_artifact_path_is_left_out_of_the_sidecar_with_a_note(tmp_path, bad):
+    assert PV.bundle_relative(bad) is None
+    assert PV.bundle_relative("processing/g/r-1/merged.csv") == "processing/g/r-1/merged.csv"
+    result = {"protocol_id": "isaac.xas.v1", "source": "isaac_protocol", "engine": {}, "result_id": "p-syn",
+              "outputs": {"files": [{"role": "plot", "relative_path": bad, "sha256": "0" * 64}]}}
+    (art,) = PV.sidecar_block(result, tmp_path, group_id="g", generated=None)["artifacts"]
+    assert "relative_path" not in art and art["matches_file"] is False
+    assert "not a bundle-relative path" in art["note"]
+
+
+def test_an_unsafe_artifact_path_is_left_out_of_the_export_row(bdir, tmp_path, monkeypatch):
+    """The bundle schema refuses such a path on write; a bundle that carries one anyway (edited by hand) still never
+    has it echoed into the export reply (defence in depth: the output list is given one past the bundle's validation)."""
+    _add_group(bdir)
+    _decide_the_rest(bdir, "p1")
+    R.build_records(bdir)
+    real = R._artifact_sources
+
+    def with_bad_path(bundle, bundle_dir, group_id):
+        return real(bundle, bundle_dir, group_id) + [
+            ({"role": "plot", "relative_path": "../SYN_outside.png", "sha256": "0" * 64}, None)]
+
+    monkeypatch.setattr(R, "_artifact_sources", with_bad_path)
+    export = R.export_records(bdir, tmp_path / "records", run_portal=_portal("publish"))
+    (row,) = export["exported"]
+    refused = [a for a in row["artifacts"] if isinstance(a, dict)]
+    assert refused and all("relative_path" not in a for a in refused), refused
+    assert "not a bundle-relative path" in refused[0]["refused"]
+
+
+def test_without_a_generated_by_in_the_record_the_sidecar_shows_none(bdir, tmp_path, engine_run):
+    """LOW: no numeric E0, no descriptors output in the record, so no generated_by: the sidecar does not show one."""
+    eng, result, _ = engine_run
+    res = _transplant(bdir, eng, result)
+    _decide_the_rest(bdir, res["result_id"])
+    R.build_records(bdir)
+    comp = json.loads((bdir / "drafts" / "g1.composition.json").read_text())
+    block = R.processing_sidecar(M.load(bdir), bdir, "g1", comp, {"record_id": "SYN"})
+    assert "generated_by" not in block and "no generated_by" in block["generated_by_note"]
+    assert block["summary"].startswith("Processed from the raw scans by isaac.xas.v1")
