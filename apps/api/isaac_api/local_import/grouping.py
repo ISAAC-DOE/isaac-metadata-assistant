@@ -312,6 +312,7 @@ FIELD_UNITS: Mapping[str, str] = {"emission_energy": "ev"}
 MERGEABLE_MISREADINGS = frozenset(
     {
         "scan_index_token_read_as_value",
+        "counter_token_read_as_sample_number",
         "same_value_different_unit_spelling",
         "auxiliary_macro_read_as_method",
         "exported_file_read_as_acquisition",
@@ -321,6 +322,8 @@ MERGEABLE_MISREADINGS = frozenset(
 #: Plain words for the confirm question, per misreading a proposed group was formed despite.
 PLAIN_MISREADING = {
     "scan_index_token_read_as_value": "the importer read scan-file numbers (_001, _002) as a sample number",
+    "counter_token_read_as_sample_number": ("the importer read a file-name number as the sample or electrode number, and "
+                                            "the scientist said that position is a run counter"),
     "same_value_different_unit_spelling": "the importer saw one value written with and without its unit as a disagreement",
     "auxiliary_macro_read_as_method": "the importer read a helper macro the run also called as a second acquisition method",
     "exported_file_read_as_acquisition": "one member is not a measurement but an exported/processed file of it (kept as context; its data are not merged)",
@@ -670,6 +673,79 @@ def _sample_number_consistency(run_readings: Sequence[Mapping[str, dict]]) -> di
     return None
 
 
+#: COUNTER_RULE: the importer's ordinal rule (``bl15.filenames.bare_integer_ordinal.v1``) reads the SECOND bare number
+#: of a name as the "sample or electrode number". That holds where a name LEADS with its run number (BL15-2, DEC-47);
+#: measured on a real BL6-2c beamtime it read the run counter ``10`` of ``PtCCNPs_on_Au_3_10_m1000mV`` (electrode 3)
+#: as the electrode. Once a scientist's ``set_counter_positions`` answer names the position that number sits at in
+#: the run's own name, the reading is no sample identity: it is left out (the run is then matched on its name with
+#: the counter removed, ``sample_key_from_name_stem``). The candidate itself is unchanged evidence.
+COUNTER_READ_AS_SAMPLE_NUMBER = "counter_token_read_as_sample_number"
+SAMPLE_NUMBER_KEY = "sample_or_electrode_number"
+_FILENAME_TOKEN_LOCATOR = re.compile(r"filename token (\d+)(?: \[chars (\d+)\.\.(\d+)\])?")
+
+
+def name_token_position(stem: str, locator: Any) -> int | None:
+    """The 1-based position grouping gives (:func:`_stem_tokens`, the positions a ``set_counter_positions`` answer
+    names) to the token a ``filename token N [chars a..b]`` locator points at in ``stem``, or ``None`` when the
+    locator is not one. Without a character span, the engine's own index (0-based) + 1."""
+    m = _FILENAME_TOKEN_LOCATOR.match(str(locator or ""))
+    if m is None:
+        return None
+    if m.group(2) is None:
+        return int(m.group(1)) + 1
+    start = int(m.group(2))
+    marked = _SIGN.sub("\x00", str(stem))  # one character for one: offsets unchanged
+    for n, t in enumerate(re.finditer(r"[^_\-\s.]+", marked), start=1):
+        if t.start() <= start < t.end():
+            return n
+    return int(m.group(1)) + 1
+
+
+def own_name_witnesses(candidate: Mapping, stem: str) -> list[Mapping]:
+    """The candidate's evidence read from the run's OWN file name (a ``filename token`` locator on a file named
+    ``stem``), not from a scan file's name inside its folder."""
+    return [e for e in candidate.get("evidence") or ()
+            if str(e.get("locator") or "").startswith("filename token")
+            and str(e.get("relative_path") or "").rsplit("/", 1)[-1] == stem]
+
+
+def _counter_read_as_sample_number(c: Mapping, run: Mapping, positions: Sequence[int], decision: Mapping) -> dict | None:
+    """COUNTER_RULE: the issue when every own-name witness of a sample-number reading sits at a position the
+    scientist named a run counter, else ``None``."""
+    if c.get("statement_key") != SAMPLE_NUMBER_KEY:
+        return None
+    if c.get("evidence_truncated"):
+        # witnesses were cut: taken only when the reading is ONE literal and every witness shown points at the same
+        # engine token index (the witnesses not shown then read that literal at that index too)
+        idx = {m.group(1) for e in c.get("evidence") or () if (m := _FILENAME_TOKEN_LOCATOR.match(str(e.get("locator") or "")))}
+        if len({str(x) for x in c.get("observed_literals") or ()}) != 1 or len(idx) != 1 \
+                or any(not _FILENAME_TOKEN_LOCATOR.match(str(e.get("locator") or "")) for e in c.get("evidence") or ()):
+            return None
+    stem = str(run.get("stem") or "")
+    # a NUMBERED position only: a `last` answer is not applied here. Its exemption (last_counter_exempt) reads the
+    # names of one prefix as a family, and dropping the reading there would join a name with no counter to the names
+    # that have one (`…_pH2_3` with `…_pH2_3_001`, `…_pH2_3_002`; test_local_import_merge_conditions)
+    counted = {p for p in positions if p != LAST_POSITION}
+    own = own_name_witnesses(c, stem)
+    at = {name_token_position(stem, e.get("locator")) for e in own}
+    if not own or None in at or not at <= counted or len(at) != 1:
+        return None
+    (pos,) = at
+    return {
+        "code": COUNTER_READ_AS_SAMPLE_NUMBER,
+        "rule_id": ENGINE_RULE_ID,
+        "statement_key": SAMPLE_NUMBER_KEY,
+        "candidate_id": c.get("candidate_id"),
+        "position": pos,
+        "decision_id": decision.get("decision_id"),
+        "detail": (f"the number at file-name position {pos} was read as the sample or electrode number, and the "
+                   f"scientist's set_counter_positions answer names position {pos} a run counter"),
+        "evidence": [{"source_id": e.get("source_id"), "locator": e.get("locator"), "literal": e.get("literal_value")}
+                     for e in own[:10]],
+        "effective_reading": None,
+    }
+
+
 def engine_reading_issues(bundle: Mapping) -> dict:
     """Every known engine misreading in ``bundle``: per run and beamtime-level. No I/O."""
     cands = {c["candidate_id"]: c for c in bundle.get("candidates") or () if "candidate_id" in c}
@@ -684,6 +760,21 @@ def engine_reading_issues(bundle: Mapping) -> dict:
             issue = _scan_index_misread(c, run) or _unit_spelling_misread(c) or _auxiliary_macro_misread(c)
             if issue:
                 per_run.setdefault(run["run_key"], []).append(issue)
+    decision = counter_positions_decision(bundle)
+    cpos = list((decision or {}).get("positions") or ())
+    if cpos:
+        exempt = (last_counter_exempt(r.get("stem") or "" for r in bundle.get("runs") or ())
+                  if LAST_POSITION in cpos else frozenset())
+        for run in bundle.get("runs") or ():
+            fixed = {i.get("candidate_id") for i in per_run.get(run["run_key"], ())}
+            for cid in run.get("candidate_ids") or ():
+                c = cands.get(cid)
+                if not c or cid in fixed or c.get("extracted_state") == "conflicting":
+                    continue
+                issue = _counter_read_as_sample_number(
+                    c, run, stem_counter_positions(run.get("stem") or "", cpos, exempt), decision)
+                if issue:
+                    per_run.setdefault(run["run_key"], []).append(issue)
     for run_key, issue in _exported_file_misreads(bundle):
         per_run.setdefault(run_key, []).append(issue)
     return {"per_run": per_run}
@@ -858,6 +949,97 @@ def element_reference_token(name: str) -> str | None:
     return found
 
 
+#: THE XDC NOT-A-MEASUREMENT RULE (an SSRL EXAFS Data Collector run, BL4-3 style). The SPEC path marks an alignment
+#: file ``run_candidate: false`` from its content (the engine classifier); an XDC scan has no such classifier, so
+#: measured on a real BL4-3 beamtime every alignment, foil and calibration run (26 of 53) was asked the sample and
+#: condition questions and an alignment scan was "the nearest group to a record". This rule marks such a run as not a
+#: measurement run, at import, from:
+#:
+#: * its NAME: a token starting ``align``, the token ``rough`` (``00_Tifoil_rough_072``), a token starting ``foil`` or
+#:   ``calib``, or an element + ``foil``/``calib`` token (:func:`element_reference_token`); never a name that also
+#:   writes a condition (a potential, pH, concentration, open circuit) or a foil-electrode word (``Nifoil_electrode``),
+#:   and never the broader reference words (``std``, ``standard``, ``ref``): a standard is measured as a result;
+#: * or EVERY scan's HEADER: a comment line that starts ``Alignment`` (the collector's alignment mode writes
+#:   "Alignment experiment"), an alignment-mode region or detector file (``align.argn``, ``*.adet``), or a comment line
+#:   that is only an element and ``foil`` (``Ti foil``, ``Cu foil reference``). A header on one scan of several is not
+#:   enough, and a region file NAMED for a foil (``TiEdge_Foil.rgn``) is not either: a sample may be run on it.
+#:
+#: A PROPOSAL like every role: grouping gives the run's group the role, and the scientist confirms or rejects it.
+XDC_NOT_MEASUREMENT_RULE_ID = "isaac.grouping.xdc_not_a_measurement.v1"
+_ALIGN_TOKEN = re.compile(r"^(?:align\w*|rough\d*)$")
+_CALIB_PREFIXES = ("foil", "calib")
+_ALIGN_HEADER_LINE = re.compile(r"^\s*alignment\b", re.IGNORECASE)
+_ALIGN_HEADER_FILE = re.compile(r"(?:^align\w*\.\w+$|\.a(?:rgn|det)$)", re.IGNORECASE)
+_FOIL_HEADER_LINE = re.compile(
+    r"^\s*(?P<el>[A-Z][a-z]?)\s*-?\s*foils?(?:\s+(?:ref|reference|calib|calibration|for\s+calibration|for\s+energy\s+calibration))?\s*$")
+
+
+def _name_not_measurement(stem: str) -> tuple[str, str] | None:
+    """``(role, token)`` the NAME half of :data:`XDC_NOT_MEASUREMENT_RULE_ID` reads, or ``None``."""
+    tokens = _name_tokens(stem)
+    if not tokens or any(_condition_shaped(t) for t in _stem_tokens(stem)):
+        return None
+    for tok in tokens:
+        if _ALIGN_TOKEN.match(tok):
+            return ROLE_ALIGNMENT, tok
+    element = element_reference_token(stem)
+    if element is not None:
+        return ROLE_REFERENCE, element
+    for tok in tokens:
+        if tok.startswith(_CALIB_PREFIXES):
+            if any(t != tok and _FOIL_NOT_REFERENCE.match(t) for t in tokens):
+                return None
+            return ROLE_REFERENCE, tok
+    return None
+
+
+def _header_not_measurement(statement: Mapping) -> str | None:
+    """The role ONE header statement of an XDC scan states (:data:`XDC_NOT_MEASUREMENT_RULE_ID`), or ``None``."""
+    key, lit = statement.get("key"), str(statement.get("literal") or "").strip()
+    if key == "free_text" or key == "header_line_8_literal":
+        if _ALIGN_HEADER_LINE.match(lit):
+            return ROLE_ALIGNMENT
+        m = _FOIL_HEADER_LINE.match(lit)
+        if m and m.group("el").casefold() in _FOIL_ELEMENTS:
+            return ROLE_REFERENCE
+        return None
+    if key in ("region_file", "detector_file") and _ALIGN_HEADER_FILE.search(lit):
+        return ROLE_ALIGNMENT
+    return None
+
+
+def xdc_not_a_measurement(stem: str, statements: Sequence[Mapping]) -> dict | None:
+    """:data:`XDC_NOT_MEASUREMENT_RULE_ID`: ``{rule_id, role, basis, ...}`` when an XDC run named ``stem`` whose scan
+    headers say ``statements`` (the reader's statements: ``key``, ``literal``, ``source_relative_path``, ``locator``)
+    is an alignment, a reference foil or a calibration run, else ``None``. ``basis`` ``name_token`` (with the
+    ``token``) or ``scan_header`` (with each scan's ``evidence``: the first statement that says it)."""
+    named = _name_not_measurement(stem)
+    if named is not None:
+        return {"rule_id": XDC_NOT_MEASUREMENT_RULE_ID, "role": named[0], "basis": "name_token", "token": named[1],
+                "name": stem}
+    by_scan: dict[str, list[Mapping]] = {}
+    for st in statements:
+        path = st.get("source_relative_path")
+        if path is not None and st.get("key") != "exp_data_file":
+            by_scan.setdefault(str(path), []).append(st)
+    if not by_scan:
+        return None
+    roles: set[str] = set()
+    evidence = []
+    for path in sorted(by_scan):
+        said = [(r, st) for st in by_scan[path] if (r := _header_not_measurement(st)) is not None]
+        if not said:
+            return None  # one scan that does not say it: the run stays a measurement
+        roles |= {r for r, _ in said}
+        r, st = said[0]
+        evidence.append({"source_relative_path": path, "locator": st.get("locator"), "key": st.get("key"),
+                         "literal": str(st.get("literal") or "").strip(), "role": r})
+    if len(roles) != 1:
+        return None  # the headers say different things: nothing is proposed
+    return {"rule_id": XDC_NOT_MEASUREMENT_RULE_ID, "role": roles.pop(), "basis": "scan_header",
+            "evidence": evidence[:10], "name": stem}
+
+
 def run_role(run: Mapping, sources_by_id: Mapping[str, Mapping] | None = None) -> tuple[str, dict]:
     """The run's role and the evidence for it (``isaac.grouping.run_role.v0``).
 
@@ -883,6 +1065,13 @@ def run_role(run: Mapping, sources_by_id: Mapping[str, Mapping] | None = None) -
     named = name_role(str(run.get("stem") or run.get("label") or ""))
     if named:
         return named[0], {**named[1], "name": run.get("stem"), "source_id": run.get("acquisition_source_id")}
+    # XDC_NOT_MEASUREMENT_RULE_ID: every scan header of an XDC run says it is an alignment or a reference foil (the
+    # import marked it not a measurement run); a name the rules above read keeps its own basis
+    said = (run.get("other_relationships") or {}).get("not_a_measurement")
+    if isinstance(said, Mapping) and said.get("basis") == "scan_header" and said.get("role") in (ROLE_ALIGNMENT, ROLE_REFERENCE):
+        return said["role"], {"rule_id": XDC_NOT_MEASUREMENT_RULE_ID, "basis": "scan_header",
+                              "evidence": list(said.get("evidence") or ())[:3], "name": run.get("stem"),
+                              "source_id": run.get("acquisition_source_id")}
     return ROLE_SAMPLE, {"rule_id": ROLE_RULE_ID, "basis": "default_sample", "source_type": stype}
 
 
@@ -1025,7 +1214,8 @@ def _propose(bundle: Mapping, *, max_split_reasons: int = 20, _force_alone: froz
         sample_known = any(k in readings and readings[k]["kind"] != "conflicting" and classes[k] == CLASS_CONDITION for k in SAMPLE_KEYS)
         scans = int(run.get("scan_count") or len(run.get("scans") or ()))
         issues = list(eng["per_run"].get(run["run_key"], []))
-        if not sample_known and any(i["code"] == "scan_index_token_read_as_value" for i in issues):
+        if not sample_known and any(i["code"] in ("scan_index_token_read_as_value", COUNTER_READ_AS_SAMPLE_NUMBER)
+                                    for i in issues):
             readings = dict(readings)
             readings["sample_name_stem"] = {
                 "kind": "literal",

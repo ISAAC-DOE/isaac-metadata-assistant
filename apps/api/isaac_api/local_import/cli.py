@@ -382,7 +382,8 @@ def render_summary(bundle: Mapping) -> str:
     for r in runs[:_SUMMARY_RUN_ROWS]:
         flag = "shares legacy no." if r["legacy_number_shared"] else ""
         if not r["run_candidate"]:
-            flag = (flag + "; " if flag else "") + "not a run (" + _clip(r["source_type"], 20) + ")"
+            said = (r.get("other_relationships") or {}).get("not_a_measurement") or {}
+            flag = (flag + "; " if flag else "") + "not a run (" + _clip(said.get("role") or r["source_type"], 20) + ")"
         add(
             f"| {r['run_id']} | {r['legacy_number'] if r['legacy_number'] is not None else '—'} "
             f"| {r['scan_count']} | {len(r['conflict_ids'])} | {flag} |"

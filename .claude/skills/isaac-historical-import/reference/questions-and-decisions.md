@@ -152,7 +152,8 @@ versioned processing protocol in the repository, reviewed by the processing revi
   start, and record `correct --value <the instant they choose>`; never pick it for them. Many groups at once:
   see the next item. A closed field
   (e.g. the technique read from macro names or Python helper lines): show `allowed_values` and record
-  the one they name. When only some readings fit, `confirm` one of those.
+  the one they name. When only some readings fit, `confirm` one of those. A technique question never shows a
+  macro or script name as a hint (`code_hints_left_out` counts them): ask which technique it was.
 - **One answer for every group's start time** (`stated_utc_start_times`, experiment scope). A SPEC file
   states in its header when the file was CREATED: `#E` (a UTC epoch) and `#D` (the same instant, a local
   clock time with no zone). Each scan then writes its own `#D`, a little later. When these disagree in two
@@ -205,7 +206,9 @@ versioned processing protocol in the repository, reviewed by the processing revi
   5 ml/min"), a label ("Cell: H-cell"), "is a flow cell", or "measured in a flow cell".
 - **Sample questions asked once for several groups** name the shared sample reading as the files write it
   ("with the same sample reading (sample name 'ZZ1', sample or electrode number '01', as the files write
-  it)"). Say that reading when you ask.
+  it)"). Say that reading when you ask. A number the files do not settle as the electrode is said as a
+  "file-name number '10' (the 5th token of …; whether it names an electrode or counts runs is not yet said)":
+  never call it the electrode; the counter question (or the electrode-position question) settles it.
 - **Per-group questions that share a reading** (73 groups' material name `'JK1C'`, one set-point per potential) are
   kept one per group (each record carries its own answer; their ids never change), but share a `same_reading_group`
   (`same_reading_count` of them), and the text says "N questions share this reading (…); answer them together with
