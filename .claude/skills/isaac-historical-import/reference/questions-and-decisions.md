@@ -75,6 +75,33 @@ group is confirmed the minimum names it in `answer_first` (not counted; never af
 - Ask `produced_by` ("who made these measurements?") once, per beamtime; offer a folder-name hint
   as a question, not an answer. `--by` is the name the scientist gave in Step 1; do not ask again.
 
+## Context beside a question
+
+Each question in `bundle questions` carries a compact `context` (the page's `context_note` says what it is):
+a few items, each `{kind, label, source, ...}`, of what the files, my readings and the processing hold for it.
+`<isaac> bundle show <bundle> question <Q>` prints it in full; `--no-context` leaves it out of a large page. The
+minimum carries it per question and, in `decision_context`, for confirming its group (the runs' conditions side by
+side) and approving its processing result (the plot, the scans proposed for leaving out, the quick-merge comparison).
+It is ADDITIVE: ids, counts, blocking and `text` are the same with it, and it sets and chooses nothing.
+
+When you ask a question, present its context before the question:
+
+- `quote`: quote the lines word for word, with the file and locator ("the logbook, line 59: '…'").
+  Say where each came from: `origin: ai_reading` is my reading of the files ("my reading of the logbook quotes …"),
+  never file evidence; `parser` is a line ISAAC's parser read.
+- `values` and `table_row`: show the values as a small table (a run per row, as the files write them: the potential
+  its name states, filter, emission energy, Sx/Sy/Sz, scan files); say "N of M runs shown" from `rows_total`.
+- `plot` and `image`: open each with the Read tool (`open_with_read`) so the scientist sees it, describe what it
+  shows in plain words, and say where it came from (ISAAC's draft processing; a document the extract tool read). An
+  image with `base: source` is in their beamtime folder: name it.
+- `example_files`: show the names as they are.
+- The clock: `#D` local time beside the `#E` epoch, and the offset the two imply. The offset is a value read from
+  two header lines, not a time zone: suggest no zone; the scientist says which zone the clock was set to.
+
+The context helps the scientist answer; it is never the answer. Never record a value because the context shows it,
+never pick a reading from it, and never say "the files say" for an AI reading. Showing it records its file values as
+seen (`exposures`, command `bundle questions (context)`), as every value a page shows is.
+
 ## Earlier answers (opt-in, this computer only)
 
 ISAAC can remember what a scientist confirmed on EARLIER beamtimes and show it beside the same question on a new

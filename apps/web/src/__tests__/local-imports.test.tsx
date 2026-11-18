@@ -2213,3 +2213,127 @@ describe('earlier answers (the opt-in answer memory): a hint with "Use this", ne
     expect(within(card).queryByTestId('li-earlier-answers')).toBeNull();
   });
 });
+
+describe('beamtime context under a question: quotes, values and images, each with its source, never an answer', () => {
+  const CONTEXT: NonNullable<LocalQuestion['context']> = [
+    { kind: 'quote', label: 'The logbook on the electrolyte', source: 'an AI reading of the files (not file evidence)',
+      origin: 'ai_reading', path: 'SYN_2099 logbook.txt', locator: 'line 59', quote: 'SYNTHETIC fill the cell with 0.1 M ZZOH' },
+    { kind: 'values', label: 'What each run’s files state', source: "ISAAC's parser, from the file names and scan headers",
+      columns: ['Run', 'Potential (from the name)', 'Scan files'],
+      rows: [['SYN_01_ZZ1_100mV', "'100mV' (read as 0.1 V)", '2'], ['SYN_02_ZZ1_200mV', "'200mV' (read as 0.2 V)", '2']],
+      rows_total: 9 },
+    { kind: 'plot', label: "ISAAC's merged curve for SYN_01_ZZ1_100mV", source: "ISAAC's processing (a draft protocol)",
+      path: 'processing/rg-syn/r-syn/plot.png', base: 'bundle', group_id: 'rg-syn',
+      alt: 'Processing plot of the merged XAS curve for SYN_01_ZZ1_100mV.' },
+    { kind: 'image', label: "An image from the beamtime's documents", source: 'an image file in the imported folder',
+      path: 'photos/SYN_cell.png', base: 'source', alt: 'Image from photos/SYN_cell.png.' },
+    { kind: 'table_row', label: "The logbook's step table, for SYN_01_ZZ1_100mV", source: "ISAAC's parser",
+      path: 'SYN_2099 logbook.txt', locator: 'line 19 table 0 row 1 column `File Number`', cells: { 'File Number': '01' } },
+    { kind: 'example_files', label: 'Some of the file names', source: "the imported folder's file names",
+      names: ['SYN_01_ZZ1_100mV', 'SYN_02_ZZ1_200mV'], total: 9 },
+  ];
+  function ctxQ(context?: LocalQuestion['context']): LocalQuestion {
+    return question({ question_id: 'Q-ctx0000001', scope: 'experiment', ...(context ? { context } : {}) });
+  }
+  function stubWith(q: LocalQuestion, body: ApiLocalQuestions = questionsBody([q])) {
+    vi.stubEnv('VITE_ISAAC_LOCAL_IMPORTS', '1');
+    const calls = stubFetchRoutes({
+      'GET /api/local-bundles': { body: listBody },
+      [`GET ${QPATH}`]: { body },
+    });
+    const inner = globalThis.fetch;
+    const files: { url: string; headers: Record<string, string> }[] = [];
+    vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = typeof input === 'string' ? input : input instanceof URL ? input.href : input.url;
+      if (url.includes('/file?')) {
+        files.push({ url, headers: (init?.headers ?? {}) as Record<string, string> });
+        return { ok: true, status: 200, headers: { get: () => null }, blob: async () => new Blob(['SYN'], { type: 'image/png' }) } as unknown as Response;
+      }
+      return inner(input, init);
+    }));
+    vi.stubGlobal('URL', Object.assign(URL, { createObjectURL: vi.fn(() => 'blob:syn-plot'), revokeObjectURL: vi.fn() }));
+    return { calls, files };
+  }
+  async function cardOf(q: LocalQuestion) {
+    await screen.findAllByRole('heading', { name: cardTitle(q) });
+    return document.getElementById(questionCardId(q.question_id)) as HTMLElement;
+  }
+
+  it('quotes say their file and line, values are a table, and every item says where it came from', async () => {
+    const q = ctxQ(CONTEXT);
+    stubWith(q);
+    renderAt(ROUTES.localImportBundle('synthetic-beamtime'));
+    const card = await cardOf(q);
+    const block = within(card).getByTestId('li-context');
+    expect(within(block).getByRole('heading', { name: COPY.contextHeading })).toBeInTheDocument();
+    expect(block).toHaveTextContent(COPY.contextNote);
+    const quote = within(block).getByTestId('li-context-quote');
+    expect(quote).toHaveTextContent('SYNTHETIC fill the cell with 0.1 M ZZOH');
+    expect(quote).toHaveTextContent('SYN_2099 logbook.txt, line 59');
+    expect(quote).toHaveTextContent('From an AI reading of the files (not file evidence).');
+    const table = within(block).getByRole('table', { name: 'What each run’s files state' });
+    expect(within(table).getAllByRole('columnheader').map((h) => h.textContent)).toEqual(['Run', 'Potential (from the name)', 'Scan files']);
+    expect(within(table).getByRole('rowheader', { name: 'SYN_01_ZZ1_100mV' })).toBeInTheDocument();
+    expect(within(block).getByTestId('li-context-values')).toHaveTextContent('Showing 2 of 9.');
+    expect(within(block).getByTestId('li-context-table_row')).toHaveTextContent('File Number');
+    expect(within(block).getByTestId('li-context-example_files')).toHaveTextContent('SYN_02_ZZ1_200mV');
+    // the context fills no answer: the answer box is still empty
+    expect(within(card).queryByDisplayValue('in_situ')).toBeNull();
+  });
+
+  it('a plot is fetched with the local header and shown with its alt text; a beamtime-folder image is only named', async () => {
+    const q = ctxQ(CONTEXT);
+    const { files } = stubWith(q);
+    renderAt(ROUTES.localImportBundle('synthetic-beamtime'));
+    const card = await cardOf(q);
+    const img = await within(card).findByRole('img', { name: 'Processing plot of the merged XAS curve for SYN_01_ZZ1_100mV.' });
+    expect(img).toHaveAttribute('src', 'blob:syn-plot');
+    expect(files).toHaveLength(1);
+    expect(files[0].url).toContain('/api/local-bundles/synthetic-beamtime/file?path=processing%2Frg-syn%2Fr-syn%2Fplot.png&base=bundle');
+    expect(files[0].headers['X-ISAAC-Local']).toBe('1');
+    const image = within(card).getByTestId('li-context-image');
+    expect(image).toHaveTextContent(`${COPY.contextImageInFolder} photos/SYN_cell.png`);
+    expect(within(image).queryByRole('img')).toBeNull();
+  });
+
+  it('passes the axe rules for images, tables and lists', async () => {
+    const q = ctxQ(CONTEXT);
+    stubWith(q);
+    renderAt(ROUTES.localImportBundle('synthetic-beamtime'));
+    const card = await cardOf(q);
+    await within(card).findByRole('img');
+    const axe = (await import('axe-core')).default;
+    const results = await axe.run(within(card).getByTestId('li-context'), {
+      runOnly: { type: 'rule', values: ['image-alt', 'th-has-data-cells', 'td-headers-attr', 'list', 'listitem',
+        'definition-list', 'dlitem', 'heading-order', 'empty-table-header'] },
+      resultTypes: ['violations'],
+    });
+    expect(results.violations.map((v) => `${v.id} × ${v.nodes.length}`)).toEqual([]);
+  });
+
+  it('the nearest group says its runs side by side before it is confirmed, and its curve before it is approved', async () => {
+    const q = ctxQ();
+    const body = questionsBody([q]);
+    body.minimum_for_one_group = {
+      group_id: 'rg-syn', blocking_questions: 0, plus_decisions: ['confirm the group', 'approve its processing result'],
+      decision_context: { confirm_the_group: [CONTEXT[1]], approve_its_processing_result: [CONTEXT[2]] },
+    };
+    const { files } = stubWith(q, body);
+    renderAt(ROUTES.localImportBundle('synthetic-beamtime'));
+    const nearest = await screen.findByTestId('li-nearest');
+    expect(within(nearest).getByRole('heading', { name: COPY.contextConfirmGroup })).toBeInTheDocument();
+    expect(within(nearest).getByRole('table', { name: 'What each run’s files state' })).toBeInTheDocument();
+    expect(within(nearest).getByRole('heading', { name: COPY.contextApproveCurve })).toBeInTheDocument();
+    expect(await within(nearest).findByRole('img', { name: 'Processing plot of the merged XAS curve for SYN_01_ZZ1_100mV.' })).toBeInTheDocument();
+    expect(files).toHaveLength(1);
+  });
+
+  it('a question with no context shows no context block and fetches no file', async () => {
+    const q = ctxQ();
+    const { files } = stubWith(q);
+    renderAt(ROUTES.localImportBundle('synthetic-beamtime'));
+    const card = await cardOf(q);
+    expect(within(card).queryByTestId('li-context')).toBeNull();
+    expect(files).toHaveLength(0);
+  });
+});
