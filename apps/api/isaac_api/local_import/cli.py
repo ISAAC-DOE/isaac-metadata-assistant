@@ -17,7 +17,7 @@ COMMANDS
     files and deletes nothing). Refuses an ``--out`` inside the folder being read.
     The local path is never written into the bundle unless ``--record-local-root``.
 
-``isaac bundle list <dir> runs|conflicts|candidates|questions|unread|groups|merge-candidates|processed-outputs|processing-results|athena-merges [--limit N] [--offset M] [--state S]``
+``isaac bundle list <dir> runs|conflicts|candidates|questions|unread|groups|merge-candidates|processed-outputs|processing-results|athena-merges|scan-notes [--limit N] [--offset M] [--state S]``
     A bounded page as JSON, with ``total`` and how many were omitted before and after.
     Never truncates silently. ``processing-results``: one compact row per result (id, group, verdict,
     applicability, key QC flags and metrics, a ``scans`` line saying which scans were used, plot path, Athena
@@ -52,6 +52,13 @@ never above needs_review; ``--blind`` honoured only before exposure), ``decide``
 ``excerpt``, ``reveal`` (records an exposure), ``build-records``, ``validate``,
 ``export`` and ``upload --dry-run``. Every mutation re-derives, re-validates and writes
 atomically under a lock, or writes nothing.
+
+``isaac bundle annotate <dir> --from-readings <findings.json> --model M [--root <folder>] [--apply]`` and
+``isaac bundle check-readings <dir> <findings.json> [--root <folder>]``: every finding's quote is checked against
+the file it cites under the imported folder (``reading_check``); a finding whose quote is not found, whose run
+reference names no run, or whose value is off its field's list is never recorded. ``scan_note`` findings become
+scan notes (1.12.0, ``scan_notes``), listed by ``bundle list <dir> scan-notes`` and shown on ``bundle show <dir> run``.
+``check-readings`` exits 1 when any quote was not found.
 
 EXIT CODES
 ==========
@@ -105,7 +112,7 @@ BUNDLE_FILES = (
 )
 
 LIST_KINDS = ("runs", "conflicts", "candidates", "questions", "unread", "groups", "merge-candidates", "processed-outputs",
-              "processing-results", "athena-merges")
+              "processing-results", "athena-merges", "scan-notes")
 SHOW_KINDS = ("run", "conflict", "candidate", "source", "question", "group", "merge-candidate", "processed-output",
               "processing-result")
 DEFAULT_LIMIT = 20
@@ -996,6 +1003,7 @@ _LIST_SECTION = {
     "unread": "unread_files",
     "processed-outputs": "processed_outputs",
     "processing-results": "processing_results",
+    "scan-notes": "scan_notes",
 }
 #: ``bundle list <dir> unread``: files the IMPORT has no reader for but a later command reads (by suffix),
 #: said on the row so an Athena project is never taken for a file nobody reads.
@@ -1112,7 +1120,12 @@ def cmd_bundle_list(args) -> int:
     total = len(rows)
     page = rows[args.offset : args.offset + args.limit]
     status = {g["group_id"]: g.get("status") for g in bundle.get("record_groups") or ()}
-    items = [_row(args.kind, r, status) for r in page]
+    if args.kind == "scan-notes":
+        from . import scan_notes as SN
+
+        items = [SN.list_row(bundle, r) for r in page]
+    else:
+        items = [_row(args.kind, r, status) for r in page]
     cannot_export: dict[str, int] = {}
     if args.kind == "groups":
         extras = group_list_extras(bundle)
@@ -1753,6 +1766,13 @@ def cmd_bundle_show(args) -> int:
                 obj = _group_view(bundle, obj)
             elif args.kind == "source":
                 obj = _source_view(bundle, obj)
+            elif args.kind == "run" and bundle.get("scan_notes"):
+                from . import scan_notes as SN
+
+                if notes := SN.scan_notes_for_run(bundle, obj["run_id"]):
+                    conflicts = SN.scan_note_conflicts(bundle, obj["run_id"])
+                    obj = {**obj, "scan_notes": notes, "scan_notes_note": SN.NOTE,
+                           **({"scan_note_conflicts": conflicts} if conflicts else {})}
             print(json.dumps(obj, indent=1, ensure_ascii=False))
             return EXIT_OK
     if args.kind == "question":
@@ -1936,6 +1956,40 @@ def _mutation(fn) -> int:
     return EXIT_OK
 
 
+def _read_findings(path: str) -> Any:
+    from . import mutations as M
+
+    try:
+        return json.loads(Path(path).read_text(encoding="utf-8"))
+    except (OSError, ValueError) as exc:
+        raise M.MutationRefused(f"The findings file cannot be read as JSON: {type(exc).__name__}", code=EXIT_NOT_FOUND) from exc
+
+
+def cmd_bundle_check_readings(args) -> int:
+    """``isaac bundle check-readings <dir> <findings.json> [--root <folder>]``: every finding's quote held against the
+    file it cites (:mod:`.reading_check`), the report ``annotate --from-readings`` prints. Reads only. Exit 0 when
+    every quote was found, 1 when any was not."""
+    from . import mutations as M
+
+    def run():
+        with M.locked(Path(args.bundle_dir)):
+            bundle = M.load(Path(args.bundle_dir))
+        root = M.quote_root(bundle, args.root)
+        if root is None:
+            raise M.MutationRefused(M.NO_QUOTE_ROOT.replace(" Nothing was recorded.", ""), code=EXIT_USAGE)
+        out = M.check_readings(bundle, _read_findings(args.findings), root)
+        out.pop("_by_finding", None)
+        return out
+
+    try:
+        report = run()
+    except M.MutationRefused as exc:
+        _err(str(exc))
+        return exc.code
+    _print(report)
+    return EXIT_OK if not report["failed"] else EXIT_INVALID
+
+
 def cmd_bundle_annotate(args) -> int:
     from . import mutations as M
 
@@ -1947,13 +2001,12 @@ def cmd_bundle_annotate(args) -> int:
             return _mutation(lambda: refuse("--from-readings takes its targets and values from the file, and a reading pass is not blind; drop --target/--value/--blind."))
 
         def run():
-            try:
-                findings = json.loads(Path(args.from_readings).read_text(encoding="utf-8"))
-            except (OSError, ValueError) as exc:
-                raise M.MutationRefused(f"--from-readings cannot be read as JSON: {type(exc).__name__}", code=6) from exc
-            return M.annotate_from_readings(Path(args.bundle_dir), findings, model_id=args.model, apply=args.apply)
+            return M.annotate_from_readings(Path(args.bundle_dir), _read_findings(args.from_readings), model_id=args.model,
+                                            apply=args.apply, root=args.root)
 
         return _mutation(run)
+    if args.root:
+        return _mutation(lambda: refuse("--root goes with --from-readings: it is the folder the findings' quotes are checked against."))
     if args.apply:
         return _mutation(lambda: refuse("--apply goes with --from-readings; a single --target reading is recorded at once."))
     if not args.target:
@@ -2839,6 +2892,8 @@ def build_parser(prog: str = "isaac") -> argparse.ArgumentParser:
     q.add_argument("--target", help="one target id (or use --from-readings)")
     q.add_argument("--from-readings", help="a Claude reading pass's findings file (isaac.reading_findings): one interpretation per target it names")
     q.add_argument("--apply", action="store_true", help="with --from-readings: record them (default: show what would be recorded)")
+    q.add_argument("--root", help="with --from-readings: the folder you imported, which every finding's quote is checked against "
+                                  "(default: the bundle's recorded root, if it has one); --apply refuses without one")
     q.add_argument("--value")
     q.add_argument("--json", action="store_true", help="parse --value as JSON")
     q.add_argument("--excerpt-locator")
@@ -2847,6 +2902,12 @@ def build_parser(prog: str = "isaac") -> argparse.ArgumentParser:
     q.add_argument("--blind", action="store_true")
     q.add_argument("--rationale")
     q.set_defaults(func=cmd_bundle_annotate)
+
+    q = bsub.add_parser("check-readings", help="check every quote of a findings file against the file it cites (reads only)")
+    q.add_argument("bundle_dir")
+    q.add_argument("findings", help="a reading pass's findings file (isaac.reading_findings)")
+    q.add_argument("--root", help="the folder you imported (default: the bundle's recorded root, if it has one)")
+    q.set_defaults(func=cmd_bundle_check_readings)
 
     q = bsub.add_parser("decide", help="record a scientist decision (identity: local_unverified)")
     q.add_argument("bundle_dir")
