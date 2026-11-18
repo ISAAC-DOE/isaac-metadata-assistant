@@ -147,6 +147,9 @@ export interface LocalProgress {
     groups_with_nothing_left?: number;
     groups_without_an_applicable_processing_protocol?: number;
     statement?: string;
+    /** BEAMTIME CONTEXT for the group's own decisions (`question_context`): confirming it (its runs' conditions side
+     *  by side) and approving its processing result (the plot, the scan proposals, the quick-merge comparison). */
+    decision_context?: { confirm_the_group?: LocalContextItem[]; approve_its_processing_result?: LocalContextItem[] };
   } | null;
   blocks_export: string[];
   /** Live groups that can never export as they stand, counted by `cannot_export_reason` (`bundle list <dir> groups`);
@@ -373,7 +376,24 @@ export interface LocalQuestion {
   /** `stated_utc_start_times`: the largest gap from a file's creation to its first scan, and the most left in. */
   largest_file_to_first_scan_s?: number;
   max_file_to_first_scan_s?: number;
+  /** BEAMTIME CONTEXT (`question_context`): what the files, the readings and the processing hold for this question,
+   *  shown under it so the person has what they need to answer. Evidence, never the answer: nothing is set by it. */
+  context?: LocalContextItem[];
   display: LocalQuestionDisplay;
+}
+
+/** One item of a question's context, each with where it came from (`source`). */
+export type LocalContextItem =
+  | (LocalContextBase & { kind: 'quote'; origin: 'ai_reading' | 'parser' | 'document'; path: string | null; locator: string | null; quote: string; field?: string | null; strength?: string | null })
+  | (LocalContextBase & { kind: 'values'; columns: string[]; rows: string[][]; rows_total: number; note?: string })
+  | (LocalContextBase & { kind: 'plot'; path?: string; base?: 'bundle'; group_id: string; result_id?: string; alt?: string; qc_verdict?: string; not_shown?: string })
+  | (LocalContextBase & { kind: 'image'; path: string; base: 'bundle' | 'notes' | 'source'; alt?: string; document?: string; text_before?: string; not_shown?: string })
+  | (LocalContextBase & { kind: 'example_files'; names: string[]; total: number })
+  | (LocalContextBase & { kind: 'table_row'; path: string | null; locator: string | null; cells: Record<string, string> });
+
+export interface LocalContextBase {
+  label: string;
+  source: string;
 }
 
 /** One distinct latest answer an ANSWERED question's targets hold (`questions.answered_question`): the decision, its
@@ -649,6 +669,23 @@ export const LOCAL_LIMITS = {
  * `text` cut to at most `max` UTF-16 units (so at most `max` characters as the server counts them),
  * ending in "…" when cut, never splitting a surrogate pair.
  */
+/** A context table cut to its first rows says how many there are. */
+export function contextRowsText(shown: number, total: number): string | null {
+  return total > shown ? `Showing ${shown} of ${total}.` : null;
+}
+
+/** The image types the page shows inline: PNG and JPEG only. Never an SVG, which can carry script. */
+export const SHOWN_IMAGE_TYPES: readonly string[] = ['image/png', 'image/jpeg'];
+
+/** The context images the page can show inline: a PNG or JPEG plot in the bundle or image in its notes folder. An
+ *  item the API says is `not_shown` (an SVG, a result with no plot) and an image of the beamtime folder itself are
+ *  never fetched. */
+export function servedContextFile(item: LocalContextItem): { path: string; base: 'bundle' | 'notes' } | null {
+  if (item.kind !== 'plot' && item.kind !== 'image') return null;
+  if (item.not_shown || !item.path || !/\.(png|jpe?g)$/i.test(item.path)) return null;
+  return item.base === 'bundle' || item.base === 'notes' ? { path: item.path, base: item.base } : null;
+}
+
 export function clampText(text: string, max: number): string {
   if (text.length <= max) return text;
   let end = max - 1;
@@ -775,6 +812,14 @@ export const LOCAL_IMPORTS_COPY = {
   settlesManyTitle: 'Answer Once for the Whole Beamtime',
   settlesManyLead: 'One answer here settles many records. Each is previewed group by group before it is written.',
   suggestedNotConfirmed: 'Suggested — not confirmed',
+  contextHeading: 'What the beamtime holds for this',
+  contextConfirmGroup: 'Before you confirm this group',
+  contextApproveCurve: 'Before you approve its curve',
+  contextNote: 'From the files, my readings of them and the processing, to help you answer. None of it is the answer, and nothing here is recorded.',
+  contextImageLoading: 'Loading the image…',
+  contextImageFailed: 'The image could not be shown here.',
+  contextImageInFolder: 'In the beamtime folder:',
+  contextNotShown: 'Not shown:',
   earlierHeading: 'From an earlier beamtime',
   earlierUse: 'Use this',
   earlierFilled: 'Filled in the answer box. Nothing is recorded until you answer.',

@@ -3692,6 +3692,21 @@ def not_a_measurement_reasons(bundle: Mapping, not_measured: Mapping[str, Sequen
 NOT_PROCESSED_YET = "run `isaac process` first: it has no processing result yet, so there is nothing to approve"
 
 
+def curve_result(bundle: Mapping, gid: str) -> Mapping | None:
+    """THE processing result a question about ``gid``'s curve concerns, chosen as :func:`_curve` chooses it: the
+    approved one (the last, as ``_curve`` reads it), else the LATEST undecided result offered for approval (not a curve
+    QC calls unusable), else the latest undecided one; never a rejected one. ``None`` when there is none."""
+    from .mutations import unusable_curve_reasons
+
+    mine = [r for r in bundle.get("processing_results") or () if r.get("group_id") == gid and not B.processing_not_applicable(r)]
+    approved = [r for r in mine if r.get("state") == B.STATE_SCIENTIST_CONFIRMED]
+    if approved:
+        return approved[-1]
+    open_ = [r for r in mine if r.get("state") in B.PROCESSING_UNDECIDED_STATES]
+    offered = [r for r in open_ if not ((r.get("outputs") or {}).get("files") and unusable_curve_reasons(r))]
+    return (offered or open_ or [None])[-1]
+
+
 def _curve(bundle: Mapping, gid: str) -> dict:
     """What approving this group's processing could give it: ``{"state": "approved" | "curve" | "no_curve" |
     "unusable" | "none", "verdict", "reasons"}``. ``no_curve``: every undecided result lists no normalised spectrum
