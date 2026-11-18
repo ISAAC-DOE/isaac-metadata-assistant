@@ -123,6 +123,10 @@ NO_REFERENCE = ("no_energy_reference", "no energy reference found in this scan")
 FIT_FAILED = ("reference_fit_failed", "reference feature fit failed")
 #: the beamtime has no energy reference at all: a loud state, a review flag that blocks a bulk approval
 NO_REFERENCE_FLAG = "no_energy_reference"
+#: How a REMARK (a note that decides nothing) ends: it says the finding is not a reason to drop the scan, never "kept",
+#: because the scan may still be dropped for another reason (a dose or spot rule after it, or the scientist), and a
+#: remark must never contradict the decision (end-to-end test on real data, 17 Nov 2026: a DROP row said "kept").
+NOT_A_DROP_REASON = "not a reason to drop"
 
 DECISION_RULE = {
     "rule_id": DECISION_RULE_ID,
@@ -1325,32 +1329,33 @@ def process_group_v1(group: Mapping, ctx) -> list[dict]:
     recs = gr["recs"]
     E_edge = absorber.get("E_edge_eV")
     # --- align: ONE shift and ONE interpolation per scan, onto the group's modal grid
-    from collections import Counter
-
     from xas_analysis.average import AlignedScan, average_scans
     from xas_analysis.calib import align_and_resample
     from xas_analysis.pipeline import screen_report
 
-    grid_of = Counter((round(float(r["E"][0]), 1), round(float(r["E"][-1]), 1), int(r["E"].size)) for r in recs)
-    modal = grid_of.most_common(1)[0][0]
-    grid_rec = next(r for r in recs if (round(float(r["E"][0]), 1), round(float(r["E"][-1]), 1), int(r["E"].size)) == modal)
-    g_shift = grid_rec["alignment"]["shift_eV"] if grid_rec["alignment"]["ok"] else 0.0
-    target = np.asarray(grid_rec["E"], float) + float(g_shift or 0.0)
-    aligned = []
-    for r in recs:
-        al = r["alignment"]
-        if not al["ok"]:
-            r["aligned"] = None
-            continue
-        sec = r["sec"] if r.get("sec") is not None else np.full(r["E"].size, np.nan)
-        with warnings.catch_warnings():
-            warnings.simplefilter("ignore")
-            Y, _ri = align_and_resample(r["E"], np.c_[r["IF"], r["I0"], sec], 0.0, float(al["shift_eV"]), target)
-        _exclude_dropout_points(Y, r, float(al["shift_eV"]), target, np)
-        a = AlignedScan(r["num"], target, Y[:, 0], Y[:, 1], Y[:, 2], _f(al["anchor_eV"]) if al["anchor_eV"] is not None else 0.0,
-                        float(al["shift_eV"]), True, True, key=r["scan_id"])
-        r["aligned"] = a
-        aligned.append(a)
+    grid_rec = modal_grid_scan(recs)
+    target = grid_target(grid_rec, np)
+
+    def align_onto(rs, grid):
+        out = []
+        for r in rs:
+            al = r["alignment"]
+            if not al["ok"]:
+                r["aligned"] = None
+                continue
+            sec = r["sec"] if r.get("sec") is not None else np.full(r["E"].size, np.nan)
+            with warnings.catch_warnings():
+                warnings.simplefilter("ignore")
+                Y, _ri = align_and_resample(r["E"], np.c_[r["IF"], r["I0"], sec], 0.0, float(al["shift_eV"]), grid)
+            _exclude_dropout_points(Y, r, float(al["shift_eV"]), grid, np)
+            a = AlignedScan(r["num"], grid, Y[:, 0], Y[:, 1], Y[:, 2],
+                            _f(al["anchor_eV"]) if al["anchor_eV"] is not None else 0.0,
+                            float(al["shift_eV"]), True, True, key=r["scan_id"])
+            r["aligned"] = a
+            out.append(a)
+        return out
+
+    aligned = align_onto(recs, target)
     # --- screening (report-only: this rule decides)
     win = [E_edge + SCREEN_WINDOW_EV[0], E_edge + SCREEN_WINDOW_EV[1]] if E_edge else [-np.inf, np.inf]
     screen_cfg = {**SCREENING, "window_eV": win, **ratio_screens(E_edge, target, bt)}
@@ -1382,6 +1387,18 @@ def process_group_v1(group: Mapping, ctx) -> list[dict]:
         if spots["outcome"] == SPOTS_DISAGREE_FLAG:
             res["review_flags"].append(SPOTS_DISAGREE_FLAG)      # the scientist looks: a bulk approval refuses it
     kept = [r for r in recs if table["by_id"][r["scan_id"]]["decision"] == "keep" and r.get("aligned") is not None]
+    grid_said = None
+    if kept and not any(r is grid_rec for r in kept):
+        # THE MERGE GRID COMES FROM A KEPT SCAN (end-to-end test on real data, 17 Nov 2026: the grid was named after a
+        # dropped scan). The screening above ran on the first modal grid; the kept scans are interpolated again, once
+        # each, onto the modal grid of the KEPT scans, so the average's energies are those of a scan that is in it.
+        dropped_grid = grid_rec["scan_id"]
+        grid_rec = modal_grid_scan(kept)
+        target = grid_target(grid_rec, np)
+        align_onto(kept, target)
+        complete = complete_window(absorber, bt, float(target[0]), float(target[-1]))
+        grid_said = (f"the modal grid of the kept scans, from {grid_rec['scan_id']} (the screening grid came from "
+                     f"{dropped_grid}, which was dropped)")
     for e in inputs:
         e["used"] = False
     for r in recs:
@@ -1404,6 +1421,8 @@ def process_group_v1(group: Mapping, ctx) -> list[dict]:
                             "per_scan_alignment_shifts_eV": [r["alignment"]["shift_eV"] for r in kept],
                             "applied_shift_eV": 0.0, "reference_group_id": (bt.get("routes") or [{}])[0].get("reference_group_id")},
                 "flags": []}
+    # calibration (absolute, none) and alignment (per scan, to the one reference) said apart, in one place (energy_story)
+    cal_step["outcome"].update(energy_story(res))
     res["steps"].append(cal_step)
     if not kept:
         out = R._fail(res, "no_scan_kept", f"all {len(recs)} usable scans were dropped by {DECISION_RULE_ID}")
@@ -1417,7 +1436,8 @@ def process_group_v1(group: Mapping, ctx) -> list[dict]:
     E, y, err, n = target[ok], avg["IF_over_I0"][ok], avg["err"][ok], avg["n_kept"][ok]
     res["steps"].append({"step": "merge", "params": {"statistic": "uniform mean of raw IF/I0 over the kept scans "
                                                                   "(xas_analysis.average.average_scans; err = its standard "
-                                                                  "error)", "grid": "the group's modal scan grid, shifted"},
+                                                                  "error)",
+                                                     "grid": grid_said or "the group's modal scan grid (a kept scan's), shifted"},
                          "outcome": {"n_scans": len(kept), "points": int(E.size), "grid_from_scan": grid_rec["scan_id"]},
                          "flags": [] if len(kept) > 1 else ["single_scan_no_merge"]})
     short = _incomplete(E, complete, E_edge, absorber, len(kept))
@@ -1521,6 +1541,24 @@ def process_group_v1(group: Mapping, ctx) -> list[dict]:
     if not record.exists():
         R._write(record, R._json_bytes({"results": [res]}))
     return [res]
+
+
+def _grid_key(r: Mapping) -> tuple:
+    return (round(float(r["E"][0]), 1), round(float(r["E"][-1]), 1), int(r["E"].size))
+
+
+def modal_grid_scan(recs: Sequence[Mapping]) -> Mapping:
+    """The first scan (in order) on the most common grid of ``recs``: the merge grid is taken from it."""
+    from collections import Counter
+
+    modal = Counter(_grid_key(r) for r in recs).most_common(1)[0][0]
+    return next(r for r in recs if _grid_key(r) == modal)
+
+
+def grid_target(grid_rec: Mapping, np):
+    """The merge grid: ``grid_rec``'s energies, shifted by its own alignment shift (0 when it is not aligned)."""
+    g_shift = grid_rec["alignment"]["shift_eV"] if grid_rec["alignment"]["ok"] else 0.0
+    return np.asarray(grid_rec["E"], float) + float(g_shift or 0.0)
 
 
 def dropout_said(d: Mapping) -> str:
@@ -1733,7 +1771,7 @@ def decide_scans(recs, screen_flags, stability, notes, overrides, inputs, target
                 if evaluated and not moved:
                     noted.append({**item, "code": "change_within_noise", "decides": False,
                                   "said": f"{item['said']}; but within the noise (the shape guard's threshold: "
-                                          "the stability rule's floor and 3 x the scans' own sd): kept"})
+                                          "the stability rule's floor and 3 x the scans' own sd): " + NOT_A_DROP_REASON})
                 else:
                     if moved:
                         item["evidence"]["normalised_shape"] = moved
@@ -1776,8 +1814,8 @@ def decide_scans(recs, screen_flags, stability, notes, overrides, inputs, target
                 if noise is not None and f.get("value") is not None and f["value"] <= SHAPE_NOISE_FACTOR * noise:
                     noted.append({**item, "code": "noisier_not_off_shape", "decides": False,
                                   "said": f"{f['reason']}, but within {SHAPE_NOISE_FACTOR:g}x its own counting noise "
-                                          f"({noise:.2e}): fewer counts, not another shape; kept (an intensity effect "
-                                          "never drops a scan)"})
+                                          f"({noise:.2e}): fewer counts, not another shape; {NOT_A_DROP_REASON} (an "
+                                          "intensity effect never drops a scan)"})
                     continue
             if test == "coverage" and complete_eV is not None:
                 span = _finite_span(r, np)
@@ -1787,7 +1825,7 @@ def decide_scans(recs, screen_flags, stability, notes, overrides, inputs, target
                     noted.append({**item, "code": "shorter_but_complete", "decides": False,
                                   "said": f"{f['reason']}, but it covers {span[0]:.0f}-{span[1]:.0f} eV, the pre-edge "
                                           f"window through the post-edge window ({complete_eV[0]:.0f}-"
-                                          f"{complete_eV[1]:.0f} eV): a shorter, complete scan, kept"})
+                                          f"{complete_eV[1]:.0f} eV): a shorter, complete scan, {NOT_A_DROP_REASON}"})
                     continue
             if test in ("ratio_shape", "post_drift"):
                 dist = shape_distortion(r, recs, ratio_win or win, E_edge, np, exclude=ratio_exclude)
@@ -1797,7 +1835,7 @@ def decide_scans(recs, screen_flags, stability, notes, overrides, inputs, target
                                   "said": f"{f['reason']}; after a free scale and offset its normalised shape is the "
                                           "others' (" + (f"residual {100 * dist['max_residual']:.1f} % of the edge step, "
                                                          f"threshold {100 * dist['threshold']:.1f} %" if dist else
-                                                         "not measurable") + "): an intensity effect, kept"})
+                                                         "not measurable") + f"): an intensity effect, {NOT_A_DROP_REASON}"})
                     continue
                 item["said"] = (f"{f['reason']}; its NORMALISED shape is distorted (after a free scale and offset it "
                                 f"departs {100 * dist['max_residual']:.1f} % of the edge step from the other scans, "
@@ -1808,7 +1846,7 @@ def decide_scans(recs, screen_flags, stability, notes, overrides, inputs, target
                 if snr is None or snr >= DEAD_EDGE_SNR_MIN:
                     noted.append({**item, "code": "weak_signal", "decides": False,
                                   "said": f"{f['reason']}; its edge is still visible (edge/noise {snr if snr is None else round(snr, 1)}): "
-                                          "a weaker scan, kept (an intensity drop alone never drops a scan)"})
+                                          f"a weaker scan, {NOT_A_DROP_REASON} (an intensity drop alone never drops a scan)"})
                     continue
                 item["said"] = f"{f['reason']} and no edge at all (edge/noise {snr:.1f}): no spectrum"
             drop.append(item)
@@ -2047,10 +2085,10 @@ def apply_spots(table: dict, recs: Sequence[Mapping], stability: Mapping, np) ->
                 else:
                     x["reasons"] = rest
                     x["notes"] = list(x["notes"]) + [{"source": "spots", "code": "spot_differs", "decides": False,
-                                                      "said": what + ("; kept: the spots split evenly, no majority, the "
-                                                                      "scientist decides" if shape else
-                                                                      ": kept (an intensity difference alone never "
-                                                                      "drops a scan)"),
+                                                      "said": what + (f"; {NOT_A_DROP_REASON}: the spots split evenly, no "
+                                                                      "majority, the scientist decides" if shape else
+                                                                      f": {NOT_A_DROP_REASON} (an intensity "
+                                                                      "difference alone never drops a scan)"),
                                                       "was_said": said_before}]
                 x["rule_decision"] = "drop" if x["reasons"] else "keep"
                 if x["decided_by"] == "rule":
@@ -2075,7 +2113,8 @@ def apply_spots(table: dict, recs: Sequence[Mapping], stability: Mapping, np) ->
             continue
         word = "weaker" if st < ref_o else "stronger"
         note = {"source": "spots", "code": f"{word}_spot_same_shape", "decides": False,
-                "said": f"{word} signal at this spot ({names[lab]}: edge step {_pct(st, ref_o)}), same shape: kept"}
+                "said": f"{word} signal at this spot ({names[lab]}: edge step {_pct(st, ref_o)}), same shape: "
+                        f"{NOT_A_DROP_REASON}"}
         for x in xs:
             x["notes"] = list(x["notes"]) + [note]
     summary = []
@@ -2932,6 +2971,57 @@ def _reference_view(bt, recs) -> dict:
     return {"routes": routes, "why": why, "mono_reset_lines": (sv.get("calibration_log") or [])[:20],
             "survey_warnings": list(sv.get("warnings") or ())[:10], "statement": stmt,
             "beamtime_fingerprint": bt.get("fingerprint")}
+
+
+#: what ``applied_shift_eV`` 0.0 on a v1 result means: no ABSOLUTE calibration, because none is needed
+ABSOLUTE_CALIBRATION_SAID = ("No absolute energy calibration was applied (shift 0 eV), and none is needed: the "
+                             "monochromator was foil-calibrated by the beamline staff at the start of the beamtime. "
+                             "Energies are the beamline's calibrated energies.")
+_ROUTE_SAID = {"ref_foil": "an in-scan reference foil in transmission", "glitch_I0": "the I0 glitch",
+               "foil_timeline": "separate foil scans over time", "none": "no energy reference"}
+
+
+def energy_story(res: Mapping) -> dict:
+    """``{"absolute_calibration": ..., "alignment": ...}`` of a v1 result, from its ``energy_reference``,
+    ``scan_shifts`` and ``scan_decisions`` (so a result stored before this was written is said the same way).
+
+    The two words mean two things (end-to-end test on real data, 17 Nov 2026: the calibration block said "no energy
+    reference" while the energy reference showed an I0-glitch alignment of +67 to +72 meV). CALIBRATION is absolute
+    (onto tabulated energies): none, since the mono is staff-calibrated. ALIGNMENT is per scan: every scan shifted onto
+    the ONE beamtime reference."""
+    ref = res.get(REFERENCE_KEY) or {}
+    route = (ref.get("routes") or [{}])[0] or {}
+    mode = route.get("mode")
+    rows = (res.get(SHIFTS_KEY) or {}).get("rows") or []
+    merged = {x.get("scan_id") for x in (res.get(DECISIONS_KEY) or {}).get("rows") or () if x.get("merged")}
+    aligned = [x for x in rows if x.get("ok") and isinstance(x.get("shift_eV"), (int, float))]
+    in_merge = [x["shift_eV"] for x in aligned if x.get("scan_id") in merged] or [x["shift_eV"] for x in aligned]
+    shown = (lambda v: f"{1000 * v:+.0f} meV")
+    alignment: dict[str, Any] = {
+        "kind": "per_scan_alignment", "route": mode, "method": route.get("method"),
+        "window_eV": route.get("window_eV"), "reference_group_id": route.get("reference_group_id"),
+        "reference_name": route.get("reference_name"), "reference_anchor_eV": route.get("reference_anchor_eV"),
+        "reference_scans": route.get("reference_scans"), "scans_aligned": len(aligned), "scans_listed": len(rows),
+        "shift_range_eV": [min(in_merge), max(in_merge)] if in_merge else None,
+        "shift_range_of": "the merged scans" if merged and any(x.get("scan_id") in merged for x in aligned) else "the aligned scans",
+    }
+    if mode == "none" or not route:
+        alignment["statement"] = ("No per-scan alignment: the beamtime has no energy reference (no in-scan foil, no I0 "
+                                  "glitch in most scans, no foil scans), so every shift is 0.")
+    else:
+        anchor = route.get("reference_anchor_eV")
+        alignment["statement"] = (
+            f"Each scan was aligned to one beamtime energy reference, {_ROUTE_SAID.get(mode, str(mode))}"
+            + (f" ({route.get('method')} fit, window {route['window_eV'][0]:g}-{route['window_eV'][1]:g} eV)"
+               if isinstance(route.get("window_eV"), (list, tuple)) and len(route["window_eV"]) == 2 else "")
+            + (f", anchored on the earliest group {route.get('reference_name')} at {anchor:.4f} eV (median of "
+               f"{route.get('reference_scans')} scans)" if isinstance(anchor, (int, float)) else "")
+            + f": {len(aligned)} of {len(rows)} scans aligned"
+            + (f", shifts {shown(min(in_merge))} to {shown(max(in_merge))} ({alignment['shift_range_of']})"
+               if in_merge else "") + ".")
+    return {"absolute_calibration": {"applied": False, "applied_shift_eV": 0.0, "needed": False,
+                                     "basis": "staff_foil_calibrated_mono", "statement": ABSOLUTE_CALIBRATION_SAID},
+            "alignment": alignment}
 
 
 def _quick_merges(group, ctx, recs, kept, E, y, nm, e0, absorber, np) -> list[dict]:
