@@ -193,14 +193,15 @@ function startRun(ids, single = false) {
   show('card');
 }
 
-function progressBlock(label, done, total) {
+function progressBlock(label, done, total, unsure = 0) {
   const pct = total ? Math.round((done / total) * 100) : 0;
   const fill = h('i');
   fill.style.width = `${pct}%`;
+  const aside = unsure ? ` (${unsure} marked “don’t know”)` : '';
   return h(
     'div',
     { class: 'progress' },
-    h('div', { class: 'progress-line' }, h('span', {}, h('strong', { text: `${done} of ${total}` }), ` ${label}`), h('span', { text: `${pct}%` })),
+    h('div', { class: 'progress-line' }, h('span', {}, h('strong', { text: `${done} of ${total}` }), ` ${label}${aside}`), h('span', { text: `${pct}%` })),
     h('div', { class: 'bar', role: 'progressbar', 'aria-valuemin': 0, 'aria-valuemax': total, 'aria-valuenow': done, 'aria-label': label }, fill),
   );
 }
@@ -232,8 +233,8 @@ function viewHome() {
     { class: 'panel' },
     h('h1', { class: 'title', text: allDone ? 'Everything is answered. Thank you.' : `Hello ${state.name.split(' ')[0]}. ${t.neededOpen ? `${t.neededOpen} question${t.neededOpen === 1 ? '' : 's'} left before these records can be exported.` : 'The needed questions are all answered.'}` }),
     h('p', { class: 'beamtime', text: state.site.title }),
-    t.needed ? progressBlock('needed questions answered', t.neededDone, t.needed) : null,
-    t.optional ? progressBlock('nice-to-have questions answered', t.optionalDone, t.optional) : null,
+    t.needed ? progressBlock('needed questions done', t.neededDone, t.needed, t.neededUnsure) : null,
+    t.optional ? progressBlock('nice-to-have questions done', t.optionalDone, t.optional) : null,
     allDone
       ? null
       : h(
@@ -575,7 +576,7 @@ function viewDone() {
       { class: 'panel' },
       h('h1', { class: 'title', text: run.answered ? `Thank you. ${run.answered} answer${run.answered === 1 ? '' : 's'} saved.` : 'Nothing new saved this time.' }),
       h('p', { class: 'subtitle', text: `${left} You can stop here and come back any time.` }),
-      t.needed ? progressBlock('needed questions answered', t.neededDone, t.needed) : null,
+      t.needed ? progressBlock('needed questions done', t.neededDone, t.needed, t.neededUnsure) : null,
       h(
         'div',
         { class: 'start' },

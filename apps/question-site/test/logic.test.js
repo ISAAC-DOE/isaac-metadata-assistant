@@ -18,8 +18,8 @@ test('the next sitting is the needed questions first, in the site\'s order, and 
 });
 
 test('progress counts needed and nice-to-have questions apart', () => {
-  const t = tally(cards, { 'C-0000000001': {}, 'C-0000000008': {} });
-  assert.deepEqual([t.needed, t.neededDone, t.neededOpen, t.optional, t.optionalDone, t.open], [7, 1, 6, 2, 1, 7]);
+  const t = tally(cards, { 'C-0000000001': {}, 'C-0000000002': { action: 'dont_know' }, 'C-0000000008': {} });
+  assert.deepEqual([t.needed, t.neededDone, t.neededUnsure, t.neededOpen, t.optional, t.optionalDone, t.open], [7, 2, 1, 5, 2, 1, 6]);
 });
 
 test('a saved answer is shown in the words it was chosen in', () => {

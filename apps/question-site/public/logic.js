@@ -39,11 +39,13 @@ export function tally(cards, answers) {
   const needed = cards.filter((c) => c.blocking);
   const optional = cards.filter((c) => !c.blocking);
   const done = (list) => list.filter((c) => answers[c.card_id]).length;
+  const unsure = (list) => list.filter((c) => answers[c.card_id]?.action === 'dont_know').length;
   const neededDone = done(needed);
   const optionalDone = done(optional);
   return {
     needed: needed.length,
-    neededDone,
+    neededDone, // answered or marked "don't know": nothing left for the person to do
+    neededUnsure: unsure(needed), // of those, the ones still without a value
     neededOpen: needed.length - neededDone,
     optional: optional.length,
     optionalDone,
