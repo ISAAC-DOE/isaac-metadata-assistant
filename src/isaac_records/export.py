@@ -485,14 +485,13 @@ def export_draft(
             f"an uppercase letter A-Z or a digit 0-9, and nothing before or after "
             f"them.{detail}",
         )
+    # The rejected-path check is part of the DRAFT gate (it reports into draft_report), so
+    # it shares the draft gate's single refusal rather than adding a fourth gate: export
+    # still has exactly three checks (draft, exactness, official schema).
+    if draft_report.ok:
+        record, removed = _compose(draft, record_id=record_id, now=now)
+        _report_rejected(draft, record, removed, draft_report)
     if not draft_report.ok:
-        return ExportResult(False, None, None, draft_report, None)
-
-    record, removed = _compose(draft, record_id=record_id, now=now)
-    _report_rejected(draft, record, removed, draft_report)
-    if not draft_report.ok:
-        # Refused: hand back no record, like every other refusal, so a caller that ignores
-        # `ok` still has nothing that could carry a rejected value.
         return ExportResult(False, None, None, draft_report, None)
 
     # EXACTNESS, on the ASSEMBLED RECORD, before official validation.
