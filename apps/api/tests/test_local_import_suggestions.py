@@ -171,7 +171,7 @@ def test_a_preview_writes_nothing_and_apply_records_cited_readings(grouped):
     assert plan["applied"] is False and plan["interpretations"] == 1
     assert (out / "bundle.json").read_bytes() == before
 
-    done = M.annotate_from_readings(out, _findings(), model_id="synthetic-model", apply=True)
+    done = M.annotate_from_readings(out, _findings(), model_id="synthetic-model", apply=True, check_quotes=False)
     assert done["applied"] is True and done["interpretations"] == 1
     b = _load(out)
     [i] = b["ai_interpretations"]
@@ -182,13 +182,13 @@ def test_a_preview_writes_nothing_and_apply_records_cited_readings(grouped):
     assert i["max_state"] == "needs_review" and m["value_state"] == B.STATE_NEEDS_REVIEW
     assert m["eligibility_for_official_record"]["eligible"] is False
     assert B.validate_bundle(b) == []
-    again = M.annotate_from_readings(out, _findings(), model_id="synthetic-model", apply=True)
+    again = M.annotate_from_readings(out, _findings(), model_id="synthetic-model", apply=True, check_quotes=False)
     assert again["interpretations"] == 0 and again["already_recorded"] == 1
 
 
 def test_a_missing_value_an_ai_reading_lifted_is_still_asked_with_the_reading_as_a_hint(grouped):
     out = grouped()
-    M.annotate_from_readings(out, _findings(), model_id="synthetic-model", apply=True)
+    M.annotate_from_readings(out, _findings(), model_id="synthetic-model", apply=True, check_quotes=False)
     b = _load(out)
     m = _missing(b, "SYN_cell", "context.environment")
     asked = [q for q in Q.consolidate(b)["questions"] if {"kind": "missing_value", "id": m["value_id"]} in q["targets"]]
@@ -208,7 +208,7 @@ def test_an_experiment_scope_finding_reaches_every_live_run_and_a_document_besid
     out = grouped()
     f = _findings(field_path="system.facility.beamline", value="SYN-1", applies_to={"scope": "experiment"},
                   source={"path": "../SYN_proposal.pdf", "locator": "page 2"})
-    done = M.annotate_from_readings(out, f, model_id="synthetic-model", apply=True)
+    done = M.annotate_from_readings(out, f, model_id="synthetic-model", apply=True, check_quotes=False)
     b = _load(out)
     beam = [m for m in b["missing_values"] if m["target_field_path"] == "system.facility.beamline"]
     assert done["interpretations"] == len(beam) >= 2
@@ -223,7 +223,7 @@ def test_an_experiment_scope_finding_reaches_every_live_run_and_a_document_besid
 ])
 def test_a_finding_that_cannot_be_placed_is_reported_never_forced(grouped, over, reason):
     out = grouped()
-    done = M.annotate_from_readings(out, _findings(**over), model_id="synthetic-model", apply=True)
+    done = M.annotate_from_readings(out, _findings(**over), model_id="synthetic-model", apply=True, check_quotes=False)
     assert done["interpretations"] == 0
     [s] = done["skipped"]
     assert reason in s["reason"]
@@ -233,7 +233,7 @@ def test_a_finding_that_cannot_be_placed_is_reported_never_forced(grouped, over,
 def test_an_electrolyte_reading_is_offered_unsplit_on_name_and_concentration(grouped):
     out = grouped()
     f = _findings(field_path="context.electrochemistry.electrolyte", value="0.1 M SYN-acid")
-    done = M.annotate_from_readings(out, f, model_id="synthetic-model", apply=True)
+    done = M.annotate_from_readings(out, f, model_id="synthetic-model", apply=True, check_quotes=False)
     assert done["interpretations"] == 2
     b = _load(out)
     paths = {next(m["target_field_path"] for m in b["missing_values"] if m["value_id"] == i["target"]["id"]) for i in b["ai_interpretations"]}
@@ -328,7 +328,7 @@ def test_the_absorber_witness_quotes_the_files_own_literal(grouped):
 @pytest.mark.parametrize("path", ["/Users/someone/notes.docx", "C:/notes.docx", "../../outside.pdf", "a/../../b.txt"])
 def test_a_finding_citing_an_absolute_or_escaping_path_is_refused(grouped, path):
     out = grouped()
-    done = M.annotate_from_readings(out, _findings(source={"path": path, "locator": "p1"}), model_id="m", apply=True)
+    done = M.annotate_from_readings(out, _findings(source={"path": path, "locator": "p1"}), model_id="m", apply=True, check_quotes=False)
     assert done["interpretations"] == 0 and "never absolute" in done["skipped"][0]["reason"]
 
 
@@ -354,7 +354,7 @@ def test_a_potential_reading_lands_on_a_run_with_no_parsed_potential(grouped):
     assert not [c for c in b["candidates"] if c["target_field_path"] == POT]  # no file states one
     assert {m["run_id"] for m in b["missing_values"] if m["target_field_path"] == POT} == {
         r["run_id"] for r in b["runs"] if r["run_candidate"]}
-    done = M.annotate_from_readings(out, _findings(field_path=POT, value=-0.8), model_id="synthetic-model", apply=True)
+    done = M.annotate_from_readings(out, _findings(field_path=POT, value=-0.8), model_id="synthetic-model", apply=True, check_quotes=False)
     assert done["interpretations"] == 1 and done["skipped"] == []
     b = _load(out)
     m = _missing(b, "SYN_cell", POT)
@@ -435,7 +435,7 @@ def test_element_and_edge_readings_without_processed_output_reach_the_groups_and
     assert not [q for q in Q.consolidate(b)["questions"] if q["kind"] == "confirm_absorber"]  # nothing to ask yet
 
     f = _absorber_findings(("system.absorbing_element", "Zz"), ("system.edge", "K"))  # an alias is accepted
-    done = M.annotate_from_readings(out, f, model_id="synthetic-model", apply=True)
+    done = M.annotate_from_readings(out, f, model_id="synthetic-model", apply=True, check_quotes=False)
     assert done["interpretations"] == 4 and done["skipped"] == []
     b = _load(out)
     assert {(i["target"]["kind"], i["field_path"]) for i in b["ai_interpretations"]} == {
@@ -481,7 +481,7 @@ def test_element_and_edge_readings_without_processed_output_reach_the_groups_and
 def test_an_ai_reading_that_disagrees_with_the_files_is_shown_and_not_resolved(grouped):
     out = grouped()
     f = _absorber_findings(("system.element", "Yy"), scope={"scope": "runs", "run_labels": ["SYN_cell"]})
-    assert M.annotate_from_readings(out, f, model_id="synthetic-model", apply=True)["interpretations"] == 1
+    assert M.annotate_from_readings(out, f, model_id="synthetic-model", apply=True, check_quotes=False)["interpretations"] == 1
     b = _load(out)
     group = _group_of(b, "SYN_cell")
     sug = S.absorber_for_group(b, group)
@@ -507,7 +507,7 @@ def test_an_ai_reading_that_disagrees_with_the_files_is_shown_and_not_resolved(g
 ])
 def test_an_absorber_reading_of_the_wrong_shape_is_skipped_never_normalised(grouped, path, value):
     out = grouped(processed=False)
-    done = M.annotate_from_readings(out, _absorber_findings((path, value)), model_id="m", apply=True)
+    done = M.annotate_from_readings(out, _absorber_findings((path, value)), model_id="m", apply=True, check_quotes=False)
     assert done["interpretations"] == 0
     [s] = done["skipped"]
     assert "is not an absorber" in s["reason"] and "nothing is normalised" in s["reason"]
@@ -518,7 +518,7 @@ def test_a_runs_scope_absorber_reading_reaches_only_the_groups_holding_those_run
     out = grouped(processed=False)
     run_group = _group_of(_load(out), "SYN_run")
     done = M.annotate_from_readings(out, _absorber_findings(("system.element", "Zz"), scope={"scope": "runs", "run_labels": ["SYN_run"]}),
-                                    model_id="m", apply=True)
+                                    model_id="m", apply=True, check_quotes=False)
     assert done["interpretations"] == 1
     b = _load(out)
     [i] = b["ai_interpretations"]
@@ -540,16 +540,16 @@ def test_a_runs_scope_absorber_reading_reaches_only_the_groups_holding_those_run
 def test_an_absorber_reading_before_grouping_is_skipped_with_the_reason(tmp_path, capsys):
     out = tmp_path / "out"
     assert _run(["import", str(_beamtime(tmp_path / "src", processed=False)), "--out", str(out)], capsys)[0] == 0
-    done = M.annotate_from_readings(out, _absorber_findings(("system.element", "Zz")), model_id="m", apply=True)
+    done = M.annotate_from_readings(out, _absorber_findings(("system.element", "Zz")), model_id="m", apply=True, check_quotes=False)
     assert done["interpretations"] == 0 and "no live record group yet" in done["skipped"][0]["reason"]
 
 
 def test_absorber_readings_apply_once_and_element_k_and_edge_k_are_two_readings(grouped):
     out = grouped(processed=False)
     f = _absorber_findings(("system.element", "K"), ("system.edge", "K"))  # potassium, K edge: same value, same line
-    first = M.annotate_from_readings(out, f, model_id="m", apply=True)
+    first = M.annotate_from_readings(out, f, model_id="m", apply=True, check_quotes=False)
     assert first["interpretations"] == 4
-    again = M.annotate_from_readings(out, f, model_id="m", apply=True)
+    again = M.annotate_from_readings(out, f, model_id="m", apply=True, check_quotes=False)
     assert again["interpretations"] == 0 and again["already_recorded"] == 4
     b = _load(out)
     assert len(b["ai_interpretations"]) == 4
@@ -558,7 +558,7 @@ def test_absorber_readings_apply_once_and_element_k_and_edge_k_are_two_readings(
 
 def test_the_validator_refuses_a_tampered_absorber_reading(grouped):
     out = grouped(processed=False)
-    M.annotate_from_readings(out, _absorber_findings(("system.element", "Zz")), model_id="m", apply=True)
+    M.annotate_from_readings(out, _absorber_findings(("system.element", "Zz")), model_id="m", apply=True, check_quotes=False)
     b = _load(out)
     b["ai_interpretations"][0]["proposed_value"] = "zz"
     assert any("is not an absorber element" in e for e in B.validate_bundle(b))
@@ -703,7 +703,7 @@ def test_a_regroup_after_an_absorber_reading_supersedes_the_old_groups_and_a_rea
     f = {"format": S.READINGS_FORMAT, "findings": [
         {"field_path": "system.element", "value": "Fe", "applies_to": {"scope": "experiment"},
          "source": {"path": "Zz_XAS.mac", "locator": "line 1"}, "quote": "synthetic quote", "strength": "stated", "reasoning": "r"}]}
-    assert M.annotate_from_readings(out, f, model_id="m", apply=True)["interpretations"] == 2
+    assert M.annotate_from_readings(out, f, model_id="m", apply=True, check_quotes=False)["interpretations"] == 2
     assert _run(["bundle", "decide", str(out), "--target", "experiment", "--decision", "set_counter_positions",
                  "--positions", "2", "--by", BY], capsys)[0] == 0
     # this used to be refused for good: "a record_group target ... does not exist"
@@ -720,7 +720,7 @@ def test_a_regroup_after_an_absorber_reading_supersedes_the_old_groups_and_a_rea
     qs = [q for q in Q.consolidate(b)["questions"] if q["kind"] == "confirm_absorber"]
     assert not [h for q in qs for h in q["hints"] if h["kind"] == "ai_suggestion"]
     # re-applying the same findings file (the skill's step after --regroup) lands it on the new group
-    again = M.annotate_from_readings(out, f, model_id="m", apply=True)
+    again = M.annotate_from_readings(out, f, model_id="m", apply=True, check_quotes=False)
     assert again["interpretations"] == 1 and again["already_recorded"] == 0
     b = _load(out)
     assert [r["value"] for r in S.absorber_for_group(b, new)["ai_readings"]] == ["Fe"]
@@ -751,7 +751,7 @@ def test_a_runs_scope_reading_on_a_bigger_group_says_which_runs_it_was_read_for(
     out = grouped(processed=False)
     group = _one_group_of_both_runs(out)
     f = _absorber_findings(("system.element", "Zz"), ("system.edge", "K"), scope={"scope": "runs", "run_labels": ["SYN_run"]})
-    assert M.annotate_from_readings(out, f, model_id="m", apply=True)["interpretations"] == 2
+    assert M.annotate_from_readings(out, f, model_id="m", apply=True, check_quotes=False)["interpretations"] == 2
     b = _load(out)
     rid = next(r["run_id"] for r in b["runs"] if r["label"] == "SYN_run")
     assert {json.dumps(i["run_ids"]) for i in b["ai_interpretations"]} == {json.dumps([rid])}
@@ -765,7 +765,7 @@ def test_a_runs_scope_reading_on_a_bigger_group_says_which_runs_it_was_read_for(
     assert hints and all("read for 1 of 2 runs in this group: SYN_run" in h["note"] for h in hints)
     assert all(h["read_for"] == [{"group_id": group["group_id"], "run_ids": [rid], "text": f"read for 1 of 2 runs in this group: SYN_run ({rid})"}] for h in hints)
     # an experiment-scope reading is about the whole group: no run_ids, no "read for"
-    M.annotate_from_readings(out, _absorber_findings(("system.edge", "K"), locator="line 9"), model_id="m", apply=True)
+    M.annotate_from_readings(out, _absorber_findings(("system.edge", "K"), locator="line 9"), model_id="m", apply=True, check_quotes=False)
     b = _load(out)
     whole = [r for r in S.absorber_for_group(b, group)["ai_readings"] if r["locator"] == "line 9"]
     assert [(r["run_ids"], r["read_for"]) for r in whole] == [(None, None)]
@@ -775,13 +775,13 @@ def test_a_runs_scope_reading_on_a_bigger_group_says_which_runs_it_was_read_for(
 def test_the_validator_refuses_run_ids_outside_the_group_or_on_a_value_reading(grouped):
     out = grouped(processed=False)
     f = _absorber_findings(("system.element", "Zz"), scope={"scope": "runs", "run_labels": ["SYN_run"]})
-    M.annotate_from_readings(out, f, model_id="m", apply=True)
+    M.annotate_from_readings(out, f, model_id="m", apply=True, check_quotes=False)
     b = _load(out)
     other = next(r["run_id"] for r in b["runs"] if r["label"] == "SYN_cell")
     b["ai_interpretations"][0]["run_ids"] = [other]
     assert any("not in group" in e for e in B.validate_bundle(b))
     b = _load(out)
-    M.annotate_from_readings(out, _findings(), model_id="m", apply=True)
+    M.annotate_from_readings(out, _findings(), model_id="m", apply=True, check_quotes=False)
     b = _load(out)
     value_reading = next(i for i in b["ai_interpretations"] if i["target"]["kind"] == "missing_value")
     value_reading["run_ids"] = [other]
