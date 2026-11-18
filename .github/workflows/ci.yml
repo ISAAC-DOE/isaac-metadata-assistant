@@ -2940,6 +2940,27 @@ jobs:
       - name: Build
         run: npm run build
 
+  question-site:
+    name: question site tests
+    runs-on: ubuntu-latest
+
+    defaults:
+      run:
+        working-directory: apps/question-site
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v5
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "24"
+
+      # no dependencies to install: the site uses only Node's standard library
+      - name: Run tests
+        run: npm test
+
   browser-a11y:
     name: browser accessibility and responsive baseline
     runs-on: ubuntu-latest
