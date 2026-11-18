@@ -44,6 +44,20 @@ def test_screen_report_is_report_only():
     assert [a.num for a in out if a.keep] == [1, 2, 4, 7]
 
 
+def test_affine_shape_screen_never_calls_an_intensity_change_shape():
+    """M7: a weaker scan on a constant background (edge step 60 % lower, same shape) is off-shape for the scale-only
+    screen, never for the affine one; a real shape change is off-shape for both."""
+    E, out = _aligned(9, seed=5)
+    step = 0.5 * (1 + np.tanh((E - 11215) / 1.5))
+    out[3].IF = 1.0 + 0.4 * step * (1 + 1e-3 * np.random.default_rng(9).standard_normal(E.size))
+    out[6].IF = 1 + 0.5 * (1 + np.tanh((E - 11222) / 1.5))
+    base = {"shape_mad": 6, "window_eV": [11205, 11240]}
+    old = {r["scan"] for r in screen_report(out, base) if r["test"] == "shape"}
+    new = {r["scan"] for r in screen_report(out, {**base, "shape_affine": True}) if r["test"] == "shape"}
+    assert 4 in old and 7 in old
+    assert new == {7}
+
+
 def test_pooled_scans_keep_their_identity():
     """Two files pooled into one sample: scan numbers repeat; each scan is reported by its own key."""
     E, a = _aligned(4, seed=1, key_prefix="SYN_A")

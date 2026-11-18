@@ -59,5 +59,9 @@ the beamline scientists' rules (17 Nov 2026) are never Athena, and no dead-time 
 - **M6 documentation sanitised** (no code change): `skill/SKILL.md` (no named sync service, no `gotchas.md`
   entry), `skill/scope.md` (no beamtime or dataset names), `skill/references/calibration.md` (no named colleague),
   `skill/references/recipe.md` and the `pipeline.py` docstring (`<data root>` for the author's local folder).
+- **M7 affine shape screen** (`pipeline.py _screen`, opt-in `screening.shape_affine`). The off-shape test scaled each
+  scan to the median (scale only), so a weaker scan on a constant fluorescence background (an edge-step change, the
+  same shape) read as "shape". With `shape_affine: true` (ISAAC sets it) the residual is measured after a free scale
+  AND offset; without it the screen is unchanged. Test: `::test_affine_shape_screen_never_calls_an_intensity_change_shape`.
 - **M5 an undated alignment scan no longer crashes the survey** (`survey.py`): the edge-scan finding formatted
   `s.time` with `%m-%d`, a `TypeError` for a scan without a `#D` date. Test: `::test_survey_undated_alignment_scan`.

@@ -845,6 +845,8 @@ def _bl15_2_missing_said(inputs: Sequence[Mapping], params: Mapping) -> str | No
 #: pq-002 (beamline scientist answers relayed by Krish, 17 Nov 2026): a new spot is not a new result; each scan's spot
 #: (the stage motors its SPEC #P header states) is recorded beside it, never a condition
 _SPOT_MOTORS = ("Sx", "Sy", "Sz", "Sr")
+#: any ``Sx=…`` token of a #P line, numeric or not (a non-numeric one makes the spot "not read")
+_SPOT_ANY_VALUE = re.compile(r"(?<![\w.])(Sx|Sy|Sz|Sr)=(\S+)")
 #: two stage positions closer than this on every motor are one spot
 SPOT_TOLERANCE = 0.01
 
@@ -858,6 +860,7 @@ def _header_spot(header_lines: Sequence[str] | None, motor_lines: Sequence[str] 
 
     out: dict = {}
     keyed = False
+    bad: list[str] = []
     for line in header_lines or ():
         text = str(line).strip()
         if not text.startswith("#P"):
@@ -868,7 +871,20 @@ def _header_spot(header_lines: Sequence[str] | None, motor_lines: Sequence[str] 
                 try:
                     out[k] = float(v)
                 except ValueError:
-                    pass
+                    bad.append(f"{k}={v}")
+        # a stage motor written as nan, inf or text (the numeric pattern above skips it)
+        for k, v in _SPOT_ANY_VALUE.findall(text):
+            try:
+                ok = math.isfinite(float(v))
+            except ValueError:
+                ok = False
+            if not ok:
+                keyed = True
+                bad.append(f"{k}={v}")
+    # a stage motor that reads nan / inf / text is NOT a position: the spot is not read (never its own spot)
+    bad += [f"{k}={v}" for k, v in out.items() if not math.isfinite(v)]
+    if bad:
+        return None, f"its #P lines give no usable stage position ({', '.join(sorted(set(bad)))})"
     if out:
         return out, None
     lines = [str(x).strip() for x in motor_lines or ()]
@@ -891,6 +907,9 @@ def _header_spot(header_lines: Sequence[str] | None, motor_lines: Sequence[str] 
                     out[k] = float(v)
                 except ValueError:
                     pass
+    bad = [f"{k}={v}" for k, v in out.items() if not math.isfinite(v)]
+    if bad:
+        return None, f"its #P positions give no usable stage position ({', '.join(sorted(bad))})"
     if out:
         return out, None
     if refused:

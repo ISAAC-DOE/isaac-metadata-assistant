@@ -34,7 +34,7 @@ def _engine_on(monkeypatch):
 
 
 def scan_cols(seed, *, d=0.0, chem=0.0, scale=1.0, noise=2e-3, foil=False, glitch=True, fluo=True, trans_step=0.0,
-              n_points=None, wl=3.0):
+              n_points=None, wl=3.0, bg=0.0, wl_shift=0.0):
     """One SYN scan. ``d``: the mono offset (the recorded absev reads ``d`` above the true energy, so every feature
     sits at its true energy + d); ``chem``: a true shift of the sample's own edge; ``scale``: the signal's intensity."""
     rng = np.random.default_rng(seed)
@@ -43,8 +43,8 @@ def scan_cols(seed, *, d=0.0, chem=0.0, scale=1.0, noise=2e-3, foil=False, glitc
     I0 = 1e5 * (1 - 0.0004 * (E - 11165))
     if glitch:
         I0 = I0 * (1 - 0.06 * np.exp(-((t - GLITCH) / 0.22) ** 2))
-    mu = 0.05 + 1.0 / (1 + np.exp(-(t - E_EDGE - chem) / 1.2)) + wl * np.exp(-((t - 11218 - chem) / 1.5) ** 2)
-    IF = scale * mu * I0 * 1e-3 * (1 + noise * rng.standard_normal(E.size))
+    mu = 0.05 + 1.0 / (1 + np.exp(-(t - E_EDGE - chem) / 1.2)) + wl * np.exp(-((t - 11218 - chem - wl_shift) / 1.5) ** 2)
+    IF = (scale * mu + bg) * I0 * 1e-3 * (1 + noise * rng.standard_normal(E.size))
     if foil:
         muf = 0.3 + 0.8 / (1 + np.exp(-(t - E_EDGE) / 0.9))
         I1 = 0.6 * I0
@@ -819,7 +819,7 @@ def test_three_spots_one_off_shape_the_odd_spot_is_dropped_with_a_spot_reason(tm
         assert rows[k]["decision"] == "drop" and codes == ["spot_differs"], (k, rows[k]["reasons"])
         said = rows[k]["reasons"][0]["said"]
         assert said.startswith("spot Sz -7.15 (scans 4, 5, 6) differs from the other 2 spots (scans 1, 2, 3, 7, 8, 9)")
-        assert "white line" in said and "shape differs" in said and "still changing" not in said
+        assert "white-line height -2" in said and "normalised shape differs" in said and "still changing" not in said
     assert all(rows[k]["decision"] == "keep" for k in (1, 2, 3, 7, 8, 9))
     sp = r["spots"]
     assert sp["outcome"] == "differing_spot_dropped" and len(sp["spots"]) == 3
@@ -841,8 +841,9 @@ def test_the_first_scans_at_another_spot_say_both_causes(tmp_path):
         assert rows[k]["decision"] == "drop" and [y["code"] for y in rows[k]["reasons"]] == ["early_and_spot_differs"], \
             (k, rows[k]["reasons"])
     said = rows[1]["reasons"][0]["said"]
-    assert said.startswith("scans 1, 2, 3, 4 differ from the rest (scans 5, 6, 7, 8, 9, 10, 11, 12, 13): they are the "
-                           "first scans")
+    assert said.startswith("scans 1, 2, 3, 4 differ from the rest (scans 5, 6, 7, 8, 9, 10, 11, 12, 13) in shape "
+                           "(edge position +0.")
+    assert "they are the first scans" in said
     assert "AND at other spots (Sz -6.7, Sz -5.5)" in said and "either the sample was still changing or the spot differs" in said
     assert all(rows[k]["decision"] == "keep" for k in range(5, 14))
     assert r["spots"]["outcome"] == "early_and_spot_differs"
@@ -877,3 +878,77 @@ def test_a_trend_within_one_spot_is_still_changing(tmp_path):
         assert "still changing" in rows[k]["reasons"][0]["said"]
     assert all(rows[k]["decision"] == "keep" for k in range(3, 10))
     assert r["spots"]["outcome"] == "evolution_within_a_spot"
+
+
+# --- rule 3 at the spot level: a weaker spot with the same shape is KEPT (review of eec37461) -----------------------
+
+
+@pytest.mark.parametrize("where", ["middle", "first"])
+def test_a_weaker_spot_with_the_same_shape_is_kept_in_any_position(tmp_path, where):
+    """The reviewer's probe: 9 scans on 3 spots, one spot's edge step 60 % lower, the SAME shape, a constant
+    fluorescence background. Never dropped, whether it is the middle spot or holds the first scans."""
+    weak = range(3, 6) if where == "middle" else range(0, 3)
+    sz = ([-7.45] * 3 + [-7.15] * 3 if where == "middle" else [-7.15] * 3 + [-7.45] * 3) + [-6.0] * 3
+    cols = [scan_cols(70 + k, scale=0.4 if k in weak else 1.0, bg=0.5) for k in range(9)]
+    bdir, _ = imported(tmp_path, _spot_run(sz, cols))
+    r = by_run(v1_results(bdir), "02_SYN_ZZ2")
+    rows = {x["scan"]: x for x in r[EX.DECISIONS_KEY]["rows"]}
+    assert all(x["decision"] == "keep" for x in rows.values()), {k: x["reasons"] for k, x in rows.items()}
+    for k in weak:
+        notes = [n for n in rows[k + 1]["notes"] if n.get("source") == "spots"]
+        assert notes and notes[0]["said"].startswith("weaker signal at this spot (spot Sz -7.15: edge step -6"), notes
+        assert notes[0]["said"].endswith("same shape: kept")
+    assert r["spots"]["outcome"] in ("consistent", "intensity_only_kept")
+    assert next(s for s in r["steps"] if s["step"] == "merge")["outcome"]["n_scans"] == 9
+
+
+def test_a_nan_stage_position_is_spot_not_read_never_its_own_spot(tmp_path):
+    from isaac_api.local_import.processing import run as R
+
+    got = R._spot_labels([(["#P0 Sx=1 Sy=2 Sz=nan Sr=0"], ()), (["#P0 Sx=1 Sy=2 Sz=3 Sr=0"], ()),
+                          (["#P0 Sx=1 Sy=2 Sz=abc Sr=0"], ())])
+    assert got[0] == (None, "its #P lines give no usable stage position (Sz=nan)") and got[1][0]["label"] == "spot 1"
+    assert got[2][0] is None and "Sz=abc" in got[2][1]
+    sz = [-7.15] * 4 + [float("nan")] + [-7.45] * 4
+    bdir, _ = imported(tmp_path, _spot_run(sz, [scan_cols(80 + k) for k in range(9)]))
+    r = by_run(v1_results(bdir), "02_SYN_ZZ2")
+    assert [x["spot"] for x in r["spots"]["spots"]] == ["spot 1", "spot 2"]
+    rows = {x["scan"]: x for x in r[EX.DECISIONS_KEY]["rows"]}
+    assert "spot" not in rows[5] and rows[5]["decision"] == "keep"
+
+
+@pytest.mark.parametrize("noisy", [False, True])
+def test_a_white_line_energy_shift_in_the_first_scans_at_another_spot_is_dropped(tmp_path, noisy):
+    """A 0.5 eV white-line ENERGY shift (same intensity) in the first scans, at another spot: a normalised-shape
+    change, dropped and named, even for a noisier scan whose residual sits within twice its own noise."""
+    sz = [-6.7] * 3 + [-7.15] * 3 + [-7.45] * 3 + [-6.0] * 3
+    cols = [scan_cols(90 + k, wl_shift=0.5 if k < 3 else 0.0, noise=(6e-3 if noisy and k == 2 else 2e-3))
+            for k in range(12)]
+    bdir, _ = imported(tmp_path, _spot_run(sz, cols))
+    r = by_run(v1_results(bdir), "02_SYN_ZZ2")
+    rows = {x["scan"]: x for x in r[EX.DECISIONS_KEY]["rows"]}
+    for k in (1, 2, 3):
+        codes = {y["code"] for y in rows[k]["reasons"]}
+        assert rows[k]["decision"] == "drop" and codes & {"early_and_spot_differs", "before_stable_window"}, \
+            (k, rows[k]["reasons"], rows[k]["notes"])
+        assert any("white-line energy +0." in y["said"] for y in rows[k]["reasons"]), rows[k]["reasons"]
+    assert all(rows[k]["decision"] == "keep" for k in range(4, 13))
+
+
+def test_the_noise_guard_never_keeps_a_scan_whose_white_line_moved():
+    """decide_scans: an off-shape flag within twice the scan's noise is "noisier" ONLY when no normalised-shape
+    metric moved; a white-line energy beyond the stability rule's threshold keeps the drop."""
+    recs = [_rec(f"SYN_D#{k}", k, seed=k) for k in range(1, 7)]
+    recs[5] = _rec("SYN_D#6", 6, noise=0.05, seed=6)
+    metrics = {f"SYN_D#{k}": {"metrics": {"wl_e_eV": 11218.0 + 0.01 * k, "sd_wl_e_eV": 0.02, "wl_h": 2.0,
+                                          "sd_wl_h": 0.01, "delta_eV": 0.0, "sd_delta_eV": 0.02}, "reasons": []}
+               for k in range(1, 7)}
+    metrics["SYN_D#6"]["metrics"]["wl_e_eV"] = 11218.5
+    flags = {"SYN_D#6": [{"test": "shape", "reason": "shape rms 6e-02", "value": 0.06, "median": 0.002,
+                          "threshold": 0.012}]}
+    row = _decide(recs, flags, {"rows": metrics})["by_id"]["SYN_D#6"]
+    assert row["decision"] == "drop" and row["reasons"][0]["code"] == "shape"
+    assert "white-line energy +0.4" in row["reasons"][0]["said"]
+    metrics["SYN_D#6"]["metrics"]["wl_e_eV"] = 11218.06           # within the threshold: noise, kept
+    row = _decide(recs, flags, {"rows": metrics})["by_id"]["SYN_D#6"]
+    assert row["decision"] == "keep" and row["notes"][0]["code"] == "noisier_not_off_shape"

@@ -332,10 +332,17 @@ def _screen(out, cfg) -> list[tuple]:
             Y = np.array([a.IF[m] / a.I0[m] for a in good])
         ref = np.nanmedian(Y, axis=0)
         sc = np.nanmedian(np.abs(ref)) or 1.0
-        # scale each scan to the median first: shape, not overall level
+        # scale each scan to the median first: shape, not overall level. ISAAC (PROVENANCE.md M7): with
+        # ``shape_affine`` a free scale AND offset, so a constant background is not "shape" either
+        affine = bool(cfg.get("shape_affine"))
         rms = []
         for y in Y:
             ok = np.isfinite(y) & np.isfinite(ref)
+            if affine and ok.sum() > 2:
+                A = np.c_[y[ok], np.ones(ok.sum())]
+                (c, b), *_ = np.linalg.lstsq(A, ref[ok], rcond=None)
+                rms.append(np.sqrt(np.mean((c * y[ok] + b - ref[ok]) ** 2)) / sc)
+                continue
             c = np.dot(y[ok], ref[ok]) / np.dot(y[ok], y[ok]) if ok.any() else np.nan
             rms.append(np.sqrt(np.mean((c * y[ok] - ref[ok]) ** 2)) / sc if ok.any() else np.inf)
         rms = np.array(rms)

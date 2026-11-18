@@ -71,7 +71,10 @@ ENGINE_FORMATS = {"spec_columns": "SPEC", "ssrl_xdac": "SSRL EXAFS Data Collecto
 V0_FALLBACK = "isaac.xas.v0"
 
 #: screening (the engine's ``screen_report``, report-only): its recipe defaults (recipe_init.draft_recipe)
-SCREENING = {"anchor_mad": 5, "shape_mad": 6, "min_coverage": 0.9}
+SCREENING = {"anchor_mad": 5, "shape_mad": 6, "min_coverage": 0.9,
+             # off-shape = the residual after a free scale AND offset (PROVENANCE.md M7): an edge-step change or a
+             # constant fluorescence background is intensity, never shape (rule 3)
+             "shape_affine": True}
 SCREEN_WINDOW_EV = (-10.0, 45.0)        # relative to the tabulated edge (recipe_init: E0-10 .. E0+45)
 #: a shape flag whose rms is at most this many times the scan's OWN point-to-point noise is noise (fewer counts),
 #: not a different shape: noise is an intensity effect, and an intensity drop alone never drops a scan (rule 3)
@@ -1432,6 +1435,16 @@ def decide_scans(recs, screen_flags, stability, notes, overrides, inputs, target
             if test == "shape":
                 noise = _own_noise(r, win, np)
                 item["evidence"]["own_noise"] = noise
+                # a NORMALISED-shape metric that moved (white-line energy, edge position, white-line height against
+                # the stable scans, beyond the stability rule's floor and 3 x the scans' own sd) is a shape change,
+                # however small the residual looks next to the scan's noise (a 0.5 eV white-line shift on a sharp
+                # HERFD line): never "noisier"
+                moved = metric_shifts(sid, stability, np)
+                if moved:
+                    item["evidence"]["normalised_shape"] = moved
+                    item["said"] = f"{f['reason']}; its normalised shape moved: " + ", ".join(m["said"] for m in moved)
+                    drop.append(item)
+                    continue
                 if noise is not None and f.get("value") is not None and f["value"] <= SHAPE_NOISE_FACTOR * noise:
                     noted.append({**item, "code": "noisier_not_off_shape", "decides": False,
                                   "said": f"{f['reason']}, but within {SHAPE_NOISE_FACTOR:g}x its own counting noise "
@@ -1513,6 +1526,8 @@ DIFFERS_CODES = ("before_stable_window", "shape")
 #: stability metrics that are shape (normalised), not intensity (core.SEL_SHAPE_METRICS)
 SHAPE_METRICS = ("delta_eV", "wl_e_eV", "wl_h")
 SPOT_RULE_ID = "isaac.xas.spot_decision.v1"
+#: a spot whose edge step differs from the other spots' by at least this fraction, with the same shape, is said
+WEAK_SPOT_FRACTION = 0.25
 SPOTS_DISAGREE_FLAG = "spots_disagree"
 SPOT_RULE = (
     "Scans are grouped by spot (the stage motors Sx Sy Sz Sr their headers state). When the scans the rule finds "
@@ -1588,6 +1603,32 @@ def apply_spots(table: dict, recs: Sequence[Mapping], stability: Mapping, np) ->
         return float(np.median(vs)) if vs else None
 
     ref_ids = set(kept)
+    evo = set((stability or {}).get("evolving_metrics") or ())
+
+    def shape_evidence(ids) -> tuple[list[str], bool]:
+        """What of the NORMALISED shape differs between ``ids`` and the kept scans, beyond the noise (white-line
+        height, white-line energy, edge position: the stability metrics; their floors and 3 x their per-scan sd),
+        and whether there is a real shape difference at all (those, an affine off-shape flag, or the stability
+        analysis' evolution in a shape metric). An edge step or a background is intensity, never shape."""
+        ids = list(ids)
+        said = []
+        for k in SHAPE_METRICS:
+            f = [v for v in (metric(x, k) for x in ids) if v is not None]
+            r = [v for v in (metric(x, k) for x in ref_ids) if v is not None]
+            if not f or not r:
+                continue
+            d = float(np.median(f)) - float(np.median(r))
+            sds = [v for v in (metric(x, C._sd_key(k)) for x in list(ids) + list(ref_ids)) if v is not None]
+            noise = max(float(C.SEL_FLOOR.get(k, 0.0)), 3 * float(np.median(sds)) if sds else 0.0)
+            if abs(d) > noise:
+                said.append(f"white-line height {_pct(float(np.median(f)), float(np.median(r)))}" if k == "wl_h" else
+                            f"white-line energy {d:+.2f} eV" if k == "wl_e_eV" else f"edge position {d:+.2f} eV")
+        flag = any(y["code"] == "shape" for x in ids for y in rows[x]["reasons"] + rows[x]["notes"]
+                   if y.get("source") == "screening")
+        trend = bool(evo & set(SHAPE_METRICS)) and any(y["code"] == "before_stable_window" for x in ids
+                                                         for y in rows[x]["reasons"])
+        return said, bool(said) or flag or trend
+
     ref_wl = [metric(s, "wl_h") for s in ref_ids]
     ref_wl = float(np.median([v for v in ref_wl if v is not None])) if any(v is not None for v in ref_wl) else None
     ref_st = [metric(s, "edge_step") for s in ref_ids]
@@ -1596,14 +1637,16 @@ def apply_spots(table: dict, recs: Sequence[Mapping], stability: Mapping, np) ->
     confined = bool(flagged) and all(spot.get(s) for s in flagged) and not (sp_f & sp_k)
     if flagged and not confined:
         outcome = "evolution_within_a_spot" if sp_f & sp_k else "spot_not_read"
-    elif confined and _earliest(flagged, recs, rows) and len(sp_k) > len(sp_f):
+    elif confined and _earliest(flagged, recs, rows) and len(sp_k) > len(sp_f) and shape_evidence(flagged)[1]:
         # spot and time order are CONFOUNDED: the differing scans are the first of their run AND at other spots;
         # neither label alone is honest, and both point to leaving them out
         mine = [rows[s] for s in sorted(flagged, key=lambda s: [r["scan_id"] for r in recs].index(s))]
         sps = sorted({spot[s]["label"] for s in flagged}, key=lambda x: int(x.split()[-1]))
         pos = ", ".join(names[lab].removeprefix("spot ") for lab in sps)
         other_rows = [x for o in sorted(sp_k, key=lambda x: int(x.split()[-1])) for x in by_spot[o] if x["scan_id"] in ref_ids]
-        what = (f"{_scan_list(mine)} differ{'s' if len(mine) == 1 else ''} from the rest ({_scan_list(other_rows)}): "
+        how = shape_evidence(flagged)[0]
+        what = (f"{_scan_list(mine)} differ{'s' if len(mine) == 1 else ''} from the rest ({_scan_list(other_rows)})"
+                + (f" in shape ({', '.join(how)})" if how else " in shape") + ": "
                 f"{'it is the first scan' if len(mine) == 1 else 'they are the first scans'} of the run (after the "
                 f"condition was set) AND at {'another spot' if len(sps) == 1 else 'other spots'} ({pos}), so either "
                 "the sample was still changing or the spot differs; both point to leaving "
@@ -1619,25 +1662,25 @@ def apply_spots(table: dict, recs: Sequence[Mapping], stability: Mapping, np) ->
                 x["decision"], x["merged"] = "drop", False
         outcome, statement = "early_and_spot_differs", what
     elif confined:
-        evo = set((stability or {}).get("evolving_metrics") or ())
-        shape = any(y["code"] == "shape" for s in flagged for y in rows[s]["reasons"]) or bool(evo & set(SHAPE_METRICS))
         others = sorted(sp_k, key=lambda s: int(s.split()[-1]))
         majority = len(sp_k) > len(sp_f)
         early = _earliest(flagged, recs, rows)
         said_spots: list[str] = []
+        outcomes: list[str] = []
         for lab in sorted(sp_f, key=lambda s: int(s.split()[-1])):
             mine = [x for x in by_spot[lab] if x["scan_id"] in flagged]
-            wl, st = med(lab, "wl_h", {x["scan_id"] for x in mine}), med(lab, "edge_step", {x["scan_id"] for x in mine})
-            parts = []
-            if _pct(wl, ref_wl):
-                parts.append(f"its white line is {_pct(wl, ref_wl)} from the others'")
+            how, shape = shape_evidence([x["scan_id"] for x in mine])
+            st = med(lab, "edge_step", {x["scan_id"] for x in mine})
+            parts = list(how)
             if _pct(st, ref_st):
-                parts.append(f"its edge step {_pct(st, ref_st)}")
+                parts.append(f"edge step {_pct(st, ref_st)}")
             other_rows = [x for o in others for x in by_spot[o] if x["scan_id"] in ref_ids]
             what = (f"{names[lab]} ({_scan_list(mine)}) differs from the other "
                     f"{'spot' if len(others) == 1 else f'{len(others)} spots'} ({_scan_list(other_rows)})"
                     + (": " + ", ".join(parts) if parts else "")
-                    + ("; its shape differs" if shape else "; only its intensity differs")
+                    + ("; its normalised shape differs" if shape else
+                       "; weaker signal at this spot, same shape" if st is not None and ref_st and st < ref_st else
+                       "; only its intensity differs, same shape")
                     + ("; these are also the first scans of the run, so the sample may still have been changing"
                        if early else "")
                     + "; possibly an uneven or thinner area of the sample")
@@ -1655,17 +1698,35 @@ def apply_spots(table: dict, recs: Sequence[Mapping], stability: Mapping, np) ->
                     x["notes"] = list(x["notes"]) + [{"source": "spots", "code": "spot_differs", "decides": False,
                                                       "said": what + ("; kept: the spots split evenly, no majority, the "
                                                                       "scientist decides" if shape else
-                                                                      "; kept: an intensity difference alone never "
-                                                                      "drops a scan"),
+                                                                      ": kept (an intensity difference alone never "
+                                                                      "drops a scan)"),
                                                       "was_said": said_before}]
                 x["rule_decision"] = "drop" if x["reasons"] else "keep"
                 if x["decided_by"] == "rule":
                     x["decision"] = x["rule_decision"]
                     x["merged"] = x["decision"] == "keep" and x.get("shift_eV") is not None
             said_spots.append(what)
+            outcomes.append("differing_spot_dropped" if majority and shape else
+                            ("spots_disagree" if shape else "intensity_only_kept"))
         statement = "; ".join(said_spots)
-        outcome = ("differing_spot_dropped" if majority and shape else
-                   ("spots_disagree" if shape else "intensity_only_kept"))
+        outcome = next((o for o in ("spots_disagree", "differing_spot_dropped") if o in outcomes), "intensity_only_kept")
+    # a spot whose signal is much weaker (or stronger) with the SAME normalised shape: kept, and said so
+    for lab in labels:
+        xs = [x for x in by_spot[lab] if x["decision"] == "keep" and not any(n.get("source") == "spots" for n in x["notes"])]
+        others_k = {x for o in labels if o != lab for x in (y["scan_id"] for y in by_spot[o]) if x in ref_ids}
+        st = med(lab, "edge_step", {x["scan_id"] for x in xs})
+        ro = [v for v in (metric(x, "edge_step") for x in others_k) if v is not None]
+        ref_o = float(np.median(ro)) if ro else None
+        if not xs or st is None or not ref_o or abs(st - ref_o) / abs(ref_o) < WEAK_SPOT_FRACTION:
+            continue
+        how = shape_evidence([x["scan_id"] for x in xs])[0]
+        if how:
+            continue
+        word = "weaker" if st < ref_o else "stronger"
+        note = {"source": "spots", "code": f"{word}_spot_same_shape", "decides": False,
+                "said": f"{word} signal at this spot ({names[lab]}: edge step {_pct(st, ref_o)}), same shape: kept"}
+        for x in xs:
+            x["notes"] = list(x["notes"]) + [note]
     summary = []
     for lab in labels:
         xs = by_spot[lab]
@@ -1714,6 +1775,39 @@ def _recount(table: dict) -> None:
                        "overridden_by_scientist": len([x for x in rows if x["decided_by"] == "scientist"]),
                        "merged": len(merged), "kept_not_merged": len(kept) - len(merged)}
     table["statement"] = decisions_statement(rows, table.get("overrides_not_applied") or ())
+
+
+def metric_shifts(sid: str, stability: Mapping | None, np) -> list[dict]:
+    """How one scan's NORMALISED-shape metrics (the stability analysis' ``delta_eV``, ``wl_e_eV``, ``wl_h``) differ
+    from the stable scans' (the stable window, else every other scan), counted only beyond the stability rule's own
+    floor (``core.SEL_FLOOR``) and 3 x the difference's sd (this scan's and the stable scans'). Empty: no shape metric moved, or none was measured."""
+    rows = (stability or {}).get("rows") or {}
+    me = (rows.get(sid) or {}).get("metrics") or {}
+    if not me:
+        return []
+    ref = [x for k, x in rows.items() if k != sid and "before_stable_window" not in (x.get("reasons") or ())]
+
+    def val(m, k):
+        v = m.get(k)
+        return float(v) if isinstance(v, (int, float)) and not isinstance(v, bool) and v == v else None
+
+    out = []
+    for k in SHAPE_METRICS:
+        v = val(me, k)
+        r = [x for x in (val(y.get("metrics") or {}, k) for y in ref) if x is not None]
+        if v is None or len(r) < 2:
+            continue
+        d = v - float(np.median(r))
+        # the uncertainty of the DIFFERENCE: this scan's own sd (a noisier scan's metric is less certain) with the
+        # stable scans' typical sd
+        mine = val(me, C._sd_key(k)) or 0.0
+        sds = [x for x in (val(y.get("metrics") or {}, C._sd_key(k)) for y in ref) if x is not None]
+        thr = max(float(C.SEL_FLOOR.get(k, 0.0)), 3 * float(np.hypot(mine, float(np.median(sds)) if sds else 0.0)))
+        if abs(d) > thr:
+            said = (f"white-line energy {d:+.2f} eV" if k == "wl_e_eV" else f"edge position {d:+.2f} eV"
+                    if k == "delta_eV" else f"white-line height {d:+.3g}")
+            out.append({"metric": k, "difference": d, "threshold": thr, "said": said + f" (threshold {thr:.2g})"})
+    return out
 
 
 def decisions_statement(rows: Sequence[Mapping], stale: Sequence[Mapping] = ()) -> str:
