@@ -657,6 +657,30 @@ def _has_source_evidence(candidate: Mapping) -> bool:
     return any(e["method"] in ("deterministic_parser", "stored_rule") for e in candidate["evidence"])
 
 
+def scan_decision_target_problem(bundle: Mapping, group: Mapping, value: Any) -> str | None:
+    """set_scan_decision names scans of THIS group's latest isaac.xas.v1 result (its scan id, file name or relative
+    path); ``None`` when every named scan is one, else why not, with the ids it has."""
+    from .processing import engine_xas as EX
+
+    gid = group["group_id"]
+    rows = []
+    for r in reversed(bundle.get("processing_results") or ()):
+        if r.get("group_id") == gid and r.get("protocol_id") == EX.PROTOCOL_ID and isinstance(r.get(EX.DECISIONS_KEY), Mapping):
+            rows = list(r[EX.DECISIONS_KEY].get("rows") or ())
+            break
+    if not rows:
+        return (f"{gid} has no {EX.PROTOCOL_ID} result with a scan-decision table yet (run `isaac process` first; a group "
+                f"on {EX.V0_FALLBACK} has none).")
+    known = set()
+    for x in rows:
+        known |= {str(x.get("scan_id")), str(x.get("file"))}
+    unknown = [s for s in value.get("scans") or () if s not in known]
+    if unknown:
+        ids = ", ".join(str(x.get("scan_id")) for x in rows[:12]) + (" …" if len(rows) > 12 else "")
+        return f"{gid} has no scan {', '.join(unknown)}; its scans are: {ids}."
+    return None
+
+
 def _check_decision(bundle: Mapping, kind: str, obj: Mapping, decision: str, value: Any, *, bulk: bool,
                     merge_with: Sequence[str] | None = None, split_into: Any = None) -> None:
     allowed = B.DECISIONS_BY_KIND.get(kind)
@@ -664,6 +688,10 @@ def _check_decision(bundle: Mapping, kind: str, obj: Mapping, decision: str, val
         raise MutationRefused(f"A {kind} cannot be decided.")
     if decision not in allowed:
         raise MutationRefused(f"`{decision}` is not a decision for a {kind}; allowed: {', '.join(sorted(allowed))}.")
+    if kind == "record_group" and decision == B.SCAN_DECISION:
+        problem = scan_decision_target_problem(bundle, obj, value)
+        if problem is not None:
+            raise MutationRefused(f"{problem} Nothing was recorded.")
     if kind == "record_group" and decision == "merge":
         problem = merge_with_problem(bundle, obj["group_id"], merge_with)
         if problem is not None:
@@ -796,6 +824,11 @@ def reprocess_cannot_help(result: Mapping) -> bool:
     out has more points). A result stored without that metric, or with other scans that might be used, is not one."""
     code = ((result.get("failure") or {}).get("code")) or ""
     return code in NO_REPROCESS_FAILURES and ((result.get("qc") or {}).get("metrics") or {}).get("reprocess_cannot_help") is True
+
+
+def _reprocess_group(group_id: str) -> str:
+    """Re-processing ONE group as it is (a scan decision changed): the same parameters, a new decision table."""
+    return f"isaac process <bundle_dir> --source <the beamtime folder you imported> --group {group_id}"
 
 
 def reprocess_command(group_id: str) -> str:
@@ -2731,6 +2764,10 @@ def _decide_arguments(*, target_ids, decision, by, orcid, qc_status, element, ed
     if same_conditions and decision != "merge":
         raise MutationRefused("--same-conditions goes with --decision merge on a record group: it says the words the "
                               "groups' file names differ in are labels, not conditions.")
+    if decision == B.SCAN_DECISION:
+        problem = B.scan_decision_problem(value)
+        if problem is not None:
+            raise MutationRefused(f"{problem}. Nothing was recorded.")
     if decision == B.ATHENA_SELECT_DECISION and (value is None or not isinstance(value, str)):
         raise MutationRefused("select_athena_version needs --value <version id>, one of the processing result's athena_versions.")
     if decision == B.CLOCK_ZONE_DECISION:
@@ -2768,7 +2805,7 @@ CAPTURE_STATEMENTS: Mapping[str, str] = {
 
 #: Record-group decisions that are not about the group's own state: each is compared with the latest of its own
 #: kind when a repeat is judged (a set_absorber restated after the group was confirmed records nothing).
-_GROUP_SIDE_DECISIONS = ("set_absorber", "approve_calibration")
+_GROUP_SIDE_DECISIONS = ("set_absorber", "approve_calibration", B.SCAN_DECISION)
 
 
 def _shown_value(value: Any) -> str:
@@ -2797,6 +2834,8 @@ def plain_statement(bundle: Mapping, planned: Sequence[tuple[str, Mapping]], tar
     what = {
         "set_absorber": f"{element} {edge} recorded",
         "approve_calibration": f"calibration {element} {edge} approved",
+        B.SCAN_DECISION: (f"scan decision {value.get('decision')} recorded for {', '.join(value.get('scans') or ())}"
+                          if isinstance(value, Mapping) else "scan decision recorded"),
         "confirm": "confirmed", "reject": "rejected", "defer": "deferred", "correct": f"{_shown_value(value)} recorded",
         "approve": "approved" + (f" (QC status {qc_status})" if qc_status else ""),
         "merge": "merge recorded", "split": "split recorded",
@@ -3219,6 +3258,16 @@ def record_decision(
                 "Grouping is unchanged: no position is recorded as a counter or as not one, and no group moved. The "
                 "counter question stays open, marked deferred; answer it later with set_counter_positions or "
                 "set_not_counter_positions.")
+        if decision == B.SCAN_DECISION and recorded:
+            # isaac.xas.v1: the group's curve changes only by re-processing it (the decision table is hashed into the
+            # result, so a changed decision gives a NEW result to review; an approval stays on the old curve)
+            gids = sorted({obj.get("group_id") for _, obj in planned if obj.get("group_id")})
+            result["statement"] = (
+                f"Recorded: {value['decision']} for {', '.join(value['scans'])} in {', '.join(gids)} (the scientist's scan "
+                "decision; it overrides the scan-decision rule for those scans and is shown as theirs). Re-process the "
+                "group to apply it: " + "; ".join(f"`{_reprocess_group(g)}`" for g in gids[:3])
+                + ". That makes a NEW result to review; an approval already given stays on the old curve.")
+            result["next_commands"] = [_reprocess_group(g) for g in gids[:3]]
         if decision == "set_counter_positions" and recorded:
             # what this answer would do on the next regroup, said BEFORE it (the scientist is told what it joins)
             result["regroup_preview"] = counter_answer_preview(bundle)

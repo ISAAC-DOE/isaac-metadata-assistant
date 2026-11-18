@@ -804,6 +804,10 @@ def _row(kind: str, obj: Mapping, group_status: Mapping | None = None) -> dict:
             # proposal in a few words (never applied); the full blocks are in `bundle show <dir> processing-result <id>`
             **({"quick_merge_agreement": qm} if (qm := quick_merge_agreement(obj)) else {}),
             **({"scan_selection": sb} if (sb := scan_selection_brief(obj)) else {}),
+            # isaac.xas.v1 (the vendored xas-analysis engine): the protocol and the scan decisions in a few words
+            **({"protocol": obj.get("protocol_id")} if obj.get("protocol_id") not in (None, "isaac.xas.v0") else {}),
+            **({"scan_decisions": sd} if (sd := _engine_brief(obj)) else {}),
+            **({"engine_fallback": ef} if (ef := (obj.get("engine") or {}).get("reason")) and obj.get("protocol_id") == "isaac.xas.v0" else {}),
             "athena_versions": len(obj.get("athena_versions") or ()),
             # the ids `decide --decision select_athena_version --value <version_id>` takes, with what names them
             **({"athena_version_choices": [_athena_version_brief(v) for v in obj["athena_versions"]]} if obj.get("athena_versions") else {}),
@@ -1683,7 +1687,18 @@ def _processing_result_view(bundle: Mapping, r: Mapping, *, full: bool = False) 
     quick = _quick_merges_view(r, full=full)
     if quick is not None:
         view["scientist_quick_merges"] = quick
+    # isaac.xas.v1: the engine, the energy reference and its evidence, the shift table, the decision table and the
+    # normalisation convention, in plain words (engine_xas.show_blocks); a v0 result says why v0 made it
+    from .processing import engine_xas as EX
+
+    view.update(EX.show_blocks(r, full=full))
     return view
+
+
+def _engine_brief(r: Mapping) -> str | None:
+    from .processing import engine_xas as EX
+
+    return EX.list_brief(r)
 
 
 def _spots_view(r: Mapping) -> list[str]:
@@ -2225,11 +2240,17 @@ def cmd_bundle_decide(args) -> int:
                 same_conditions=args.same_conditions,
                 as_said=args.as_said,
             )
+        value = M.parse_value(args.value, args.json)
+        if getattr(args, "scans", None) is not None or args.decision == "set_scan_decision":
+            if args.decision != "set_scan_decision":
+                raise M.MutationRefused("--scans goes with --target <group id> --decision set_scan_decision --value "
+                                        "keep|drop. Nothing was recorded.")
+            value = {"decision": value, "scans": [x.strip() for x in str(args.scans or "").split(",") if x.strip()]}
         return M.decide(
             Path(args.bundle_dir),
             target_ids=targets,
             decision=args.decision,
-            value=M.parse_value(args.value, args.json),
+            value=value,
             by=args.by,
             orcid=args.orcid,
             note=note,
@@ -2806,7 +2827,9 @@ def build_parser(prog: str = "isaac") -> argparse.ArgumentParser:
                         "decision's note); never two different parsed sample names")
     q.add_argument("--decision", required=True,
                    help="candidate / missing value / conflict: confirm correct reject defer; record group: confirm split merge "
-                        "reject defer approve_calibration set_absorber; processing result: approve reject needs_changes defer, "
+                        "reject defer approve_calibration set_absorber set_scan_decision (with --value keep|drop and "
+                        "--scans: the scientist's keep / drop of those scans, isaac.xas.v1); processing result: approve "
+                        "reject needs_changes defer, "
                         "or select_athena_version --value <one of its athena_versions[].version_id> (the result of record, "
                         "bound to that version's project file, group and data hash, so a renumbering re-processing keeps it; "
                         "changes no QC status and no processed value); merge candidate (mc-...): keep_apart (the groups are "
@@ -2857,6 +2880,9 @@ def build_parser(prog: str = "isaac") -> argparse.ArgumentParser:
     q.add_argument("--accept-shift", type=float, dest="accept_shift",
                    help="with approve_calibration: the shift in eV the scientist accepts, exactly as the reply showed it "
                         "(e.g. -8.6); needed when the shift is above the protocol's warning level")
+    q.add_argument("--scans", help="--target <group id> --decision set_scan_decision --value keep|drop: the scans, by the "
+                                   "scan ids (or file names) `bundle show processing-result` lists, comma-separated; "
+                                   "the scientist's keep / drop overrides the scan-decision rule (isaac.xas.v1)")
     q.add_argument("--positions", help="--target experiment + set_counter_positions or set_not_counter_positions: "
                                        "1-based filename token positions, e.g. 2 or 2,3; set_counter_positions also takes "
                                        "last (the last token, whatever the name's length), e.g. last or 3,last")

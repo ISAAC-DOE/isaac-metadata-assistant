@@ -1058,7 +1058,9 @@ DECISIONS_BY_KIND: Mapping[str, frozenset[str]] = {
     "candidate": frozenset({"confirm", "correct", "reject", "defer"}),
     "missing_value": frozenset({"confirm", "correct", "reject", "defer"}),
     "conflict": frozenset({"confirm", "correct", "reject", "defer"}),
-    "record_group": frozenset({"confirm", "split", "merge", "reject", "defer", "approve_calibration", "set_absorber"}),
+    # set_scan_decision (isaac.xas.v1): a scientist's keep / drop of named scans, overriding the scan-decision rule
+    "record_group": frozenset({"confirm", "split", "merge", "reject", "defer", "approve_calibration", "set_absorber",
+                               "set_scan_decision"}),
     "processing_result": frozenset({"approve", "reject", "needs_changes", "defer", "select_athena_version"}),
     # `defer` (1.9.x polish): "I don't know" to the counter question — recorded, changes no grouping
     "experiment": frozenset({"set_counter_positions", "set_clock_time_zone", "set_not_counter_positions", "defer"}),
@@ -1071,6 +1073,19 @@ DECISIONS_BY_KIND: Mapping[str, frozenset[str]] = {
 #: of record; it never moves the state, the QC status or any processed value.
 PROCESSING_STATE_DECISIONS = frozenset({"approve", "reject", "needs_changes", "defer"})
 ATHENA_SELECT_DECISION = "select_athena_version"
+#: isaac.xas.v1 (processing/engine_xas.py): the scientist's keep / drop of named scans of a record group; value
+#: ``{"decision": "keep"|"drop", "scans": [scan id, ...]}``. It moves no group status; the group is re-processed.
+SCAN_DECISION = "set_scan_decision"
+
+
+def scan_decision_problem(value: Any) -> str | None:
+    """Why a set_scan_decision value is not ``{"decision": keep|drop, "scans": [scan id, ...]}`` (None when it is)."""
+    if not isinstance(value, Mapping) or value.get("decision") not in ("keep", "drop"):
+        return "set_scan_decision needs --value keep or --value drop"
+    scans = value.get("scans")
+    if not isinstance(scans, list) or not scans or not all(isinstance(x, str) and x.strip() for x in scans):
+        return "set_scan_decision needs --scans <scan id>[,<scan id>...] (the ids `bundle show processing-result` lists)"
+    return None
 KEEP_APART_DECISION = "keep_apart"
 NOT_COUNTER_DECISION = "set_not_counter_positions"
 #: The flag and the processing result's own question while no Athena version is selected.
@@ -5788,6 +5803,10 @@ def validate_bundle(bundle: Any, *, max_errors: int = 50, encoded: bytes | None 
             is_absorber_element(d.get("element")) and is_absorber_edge(d.get("edge"))
         ):
             errors.append(f"decision: {d['decision_id']} {d['decision']} needs an element and an edge (K, L1-L3, M1-M5)")
+        if d.get("decision") == SCAN_DECISION:
+            problem = scan_decision_problem(d.get("value"))
+            if problem is not None or (d.get("target") or {}).get("kind") != "record_group":
+                errors.append(f"decision: {d['decision_id']} {problem or 'set_scan_decision is for a record group'}")
         if d.get("decision") == CLOCK_ZONE_DECISION:
             problem = clock_zone_problem(d.get("value"))
             if problem is not None:

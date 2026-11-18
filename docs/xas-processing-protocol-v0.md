@@ -54,8 +54,9 @@ with its answer). What this build does with them:
 * **Energy calibration and alignment (pq-004, closed; implementation pending).** The monochromator is foil-calibrated
   by the beamline staff at the start of the beamtime, so the energy axis is already calibrated. Every scan is to be
   aligned to its in-scan reference: a foil in transmission (on I1/I2) or, without a usable foil edge, a glitch in I0.
-  The reference foil is the element under study. The per-scan alignment will be done by the xas-analysis reduction
-  engine (integration pending); this build does not align scans yet, and its calibration step (§3) is unchanged.
+  The reference foil is the element under study. The per-scan alignment is done by the xas-analysis reduction
+  engine: `isaac.xas.v1` (next section). This v0 protocol, which keeps the groups the engine does not cover, still
+  does not align scans, and its calibration step (§3) is unchanged.
 * **Never use Athena (pq-005, pq-007, closed).** Athena projects are never read (`isaac.processing.athena_never_used.v0`):
   never the result of record, never a source of processing parameters, never an input to a QC verdict or an agreement
   check. They are still counted as present files (`athena.projects_found`); `athena.never_used` is true and the summary
@@ -70,6 +71,57 @@ with its answer). What this build does with them:
 * **Dead time (pq-006, closed): not ISAAC's job.** The flag `dead_time_correction_not_applied` and the parameter
   `channels.dead_time_rate_prefix` are removed; no warning replaces them.
 * **Over-absorption: not ISAAC's job.** No flag, question or caveat.
+
+## isaac.xas.v1: the vendored xas-analysis engine (17 Nov 2026)
+
+Oscar's validated reduction package `xas-analysis` 0.1.0.dev0 is vendored at `src/xas_analysis/` (provenance, the
+permission statement and every local modification: `src/xas_analysis/PROVENANCE.md`). `isaac process` runs it, through
+the adapter `apps/api/isaac_api/local_import/processing/engine_xas.py` (protocol `isaac.xas.v1`, status
+`draft_unreviewed`: the engine is Oscar's, the adapter is ISAAC's and is reviewed by Oscar and Angel), on every group
+the engine's own scope (`src/xas_analysis/skill/scope.md`) covers: SSRL hard-XAS fluorescence / HERFD read from SPEC
+or SSRL EXAFS Data Collector files. Everything else stays on v0 (this document) and its result says why
+(`engine.reason`): transmission samples (the channel choice is ln(I0/I1), or the engine's `measurement_mode` reads the
+data as transmission), alignment groups, other formats. `ISAAC_PROCESSING_ENGINE=v0` keeps every group on v0.
+
+**Once per beamtime** (`engine_beamtime` in `processing_results.json`): every group is read with v0's own reader,
+channel choice and BL15-2 absev rule (hash-checked); the engine's survey (`survey_files`, one entry per record group,
+spots and repeats pooled) picks the energy reference, its anchor method and window, and reads the `mono reset` lines;
+the reference is the engine's convention, the EARLIEST group's MEAN anchor; the normalisation window is the engine's
+default rule (`recipe_init.norm_range`) on the beamtime's modal grid, one per edge. With `--group`, the stored block is
+reused when its fingerprint (sources, groups, channel parameters, engine version) still holds.
+
+**Per group, in the engine's order:** anchor every scan (a foil in transmission when the survey finds one in the
+sample scans, its I0 glitch as the fallback route for a scan whose foil is not usable; else the I0 glitch, Gaussian-dip
+model fit; else the foil timeline; else none, said), shift = reference anchor - scan anchor (a shift beyond 1 eV for a
+glitch, 2 eV for a foil, is a failed anchor), ONE interpolation onto the group's modal grid; screen
+(`screen_report`, report-only); decide (below); average the kept scans' raw IF/I0 (`average_scans`, points no kept
+scan covers dropped); normalise the average ONCE (`mback_xrs`, Victoreen + McMaster, constrained background, the step
+locked at the tabulated edge; element and edge from the scientist's `set_absorber`, else the files' agreeing absorber
+evidence, else the edge the survey identified from the scan range, said as unconfirmed); E0 = larch `find_e0` on the
+average. Uncertainty note: the edge step over 12 windows around the one used (max - min over the median; warn above
+20 %). QC: `no_edge`, `edge_step_implausible`, `post_edge_not_at_1` fail (never offered for approval, as v0); warns
+`normalization_window_sensitive`, `most_scans_dropped`, `logbook_inferred_note_applied`, `anchor_fallback_route_used`,
+`normalization_window_group_own`, `single_scan`, `no_energy_reference`. Outputs (content-addressed run folder, as v0):
+`merged.csv` (raw average, its standard error, scans per point), `normalized.csv` (`energy_eV, norm, mcmaster_mu,
+background`), `scan_decisions.json` (the decision and shift tables; hashed, so a changed decision is a new result id),
+`qc.json`, `params.json`, `plot.png`. The MERGE quick-merge comparison is kept (normalised the same way).
+
+**The scan-decision rule `isaac.xas.scan_decision.v1`** (Angel and Krish, 17 Nov 2026: the skill decides, by a
+documented rule; every decision recorded with its reason and evidence, shown, and overridable). Every scan gets keep or
+drop. DROP when (a) a logbook scan note says so: `exclude`, `start_from`, `keep_only` (a note the reading marked
+`inferred` applies too, and is said so; `flag` changes nothing and is shown), read through
+`isaac_api.local_import.scan_notes.scan_notes_for_run` (absent in this build: no note applies, and the result says so);
+(b) the stability analysis `isaac.xas.scan_selection_proposal.v0` on the ALIGNED scans puts it before the stable window
+(its other reasons are said beside a kept scan, never a drop); (c) the engine's screening flags: coverage under 90 % of
+the group's grid (aborted), a failed anchor (no fit, beyond the shift limit, or more than 5 robust sigmas, floor 30 meV,
+from the group's median), an off-shape scan (6 robust sigmas and 1.5 times the median shape rms) whose departure is
+more than twice its own counting noise, a dead channel with no edge at all (edge under 2 times its noise). Otherwise
+KEEP. An intensity drop alone never drops a scan: a dead-channel flag on a scan that still shows its edge, and an
+off-shape flag within twice the scan's own noise (fewer counts), keep the scan and say why. Over-absorption and dead
+time are not judged (no flag). A scientist's `set_scan_decision` (`decide --target <group> --decision
+set_scan_decision --value keep|drop --scans <ids> --by <name>`) overrides the rule for those scans, is shown as theirs
+beside what the rule said, moves no group status, and takes effect when the group is re-processed. The scientist still
+approves each curve before it goes into a record.
 
 ## 0. Why
 

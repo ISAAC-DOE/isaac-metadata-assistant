@@ -50,6 +50,7 @@ from .. import grouping as G
 from . import _deps
 from . import athena as A
 from . import core as C
+from . import engine_xas as EX
 from . import protocol as P
 from . import quick_merge as QM
 from .channels import (BL15_2_BEAMLINE_UNCONFIRMED_FLAG, BL15_2_ENERGY_MISSING_FLAG, MODE_TRANSMISSION, ChannelChoice,
@@ -3522,6 +3523,18 @@ def _athena_result(group: Mapping, entry: Mapping, files: Sequence[Mapping], par
 # --- whole bundle ---------------------------------------------------------------------------
 
 
+#: ``isaac.xas.v1`` is the default; ``ISAAC_PROCESSING_ENGINE=v0`` keeps every group on v0 (the v0 tests pin it)
+ENGINE_ENV = "ISAAC_PROCESSING_ENGINE"
+
+
+def EX_enabled(engine: bool | None) -> bool:
+    if engine is not None:
+        return bool(engine)
+    import os
+
+    return os.environ.get(ENGINE_ENV, "v1").strip().lower() != "v0"
+
+
 def _groups_for(bundle: Mapping, bundle_dir: Path) -> tuple[list[dict], list[dict], str]:
     if bundle.get("record_groups"):
         rec, origin = list(bundle["record_groups"]), "bundle.json"
@@ -3564,8 +3577,12 @@ def process_bundle(
     scan_reader: Any = None,
     calibration_approvals: Mapping[str, Mapping] | None = None,
     skip_group_ids: Sequence[str] = (),
+    engine: bool | None = None,
 ) -> dict:
     """Process every (or the selected) record group of the bundle in ``bundle_dir``.
+
+    ``engine``: use ``isaac.xas.v1`` (the vendored xas-analysis engine, :mod:`engine_xas`) for the groups its scope
+    covers; ``None`` = the default, :data:`ENGINE_ENV` unless it says ``v0`` (the v0 test suite pins it so).
 
     ``skip_group_ids``: record groups NOT processed (``isaac process`` passes the groups that are no
     longer live: rejected, merged, split). A rejected one still takes part in the Athena name match; a group
@@ -3658,6 +3675,18 @@ def process_bundle(
     if SCAN_SELECTION_ENABLED:
         ctx.scan_series = run_series_pass(all_groups, ctx, out_dir, reuse=wanted is not None,
                                           now=header["created_utc"])
+    # isaac.xas.v1 (EX): the vendored xas-analysis engine + the ISAAC adapter, for the groups its scope covers; its
+    # beamtime pass (survey, ONE reference, windows) runs once here. v0 keeps what the engine does not cover.
+    ctx.engine = None
+    if EX_enabled(engine):
+        stored_bt = None
+        if wanted is not None:
+            try:
+                stored_bt = json.loads((out_dir / RESULTS_FILE).read_text(encoding="utf-8")).get(EX.BEAMTIME_KEY)
+            except (OSError, ValueError):
+                stored_bt = None
+        ctx._engine_groups = [g for g in all_groups if g.get("group_kind") not in ("unread_acquisition", "generic_run")]
+        ctx.engine = EX.prepare(ctx._engine_groups, ctx, stored=stored_bt, wanted=wanted)
     results, unread_results = [], []
     skipped = set(skip_group_ids or ())
     for g in all_groups:
@@ -3666,7 +3695,16 @@ def process_bundle(
         if wanted is not None and g["group_id"] not in wanted:
             continue
         try:
-            out = process_group(g, ctx, matched.get(g["group_id"]), athena_versions=versions.get(g["group_id"]))
+            covered, why = EX.covers(g, ctx) if ctx.engine is not None else (False, None)
+            if covered:
+                out = EX.process_group_v1(g, ctx)
+            else:
+                out = process_group(g, ctx, matched.get(g["group_id"]), athena_versions=versions.get(g["group_id"]))
+                if ctx.engine is not None:
+                    for r in out:  # said on the result (outside every hashed file): why v0 made it
+                        if r.get("source") == "isaac_protocol":
+                            r[EX.ENGINE_KEY] = {"protocol_id": P.PROTOCOL_ID, "reason": why,
+                                                "statement": f"Processed by {P.PROTOCOL_ID}, not {EX.PROTOCOL_ID}: {why}."}
         except Exception as exc:  # noqa: BLE001 - one group's crash is that group's failure, never a pass
             out = [_fail(_base(g, "isaac_protocol"), "processing_error", f"{type(exc).__name__}: {exc}"[:500])]
         for r in out:
@@ -3708,6 +3746,7 @@ def process_bundle(
                if ref_channels else {}),
         },
         **({SCAN_SERIES_KEY: _series_payload(ctx.scan_series)} if ctx.scan_series is not None else {}),
+        **({EX.BEAMTIME_KEY: EX.beamtime_payload(ctx.engine)} if ctx.engine is not None else {}),
         "processing_results": results,
         "unread_acquisition_results": unread_results,
         "summary": summarize(results + unread_results),
@@ -4483,14 +4522,31 @@ def summarize(results: Sequence[Mapping]) -> dict:
         },
         "athena_matched": sum(comp.values()),
         "athena_comparison": dict(sorted(comp.items())),
-        "lines": summary_lines(len(applied), verdicts, by_reason, by_reader),
+        "lines": summary_lines(len(applied), verdicts, by_reason, by_reader, by_protocol=_by_protocol(applied)),
+        **({"by_protocol": _by_protocol(applied)} if any(r.get("protocol_id") != P.PROTOCOL_ID for r in applied) else {}),
     }
 
 
-def summary_lines(processed: int, verdicts: Mapping[str, int], by_reason: Mapping[str, int], by_reader: Mapping[str, int]) -> list[str]:
+def _by_protocol(applied: Sequence[Mapping]) -> dict:
+    out: dict = {}
+    for r in applied:
+        k = str(r.get("protocol_id"))
+        out[k] = out.get(k, 0) + 1
+    return dict(sorted(out.items()))
+
+
+def summary_lines(processed: int, verdicts: Mapping[str, int], by_reason: Mapping[str, int], by_reader: Mapping[str, int],
+                  *, by_protocol: Mapping[str, int] | None = None) -> list[str]:
     """The plain sentences ``isaac process`` and ``summary.md`` print."""
     qc = ", ".join(f"{k} {verdicts[k]}" for k in ("pass", "warn", "fail") if verdicts.get(k)) or "none"
-    lines = [f"{processed} groups processed by draft protocol {P.PROTOCOL_ID}: QC {qc} (a person states the QC status)."]
+    if by_protocol and set(by_protocol) != {P.PROTOCOL_ID}:
+        # isaac.xas.v1 (the vendored xas-analysis engine) for what its scope covers, v0 for the rest
+        said = "; ".join(f"{v} by {k}" + (" (the vendored xas-analysis engine + the ISAAC adapter)" if k == EX.PROTOCOL_ID
+                                          else " (what the engine's scope does not cover)" if k == P.PROTOCOL_ID else "")
+                         for k, v in sorted(by_protocol.items(), reverse=True))
+        lines = [f"{processed} groups processed by draft protocols: {said}. QC {qc} (a person states the QC status)."]
+    else:
+        lines = [f"{processed} groups processed by draft protocol {P.PROTOCOL_ID}: QC {qc} (a person states the QC status)."]
     n = by_reason.get(B.NA_NO_XAS_CHANNEL, 0)
     if n:
         readers = ", ".join(f"{k} {v}" for k, v in sorted(by_reader.items()))

@@ -66,6 +66,52 @@ Get the groups with `bundle list <bundle> groups` and one in full with `bundle s
 - Say "7 of 12 groups confirmed" after each batch. A reference or alignment run is its own group.
 - Beamtime-wide notes are not group members.
 
+## Processing with the xas-analysis engine (`isaac.xas.v1`)
+
+`isaac process` runs **`isaac.xas.v1`**, Oscar's validated xas-analysis reduction engine (vendored in the ISAAC folder,
+`src/xas_analysis/`) plus ISAAC's adapter, on every group its scope covers: SSRL hard-XAS fluorescence / HERFD from
+SPEC or EXAFS Data Collector (BL4-3) files. The rest stays on `isaac.xas.v0` (next section): a transmission sample, an
+alignment group, another format. A v0 result then says why in `engine.reason` (the `list processing-results` row:
+`engine_fallback`); say it in words ("this pellet was measured in transmission, which the engine does not reduce").
+The `process` summary says how many groups each protocol made. What v1 did, in its order: every scan anchored on ONE
+beamtime reference and shifted once; the scans DECIDED (kept or dropped); the kept scans' raw mu (IF/I0) averaged; the
+average normalised ONCE. Show per group, from `<isaac> bundle show <bundle> processing-result <id>`:
+
+- **`energy_reference`**: say its `statement` (which reference: a foil in transmission, the I0 glitch, a foil timeline,
+  or none; the fit and window; the earliest group whose mean anchor is the reference), and its `evidence` lines and
+  `mono_reset_lines` when asked. Every scan of every sample is aligned to that one reference, never to its own edge (the
+  staff calibrate the mono on a foil at the start of the beamtime). A result with `no_energy_reference` (warn) was not
+  shifted: say so.
+- **`scan_shifts`**: the shift range in meV ("shifts +65 to +77 meV"); name a scan with `no anchor` (it is dropped).
+- **`scan_decisions`** (rule `isaac.xas.scan_decision.v1`, its text in `rule`): the skill DECIDED which scans are kept,
+  by that rule; these are decisions with their reasons, never proposals waiting for an answer. Say the `counts`, then
+  each DROPPED scan with its reason in words: a logbook note (`logbook (stated)` or `logbook (inferred)`: say "the
+  logbook says…" and, for inferred, "my reading of the logbook"), `before_stable_window` (the sample was still
+  changing), `coverage` (stopped early), `anchor` / `anchor_failed` (no reliable energy anchor), `shape` (another shape
+  than the other scans, beyond their noise), a dead channel with no edge. Then each KEPT scan with a remark (a weaker or
+  noisier scan, `weak_signal` / `noisier_not_off_shape`, a logbook flag). An intensity drop alone never drops a scan:
+  never offer to drop one for being weaker. A row "the scientist's decision" was overridden: say whose.
+- **`logbook_notes`**: the notes read for these runs (exclude, start_from, keep_only apply; a flag changes nothing and is
+  said). "No logbook scan notes: this build has no logbook scan-notes reader" means none was applied: say it once.
+- **`normalization`**: the convention in plain words (background + McMaster step; the post-edge follows McMaster and is
+  NOT flattened to 1, so edge steps run a few % above a flattened one), the absorber it used and its basis (say "not
+  confirmed" when it is, and offer `set_absorber`), the window and whether it is the beamtime's one window, and the
+  `uncertainty` sentence (the spread of the edge step over nearby windows).
+- the plot: kept scans solid, dropped scans dashed with the reason in the legend, the average in black; below, the
+  normalised curve with the McMaster step and the windows. The QC verdict uses `no_edge`, `edge_step_implausible` and
+  `post_edge_not_at_1` as v0 does (never offered for approval), and warns `normalization_window_sensitive`,
+  `most_scans_dropped`, `logbook_inferred_note_applied`, `anchor_fallback_route_used`, `normalization_window_group_own`,
+  `single_scan`: say each in words. The quick-merge block (`scientist_quick_merges`) is read as below, normalised the
+  way the result is.
+
+**The scientist overrides a decision**, only on their own word in this conversation, one call per keep / drop, naming the
+scans by the ids the rows give (`<run name>#<scan number>`, or the file name):
+`<isaac> bundle decide <bundle> --target <group id> --decision set_scan_decision --value drop --scans "<scan id>,<scan id>" --note "<their words>" --by "<name>"`
+(`--value keep` puts a dropped scan back). It moves no group status; the reply says to re-process that group:
+`<isaac> process <bundle> --source <folder> --group <group id>`. The new result has a new id, shows the row as the
+scientist's (`decided_by: scientist`, with what the rule said), and is approved as usual; an approval of the old result
+stays on the old curve. Approving stays the scientist's call per curve, exactly as below.
+
 ## Processing (draft protocol `isaac.xas.v0`)
 
 `isaac process <bundle> --source <folder>` (always give `--source`; the bundle records the folder only
