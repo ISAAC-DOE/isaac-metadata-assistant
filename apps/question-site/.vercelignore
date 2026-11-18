@@ -1,0 +1,6 @@
+test/
+dev-server.js
+.env.example
+.env.local
+.dev-store.json
+README.md

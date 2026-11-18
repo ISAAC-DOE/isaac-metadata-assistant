@@ -29,7 +29,8 @@ for (const file of ['.env.local', '.env.example']) {
 const dataArg = arg('--data', null);
 if (dataArg) process.env.QUESTION_SITE_DATA_DIR = path.resolve(dataArg);
 if (!process.env.QUESTION_SITE_DATA_DIR && !fs.existsSync(path.join(here, 'data', 'site-data.json'))) {
-  process.env.QUESTION_SITE_DATA_DIR = path.join(here, 'test', 'fixtures'); // made-up questions
+  const { fixtureDataDir } = await import('./test/fixture-data.js');
+  process.env.QUESTION_SITE_DATA_DIR = fixtureDataDir(); // made-up questions
 }
 if (process.env.QUESTION_SITE_DEV_STORE) {
   process.env.QUESTION_SITE_DEV_STORE = path.resolve(here, process.env.QUESTION_SITE_DEV_STORE);

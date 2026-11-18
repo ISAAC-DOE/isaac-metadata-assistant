@@ -67,6 +67,6 @@ question that is still asked keeps its answer, and one the bundle no longer asks
 | `public/` | The page: `index.html`, `app.js` (views), `logic.js` (pure logic, tested), `styles.css` |
 | `api/` | The routes: `login`, `logout`, `state`, `answer`, `answers` (download), `image` |
 | `lib/` | Sign-in (`auth.js`), the answer store (`store.js`), answer checks (`answers.js`), data (`data.js`) |
-| `test/` | `node --test` tests and a made-up question set |
+| `test/` | `node --test` tests and a made-up question set (its image is kept as base64 text so the repo stays greppable) |
 | `dev-server.js` | The local server |
 | `vercel.json` | Security headers, and `data/**` bundled with the functions |

@@ -1,12 +1,11 @@
 // Test helpers: call a handler the way a host would, with a fake request and response.
 
 import { Readable } from 'node:stream';
-import path from 'node:path';
-import { fileURLToPath } from 'node:url';
+import { fixtureDataDir } from './fixture-data.js';
 import { MemoryStore, useStore } from '../lib/store.js';
 import { resetDataCache } from '../lib/data.js';
 
-export const FIXTURES = path.join(path.dirname(fileURLToPath(import.meta.url)), 'fixtures');
+export const FIXTURES = fixtureDataDir();
 export const PASSWORD = 'test-password-not-real';
 
 export function setup() {
