@@ -101,6 +101,40 @@ jobs:
       - name: Audit generated record evidence
         run: isaac audit --records-dir /tmp/isaac-demo
 
+  processing:
+    # THE CONFIGURATION SCIENTISTS ACTUALLY RUN. `scripts/setup_isaac_local.sh` installs the
+    # `processing` extra by default, but the `test` job above installs only `[dev,api]`, so every
+    # processing test there skips (pytest.importorskip on numpy / larch) and the processing engine
+    # was never exercised in CI. This job installs the extra, PROVES it imports (so a silent skip
+    # cannot pass for a run), and runs the whole suite in that configuration.
+    name: tests with the processing extra installed
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v5
+
+      - name: Set up Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.11"
+          cache: "pip"
+
+      - name: Install package with the processing extra
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e ".[dev,api,processing]"
+
+      - name: Prove the processing extra imports (a skip must not pass for a run)
+        run: |
+          python - <<'PY'
+          import numpy, larch
+          print("numpy", numpy.__version__, "| larch", getattr(larch, "__version__", "?"))
+          PY
+
+      - name: Run tests
+        run: pytest -q
+
   postgres-migration:
     name: migration and durable repository against a real PostgreSQL
     runs-on: ubuntu-latest

@@ -58,8 +58,11 @@ def test_mback_recovers_synthetic_components():
 def test_mback_legacy_recovers_discontinuous_synthetic():
     E, mu, raw = _synthetic(continuous=False)
     r = mback("Ti", E, raw, None, (1, 2), "K", bg_continuity=False)
-    assert r.info["A_edge"] == pytest.approx(0.7, rel=1e-9)
-    assert np.allclose(r.norm_xas, mu, atol=1e-9)
+    # ISAAC (M9): the legacy discontinuous model is ill-conditioned (PORT_STATUS Finding 0), so its exact
+    # least-squares A_edge moves by ~1e-8 relative between BLAS/LAPACK builds (8.2e-9 on CI's Linux runner).
+    # 1e-6 still proves exact recovery of the synthetic step; the continuous-model tests keep 1e-9.
+    assert r.info["A_edge"] == pytest.approx(0.7, rel=1e-6)
+    assert np.allclose(r.norm_xas, mu, atol=1e-6)
 
 
 def test_mback_single_polynomial():

@@ -71,3 +71,7 @@ the beamline scientists' rules (17 Nov 2026) are never Athena, and no dead-time 
   labelled foil file is left out of the edge identification when any other file exists; nothing else changes (a file
   whose role is guessed from its name, the package's own `survey(folder)`, is treated as before).
   Test: `::test_a_caller_labelled_foil_never_decides_the_edge`.
+- **M9 test tolerance, legacy model only** (`tests/xas_analysis/test_xas_models.py`, no package code change):
+  `test_mback_legacy_recovers_discontinuous_synthetic` asserted A_edge to rel 1e-9. The legacy discontinuous model is
+  ill-conditioned (PORT_STATUS Finding 0), and on CI's Linux BLAS its exact minimum lands 8.2e-9 relative from 0.7.
+  The tolerance is 1e-6 for that one test; the continuous-model tests keep 1e-9.
