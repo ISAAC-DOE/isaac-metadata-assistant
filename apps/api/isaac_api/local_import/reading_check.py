@@ -60,7 +60,7 @@ MAX_SHEET_PAGES = 200
 MAX_PDF_PAGES = 2_000
 #: How to install the PDF reader, said when it is missing.
 PDF_INSTALL = 'scripts/setup_isaac_local.sh (or: .venv/bin/python -m pip install -e ".[reading]")'
-NO_TEXT_LAYER = "no text layer; quote from a text copy or report it instead"
+NO_TEXT_LAYER = "no text layer, so its quotes cannot be checked: tell the scientist what the page says instead"
 _PAGE_RE = re.compile(r"(?<![A-Za-z])(?:pages?|pp?\.)\s*[:#]?\s*(?P<n>\d+)\b", re.I)
 #: The most occurrences of one quote looked at when it is found away from the locator.
 _MAX_HITS = 50
@@ -69,10 +69,13 @@ PASS = "pass"
 FAIL = "fail"
 
 #: A line reference in every form a reader writes: ``line 12``, ``line:12``, ``line12``, ``Line #12``, ``l. 12``,
-#: ``L12``, ``ll. 4-9``, ``lines 4-9``, ``lines 1379–1391``, ``lines 4..9``, ``lines 4 to 9``, ``row 12`` (a text
-#: file's row is its line); never an Igor ``history line N``. A locator holding a number that is none of these FAILS.
+#: ``ll. 4-9``, ``lines 4-9``, ``lines 1379–1391``, ``lines 4..9``, ``lines 4 to 9``, ``row 12`` (a text file's row is
+#: its line), ``L12`` / ``L 4``; never an Igor ``history line N``, and never an absorption-edge token: ``L1``, ``L2`` and
+#: ``L3`` are edges (``Ir L3-edge note, line 151`` is line 151, not line 3), so a bare ``L`` is a line only before a
+#: number of 4 or more or of two or more digits (``l.`` with its dot is always one). A locator holding a number that is
+#: none of these FAILS.
 _LINE_RE = re.compile(
-    r"(?<![A-Za-z])(?<!history )(?:lines?|rows?|ll?)\s*[.:#]?\s*#?\s*(?P<first>\d+)"
+    r"(?<![A-Za-z])(?<!history )(?:lines?|rows?|ll?\.|l(?=\s*#?\s*(?:[4-9]|\d{2})))\s*[.:#]?\s*#?\s*(?P<first>\d+)"
     r"(?:\s*(?:-|–|—|\.\.|to)\s*(?P<last>\d+))?(?!\d)", re.I)
 #: A document locator the extractor's text can be held to: a paragraph, a table, a slide, a sheet's row.
 _DOC_RE = re.compile(r"(?<![A-Za-z])(?P<kind>paragraphs?|paras?\.?|¶|tables?|slides?|rows?)\s*[.:#]?\s*#?\s*(?P<n>\d+)\b", re.I)
@@ -381,6 +384,17 @@ def _header_lines(lines: list[str], locator: str) -> tuple[list[str], list[int],
     return keep, numbers, how
 
 
+#: A SPEC header line's key: ``#C``, ``#O3``.
+_HEADER_LINE_KEY = re.compile(r"#(?P<key>[A-Za-z]{1,3})\d*\s*")
+
+
+def _header_keys(locator: str) -> list[str]:
+    """The SPEC header keys a locator names (``scan 2 #C`` -> ``["C"]``); ``#S`` only names the scan, unless it is
+    the only key."""
+    keys = list(dict.fromkeys(m.group("key") for m in _HEADER_RE.finditer(locator)))
+    return [k for k in keys if k != "S"] or keys
+
+
 def line_locator(locator: str) -> tuple[int, int] | None:
     """``(first, last)`` of the line reference a locator holds (:data:`_LINE_RE`), or ``None``."""
     m = _LINE_RE.search(locator)
@@ -471,8 +485,12 @@ def check_one(finding: Any, root: Path, *, fid: str, sources_by_path: Mapping[st
     entry = cache[canonical]
     if isinstance(entry, str):
         return fail(entry)
-    if short and not (entry.via == "text" and entry.lines is not None and line_locator(locator)
-                      and line_locator(locator)[1] - line_locator(locator)[0] + 1 <= SHORT_QUOTE_MAX_LINES):
+    span = line_locator(locator)
+    # a short quote is checked only against a few lines a locator names: `line N` (at most SHORT_QUOTE_MAX_LINES),
+    # or a SPEC header key (`scan 2 #C`): that scan's lines of that key
+    header_keys = _header_keys(locator) if span is None else []
+    if short and not (entry.via == "text" and entry.lines is not None
+                      and ((span and span[1] - span[0] + 1 <= SHORT_QUOTE_MAX_LINES) or header_keys)):
         return fail(too_short)
     if entry.via == "pdf":
         return _check_pdf(row, entry, quote, locator) if entry.pages is not None else fail(entry.problem or "the PDF has no text")
@@ -481,7 +499,6 @@ def check_one(finding: Any, root: Path, *, fid: str, sources_by_path: Mapping[st
     if entry.lines is None:
         return fail(entry.problem or "the file has no text")
     lines = entry.lines
-    span = line_locator(locator)
     if span:
         first, last = span
         if last < first:
@@ -515,6 +532,16 @@ def check_one(finding: Any, root: Path, *, fid: str, sources_by_path: Mapping[st
                     "(whitespace, quotes and dashes compared plainly; case kept)")
     if _HEADER_RE.search(locator) or "header" in locator.lower():
         keep, numbers, how = _header_lines(lines, locator)
+        if short:
+            # A SHORT QUOTE PASSES ONLY AS (NEARLY) THE WHOLE TEXT OF ONE CITED HEADER LINE (`#C Ar sat` for "Ar sat")
+            for line, n in zip(keep, numbers):
+                m = _HEADER_LINE_KEY.match(line.strip())
+                body = normalise(line.strip()[m.end():]) if m and m.group("key") in header_keys else ""
+                if body and quote in body and len(quote) >= SHORT_QUOTE_LINE_SHARE * len(body):
+                    return {**row, "result": PASS, "at": f"line {n} ({how}; a short quote, the whole #{m.group('key')} line)"}
+            return fail(f"the quote is too short to tell apart (at least {MIN_QUOTE_WORDS} words or {MIN_QUOTE_CHARS} "
+                        f"characters) and is not the whole text of a {' / '.join('#' + k for k in header_keys)} line in "
+                        f"{how}: quote more of the line, verbatim")
         hits = _Index(keep, numbers).hits(quote) if keep else []
         if hits:
             return {**row, "result": PASS, "at": f"line {hits[0]} ({how})"}
@@ -527,6 +554,33 @@ def check_one(finding: Any, root: Path, *, fid: str, sources_by_path: Mapping[st
     if hits:
         return {**row, "result": PASS, "at": f"line {hits[0]} (the locator names no line: the whole file was searched)"}
     return fail("not found in the file (whitespace, quotes and dashes compared plainly; case kept)")
+
+
+#: How many imported sources (smallest first) :func:`holds_an_imported_source` hashes before it gives up.
+MAX_ROOT_PROBES = 20
+
+
+def holds_an_imported_source(root: Path, sources: Iterable[Mapping]) -> bool:
+    """Whether ``root`` holds at least one of the bundle's sources with the bytes the import read (its path under
+    ``root`` and its ``content_sha256``): what ties a ``--root`` to the bundle when it records no root. The
+    :data:`MAX_ROOT_PROBES` smallest sources present under ``root`` are hashed, through :func:`resolve_cited` (no
+    symbolic link, nothing outside ``root``)."""
+    hashed = sorted((s for s in sources if isinstance(s, Mapping) and s.get("content_sha256")
+                     and isinstance(s.get("relative_path"), str)), key=lambda s: int(s.get("size_bytes") or 0))
+    probed = 0
+    for s in hashed:
+        path, _ = resolve_cited(Path(root), s["relative_path"])
+        if path is None:
+            continue
+        probed += 1
+        try:
+            if _sha256(path) == s["content_sha256"]:
+                return True
+        except OSError:
+            pass
+        if probed >= MAX_ROOT_PROBES:
+            break
+    return False
 
 
 def check_findings(findings: Iterable[Any], root: Path, *, sources: Iterable[Mapping] = ()) -> list[dict]:

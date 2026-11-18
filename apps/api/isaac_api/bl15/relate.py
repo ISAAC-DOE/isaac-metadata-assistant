@@ -68,7 +68,7 @@ UNIT_SOURCE_TYPES: frozenset[str] = frozenset(
 )
 
 #: A measurement stem's leading legacy number, e.g. ``15`` in
-#: ``15_02_JK2_base_...``. The corpus's own identifier, not ISAAC's.
+#: ``15_02_ZZ2_base_...``. The corpus's own identifier, not ISAAC's.
 _LEGACY = re.compile(r"^(\d+)_")
 #: The suffix the beamline gives a measurement's scan directory.
 SCAN_DIR_SUFFIX = "_dir"
@@ -496,7 +496,7 @@ def relate(
         # COMPARE BASENAMES, NOT THE RAW DECLARATION, and this is a measured
         # correction rather than defensive coding. Two files in the real corpus declare
         # themselves with an ABSOLUTE FILESYSTEM PATH
-        # (`/data/.../MERGE/ave_JK2_filter10.mca`) instead of a bare stem. A raw
+        # (`/data/.../MERGE/ave_ZZ2_filter10.mca`) instead of a bare stem. A raw
         # comparison called both of them conflicts — and they are not: their basenames
         # match their filenames exactly. Measured over all 188 files carrying a
         # declaration: 186 bare stems, 2 absolute paths, and ZERO whose basename still

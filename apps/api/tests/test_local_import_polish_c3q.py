@@ -351,9 +351,12 @@ def test_validate_warns_too_and_the_minimum_recommends_the_scale_question(groupe
     assert any(w["group_id"] == gid and "100mV" in w["text"] for w in v["warnings"])
     payload = Q.consolidate(M.load(grouped))
     minimum = Q.minimum_answers_for_one_group(payload, M.load(grouped), scope=f"group:{gid}")
-    [rec] = minimum["recommended"]
-    assert rec["fields"] == [SCALE] and rec["blocking"] is False and "100mV" in rec["why"]
-    assert rec["question_id"] not in {e["question_id"] for e in minimum["questions"]} or minimum["blocking_questions"]
+    # 2026-11-18: the set-point the name gives (0.1 V) waits for a confirm, so it is recommended WITH the scale
+    recs = minimum["recommended"]
+    assert sorted(f for r in recs for f in r["fields"]) == sorted([SCALE, SETPOINT])
+    for rec in recs:
+        assert rec["blocking"] is False and "100mV" in rec["why"]
+        assert rec["question_id"] not in {e["question_id"] for e in minimum["questions"]} or minimum["blocking_questions"]
     assert minimum["warnings"] and "100mV" in minimum["warnings"][0]
 
 

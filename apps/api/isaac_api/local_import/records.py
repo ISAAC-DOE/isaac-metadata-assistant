@@ -1407,9 +1407,19 @@ def _stated_potential_warnings(bundle: Mapping, group: Mapping, member_ids: set,
     if header_read:
         w["setpoint_needs_review"] = True
         unread = True
-    also = open_targets(SETPOINT_PATH) if scale_missing and unread else []
+    # ONE PARSED SET-POINT (2026-11-18): the file names give the set-point as ONE value and it waits only for a
+    # confirmation. Confirming the scale alone would move the warning on to the set-point, a second round, so both
+    # are named now: the scale's answer and the set-point's confirm, each the scientist's own (no value is confirmed
+    # for them by the other's answer)
+    parsed = {round(s["read_as_V"], 9) for s in stated if s.get("read_as_V") is not None}
+    open_setpoints = open_targets(SETPOINT_PATH) if scale_missing and not unread else []
+    single = (not answered and len(parsed) == 1 and all(s.get("read_as_V") is not None for s in stated)
+              and bool(open_setpoints) and all(t in valued for t in open_setpoints))
+    also = open_targets(SETPOINT_PATH) if scale_missing and unread else (open_setpoints if single else [])
     if also:
         w.update(also_needs=SETPOINT_PATH, also_targets=also, also_command=command_for(SETPOINT_PATH, also))
+        if single:
+            w["setpoint_parsed_V"] = next(iter(parsed))
     return [{**w, "text": potential_warning_text(w)}]
 
 
@@ -1966,6 +1976,12 @@ def potential_warning_text(w: Mapping) -> str:
                      for s in w["stated"][:3])
     if w.get("answered_V"):
         lits += "; the set-point answered for it: " + ", ".join(f"{v:g} V" for v in w["answered_V"][:3])
+    if w.get("also_needs") and w.get("setpoint_parsed_V") is not None:
+        # the set-point was read as one value from the file names: confirming the scale alone would only move this
+        # warning on to it, so both answers are asked now, the scale first
+        return (f"{Q.stated_opening(w, lits)} until the potential scale is confirmed AND the set-point the file names "
+                f"give ({w['setpoint_parsed_V']:g} V) is confirmed (or corrected). Both are asked now, so no second "
+                f"question follows.{extra} Both: {w['command']}  ;  {w['also_command']}")
     if w.get("also_needs") and w.get("setpoint_needs_review"):
         # c16b: the set-point was read from a scan-header comment line and waits for review, as the scale does
         return (f"{Q.stated_opening(w, lits)} until the potential scale AND "
@@ -3323,6 +3339,7 @@ def export_records(bundle_dir: Path, out: Path, *, run_portal=None) -> dict:
         if link is not None:
             row["follows"] = {"target": link["target"], "basis": link["basis"]}
         said_each_record.append(list(still))  # r5f L3: grouped by text for the summary below (rows keep their own)
+        written_notes = list(still)  # what export says the record is written without, kept for `upload --dry-run`
         if pw := portal_warnings_of(report):
             # r4-b M7: a record the portal validator warns about says so on its row
             portal_warned[group_id] = pw
@@ -3366,6 +3383,9 @@ def export_records(bundle_dir: Path, out: Path, *, run_portal=None) -> dict:
                  "body_sha256": body, "exported_utc": at, "sidecar_generated_utc": sidecar["generated_utc"],
                  "replaced_record_ids": ([*(prior.get("replaced_record_ids") or []), prior.get("record_id")]
                                          if status == "replaced" else list((prior or {}).get("replaced_record_ids") or [])),
+                 # what export says this record is written without (every "Written without ..." line), kept so the
+                 # upload dry run says exactly the same notes
+                 **({"written_without": written_notes} if written_notes else {}),
                  # r5f L3: what the portal validator warned about this record, kept so the dry run can say it once
                  **({"portal_warnings": [{"code": w["code"], "path": w["path"], "message": w["message"]} for w in pw]}
                     if (pw := portal_warnings_of(report)) else {})}
@@ -3484,6 +3504,7 @@ def upload_plan(records_dir: Path, portal_url: str | None) -> list[dict]:
     base = (portal_url or "<portal-url>").rstrip("/")
     replaces = _replaced_by(Path(records_dir))
     labels = _labels_in_index(Path(records_dir))
+    written = _written_without_in_index(Path(records_dir))
     plan = []
     paths = [p for p in sorted(Path(records_dir).glob("*.json")) if not p.name.endswith(".evidence.json")]
     for path in L.order_records_by_links(paths, _link_targets(paths)):
@@ -3505,7 +3526,10 @@ def upload_plan(records_dir: Path, portal_url: str | None) -> list[dict]:
                 ],
             }
         )
+        # the evidence file's notes, then each other note export said for the record (its index entry: "Written
+        # without the potential set-point: …"), never one a sidecar note already says
         notes = _sidecar_notes(path.with_name(path.name[: -len(".json")] + ".evidence.json"))
+        notes += [n for n in written.get(path.name[: -len(".json")]) or () if not any(x in n for x in notes)]
         if notes:
             # c16d: what the record is written WITHOUT (its evidence file's notes), said before an upload too
             plan[-1]["notes"] = notes
@@ -3621,6 +3645,18 @@ def _labels_in_index(records_dir: Path) -> dict[str, str]:
     rows = index.get("records") if isinstance(index, Mapping) else None
     return {r["record_id"]: r["label"] for r in rows or () if isinstance(r, Mapping)
             and isinstance(r.get("record_id"), str) and isinstance(r.get("label"), str)}
+
+
+def _written_without_in_index(records_dir: Path) -> dict[str, list[str]]:
+    """``{record_id: export's "Written without ..." lines}`` from ``records_dir``'s :data:`EXPORT_INDEX` (``{}`` when it
+    has none): the notes ``upload --dry-run`` says, the same as ``export`` said them."""
+    try:
+        index = json.loads((records_dir / EXPORT_INDEX).read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return {}
+    rows = index.get("records") if isinstance(index, Mapping) else None
+    return {r["record_id"]: [n for n in r["written_without"] if isinstance(n, str)] for r in rows or ()
+            if isinstance(r, Mapping) and isinstance(r.get("record_id"), str) and isinstance(r.get("written_without"), list)}
 
 
 def _sidecar_notes(path: Path) -> list[str]:

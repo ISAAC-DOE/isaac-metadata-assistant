@@ -122,19 +122,19 @@ are the same measurements under different names:
 
 | macro declared | acquired |
 |---|---|
-| `29_03_JK2_base_beforeCycling_filter20_060mV` | `29_03_JK2_base_after1500Cycling_filter20_060mV` |
-| `30_03_JK2_base_after1400Cycling_filter20_850mV` | `30_03_JK2_base_after1500Cycling_filter20_850mV` |
-| `44_04_JK2_base_after1500Cycling_filter20_1500mV` | `44_04_JK2_base_after1500Cycling_filter35_newSpots_1200mV` |
+| `29_03_ZZ2_base_beforeCycling_filter20_060mV` | `29_03_ZZ2_base_after1500Cycling_filter20_060mV` |
+| `30_03_ZZ2_base_after1400Cycling_filter20_850mV` | `30_03_ZZ2_base_after1500Cycling_filter20_850mV` |
+| `44_04_ZZ2_base_after1500Cycling_filter20_1500mV` | `44_04_ZZ2_base_after1500Cycling_filter35_newSpots_1200mV` |
 
 **This is a conflict, not a defect to repair.** Both must survive.
 
 **2.6 — The duplicate legacy number `32` is real, and one half also disagrees with
 itself.** Two distinct acquisition files carry legacy number 32:
 
-- `32_03_JK2_base_after1400Cycling_filter20_1500mV` — internal `#F` **agrees** with its
+- `32_03_ZZ2_base_after1400Cycling_filter20_1500mV` — internal `#F` **agrees** with its
   external name; `#E 1744501604` (Sat Apr 12 16:46:44 2025).
-- `32_03_JK2_base_after1500Cycling_filter20_1500mV` — internal `#F` reads
-  **`32_03_JK2_base_beforeCycling_filter20_1500mV`**; `#E 1744500067` (16:21:07 2025).
+- `32_03_ZZ2_base_after1500Cycling_filter20_1500mV` — internal `#F` reads
+  **`32_03_ZZ2_base_beforeCycling_filter20_1500mV`**; `#E 1744500067` (16:21:07 2025).
 
 So the external name says `after1500Cycling`, the internal declaration says
 `beforeCycling`, and a sibling file says `after1400Cycling`. Three readings, one legacy
@@ -159,10 +159,10 @@ Measured over all 94 SPEC acquisitions by comparing each `#F` against its own fi
 
 | file | its own `#F` says |
 |---|---|
-| `29_03_JK2_base_after1500Cycling_filter20_060mV` | `29_03_JK2_base_beforeCycling_filter20_060mV` |
-| `30_03_JK2_base_after1500Cycling_filter20_850mV` | `30_03_JK2_base_beforeCycling_filter20_850mV` |
-| `31_03_JK2_base_after1500Cycling_filter20_1200mV` | `31_03_JK2_base_beforeCycling_filter20_1200mV` |
-| `32_03_JK2_base_after1500Cycling_filter20_1500mV` | `32_03_JK2_base_beforeCycling_filter20_1500mV` |
+| `29_03_ZZ2_base_after1500Cycling_filter20_060mV` | `29_03_ZZ2_base_beforeCycling_filter20_060mV` |
+| `30_03_ZZ2_base_after1500Cycling_filter20_850mV` | `30_03_ZZ2_base_beforeCycling_filter20_850mV` |
+| `31_03_ZZ2_base_after1500Cycling_filter20_1200mV` | `31_03_ZZ2_base_beforeCycling_filter20_1200mV` |
+| `32_03_ZZ2_base_after1500Cycling_filter20_1500mV` | `32_03_ZZ2_base_beforeCycling_filter20_1500mV` |
 
 **Four consecutive files, one sample group, the same substitution every time** —
 `beforeCycling` internally, `after1500Cycling` externally. A single file disagreeing
@@ -180,7 +180,7 @@ show a THREE-way disagreement, not just two. It also means a plausible-sounding
 "trust the internal `#F`, it is closer to the instrument" rule would be wrong for these
 four — the rename is likelier to be the scientist's correction than the header is.
 
-**2.7 — `ffilter35` is real.** `46_04_JK2_base_after1500Cycling_ffilter35_newSpots_1600mV`.
+**2.7 — `ffilter35` is real.** `46_04_ZZ2_base_after1500Cycling_ffilter35_newSpots_1600mV`.
 
 **2.8 — The candidate-unit arithmetic, measured, because it is what the reconstruction
 must reproduce.** Classification content-led (first line begins `#F`):
@@ -274,7 +274,7 @@ Other commands observed: `qdo` (include), `mv` / `mvr` (absolute / relative moto
 **3.4 — `MERGE/` holds processed products, 34 entries**: 32 `.txt` two-column
 `energy value` spectra and 2 `.mca`. Their names are RE-SPELLED (`f10` where the
 acquisition says `filter10`, `43_44_04_...` naming two legacy numbers in one file,
-`ave_JK2_filter10_1600mv` naming no legacy number at all). A `MERGE` entry is a
+`ave_ZZ2_filter10_1600mv` naming no legacy number at all). A `MERGE` entry is a
 **candidate processed artifact**; nothing here makes it ISAAC's official reduced spectrum.
 
 **3.5 — `readme.txt` is beamtime-scope shared context** (13 lines): the absorbing
@@ -285,7 +285,7 @@ emission line, and the monochromator's calibration foil. **The values are withhe
 must not be designed against assumptions (the brief's §20).
 
 **3.6 — The beamtime notes are one source family in three representations.** `.docx`,
-`.pdf` and `.txt` of `250411 BL 15 IrOx NP HERFD acid base`. The `.txt` is ~29.7 KB and
+`.pdf` and `.txt` of `YYMMDD BL 15 IrOx NP HERFD acid base`. The `.txt` is ~29.7 KB and
 contains DOCX-table-flattened sections `Sample N <name> in <medium>` with
 `Step / File Number / E-chem Procedure / Notes` rows — the independent human mapping from
 file number to condition. **Three files are one witness, not three.**
@@ -293,7 +293,7 @@ file number to condition. **Three files are one witness, not three.**
 **3.7 — The notes contain a broad claim that contradicts the same document.** *"In ALL
 experiments we used <one alkaline electrolyte, named with its concentration> from the same
 solution prepared in the beginning of the beam
-time"* sits above `Sample 1 JK3 in acid`, in a document whose own preparation section
+time"* sits above `Sample 1 ZZ3 in acid`, in a document whose own preparation section
 specifies an acid at a stated concentration. A broad human statement is **candidate shared
 context**, and
 sample-specific contrary evidence is a **conflict** — never an app-wide overwrite.

@@ -319,7 +319,7 @@ def decode_source_bytes(
     UTF-8-with-BOM" would never reach the second codec, and every reader
     downstream would have to strip the mark itself or match on a header key that
     had silently gained an invisible character. The real beamtime notes file
-    ``250411 BL 15 IrOx NP HERFD acid base.txt`` begins ``EF BB BF`` (measured
+    ``YYMMDD BL 15 IrOx NP HERFD acid base.txt`` begins ``EF BB BF`` (measured
     2026-09-16), so this is the corpus's actual behaviour and not a hypothetical:
     the BOM is detected, stripped, and DISCLOSED as ``utf-8-sig``.
 
@@ -731,8 +731,8 @@ def common_root_prefix(names: Iterable[str]) -> str | None:
     would otherwise disagree.** Archiving a folder produces member names
     ``Corpus/readme.txt``, while walking the extracted folder produces
     ``readme.txt``. Measured on the real archive (2026-09-16): every one of the
-    1,194 members of ``SSRL_BL152_2025-04_Sokaras_IrOxBase.zip`` begins
-    ``SSRL_BL152_2025-04_Sokaras_IrOxBase/``. Without stripping it, the same
+    1,194 members of ``SSRL_BL152_2025-04_SYNPI_SynBase.zip`` begins
+    ``SSRL_BL152_2025-04_SYNPI_SynBase/``. Without stripping it, the same
     corpus read two ways gives a different ``archive_path`` for every file, and
     every piece of evidence, every duplicate group and every locator would depend
     on which container the scientist happened to hand over.

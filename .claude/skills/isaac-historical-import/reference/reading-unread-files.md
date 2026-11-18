@@ -179,7 +179,7 @@ See them with `<isaac> bundle list <bundle> scan-notes` and `<isaac> bundle show
 ```
 
 `<folder>` is the folder that was imported: when the bundle records it, `--root` may be left out and
-any other folder is refused; when not, a folder of another name is refused. `check-readings` and the preview report every quote as
+any other folder is refused; when not, a folder of another name is refused, and so is one holding none of the imported files with the bytes the import read. `check-readings` and the preview report every quote as
 `pass` or `fail` (and where a quote was found when it is not near its locator). `--apply` records NO
 finding whose quote was not found, whose run reference names no run (or more than one), or whose value
 is not on its field's list (`refused_by_reason`); there is no way to skip the check. Fix the file and

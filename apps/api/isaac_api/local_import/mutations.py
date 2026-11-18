@@ -602,8 +602,9 @@ def quote_root(bundle: Mapping, explicit: str | Path | None) -> Path | None:
 
     ``--root`` IS TIED TO THE BUNDLE: when the bundle records its root, ``--root`` must be that folder; when it
     records none, ``--root``'s name must be the imported folder's (``source_root.label``, a ZIP's name without
-    ``.zip``). Anything else is refused (exit 2), so a quote is never checked against some other folder's files. The
-    hash of every cited bundle source ties the content too (``reading_check``)."""
+    ``.zip``) AND it must hold at least one of the bundle's sources with the bytes the import read
+    (``reading_check.holds_an_imported_source``). Anything else is refused (exit 2), so a quote is never checked
+    against some other folder's files. The hash of every cited bundle source ties the content too (``reading_check``)."""
     sr = bundle.get("source_root") or {}
     hint = sr.get("local_root_hint")
     if not explicit:
@@ -626,6 +627,12 @@ def quote_root(bundle: Mapping, explicit: str | Path | None) -> Path | None:
         raise MutationRefused(
             f"--root {root.name!r} is not the folder this bundle was imported from (that folder is named {label!r}): pass "
             "the folder you imported. Nothing was checked or recorded.", code=2)
+    from . import reading_check as RC
+
+    if not RC.holds_an_imported_source(root, bundle.get("sources") or ()):
+        raise MutationRefused(
+            f"--root {root.name!r} has the imported folder's name but holds none of the files this bundle imported with "
+            "the bytes the import read: pass the folder you imported. Nothing was checked or recorded.", code=2)
     return root
 
 
@@ -2076,6 +2083,13 @@ def answer_reach(bundle: Mapping, target_ids: Sequence[str], path: str, index: d
             "beamtime_fills_none": beamtime and path in RUN_ONLY_PATHS}
 
 
+#: why a group of each non-sample role is not an electrode in a cell (:func:`misfit_groups`), in the role's own words
+_ROLE_NOT_A_CELL = {
+    "reference": "a reference group: a standard or reference foil, not an electrode in a cell",
+    "alignment": "an alignment group: an alignment or calibration scan, not an electrode in a cell",
+}
+
+
 def misfit_groups(bundle: Mapping, path: str, group_ids: Sequence[str], index: dict | None = None) -> list[dict]:
     """r4-b M4: of ``group_ids``, the groups a word for an electrochemical cell or its control (:data:`CELL_FIELDS`)
     does not describe: a reference or alignment group (a standard, a foil), or one every run of which is recorded ex
@@ -2098,7 +2112,11 @@ def misfit_groups(bundle: Mapping, path: str, group_ids: Sequence[str], index: d
         g = index["group_by_id"].get(gid) or {}
         members = [run_of_key[k] for k in g.get("member_run_keys") or () if k in run_of_key]
         if g.get("role") in (G.ROLE_REFERENCE, G.ROLE_ALIGNMENT):
-            out.append({"group_id": gid, "why": f"a {g['role']} group: a standard or foil, not an electrode in a cell"})
+            out.append({"group_id": gid, "why": _ROLE_NOT_A_CELL[g["role"]] + (
+                " (the scientist's word; `--decision set_role --value sample` if it is a sample)"
+                if (g.get("role_basis") or {}).get("basis") == "scientist_decision" else
+                f" (proposed from its files; if it is a sample: `isaac bundle decide <bundle_dir> --target {gid} "
+                '--decision set_role --value sample --by "<your name>"`)')})
         elif members and all((env.get(r) or env.get(None)) == {json.dumps("ex_situ")} for r in members):
             out.append({"group_id": gid, "why": "recorded ex situ: measured outside a cell"})
     return out
@@ -2336,6 +2354,27 @@ def _reach_statement(bundle: Mapping, recorded_ids: Sequence[str], override: Map
     return text, {**reach, "groups_reached": reached_groups, "not_reached": kept}
 
 
+def _scope_refused(exc: MutationRefused, bundle: Mapping, only: str | None, only_scopes: Sequence[str] | None,
+                   open_payload: Mapping | None, question_id: str) -> MutationRefused:
+    """``decide --question`` on an OPEN question that has no open target in the scope named (``--only``): a refused
+    decision, exit 2 (reference/commands.md), never "not found". Exit 6 stays for an unknown id (the question, or a
+    ``group:<id>`` scope naming no live record group) and for a question no longer open (answered, of a kind not
+    answered again), as before."""
+    from . import questions as Q
+
+    if open_payload is None or Q.question(open_payload, question_id) is None:
+        return exc
+
+    live = {g.get("group_id") for g in Q.live_groups(bundle)}
+    named = [s for s in ([only] if only else []) + list(only_scopes or ()) if s]
+    if any(s.startswith("group:") and s.split(":", 1)[1] not in live for s in named):
+        return exc
+    text = str(exc)
+    if not _NOTHING_RECORDED.search(text):
+        text = text.rstrip(".") + "; nothing was recorded."
+    return MutationRefused(text, code=2)
+
+
 def decide_question(
     bundle_dir: Path,
     *,
@@ -2426,6 +2465,7 @@ def decide_question(
         override = None
         slots_added: list[str] = []
         asked_now = None  # r6 I1: the question as resolved (open, or answered), for a kind answered its own way
+        open_payload = None
         try:
             if question_id == Q.COUNTER_QUESTION_ID and decision == B.KEEP_APART_DECISION:
                 found = _said_not_counter_keep_apart(bundle, only, field, positions, only_scopes, extra_targets)
@@ -2441,8 +2481,10 @@ def decide_question(
             # answered (Q.RESOLVABLE_WHEN_ANSWERED): a value, the absorber, the counter positions, the clock zone.
             answered = Q.consolidate(bundle, include_answered=True, explain_counter=False) if exc.code == 6 else None
             asked = Q.question(answered, question_id) if answered is not None else None
-            if asked is None or asked["kind"] not in Q.RESOLVABLE_WHEN_ANSWERED:
+            if asked is None:
                 raise
+            if asked["kind"] not in Q.RESOLVABLE_WHEN_ANSWERED:
+                raise _scope_refused(exc, bundle, only, only_scopes, open_payload, question_id) from None
             asked_now = asked
             try:
                 found, positions = question_targets(answered, question_id, **resolve)
@@ -2452,7 +2494,8 @@ def decide_question(
                 got = (group_answer_targets(bundle, asked, only, field, decision)
                        if again.code == 6 and only and not only_scopes else None)
                 if got is None:
-                    raise (exc if again.code == 6 else again) from None
+                    raise (_scope_refused(exc, bundle, only, only_scopes, open_payload, question_id)
+                           if again.code == 6 else again) from None
                 found, slots_added, override = got
             if asked["kind"] == "confirm_absorber" and decision == "set_absorber" and only is None:
                 found, kept_overrides = _keep_absorber_overrides(bundle, found)
@@ -2877,6 +2920,10 @@ def _decide_arguments(*, target_ids, decision, by, orcid, qc_status, element, ed
         problem = B.dose_reading_problem(value)
         if problem is not None:
             raise MutationRefused(f"{problem}. Nothing was recorded.")
+    if decision == B.ROLE_DECISION:
+        problem = B.role_problem(value)
+        if problem is not None:
+            raise MutationRefused(f"{problem} (what the group is, in the scientist's word). Nothing was recorded.")
     if decision == B.ATHENA_SELECT_DECISION and (value is None or not isinstance(value, str)):
         raise MutationRefused("select_athena_version needs --value <version id>, one of the processing result's athena_versions.")
     if decision == B.CLOCK_ZONE_DECISION:
@@ -2914,7 +2961,8 @@ CAPTURE_STATEMENTS: Mapping[str, str] = {
 
 #: Record-group decisions that are not about the group's own state: each is compared with the latest of its own
 #: kind when a repeat is judged (a set_absorber restated after the group was confirmed records nothing).
-_GROUP_SIDE_DECISIONS = ("set_absorber", "approve_calibration", B.SCAN_DECISION, B.DOSE_READING_DECISION)
+_GROUP_SIDE_DECISIONS = ("set_absorber", "approve_calibration", B.SCAN_DECISION, B.DOSE_READING_DECISION,
+                         B.ROLE_DECISION)
 
 
 def _shown_value(value: Any) -> str:
@@ -2950,6 +2998,7 @@ def plain_statement(bundle: Mapping, planned: Sequence[tuple[str, Mapping]], tar
         "merge": "merge recorded", "split": "split recorded",
         "set_counter_positions": _counter_positions_words(positions),
         B.CLOCK_ZONE_DECISION: f"instrument clock time zone {value} recorded",
+        B.ROLE_DECISION: f"role {value!r} recorded (the scientist's word on what the group is; its status is unchanged)",
     }.get(decision, f"{decision} recorded")
     cand_path = {c["candidate_id"]: c.get("target_field_path") for c in bundle.get("candidates") or ()}
     context = B.context_run_ids(bundle)  # r2-a L4: a run kept as context (an exported file) is no measurement run

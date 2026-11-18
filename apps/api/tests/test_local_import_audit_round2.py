@@ -400,11 +400,22 @@ def test_the_processing_remedy_names_the_source_process_needs():
     assert "--qc-note" in R.processing_remedy({"awaiting_approval": ["p1"]})
 
 
-def test_the_schema_drift_note_does_not_say_an_exportable_record_is_blocked():
-    where = P.locate()
-    if not where.get("available"):
-        pytest.skip("the pinned portal validator is not installed")
+#: The two schema sides the drift note was written for, PINNED (2026-11-18, as PR #317 pinned the vendored basis): the
+#: portal's schema accepts an unknown temperature (``temperature_K: null`` with a basis), the July website schema
+#: required a number. Read from the installed validator, the test failed wherever one is installed (both sides now come
+#: from one commit, so there is no drift to word) and was skipped in CI, where none is.
+_UPSTREAM_ACCEPTS_UNKNOWN_TEMPERATURE = {"type": "object"}
+_JULY_REQUIRES_A_NUMBER = {"type": "object", "properties": {"context": {"type": "object", "properties": {
+    "temperature_K": {"type": "number"}}}}}
+
+
+def test_the_schema_drift_note_does_not_say_an_exportable_record_is_blocked(monkeypatch):
+    from jsonschema import Draft202012Validator
+
+    import isaac_records.official as O
+
+    monkeypatch.setattr(O, "load_official_validator", lambda root: Draft202012Validator(_JULY_REQUIRES_A_NUMBER))
     record = {"context": {"temperature_K": None, "temperature_basis": "not_reported"}}
-    drift = R.schema_drift(record, P.upstream_schema(where))
+    drift = R.schema_drift(record, _UPSTREAM_ACCEPTS_UNKNOWN_TEMPERATURE)
     assert "blocked by schema drift unless" not in drift["temperature"]
     assert "does NOT block the local export" in drift["temperature"]

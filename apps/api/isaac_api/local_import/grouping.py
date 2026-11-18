@@ -976,8 +976,9 @@ _FOIL_HEADER_LINE = re.compile(
 #: ``Pt_foil_annealed_500C``, a potential, a pH, a concentration, an electrode word). The standard words (``std``,
 #: ``standard``, ``ref``, ``reference``) propose a reference as they do for SPEC: a standard is still measured.
 XDC_NAME_ROLE_RULE_ID = "isaac.grouping.xdc_name_role.v1"
-NAME_ROLE_NOTE = ("judged from the name only: say if this is a sample. Confirm the group and answer its questions and "
-                  "it becomes a record like any other; reject it to leave it out")
+NAME_ROLE_NOTE = ("judged from the name only: say if this is a sample (`isaac bundle decide <bundle_dir> --target "
+                  "<group id> --decision set_role --value sample --by \"<your name>\"`). Confirm the group and answer its "
+                  "questions and it becomes a record like any other; reject it to leave it out")
 _XDC_ALIGN_WORD = re.compile(r"^align(?:ment)?\d*$")
 _XDC_ROUGH_WORD = re.compile(r"^rough\d*$")
 _XDC_CALIB_REST = re.compile(r"calib(?:ration)?\d*")

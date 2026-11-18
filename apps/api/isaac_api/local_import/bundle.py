@@ -93,7 +93,13 @@ FORMAT_ID = "isaac.local-import-bundle"
 #: and the processing step may cite it in a scan-selection proposal (``scan_notes.scan_notes_for_run``). A 1.11.0
 #: validator refuses a bundle holding the section, hence the version. Nothing becomes newly writable; the upgrade
 #: is disclosed (:data:`CHANGES_ADDED_IN`).
-FORMAT_VERSION = "1.12.0"
+#: 1.13.0 (additive): a third processed-output origin rule, :data:`AVERAGE_TITLE_ORIGIN_RULE_ID` (basis
+#: ``average_title``): beside SPEC acquisition runs, a file a GENERIC reader read whose own scan title states an average
+#: of N spectra (a PyMca ``.mca`` average, which the engine calls a detector product) is a processed output linked by
+#: legacy number, never a run; a file in a MERGE folder whose content says no such thing stays a run, with a note. A 1.12.0 validator refuses the new enum values, hence the
+#: version. Nothing becomes newly writable; a 1.12.0 bundle keeps such files as runs until re-imported, and its first
+#: save says so (:func:`average_title_runs`).
+FORMAT_VERSION = "1.13.0"
 #: The electrochemical control mode. Its allowed values are the official schema's enum (read at
 #: runtime by :func:`value_problem`); the schema's conditional rules key the set-point a record
 #: requires on it (:func:`required_record_paths`). Never defaulted, never derived.
@@ -119,7 +125,7 @@ VALUE_IDS_APPEND_FROM = "1.5.0"
 IMPORT_RULES_ADDED_IN: Mapping[str, tuple] = {
     "1.4.0": (("generic:ssrl_xdc_v1", "ssrl_xdc_scan_start_v1"),),
 }
-_VERSION_ORDER = ("1.0.0", "1.1.0", "1.2.0", "1.3.0", "1.4.0", "1.5.0", "1.6.0", "1.7.0", "1.8.0", "1.9.0", "1.10.0", "1.11.0", "1.12.0")
+_VERSION_ORDER = ("1.0.0", "1.1.0", "1.2.0", "1.3.0", "1.4.0", "1.5.0", "1.6.0", "1.7.0", "1.8.0", "1.9.0", "1.10.0", "1.11.0", "1.12.0", "1.13.0")
 #: A change a format version made that moves no eligibility and adds no import rule, but that the
 #: first save by a newer build still DISCLOSES in its ``format_upgrades`` entry (never silently).
 CHANGES_ADDED_IN: Mapping[str, str] = {
@@ -133,6 +139,10 @@ CHANGES_ADDED_IN: Mapping[str, str] = {
                "processed output linked by legacy number, never a run; a bundle imported before holds such files as runs "
                "until re-imported"),
     "1.12.0": "1.12.0 keeps a reading pass's notes about a run's scans (scan_notes) as AI readings, never decisions",
+    "1.13.0": ("1.13.0 keeps a file whose scan title states an average of several spectra beside SPEC acquisitions (the "
+               "scientists' averages, e.g. a .mca) as a processed output linked by legacy number, never a run; a bundle "
+               "imported before holds such files as runs until re-imported; and takes the scientist's set_role decision for a record group (sample, reference or "
+               "alignment)"),
 }
 #: A field composed into a draft only beside another of the SAME run (interim decision for the
 #: set-point, pending domain-owner review; ``records.compose_group`` applies it). The CURRENT
@@ -258,6 +268,23 @@ ENGINE_ORIGIN_RULE_ID = "isaac.processed_output.origin.engine_classification.v0"
 ENGINE_PROCESSED_SOURCE_TYPE = "processed_spectrum"
 SPEC_ACQUISITION_SOURCE_TYPE = "spec_acquisition"
 ENGINE_PROCESSED_NOTE_KIND = "engine_reads_processed_spectrum"
+
+# THE THIRD ORIGIN RULE (1.13.0, ``isaac.processed_output.origin.average_title.v0``): the file's OWN CONTENT says it is
+# an average. Measured on a real BL15-2 beamtime: beside the 32 headerless quick merges, its ``MERGE/`` folder held two
+# PyMca ``.mca`` averages whose scan title reads ``#S 1 Average of 11 from Norm. …``. The engine calls an ``.mca`` a
+# detector product, so the engine rule above leaves it alone, and the generic MCA reader made each a run: a record group
+# and questions for a measurement nobody performed, and processing said ``bl15_2_energy_column_missing``. Beside SPEC
+# acquisitions (:func:`quick_merges_apply`, as for the engine rule), a file a generic reader read whose scan title is
+# that average title (:func:`is_average_title`: ``<n> Average of <N> from <name>``) is a processed output, linked by
+# legacy number; the validator re-derives it from the title statement the output keeps. A FOLDER NAME IS NEVER
+# EVIDENCE (review of PR #335, the lesson of #333): any other file in a folder named ``MERGE`` stays a run, with a note
+# (:data:`MERGE_FOLDER_NOTE_KIND`) asking whether it is the scientists' quick merge; the scientist rejects its group
+# (a quick merge, never a record) or confirms it (a measurement).
+AVERAGE_TITLE_ORIGIN_RULE_ID = "isaac.processed_output.origin.average_title.v0"
+MERGE_FOLDER_NAME = "merge"
+MERGE_FOLDER_NOTE_KIND = "in_merge_folder"
+#: PyMca's own scan title for an average of N spectra (the mca reader keeps ``#S`` as statement ``scan_title``)
+_AVERAGE_TITLE = re.compile(r"^(?:S\s+)?\d+\s+Average of \d+ from\s+\S", re.IGNORECASE)
 
 # ITS LINK RULE (``isaac.processed_output.link_by_legacy_number.v0``, :func:`_link_by_legacy_number`) — applied to
 # engine-classified outputs ONLY (an XDI output keeps :data:`LINK_RULE_ID`). The whole-number tokens a name STARTS with
@@ -473,6 +500,47 @@ def engine_processing_origin() -> dict:
     }
 
 
+def in_merge_folder(rel: Any) -> bool:
+    """True when a relative path sits under a folder named ``MERGE`` (any case): a PROPOSAL only
+    (:data:`MERGE_FOLDER_NOTE_KIND`), never evidence that a file is processed."""
+    parts = str(rel or "").replace("\\", "/").split("/")[:-1]
+    return any(p.casefold() == MERGE_FOLDER_NAME for p in parts)
+
+
+def is_average_title(literal: Any) -> bool:
+    """True for a scan title that states an average of N spectra (:data:`AVERAGE_TITLE_ORIGIN_RULE_ID`)."""
+    return isinstance(literal, str) and bool(_AVERAGE_TITLE.match(literal.strip()))
+
+
+def merge_folder_note(rel: str) -> dict:
+    """The note on a run whose file sits in a MERGE folder while its content does not say it is processed."""
+    return {
+        "kind": MERGE_FOLDER_NOTE_KIND,
+        "locator": None,
+        "detail": ("In a MERGE folder: is this the scientists' quick merge? Its content does not say so (not a "
+                   "headerless two-column spectrum, no average title), so it is kept as a run. If it is a quick merge, "
+                   "reject its group (never a record); if it is a measurement, confirm it."),
+        "severity": "note",
+        "source_relative_path": rel,
+        "scan_index": None,
+    }
+
+
+def average_title_processing_origin() -> dict:
+    """The ``processing_origin`` of a file kept by :data:`AVERAGE_TITLE_ORIGIN_RULE_ID`: its average title is the basis
+    (kept as a statement of the processed output); it names no application."""
+    return {
+        "rule_id": AVERAGE_TITLE_ORIGIN_RULE_ID,
+        "basis": "average_title",
+        "processed_by": None,
+        "application_version": None,
+        "line_1_applications": [],
+        "names_a_processing_application": False,
+        "has_demeter_output_filetype": False,
+        "has_athena_fields": False,
+    }
+
+
 def quick_merges_apply(runs: Sequence[Mapping]) -> bool:
     """Whether :data:`ENGINE_ORIGIN_RULE_ID` applies: the runs include an engine SPEC acquisition."""
     return any(r.get("source_type") == SPEC_ACQUISITION_SOURCE_TYPE for r in runs)
@@ -502,6 +570,20 @@ def quick_merge_runs(bundle: Mapping) -> list[str]:
     type_of = {s.get("source_id"): (s.get("classification") or {}).get("source_type") for s in bundle.get("sources") or ()}
     return [r["run_id"] for r in runs if str(r.get("source_type") or "").startswith("generic:") and r.get("scans")
             and all(type_of.get(s.get("source_id")) == ENGINE_PROCESSED_SOURCE_TYPE for s in r["scans"])]
+
+
+def average_title_runs(bundle: Mapping) -> list[str]:
+    """Run ids of GENERIC runs every scan file of which states an average title (a run-scoped ``scan_title`` statement,
+    :func:`is_average_title`), in a bundle that also holds SPEC acquisition runs: what
+    :data:`AVERAGE_TITLE_ORIGIN_RULE_ID` makes processed outputs. Non-empty only for a bundle a build older than 1.13.0
+    imported (a 1.13.0 import holds none: the validator refuses one)."""
+    runs = bundle.get("runs") or ()
+    if not quick_merges_apply(runs):
+        return []
+    titled = {(e.get("run_id"), e.get("relative_path")) for e in bundle.get("extended_context") or ()
+              if e.get("concept") == "scan_title" and is_average_title(e.get("raw_literal"))}
+    return [r["run_id"] for r in runs if str(r.get("source_type") or "").startswith("generic:") and r.get("scans")
+            and all((r["run_id"], s.get("relative_path")) in titled for s in r["scans"])]
 
 
 def _imported_by_at_least(bundle: Mapping, version: str) -> bool:
@@ -540,6 +622,32 @@ def _engine_origin_errors(bundle: Mapping, po: Mapping, f: Mapping, source_of: M
         out.append(f"consistency: processed output {pid} is kept by {ENGINE_ORIGIN_RULE_ID} but states something about "
                    "itself, which a headerless processed spectrum cannot")
     return out
+
+
+def _average_title_origin_errors(bundle: Mapping, po: Mapping, f: Mapping, source_of: Mapping) -> list[str]:
+    """What the validator re-derives about a file kept by :data:`AVERAGE_TITLE_ORIGIN_RULE_ID`: the source exists, is
+    the SAME file (path and sha256), and the output keeps that file's ``scan_title`` statement, an average title."""
+    pid, rel = po.get("processed_output_id"), f.get("relative_path")
+    src = source_of.get(f.get("source_id")) if f.get("source_id") is not None else None
+    if src is None:
+        return [f"consistency: processed output {pid} file {rel} is kept by {AVERAGE_TITLE_ORIGIN_RULE_ID} but names no source"]
+    if src.get("relative_path") != rel or (f.get("sha256") and src.get("content_sha256") != f.get("sha256")):
+        return [f"consistency: processed output {pid} file {rel} is not the file its source {f.get('source_id')} records"]
+    own = set(po.get("extended_context_entry_ids") or ())
+    if not any(e.get("entry_id") in own and e.get("relative_path") == rel and e.get("concept") == "scan_title"
+               and is_average_title(e.get("raw_literal")) for e in bundle.get("extended_context") or ()):
+        return [f"consistency: processed output {pid} file {rel} is kept by {AVERAGE_TITLE_ORIGIN_RULE_ID} but keeps no "
+                "average title from it"]
+    return []
+
+
+def is_quick_merge(po: Mapping) -> bool:
+    """True for a processed output kept as the scientists' quick merge: every file's origin is the engine's
+    classification (:data:`ENGINE_ORIGIN_RULE_ID`) or its average title (:data:`AVERAGE_TITLE_ORIGIN_RULE_ID`). Both are
+    linked by legacy number and apply only beside a SPEC acquisition run."""
+    files = po.get("files") or ()
+    return bool(files) and all((f.get("processing_origin") or {}).get("rule_id") in (ENGINE_ORIGIN_RULE_ID, AVERAGE_TITLE_ORIGIN_RULE_ID)
+                               for f in files)
 
 
 def is_engine_classified(po: Mapping) -> bool:
@@ -771,8 +879,9 @@ def propose_processed_links(processed_outputs: Sequence[dict], runs: Sequence[Ma
         return [r for r in rs if r.get("run_candidate") and int(r.get("scan_count") or 0) > 0]
 
     for po in processed_outputs:
-        if is_engine_classified(po):
-            # 1.11.0: an output the ENGINE classified is linked by its legacy number, never by its stem
+        if is_quick_merge(po):
+            # 1.11.0: an output the ENGINE classified is linked by its legacy number, never by its stem (1.13.0: and one
+            # kept by its MERGE folder)
             _link_by_legacy_number(po, runs)
             continue
         stem = po["label"]
@@ -844,7 +953,7 @@ def propose_processed_links(processed_outputs: Sequence[dict], runs: Sequence[Ma
 
 
 def _leading_numbers(name: object) -> list[str]:
-    """The whole-number tokens a name STARTS with, as written (``04_01_JK3_x`` -> ["04", "01"]; ``IrO2_x`` -> [])."""
+    """The whole-number tokens a name STARTS with, as written (``04_01_ZZ3_x`` -> ["04", "01"]; ``IrO2_x`` -> [])."""
     out = []
     for tok in str(name or "").split("_"):
         if not _WHOLE_NUMBER.match(tok):
@@ -1067,7 +1176,7 @@ DECISIONS_BY_KIND: Mapping[str, frozenset[str]] = {
     "conflict": frozenset({"confirm", "correct", "reject", "defer"}),
     # set_scan_decision (isaac.xas.v1): a scientist's keep / drop of named scans, overriding the scan-decision rule
     "record_group": frozenset({"confirm", "split", "merge", "reject", "defer", "approve_calibration", "set_absorber",
-                               "set_scan_decision", "set_dose_reading"}),
+                               "set_scan_decision", "set_dose_reading", "set_role"}),
     "processing_result": frozenset({"approve", "reject", "needs_changes", "defer", "select_athena_version"}),
     # `defer` (1.9.x polish): "I don't know" to the counter question — recorded, changes no grouping
     "experiment": frozenset({"set_counter_positions", "set_clock_time_zone", "set_not_counter_positions", "defer",
@@ -1088,6 +1197,49 @@ SCAN_DECISION = "set_scan_decision"
 #: for one record group or (target ``experiment``) the whole beamtime; a group's own reading wins
 DOSE_READING_DECISION = "set_dose_reading"
 DOSE_READINGS = ("beam_damage", "not_beam_damage", "first_scan_settling")
+
+
+#: 1.13.0: the scientist's word on what a record group IS — a sample, a reference (a standard or foil) or an alignment
+#: scan — over the role grouping proposed (a file name's ``foil`` / ``align`` token, a header, the engine's class).
+#: Latest wins; :func:`apply_derivations` sets the group's ``role`` and ``role_basis`` from it. It moves no status.
+ROLE_DECISION = "set_role"
+ROLES = ("sample", "reference", "alignment")
+ROLE_DECISION_RULE_ID = "isaac.record_group.role.scientist_decision.v0"
+
+
+def role_problem(value: Any) -> str | None:
+    """Why a set_role value is not one of :data:`ROLES` (None when it is)."""
+    if value not in ROLES:
+        return f"set_role needs --value {', '.join(ROLES[:-1])} or {ROLES[-1]}"
+    return None
+
+
+def _derive_roles(bundle: dict) -> None:
+    """1.13.0: each record group's ``role`` from the scientist's latest ``set_role`` on it, else on the group it came
+    from (review of PR #335): a group whose runs are all runs of a decided group (identical after a regroup, or a part
+    of a split; never a merge, which holds more) takes that group's role, the latest such decision winning. The role
+    grouping proposed is kept beside it (``role_basis.proposed_role`` / ``proposed_basis``)."""
+    made = {id(d): i for i, d in enumerate(bundle.get("scientist_decisions") or ())}
+    role_of = _decisions_by_target(
+        [d for d in bundle.get("scientist_decisions") or () if d.get("decision") == ROLE_DECISION and d.get("value") in ROLES]
+    )
+    groups = [*(bundle.get("superseded_record_groups") or ()), *(bundle.get("record_groups") or ())]
+    members_of = {g.get("group_id"): set(g.get("member_run_keys") or ()) for g in groups}
+    decided = [(gid, d) for (kind, gid), d in role_of.items() if kind == "record_group"]
+    for g in bundle.get("record_groups") or ():
+        own = role_of.get(("record_group", g.get("group_id")))
+        mine = set(g.get("member_run_keys") or ())
+        carried = [(gid, d) for gid, d in decided if gid != g.get("group_id") and mine and mine <= members_of.get(gid, set())]
+        if own is None and not carried:
+            continue
+        rd, came_from = (own, None) if own is not None else max(carried, key=lambda x: made.get(id(x[1]), -1))[::-1]
+        basis = g.get("role_basis") if isinstance(g.get("role_basis"), Mapping) else {}
+        proposed = ({"proposed_role": basis.get("proposed_role"), "proposed_basis": basis.get("proposed_basis")}
+                    if basis.get("basis") == "scientist_decision" else {"proposed_role": g.get("role"), "proposed_basis": basis})
+        g["role"] = rd["value"]
+        g["role_basis"] = {"rule_id": ROLE_DECISION_RULE_ID, "basis": "scientist_decision",
+                           "decision_id": rd.get("decision_id"), **({"carried_from_group": came_from} if came_from else {}),
+                           **proposed}
 
 
 def dose_reading_problem(value: Any) -> str | None:
@@ -2483,6 +2635,7 @@ def apply_derivations(bundle: dict) -> dict:
     status_of = _decisions_by_target(
         [d for d in bundle.get("scientist_decisions") or () if d.get("decision") in GROUP_STATUS_DECISIONS]
     )
+    _derive_roles(bundle)
     merge_decided: list[tuple[Mapping, dict]] = []
     for g in bundle.get("record_groups") or ():
         # only a STATUS decision moves a group's status (a calibration approval does not)
@@ -4219,6 +4372,15 @@ def build_bundle(
                         origin[rel] = engine_processing_origin()
                     else:
                         engine_noted.append(engine_processed_note(rel))
+                elif origin.get(rel) is None and beside_spec and any(
+                        st.get("source_relative_path") == rel and st.get("key") == "scan_title"
+                        and is_average_title(st.get("literal")) for st in g.statements):
+                    # 1.13.0 (AVERAGE_TITLE_ORIGIN_RULE_ID): a file whose own scan title says it is an average of N
+                    # spectra (a PyMca .mca average) beside SPEC acquisitions is the scientists' processed output
+                    origin[rel] = average_title_processing_origin()
+                elif origin.get(rel) is None and beside_spec and in_merge_folder(rel):
+                    # a MERGE folder alone is a PROPOSAL, never evidence: the file stays a run, and the note asks
+                    engine_noted.append(merge_folder_note(rel))
             # a file whose line 1 names another application but whose fields mention
             # Athena/Demeter stays an acquisition; the disagreement is recorded on it
             disagreements = [
@@ -4270,6 +4432,7 @@ def build_bundle(
                 entries = [_statement_entry(g, k, st, run_id=None, po_id=po_id) for k, st in enumerate(kept)]
                 generic_statements.extend(entries)
                 by_engine = all(f["processing_origin"]["rule_id"] == ENGINE_ORIGIN_RULE_ID for f in files)
+                by_title = all(f["processing_origin"]["rule_id"] == AVERAGE_TITLE_ORIGIN_RULE_ID for f in files)
                 processed_outputs.append(
                     {
                         "processed_output_id": po_id,
@@ -4284,6 +4447,10 @@ def build_bundle(
                             "every line two numbers): a quick merge, a rough reference result and evidence: never a run, "
                             "never a record group, never preferred for a record."
                             if by_engine else
+                            "The scientists' own average of several spectra, as its scan title states (\"Average of N "
+                            "from …\"): a quick merge, a rough reference result and evidence: never a run, never a record "
+                            "group, never preferred for a record."
+                            if by_title else
                             "The scientists' own processed output, as its header states. A "
                             "reference result and evidence: never a run, never a record group."
                         ),
@@ -5578,10 +5745,12 @@ def import_rules_missing(bundle: Mapping) -> list[tuple[str, str]]:
 
 
 def upgrade_statement(from_version: str | None, newly_writable: Iterable[str],
-                      rules_missing: Iterable[tuple[str, str]] = (), quick_merge_run_ids: Sequence[str] = ()) -> str:
+                      rules_missing: Iterable[tuple[str, str]] = (), quick_merge_run_ids: Sequence[str] = (),
+                      average_title_run_ids: Sequence[str] = ()) -> str:
     """THE ONE SENTENCE every surface prints about an upgrade of an older bundle. ``quick_merge_run_ids``
     (:func:`quick_merge_runs`): runs an older build made of the scientists' quick merges, which only a re-import
-    keeps as processed outputs (review L5)."""
+    keeps as processed outputs (review L5); ``average_title_run_ids`` (:func:`average_title_runs`, 1.13.0) the same for
+    the files whose scan title states an average."""
     if list(newly_writable):
         text = (f"upgraded from {from_version}; fields this build can newly write have no answer slots on runs that "
                 "lacked a parsed value — re-import to get them")
@@ -5597,6 +5766,11 @@ def upgrade_statement(from_version: str | None, newly_writable: Iterable[str],
         text += (f"; {len(ids)} of its runs ({', '.join(ids[:5])}{', ...' if len(ids) > 5 else ''}) are files the engine "
                  "reads as processed spectra beside SPEC acquisitions (the scientists' quick merges), kept as runs by the "
                  "build that imported it — re-import to keep them as processed outputs")
+    folder = [i for i in average_title_run_ids if i not in ids]
+    if folder:
+        text += (f"; {len(folder)} of its runs ({', '.join(folder[:5])}{', ...' if len(folder) > 5 else ''}) are files whose "
+                 "scan title states an average, beside SPEC acquisitions (the scientists' averages), kept as runs by the build that "
+                 "imported it — re-import to keep them as processed outputs")
     return text
 
 
@@ -5614,7 +5788,8 @@ def record_format_upgrade(bundle: dict, *, from_version: str | None, to_version:
         "upgraded_utc": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
         "decisions_before": int(decisions_before),
         "newly_writable_paths": newly,
-        "statement": upgrade_statement(from_version, newly, import_rules_missing(bundle), quick_merge_runs(bundle)),
+        "statement": upgrade_statement(from_version, newly, import_rules_missing(bundle), quick_merge_runs(bundle),
+                                       average_title_runs(bundle)),
     }
     bundle.setdefault("format_upgrades", []).append(entry)
     return entry
@@ -5844,6 +6019,10 @@ def validate_bundle(bundle: Any, *, max_errors: int = 50, encoded: bytes | None 
             problem = scan_decision_problem(d.get("value"))
             if problem is not None or (d.get("target") or {}).get("kind") != "record_group":
                 errors.append(f"decision: {d['decision_id']} {problem or 'set_scan_decision is for a record group'}")
+        if d.get("decision") == ROLE_DECISION:
+            problem = role_problem(d.get("value"))
+            if problem is not None or (d.get("target") or {}).get("kind") != "record_group":
+                errors.append(f"decision: {d['decision_id']} {problem or 'set_role is for a record group'}")
         if d.get("decision") == DOSE_READING_DECISION:
             problem = dose_reading_problem(d.get("value"))
             if problem is not None or (d.get("target") or {}).get("kind") not in ("record_group", "experiment"):
@@ -5952,6 +6131,10 @@ def validate_bundle(bundle: Any, *, max_errors: int = 50, encoded: bytes | None 
         for rid in quick_merge_runs(bundle):
             errors.append(f"consistency: run {rid} is a file the engine classifies {ENGINE_PROCESSED_SOURCE_TYPE} beside "
                           f"SPEC acquisition runs, which {ENGINE_ORIGIN_RULE_ID} keeps as a processed output, never a run")
+    if _imported_by_at_least(bundle, "1.13.0"):
+        for rid in average_title_runs(bundle):
+            errors.append(f"consistency: run {rid} is a file whose scan title states an average beside SPEC acquisition "
+                          f"runs, which {AVERAGE_TITLE_ORIGIN_RULE_ID} keeps as a processed output, never a run")
     for po in bundle.get("processed_outputs") or ():
         pid = po["processed_output_id"]
         for f in po["files"]:
@@ -5963,8 +6146,11 @@ def validate_bundle(bundle: Any, *, max_errors: int = 50, encoded: bytes | None 
                 errors.append(f"consistency: processed output {pid} file {f['relative_path']} is also a run's scan")
             if (f.get("processing_origin") or {}).get("rule_id") == ENGINE_ORIGIN_RULE_ID:
                 errors.extend(_engine_origin_errors(bundle, po, f, source_of))
-        if is_engine_classified(po) and not quick_merges_apply(bundle["runs"]):
-            errors.append(f"consistency: processed output {pid} is kept by {ENGINE_ORIGIN_RULE_ID}, which applies only "
+            elif (f.get("processing_origin") or {}).get("rule_id") == AVERAGE_TITLE_ORIGIN_RULE_ID:
+                errors.extend(_average_title_origin_errors(bundle, po, f, source_of))
+        if is_quick_merge(po) and not quick_merges_apply(bundle["runs"]):
+            rule = ENGINE_ORIGIN_RULE_ID if is_engine_classified(po) else AVERAGE_TITLE_ORIGIN_RULE_ID
+            errors.append(f"consistency: processed output {pid} is kept by {rule}, which applies only "
                           "beside a SPEC acquisition run, and this bundle holds none")
         for link in po["proposed_links"]:
             if link["run_id"] not in run_ids or link["run_key"] not in run_keys:
@@ -5986,7 +6172,7 @@ def validate_bundle(bundle: Any, *, max_errors: int = 50, encoded: bytes | None 
 
         for po, e in zip(bundle["processed_outputs"], again):
             if _bare(po["proposed_links"]) != _bare(e["proposed_links"]) or po["link_note"] != e["link_note"]:
-                rule = LEGACY_LINK_RULE_ID if is_engine_classified(po) else LINK_RULE_ID
+                rule = LEGACY_LINK_RULE_ID if is_quick_merge(po) else LINK_RULE_ID
                 errors.append(f"consistency: processed output {po['processed_output_id']} link is not what {rule} gives over the stored runs")
     # A RUN IS IN AT MOST ONE LIVE GROUP (proposed / confirmed / merged); rejected and split
     # groups are history and do not hold their runs.

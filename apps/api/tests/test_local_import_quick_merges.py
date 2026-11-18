@@ -179,7 +179,7 @@ def _engine_po(label):
 
 
 def test_the_rule_without_an_import_one_number_names_no_electrode_and_a_run_without_scans_is_said():
-    # the shape of the real IrOxBase 01_/02_ merges: one number, and the run's own words (SYNpellet, oldPellet, f35)
+    # the shape of the real SynBase 01_/02_ merges: one number, and the run's own words (SYNpellet, oldPellet, f35)
     runs = [_r("01_SYNpellet_oldPellet_f35", "run-001", 1), _r("07_02_SYN_x", "run-002", 7, scans=0)]
     one, empty = _engine_po("01_SYNpellet_oldPellet_f35_0p2wtpc"), _engine_po("07_02_SYN_f10")
     B.propose_processed_links([one, empty], runs)
@@ -339,6 +339,7 @@ def test_the_summary_says_what_the_quick_merges_are(built):
 def test_a_1_10_0_bundle_still_validates_and_its_first_save_says_what_1_11_0_added(tmp_path, capsys, monkeypatch):
     # what an older build made: the quick merges as runs (the engine classification not yet a processed-output rule)
     monkeypatch.setattr(B, "ENGINE_PROCESSED_SOURCE_TYPE", "no_such_class")
+    monkeypatch.setattr(B, "is_average_title", lambda literal: False)  # nor the 1.13.0 average-title rule
     out = tmp_path / "old"
     old = _import(capsys, _beamtime(tmp_path / "src"), out)
     monkeypatch.undo()
@@ -351,7 +352,7 @@ def test_a_1_10_0_bundle_still_validates_and_its_first_save_says_what_1_11_0_add
     assert B.check_bundle(out) == []
     M.group(out)
     saved = M.load(out)
-    assert saved["format_version"] == B.FORMAT_VERSION == "1.12.0"
+    assert saved["format_version"] == B.FORMAT_VERSION == "1.13.0"
     [u] = saved["format_upgrades"]
     assert u["from_format_version"] == "1.10.0" and B.CHANGES_ADDED_IN["1.11.0"] in u["statement"]
     # review L5: the runs it still holds of the quick merges are named, and re-import is said to fix them
@@ -365,8 +366,8 @@ def test_a_1_10_0_bundle_still_validates_and_its_first_save_says_what_1_11_0_add
 def test_a_1_10_0_validator_shape_refuses_nothing_old_and_the_new_enums_are_the_approved_ones():
     s = B.bundle_schema()
     f = s["$defs"]["processed_output"]["properties"]["files"]["items"]["properties"]["processing_origin"]["properties"]
-    assert f["rule_id"]["enum"] == ["isaac.processed_output.origin.v0", "isaac.processed_output.origin.engine_classification.v0"]
-    assert f["basis"]["enum"] == ["line_1", "fields", "engine_classification"]
+    assert f["rule_id"]["enum"][:2] == ["isaac.processed_output.origin.v0", "isaac.processed_output.origin.engine_classification.v0"]
+    assert f["basis"]["enum"][:3] == ["line_1", "fields", "engine_classification"]  # 1.13.0 appends merge_folder (test_local_import_overnight_polish_merge)
     link = s["$defs"]["processed_output"]["properties"]["proposed_links"]["items"]["properties"]
     assert link["rule_id"]["enum"] == ["isaac.processed_output.link_by_run_stem.v0", "isaac.processed_output.link_by_legacy_number.v0"]
     assert link["match"]["enum"] == ["exact", "scan_selection_suffix", "legacy_number"]
@@ -396,6 +397,7 @@ def _workbook(path: Path, folder: str, rows: list[tuple[str, str]]) -> Path:
 def test_answers_to_the_quick_merge_runs_an_older_build_asked_about_are_reported_never_applied(tmp_path, capsys, monkeypatch):
     src = _beamtime(tmp_path / "src")
     monkeypatch.setattr(B, "ENGINE_PROCESSED_SOURCE_TYPE", "no_such_class")
+    monkeypatch.setattr(B, "is_average_title", lambda literal: False)  # nor the 1.13.0 average-title rule
     old_dir = tmp_path / "old"
     old_b = _import(capsys, src, old_dir)
     monkeypatch.undo()

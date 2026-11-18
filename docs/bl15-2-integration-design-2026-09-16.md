@@ -129,7 +129,7 @@ needed:
   better provenance record than a run-level flag, because it says *which file supports
   which value* rather than *this run came from somewhere*.
 - **The scientist-readable condition goes in `label`**, which already exists. The brief's
-  §47 asks the Runs screen to show *"Legacy Run/File 44 · Sample 04 · JK2 · Base · After
+  §47 asks the Runs screen to show *"Legacy Run/File 44 · Sample 04 · ZZ2 · Base · After
   1500 mV cycling · Filter 35 · Potential 1.2 V · New spot"* instead of a raw stem — and
   the legacy number is the right label because the registry marks it `not_expressible`
   and records that it is *"the handle they already use"*.

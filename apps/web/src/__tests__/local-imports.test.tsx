@@ -1835,8 +1835,8 @@ describe('plain words on the questions page (2026-11-17, owner: “reads like an
       text: `What is the sample form (sample.sample_form)? No source in this import states it. Applies to 3 group(s) with the same sample reading (${said}, as the files write it) — answer once, or per group.`,
       applies_to: { groups: 3, runs: 3, targets: 3 },
     });
-  const jk1 = sampleQ('Q-sample0001', 'sample={"sample_name": "jk1", "sample_or_electrode_number": "06"}', "sample name 'JK1', sample or electrode number '06'");
-  const jk2 = sampleQ('Q-sample0002', 'sample={"sample_name": "jk2"}', "sample name 'JK2'");
+  const zz1 = sampleQ('Q-sample0001', 'sample={"sample_name": "zz1", "sample_or_electrode_number": "06"}', "sample name 'ZZ1', sample or electrode number '06'");
+  const zz2 = sampleQ('Q-sample0002', 'sample={"sample_name": "zz2"}', "sample name 'ZZ2'");
 
   function stubPage(qs: LocalQuestion[], over: Partial<ApiLocalQuestions> = {}) {
     vi.stubEnv('VITE_ISAAC_LOCAL_IMPORTS', '1');
@@ -1898,10 +1898,10 @@ describe('plain words on the questions page (2026-11-17, owner: “reads like an
     vi.stubEnv('VITE_ISAAC_LOCAL_IMPORTS', '1');
     stubFetchRoutes({
       'GET /api/local-bundles': { body: listBody },
-      [`GET ${QPATH}`]: { body: questionsBody([jk1, jk2]) },
-      [APATH(jk2.question_id)]: (init) => {
+      [`GET ${QPATH}`]: { body: questionsBody([zz1, zz2]) },
+      [APATH(zz2.question_id)]: (init) => {
         posts.push(bodyOf(init));
-        return { body: recordedBody(jk2.question_id, ['miss-jk2']) };
+        return { body: recordedBody(zz2.question_id, ['miss-zz2']) };
       },
     });
     renderAt(ROUTES.localImportBundle('synthetic-beamtime'));
@@ -1911,10 +1911,10 @@ describe('plain words on the questions page (2026-11-17, owner: “reads like an
     expect(card).toHaveTextContent('Asked once for each sample: 2 samples.');
     expect(screen.getAllByTestId('li-repeated')).toHaveLength(1);
     // each row is titled by its sample, in the files' own spelling
-    const row1 = within(card).getByRole('heading', { level: 5, name: 'Sample JK1, no. 06' }).closest('li') as HTMLElement;
-    const row2 = within(card).getByRole('heading', { level: 5, name: 'Sample JK2' }).closest('li') as HTMLElement;
-    expect(row1.id).toBe(questionCardId(jk1.question_id));
-    expect(row2.id).toBe(questionCardId(jk2.question_id));
+    const row1 = within(card).getByRole('heading', { level: 5, name: 'Sample ZZ1, no. 06' }).closest('li') as HTMLElement;
+    const row2 = within(card).getByRole('heading', { level: 5, name: 'Sample ZZ2' }).closest('li') as HTMLElement;
+    expect(row1.id).toBe(questionCardId(zz1.question_id));
+    expect(row2.id).toBe(questionCardId(zz2.question_id));
     // a row answers its own question, through the same path as any card
     fireEvent.change(screen.getByLabelText(COPY.yourName), { target: { value: 'Synthetic Scientist' } });
     fireEvent.change(within(row2).getByLabelText('Your answer'), { target: { value: 'SYN powder' } });
