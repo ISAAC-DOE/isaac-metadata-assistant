@@ -7,7 +7,7 @@ that shared property visible; splitting them would suggest the ``readme`` is a
 format when it is one file.
 
 **``.txt`` ONLY. A DOCX/PDF/TXT TRIO IS ONE SOURCE FAMILY, NOT THREE WITNESSES.**
-The archive holds ``250411 BL 15 IrOx NP HERFD acid base`` as ``.docx``, ``.pdf``
+The archive holds ``YYMMDD BL 15 IrOx NP HERFD acid base`` as ``.docx``, ``.pdf``
 and ``.txt`` — the same document, saved three ways (characterization §3.6).
 **This slice implements no DOCX and no PDF extraction**, and that is a scope
 decision rather than an oversight: the ``.txt`` is a flattening of the ``.docx``
@@ -460,7 +460,7 @@ def read_shared_readme(
             index += 1
             continue
         if _COMMENT.match(raw):
-            # The real readme opens with `# 2025-04_Sokaras`. It is a comment and
+            # The real readme opens with `# 2025-04_SYNPI`. It is a comment and
             # this reader assigns it NO concept: it looks like a date and a name,
             # and reading either out of it would be a guess about which.
             unread.append((index + 1, line))

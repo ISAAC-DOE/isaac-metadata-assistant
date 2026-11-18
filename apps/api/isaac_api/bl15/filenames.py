@@ -147,7 +147,7 @@ RULE_FILTER_COUNT = (
 RULE_FILTER_DOUBLED_PREFIX = (
     "bl15.filenames.filter_doubled_prefix.v1: `ffilter<n>` is read as filter "
     "<n>. The corpus contains exactly one instance "
-    "(`46_04_JK2_base_after1500Cycling_ffilter35_newSpots_1600mV`) and the "
+    "(`46_04_ZZ2_base_after1500Cycling_ffilter35_newSpots_1600mV`) and the "
     "surrounding family writes `filter35`, so this is a PROBABLE DOUBLED-PREFIX "
     "TYPO. The literal is preserved verbatim and is never rewritten; a "
     "scientist who disagrees can see exactly what the file says."
@@ -204,7 +204,7 @@ RULE_ELECTROLYTE_NEGATION = (
 RULE_SAMPLE_CODE_SHAPE = (
     "bl15.filenames.sample_code_shape.v1: a token of uppercase letters followed "
     "by digits and an optional trailing letter is this scientist's sample code "
-    "(`JK1`, `JK1C`). Read AS ITSELF — no expansion, no material identity, no "
+    "(`ZZ1`, `ZZ1C`). Read AS ITSELF — no expansion, no material identity, no "
     "link to any other sample. Checked against every token in the measured "
     "corpus: it matches those codes and nothing else."
 )
@@ -216,7 +216,7 @@ RULE_BARE_INTEGER_ORDINAL = (
     "sample/electrode number. This is an ordinal among the numeric tokens, not "
     "a token position: `01_IrO2_oldPellet_f35` has one and gets a legacy number "
     "only. A THIRD bare integer is NOT assigned a role — the MERGE product "
-    "`43_44_04_JK2_...` carries three, and which of `43`/`44` is 'the' legacy "
+    "`43_44_04_ZZ2_...` carries three, and which of `43`/`44` is 'the' legacy "
     "number is a question about a processed artifact that only a scientist can "
     "answer — so the third and later are reported as unknown tokens. "
     "WHAT THE SECOND TOKEN MEANS IS CONFIRMED (DEC-47, 2026-09-17): it is a "
@@ -635,7 +635,7 @@ def _recognize_bare_integer(
     elif state.bare_integers_seen == 2:
         concept = CONCEPT_SAMPLE_OR_ELECTRODE_NUMBER
     else:
-        # A third bare integer gets no role. `43_44_04_JK2_...` in MERGE carries
+        # A third bare integer gets no role. `43_44_04_ZZ2_...` in MERGE carries
         # three, and choosing between `43` and `44` is a scientific question
         # about a processed artifact.
         return TokenReading(

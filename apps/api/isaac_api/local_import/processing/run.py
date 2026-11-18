@@ -815,7 +815,8 @@ def _bl15_2_unconfirmed(attempts, choice, ctx: _Ctx, params: Mapping) -> str | N
             hints.append((entry, hint))
     if not hints:
         return None
-    return bl15_2_unconfirmed_statement(col, [_scan_file(e) for e, _ in hints], choice.energy, hints[0][1])
+    return (bl15_2_unconfirmed_statement(col, [_scan_file(e) for e, _ in hints], choice.energy, hints[0][1])
+            + f" Answer the beamline question: {beamline_answer_command(ctx)}.")
 
 
 def _bl15_2_missing(attempts, ctx: _Ctx, params: Mapping) -> list[tuple]:
@@ -830,16 +831,47 @@ def _bl15_2_missing(attempts, ctx: _Ctx, params: Mapping) -> list[tuple]:
     return out
 
 
-def _bl15_2_missing_said(inputs: Sequence[Mapping], params: Mapping) -> str | None:
+def beamline_answer_command(ctx: _Ctx) -> str:
+    """The command that answers the beamline question (``system.facility.beamline``) of ``ctx``'s bundle, read once
+    per run: its consolidated question's own command, else where to find it."""
+    got = getattr(ctx, "_beamline_command", None)
+    if got is not None:
+        return got
+    from .. import questions as Q
+    from ..template import BEAMLINE_PATH
+
+    bundle = ctx.bundle or {}
+    targets = [o.get("candidate_id") or o.get("value_id")
+               for o in list(bundle.get("candidates") or ()) + list(bundle.get("missing_values") or ())
+               if isinstance(o, Mapping) and o.get("target_field_path") == BEAMLINE_PATH]
+    got = ((Q.command_for_targets(Q.consolidate(bundle), targets, BEAMLINE_PATH) if targets else None)
+           or f"isaac bundle questions <bundle_dir>   # answer {BEAMLINE_PATH} there")
+    ctx._beamline_command = got
+    return got
+
+
+def _bl15_2_missing_said(inputs: Sequence[Mapping], params: Mapping, ctx: _Ctx | None = None) -> str | None:
     lacking = [i for i in inputs if i.get("skip_reason") == BL15_2_ENERGY_MISSING_FLAG]
     if not lacking:
         return None
     col = params["channels"].get("bl15_2_energy_column")
     names = ", ".join(_scan_file(i) for i in lacking[:10]) + (f" and {len(lacking) - 10} more" if len(lacking) > 10 else "")
-    return (f"{_n(len(lacking), 'BL15-2 scan')} {'has' if len(lacking) == 1 else 'have'} no '{col}' column, the BL15-2 "
+    said = (f"{_n(len(lacking), 'BL15-2 scan')} {'has' if len(lacking) == 1 else 'have'} no '{col}' column, the BL15-2 "
             f"energy axis (beamline scientist answers relayed by Krish, 17 Nov 2026): {names}. "
             f"{'It is' if len(lacking) == 1 else 'They are'} left out of the merge, never read on another energy "
-            "column; a person checks the file.")
+            "column")
+    return f"{said}; a person checks the file." + beamline_ask(ctx)
+
+
+def beamline_ask(ctx: _Ctx | None) -> str:
+    """#328 leftover: what a BL15-2 statement adds when BL15-2 is known from the SPEC headers' fingerprint only (an
+    account such as ``specadm``, or the detector columns), never from an answer: the scientist settles it with the
+    beamline question, whose command is named. ``""`` when the scientist answered BL15-2."""
+    if ctx is None or _bundle_beamline_standing(ctx)["confirmed_bl15_2"]:
+        return ""
+    return (" The beamline is read from the SPEC headers' fingerprint only; nobody has answered the beamline question. "
+            f"If this is not BL15-2, answer it ({beamline_answer_command(ctx)}) and re-process the group: on another "
+            "beamline the scans are read on their own energy column.")
 
 
 #: pq-002 (beamline scientist answers relayed by Krish, 17 Nov 2026): a new spot is not a new result; each scan's spot
@@ -2536,7 +2568,8 @@ def process_group(group: Mapping, ctx: _Ctx, athena_entry: Mapping | None = None
                 entry["skip_reason"] = BL15_2_ENERGY_MISSING_FLAG
             said = first.basis["energy_rule"]["statement"]
             out = _fail(res, BL15_2_ENERGY_MISSING_FLAG, said)
-            out["qc"]["statements"] = {BL15_2_ENERGY_MISSING_FLAG: said}
+            # the beamline question is named after the id is fixed (the failure's detail stays the rule's statement)
+            out["qc"]["statements"] = {BL15_2_ENERGY_MISSING_FLAG: said + beamline_ask(ctx)}
             return [out]
         if found is None:
             res["channel_choice"] = first.to_state()
@@ -2935,7 +2968,7 @@ def process_group(group: Mapping, ctx: _Ctx, athena_entry: Mapping | None = None
     # params-file value the stricter-only rule ignored is said (after run_id: no id moves)
     cal_step = next((s_ for s_ in res["steps"] if s_.get("step") == "calibration"), None)
     # after run_id (said only): the BL15-2 scans left out for having no absev, and the spots merged
-    absev_said = _bl15_2_missing_said(res["inputs"], params)
+    absev_said = _bl15_2_missing_said(res["inputs"], params, ctx)
     if absev_said:
         res["qc"].setdefault("statements", {})[BL15_2_ENERGY_MISSING_FLAG] = absev_said
         if BL15_2_ENERGY_MISSING_FLAG not in res["review_flags"]:

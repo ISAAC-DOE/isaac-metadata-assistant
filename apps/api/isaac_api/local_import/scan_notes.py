@@ -251,8 +251,11 @@ def list_row(bundle: Mapping, note: Mapping) -> dict:
     stems = {r["run_id"]: r.get("stem") for r in bundle.get("runs") or ()}
     live = live_run_ids(bundle)
     me = note.get("scan_note_id")
-    conflicts = sorted({other for rid in note.get("run_ids") or () for c in scan_note_conflicts(bundle, rid)
-                        if me in c["notes"] for other in c["notes"] if other != me})
+    # THIS note against each other note on its runs, each compared once (before: every pair on every run, per row)
+    mine = set(note.get("run_ids") or ())
+    others = {n.get("scan_note_id"): n for n in bundle.get("scan_notes") or ()
+              if isinstance(n, Mapping) and n.get("scan_note_id") != me and mine & set(n.get("run_ids") or ())}
+    conflicts = sorted(other for other, n in others.items() if _conflict(note, n))
     not_live = [stems.get(r) or r for r in note.get("run_ids") or () if r not in live]
     return {
         "scan_note_id": me,

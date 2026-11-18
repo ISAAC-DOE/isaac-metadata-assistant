@@ -338,30 +338,52 @@ _PEOPLE = re.compile(
 _NOT_A_NAME = frozenset({"the", "this", "that", "these", "those", "then", "it", "we", "i", "you", "they", "he", "she",
                          "please", "here", "there", "also", "someone", "everyone", "nobody", "who", "which", "what",
                          "standards", "sample", "samples", "cell", "ink", "solution", "beam", "data", "file", "files",
-                         "and", "or", "if", "when", "once", "after", "before", "a", "an", "our", "my", "your", "their"})
+                         "and", "or", "if", "when", "once", "after", "before", "a", "an", "our", "my", "your", "their",
+                         "beamline", "station", "facility", "staff", "email", "mail", "message", "report", "everything",
+                         "nothing", "all"})
+
+
+#: Capitalised words before ``group`` / ``lab`` / ``team`` that name a chemical group or a kind of group, never a
+#: person's (``Hydroxyl group``, ``Functional group``); a word ending in ``-yl`` or ``-oxy`` is one too.
+_NOT_A_GROUP_NAME = frozenset({"functional", "space", "point", "control", "amine", "amino", "nitro", "cyano", "keto",
+                               "thiol", "ester", "ether", "acid", "oxide", "hydroxide", "side", "end", "head", "tail",
+                               "leaving", "protecting", "research", "working", "focus", "study", "support", "science",
+                               "beamline", "user", "users", "test", "reference", "electrode", "cell"})
+
+
+def _is_a_name(word: str, kind: str) -> bool:
+    """Whether a capitalised ``word`` the ``people`` rule matched (in its ``kind`` of phrase: ``name1`` "by X",
+    ``name2`` "X's …", ``name3`` "X group", ``name4`` "X sent") can be a person's name. Never a sentence opener or a
+    common noun (:data:`_NOT_A_NAME`); never an element symbol outside "by X" (``Ir's samples``); never a chemical or
+    kind of group before ``group`` (``Methyl group``)."""
+    from .template import ELEMENT_SYMBOLS
+
+    low = word.casefold()
+    if low in _NOT_A_NAME:
+        return False
+    if kind != "name1" and word in ELEMENT_SYMBOLS:
+        return False
+    if kind == "name3" and (low in _NOT_A_GROUP_NAME or low.endswith(("yl", "oxy"))):
+        return False
+    return True
 
 
 def _names_people(line: str) -> int | None:
     """Where one line of a document NAMES SOMEONE by :data:`_PEOPLE` (the match's start), or ``None``. A name is a
-    capitalised word, not a common sentence opener (the pattern's words ignore case, the name's capital does not)."""
+    capitalised word that can be a person's (:func:`_is_a_name`; the pattern's words ignore case, the name's capital
+    does not). Matches are tried at every position, so a phrase that names no one (``Samples prepared``) never hides
+    one that does (``prepared by Smith``)."""
     s = line.strip()
     if not s or s.startswith(("[image", "[table")):
         return None
-    for m in _PEOPLE.finditer(s):
+    pos = 0
+    while (m := _PEOPLE.search(s, pos)) is not None:
         if m.group("list"):
             return m.start()
-        names = [v for k, v in m.groupdict().items() if v and k.startswith("name")]
-        if any(n.casefold() not in _NOT_A_NAME for n in names):
+        if any(_is_a_name(v, k) for k, v in m.groupdict().items() if v and k.startswith("name")):
             return m.start()
+        pos = m.start() + 1
     return None
-    for m in _PEOPLE.finditer(s):
-        name = m.group("name") if "name" in m.groupdict() else None
-        names = [v for k, v in m.groupdict().items() if v and k.startswith("name")]
-        if not names and m.group(0).rstrip().endswith((":", "=")):
-            return True
-        if any(n[0].isupper() and n.casefold() not in _NOT_A_NAME for n in names or ([name] if name else [])):
-            return True
-    return False
 
 
 class Index:

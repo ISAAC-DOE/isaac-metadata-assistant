@@ -574,7 +574,8 @@ def test_an_unanswered_start_time_disagreement_is_said_at_validate_export_and_th
     capsys.readouterr()
     assert cli.main(["bundle", "upload", str(out), "--dry-run"]) == 0
     [rec] = json.loads(capsys.readouterr().out)["records"]
-    assert rec["notes"] == [line]
+    # 2026-11-18: and every other note export said (the set-point), as export said it
+    assert rec["notes"][0] == line and rec["notes"][1:] == [w for w in row["warnings"] if w.startswith("Written without the potential set-point: ")]
 
 
 def test_settling_the_start_time_disagreement_ends_the_warning(bdir):

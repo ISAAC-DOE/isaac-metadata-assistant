@@ -305,7 +305,7 @@ export interface LocalQuestionDisplay {
 export interface LocalEarlierAnswer {
   field: string;
   value: unknown;
-  /** "Earlier answer: pellet — Angel, 17 Nov 2026, beamtime … (same sample JK3)" */
+  /** "Earlier answer: pellet — Angel, 17 Nov 2026, beamtime … (same sample ZZ3)" */
   said: string;
   entry_id: string;
   by: string | null;

@@ -2,7 +2,7 @@
 
 The official schema declares this field SERVER-STAMPED from the authenticated
 identity at ingestion, with any client value overwritten — "tamper-proof
-attribution", decided by D. Sokaras 2026-06-15. ISAAC authenticates nobody, so it
+attribution", decided by the domain owner 2026-06-15. ISAAC authenticates nobody, so it
 has nothing true to stamp. Before this module existed, a draft could simply carry
 `attribution.uploaded_by` and the whole attribution dict was copied verbatim by
 `export.transform`: `validate_draft` returned ok with ZERO errors and required NO

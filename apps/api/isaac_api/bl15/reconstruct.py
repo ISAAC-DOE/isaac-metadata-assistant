@@ -243,15 +243,21 @@ def _evidence_for_unit(
 ) -> list[ev.SourceEvidence]:
     """Every reading that supports ONE measurement, from every source attached to it.
 
-    **The acquisition, its scans, the macros that declared it and its processed products
-    — and deliberately NOT its byte-identical copies.** Reading the same bytes twice
-    would double every statement the acquisition makes, which is the statement-level form
-    of the unit-level doubling that turned 94 measurements into 181.
+    **The acquisition, its scans and the macros that declared it — and deliberately NOT
+    its byte-identical copies.** Reading the same bytes twice would double every statement
+    the acquisition makes, which is the statement-level form of the unit-level doubling
+    that turned 94 measurements into 181.
+
+    **Nor its processed products** (the scientists' quick merges and averages, attached by
+    legacy number only). Their file names are the scientist's re-spelled labels of a merge
+    (``f10`` for ``filter10``, ``after1200Cycling`` for ``after1200mVCycling``), not
+    readings of the measurement: read as evidence they made spurious condition and sample
+    disagreements with the acquisition (measured on a real BL15-2 beamtime, 18 Nov 2026).
+    They stay attached to the unit (``processed_products``), as a relationship only.
     """
     paths: list[str] = [unit.acquisition_path]
     paths.extend(scan.path for scan in unit.scans)
     paths.extend(sorted({block.macro_path for block in unit.declared_by}))
-    paths.extend(unit.processed_products)
 
     # A MACRO FILE DECLARES SEVERAL MEASUREMENTS, one `newfile` block each, so a
     # statement one of its blocks makes about ANOTHER measurement is that measurement's

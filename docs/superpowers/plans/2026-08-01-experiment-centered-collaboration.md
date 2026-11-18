@@ -162,7 +162,7 @@ Ask him the four open questions, and clear the project-level gate separately.
 
 - `uploaded_by` — *"Authenticated identity that submitted this record. Set by the server; any client
   value is overwritten."* The block description adds: *"SERVER-STAMPED from the authenticated identity
-  at ingestion … (tamper-proof attribution). **Decided by D. Sokaras 2026-06-15.**"*
+  at ingestion … (tamper-proof attribution). **Decided by the domain owner 2026-06-15.**"*
 - `contributors[]` — `name`, `role`, `affiliation`, `orcid`, `email`, `notes`
 
 ~~Verified: `rg "uploaded_by" src/ apps/ tests/ scripts/` → **zero matches**; only 2 occurrences

@@ -875,14 +875,14 @@ def test_plain_utf8_is_decoded_and_disclosed_as_utf8():
 
 def test_a_bom_is_stripped_and_disclosed_as_utf8_sig():
     """The real beamtime notes file begins ``EF BB BF`` (measured 2026-09-16)."""
-    raw = b"\xef\xbb\xbfSample 1 JK3 in acid\n"
+    raw = b"\xef\xbb\xbfSample 1 ZZ3 in acid\n"
     decoded = archive.decode_source_bytes(raw)
     assert decoded is not None
     assert decoded.encoding == "utf-8-sig"
     assert decoded.had_bom is True
     # The mark is GONE from the text, which is the whole point: a reader matching
     # on the first token must not have to know about an invisible character.
-    assert decoded.text == "Sample 1 JK3 in acid\n"
+    assert decoded.text == "Sample 1 ZZ3 in acid\n"
     assert "\ufeff" not in decoded.text
 
 
