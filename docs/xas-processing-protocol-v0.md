@@ -18,6 +18,59 @@ Code: `apps/api/isaac_api/local_import/grouping.py` (stdlib) and
 and `run_process(bundle_dir, source_root=..., params=...)`; evaluation:
 `python -m isaac_api.local_import.processing.evaluate <folder>`.
 
+**Beamline scientist answers relayed by Krish, 17 Nov 2026.** Seven protocol questions are closed (§11 lists each
+with its answer). What this build does with them:
+
+* **Energy axis (pq-001, closed).** At BL15-2 the energy axis is always `absev` (`channels.bl15_2_energy_column`,
+  `isaac.xas.bl15_2_energy_is_absev.v0`), and a scan that has `absev` is always read on it. Whether a scan WITHOUT
+  `absev` is a BL15-2 scan is decided per scan: it is KNOWN to be one only when the scientist answered the beamline
+  question with BL15-2, or when the bundle's acquisition fingerprint (its SPEC headers' accounts and detector columns)
+  matches BL15-2 alone, the scan's own header names no other beamline and the folder's name names no other one. Such a
+  scan is left out of the merge with skip reason and review flag `bl15_2_energy_column_missing` and a plain sentence
+  (`qc.statements.bl15_2_energy_column_missing`); it is never read on `energy`. When every scan of a group lacks it the
+  group fails with that code. The fingerprint is a hint: when the beamline is not known (the fingerprint also matches
+  another beamline, the folder names another one, a mixed folder, or only the folder names BL15-2), a scan without
+  `absev` is read on its usual energy column and flagged `absev_missing_beamline_unconfirmed`, with a sentence asking
+  to confirm the beamline (`qc.statements`, the `beamline_check` line of `bundle show processing-result`); such a curve
+  is approved on its own, never in a bulk call. A scan whose own header names only another beamline, or a beamline the
+  scientist confirmed as another one, chooses its energy column as before (§2).
+* **A new spot is not a new result (pq-002, closed).** Each sample is measured at several spots under the same
+  condition to improve statistics; the conditions stay the same. `new_spot` is a bookkeeping key and a `newSpot(s)`
+  name token is left out of the name key (`isaac.grouping.spot_not_a_condition.v0`), so scans of one sample at one
+  condition on different spots are ONE group, merged as raw mu. Spot is never a condition key; the filter and every
+  real condition key still split. Each merged scan's spot (the stage motors `Sx Sy Sz Sr` its header states: keyed
+  `#P` values, or unkeyed `#P<i>` values named by the file's `#O<i>` motor names, paired as the root SPEC reader pairs
+  them, a mispaired line refused) is recorded in the result (`inputs[].spot`: the motors and a label `spot 1`,
+  `spot 2` …), said in `qc.statements.spots_merged`, shown by `bundle show processing-result` (`spots`) and in the plot
+  legend. A merged scan whose spot cannot be read says why (`inputs[].spot_not_read`, "spot not read" in the
+  statement and the `spots` lines), never silently. Group ids
+  change only where spots now merge: the merged group's id is the hash of all its runs, and the separate groups and
+  their `unknown_key_differs` merge candidates are gone.
+* **stepNN (pq-003, closed).** stepNN is the order of potential steps in one sequence. Different steps are NEVER
+  merged, even at the same potential (step05 and step08 both at 850 mV: after the 1st and after the 2nd cycling).
+  `step_number` is a condition key (`isaac.grouping.step_is_sequence_position.v0`): it splits, offers no merge
+  candidate, and the group's `basis.conditions.step_number.sequence_position` records the step number. Steps are
+  compared by that position, never by spelling: `step5` and `step05` are one step. Spots within one step still merge.
+* **Energy calibration and alignment (pq-004, closed; implementation pending).** The monochromator is foil-calibrated
+  by the beamline staff at the start of the beamtime, so the energy axis is already calibrated. Every scan is to be
+  aligned to its in-scan reference: a foil in transmission (on I1/I2) or, without a usable foil edge, a glitch in I0.
+  The reference foil is the element under study. The per-scan alignment will be done by the xas-analysis reduction
+  engine (integration pending); this build does not align scans yet, and its calibration step (§3) is unchanged.
+* **Never use Athena (pq-005, pq-007, closed).** Athena projects are never read (`isaac.processing.athena_never_used.v0`):
+  never the result of record, never a source of processing parameters, never an input to a QC verdict or an agreement
+  check. They are still counted as present files (`athena.projects_found`); `athena.never_used` is true and the summary
+  line says so. A params file's `athena_match`, `athena_match_not` and `athena_ignore` are checked for shape and
+  ignored. `decide` refuses approving a `scientist_athena` result and names the group's ISAAC-processed result(s) to
+  approve instead. `build-records` composes nothing from an approved `scientist_athena` result an older build made
+  (`processing.athena_never_used`, blocker `approved_result_is_athena`); its remedy names both steps: withdraw that
+  approval (`--decision reject`), then approve the group's ISAAC result (`processing.isaac_results`), the command
+  spelled out. Approving the ISAAC result first is refused with the same two steps. §8 and the Athena paragraphs of §7 describe the retired behaviour. The scientists'
+  MERGE quick-merge comparison (`isaac.processed_output.quick_merge_compare.v0`) is separate and stays as a rough sanity
+  reference.
+* **Dead time (pq-006, closed): not ISAAC's job.** The flag `dead_time_correction_not_applied` and the parameter
+  `channels.dead_time_rate_prefix` are removed; no warning replaces them.
+* **Over-absorption: not ISAAC's job.** No flag, question or caveat.
+
 ## 0. Why
 
 An official ISAAC record is ONE RESULT: one sample, one technique, one set of conditions
@@ -35,9 +88,9 @@ every statement key is in exactly ONE class (`grouping.CONDITION_KEYS`, `BOOKKEE
 
 | class | keys | a difference means |
 |---|---|---|
-| **condition** | sample name/number, loading/thickness; acquisition method (technique); environment, cell type, reaction; potential + its reference; electrolyte/medium, pH; gas, flow; cycling and before/after state; dry state; temperature; filter (changes count rate and dose); HERFD emission energy (selects the line) | split (also on a conflict, or stated for one run only — with a question) |
-| **bookkeeping** | legacy run/file number, repeat markers (`again`), timestamps, scan commands/grids/counts, detector columns, motor and stage positions, file declarations, beamtime context … | nothing: runs differing only here form **one proposed group** with question `confirm_repeats_merge` listing the differing bookkeeping literals |
-| **unknown** | `new_spot`, `step_number`, unrecognised acquisition-name tokens, and **every key not listed** | split, plus a **`merge_candidate`** naming the key (`unknown_key_differs`), so a scientist merges with one decision |
+| **condition** | sample name/number, loading/thickness; acquisition method (technique); environment, cell type, reaction; potential + its reference; electrolyte/medium, pH; gas, flow; cycling and before/after state; dry state; temperature; filter (changes count rate and dose); HERFD emission energy (selects the line); `step_number` (the potential step's place in the sequence, pq-003) | split (also on a conflict, or stated for one run only — with a question) |
+| **bookkeeping** | legacy run/file number, repeat markers (`again`), `new_spot` (a new spot is not a new result, pq-002), timestamps, scan commands/grids/counts, detector columns, motor and stage positions, file declarations, beamtime context … | nothing: runs differing only here form **one proposed group** with question `confirm_repeats_merge` listing the differing bookkeeping literals |
+| **unknown** | unrecognised acquisition-name tokens, and **every key not listed** | split, plus a **`merge_candidate`** naming the key (`unknown_key_differs`), so a scientist merges with one decision |
 
 A proposed group requires, per member: same role; no conflicting condition; a stated sample
 identity; ≥ 1 scan; no engine-reading issue; equal condition and unknown readings. A merge
@@ -108,7 +161,7 @@ names kept as `name#2`, short rows skipped and counted, binary content refused.
 | `channels.i0_candidates` | `I0, i0, IO`; none → `signal_only` + `i0_missing` | yes |
 | `channels.transmission_after_sample` | `I1, It, IT` → mu = ln(I0/I1); reference/alignment groups prefer transmission | yes |
 | `channels.reference_after_reference` | `I2, Iref, IR` → reference mu = ln(I1/I2) | yes |
-| `channels.dead_time_rate_prefix` | `ICR1_` → flag `dead_time_correction_not_applied` (no rule approved) | yes |
+| `channels.bl15_2_energy_column` | `absev`: the energy axis of every BL15-2 scan; missing → skip reason / flag `bl15_2_energy_column_missing`, never another column (pq-001) | yes |
 
 Every choice, its basis and alternatives are in `channel_choice`; flags
 `channel_choice_needs_review` / `channel_from_bl15_selector_suggestion`,
@@ -522,7 +575,7 @@ Whether to leave such a scan out is the scientist's call: nothing is dropped for
 * The §7 post-edge level cannot judge a scan ending < 50 eV above E0 (`post_edge_window_too_short`
   warns; its normalised curve is unchecked, its E0 usable).
 
-**The scientist's Athena results.** A group Athena marks already normalised (`is_nor`) is used as
+**The scientist's Athena results** (retired 17 Nov 2026: Athena is never read; see §8). A group Athena marks already normalised (`is_nor`) is used as
 stored (edge step 1, no re-normalisation), and believed only when it looks normalised: pre-edge mean
 within 0.25 of 0 and post-edge mean within 0.25 of 1 (20 eV below / 50 eV above E0). Otherwise, and for
 any Athena group whose reproduced edge step is implausible, the curve is not compared, not plotted
@@ -588,7 +641,11 @@ a data-quality failure, `fail signal_channel_dead`, never "not applicable"; (3) 
 label names time (whole token `epoch`/`time`/`sec`/`seconds`/`timestamp`/`clock`) is never the
 energy axis by value shape.
 
-## 8. Athena-first
+## 8. Athena-first (RETIRED 17 Nov 2026)
+
+> **Athena is never used** (pq-005, pq-007; beamline scientist answers relayed by Krish, 17 Nov 2026). No project is
+> read, so nothing below runs any more: no match, comparison, version, tie, hint or E0 note is made. The text is kept
+> as the record of what earlier builds did.
 
 `.prj` files the bundle inventoried are read with larch (`AthenaProject.read(do_preedge=True)`
 — larch's reproduction of the stored e0/pre1/pre2/nor1/nor2/nnorm/flatten); comparison in
@@ -703,10 +760,12 @@ calibration reference and shift; deglitch thresholds and whether to exclude; the
 grid rule; normalisation ranges and E0; QC thresholds; Athena tolerances and the matching
 rule. `params.json` lists `needs_scientist_approval` per group.
 
-## 11. Open questions for Oscar / Angel (`protocol_questions`)
+## 11. Protocol questions (`protocol_questions`)
 
 Machine-readable in `processing/protocol.py` `PROTOCOL_QUESTIONS`, written into every
-`params.json` and the `processing_results.json` header so the skill can ask them:
+`params.json` and the `processing_results.json` header. All seven are closed: each carries its `answer` and
+`answered_by` ("beamline scientist answers relayed by Krish, 17 Nov 2026"); pq-004 also carries `implementation`
+(alignment pending the xas-analysis engine):
 
 ```json
 [
@@ -716,10 +775,13 @@ Machine-readable in `processing/protocol.py` `PROTOCOL_QUESTIONS`, written into 
     "ask": "angel_or_oscar",
     "text": "At SSRL BL15-2, is `absev` (encoder/absolute energy) the energy axis to use, rather than `energy`? Measured: the scientists' Athena energy arrays equal `absev`, 1.7-3.4 eV from `energy`.",
     "affects": [
-      "channels.energy_candidates"
+      "channels.energy_candidates",
+      "channels.bl15_2_energy_column"
     ],
-    "current_default": "absev before energy",
-    "status": "open"
+    "current_default": "BL15-2: always absev; a BL15-2 scan without absev is flagged, never read on energy",
+    "status": "closed",
+    "answer": "Always absev at BL15-2. A BL15-2 scan with no absev is flagged with a plain reason; it is never silently read on energy. Other beamlines are unchanged.",
+    "answered_by": "beamline scientist answers relayed by Krish, 17 Nov 2026"
   },
   {
     "question_id": "pq-002",
@@ -727,10 +789,13 @@ Machine-readable in `processing/protocol.py` `PROTOCOL_QUESTIONS`, written into 
     "ask": "angel_or_oscar",
     "text": "Is a measurement on a NEW SPOT of the same sample, at the same condition, a repeat (one record) or a different result?",
     "affects": [
-      "grouping.UNKNOWN_KEYS.new_spot"
+      "grouping.BOOKKEEPING_KEYS.new_spot",
+      "processing_results[].inputs[].spot"
     ],
-    "current_default": "unknown: separate groups plus a merge candidate",
-    "status": "open"
+    "current_default": "one group: spots of one sample at one condition merge as raw mu",
+    "status": "closed",
+    "answer": "A new spot is NOT a new result. Each sample is measured at several spots under the same condition to improve statistics; the conditions stay the same. Scans of one sample at one condition on different spots are one group, merged as raw mu. The spot (stage motors Sx Sy Sz Sr in the header) is recorded per scan; it is never a condition key.",
+    "answered_by": "beamline scientist answers relayed by Krish, 17 Nov 2026"
   },
   {
     "question_id": "pq-003",
@@ -738,10 +803,12 @@ Machine-readable in `processing/protocol.py` `PROTOCOL_QUESTIONS`, written into 
     "ask": "angel_or_oscar",
     "text": "Is a numbered step (`stepNN`) a repeat at the same condition, or a different point in a protocol?",
     "affects": [
-      "grouping.UNKNOWN_KEYS.step_number"
+      "grouping.CONDITION_KEYS.step_number"
     ],
-    "current_default": "unknown: separate groups plus a merge candidate",
-    "status": "open"
+    "current_default": "a condition: different steps are never merged",
+    "status": "closed",
+    "answer": "stepNN is the order of potential steps in one sequence. Different potential steps are NEVER merged, even when two steps share the same potential (step05 and step08 both at 850 mV: one after the 1st cycling, the other after the 2nd). The step number is the group's sequence position; spots within one step still merge.",
+    "answered_by": "beamline scientist answers relayed by Krish, 17 Nov 2026"
   },
   {
     "question_id": "pq-004",
@@ -750,10 +817,14 @@ Machine-readable in `processing/protocol.py` `PROTOCOL_QUESTIONS`, written into 
     "text": "Should the energy shift measured on a reference-foil group be applied to the beamtime's sample groups (and under which conditions)?",
     "affects": [
       "calibration.proposed_reference",
-      "calibration.apply_shift_when_confirmed"
+      "calibration.apply_shift_when_confirmed",
+      "calibration.align_scans_by_reference"
     ],
-    "current_default": "never propagated automatically",
-    "status": "open"
+    "current_default": "never propagated automatically (alignment pending the xas-analysis engine)",
+    "status": "closed",
+    "answer": "Align every scan to the in-scan reference: a foil in transmission (on I1/I2) or a glitch in I0. The monochromator is foil-calibrated by the beamline staff at the start of the beamtime, so the energy axis is already calibrated. The reference foil is the element under study.",
+    "answered_by": "beamline scientist answers relayed by Krish, 17 Nov 2026",
+    "implementation": "pending: per-scan alignment will be done by the xas-analysis reduction engine (integration pending); this build does not align scans yet"
   },
   {
     "question_id": "pq-005",
@@ -763,8 +834,10 @@ Machine-readable in `processing/protocol.py` `PROTOCOL_QUESTIONS`, written into 
     "affects": [
       "athena comparison: e0_delta_eV"
     ],
-    "current_default": "larch read_athena convention",
-    "status": "open"
+    "current_default": "Athena projects are never read",
+    "status": "closed",
+    "answer": "Never use Athena. Process from raw data only; an Athena project is no source of any value.",
+    "answered_by": "beamline scientist answers relayed by Krish, 17 Nov 2026"
   },
   {
     "question_id": "pq-006",
@@ -772,10 +845,12 @@ Machine-readable in `processing/protocol.py` `PROTOCOL_QUESTIONS`, written into 
     "ask": "oscar",
     "text": "For SSRL XDAC data, should SCA fluorescence channels be dead-time corrected with the ICR columns, and by which rule?",
     "affects": [
-      "channels.dead_time_rate_prefix"
+      "channels.dead_time_rate_prefix (removed)"
     ],
-    "current_default": "no correction; flag dead_time_correction_not_applied",
-    "status": "open"
+    "current_default": "not ISAAC's job: no correction, no flag",
+    "status": "closed",
+    "answer": "Dead time is not ISAAC's job: no correction, no flag, no warning.",
+    "answered_by": "beamline scientist answers relayed by Krish, 17 Nov 2026"
   },
   {
     "question_id": "pq-007",
@@ -783,10 +858,12 @@ Machine-readable in `processing/protocol.py` `PROTOCOL_QUESTIONS`, written into 
     "ask": "scientist_of_the_beamtime",
     "text": "When several Athena projects hold different versions of one measurement (re-normalised, glitch-removed, smoothed), which is the result of record?",
     "affects": [
-      "processing_results[].athena_versions"
+      "processing_results[].athena_versions (no longer made)"
     ],
-    "current_default": "none selected; each listed and compared",
-    "status": "open"
+    "current_default": "Athena projects are never the result of record",
+    "status": "closed",
+    "answer": "Never use Athena: an Athena project is never the result of record, never a source of processing parameters and never an input to a QC verdict or an agreement check.",
+    "answered_by": "beamline scientist answers relayed by Krish, 17 Nov 2026"
   }
 ]
 ```

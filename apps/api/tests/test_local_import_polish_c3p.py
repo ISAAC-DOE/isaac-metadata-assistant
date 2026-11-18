@@ -32,6 +32,11 @@ from test_local_import_processing import GRID, _athena_case, isaac, mu_edge  # n
 # --- 1. Athena names that are XDC scan files -----------------------------------------------------------
 
 
+#: pq-005/pq-007 (beamline scientist answers relayed by Krish, 17 Nov 2026): Athena is never used, so the Athena
+#: behaviour these tests checked no longer runs (processing reads no Athena project; no Athena result composes a record)
+ATHENA_RETIRED = pytest.mark.skip(reason="Athena is never used (pq-005/pq-007, 17 Nov 2026): retired behaviour")
+
+
 def test_the_xdc_scan_file_suffix_names_the_run():
     stem = "03_syn_dry_015"
     for name in ("03_SYN_dry_015_A.001", "03_syn_dry_015_a_001", "03_SYN_DRY_015_a.012"):
@@ -62,6 +67,7 @@ def test_an_xdc_name_that_fits_two_record_groups_matches_neither():
                       "prj_relative_path": "SYN.prj", "group_ids": ["g-x", "g-xa"]}]
 
 
+@ATHENA_RETIRED
 def test_an_athena_group_named_after_one_xdc_scan_file_is_compared(tmp_path):
     bdir, root = _athena_case(tmp_path, {"SYN.prj": [("01_SYN_ZZ1_A.001", GRID, mu_edge(GRID) * 1e-2)]})
     out = run_process(bdir, source_root=root)
@@ -74,6 +80,7 @@ def test_an_athena_group_named_after_one_xdc_scan_file_is_compared(tmp_path):
     assert [r["source"] for r in out["processing_results"]] == ["isaac_protocol", "scientist_athena"]
 
 
+@ATHENA_RETIRED
 def test_one_athena_group_per_xdc_scan_file_is_compared_as_a_set(tmp_path):
     groups = [("01_SYN_ZZ1_A.001", GRID, mu_edge(GRID) * 1e-2), ("01_SYN_ZZ1_A.002", GRID, mu_edge(GRID) * 1.01e-2)]
     bdir, root = _athena_case(tmp_path, {"SYN.prj": groups})
@@ -165,7 +172,8 @@ def test_a_good_curve_carries_none_of_the_new_checks(tmp_path):
     r = isaac(run_process(bdir, source_root=root))
     assert r["qc"]["verdict"] in ("pass", "warn")
     assert not {"post_edge_level", "edge_to_pre_edge_noise"} & set(r["qc"]["metrics"])
-    assert set(r["qc"].get("statements") or ()) <= {"glitch_check_few_scans", "glitch_points_on_edge", "channel_choice_needs_review"}  # c12-cal / r2-a: the glitch sentences only
+    assert set(r["qc"].get("statements") or ()) <= {"glitch_check_few_scans", "glitch_points_on_edge", "channel_choice_needs_review",
+                                                    "absev_missing_beamline_unconfirmed"}  # c12-cal / r2-a: the glitch sentences only; pq-001: the SYN vortDT scans have no absev and no beamline answer
 
 
 # --- 3. a foil on I2 tries the reference channel --------------------------------------------------------

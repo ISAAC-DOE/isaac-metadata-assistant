@@ -129,16 +129,39 @@ def choose_channels(
     role: str = "sample",
     bl15_selection: Mapping | None = None,
     exclude_modes: Sequence[str] = (),
+    bl15_2: str | None = None,
+    bl15_2_hint: str | None = None,
 ) -> ChannelChoice:
     """``exclude_modes``: modes NOT taken (still listed as alternatives) — the fallback when a
-    group's transmission channel is not positive in any scan (:mod:`.run`)."""
+    group's transmission channel is not positive in any scan (:mod:`.run`).
+
+    :data:`BL15_2_ENERGY_RULE_ID` (pq-001): a scan with ``channels.bl15_2_energy_column`` (``absev``) is ALWAYS read
+    on it, whatever the beamline. ``bl15_2``: why this scan is KNOWN to be a BL15-2 scan (a scientist's beamline
+    answer, or an unambiguous fingerprint; ``None`` when it is not known): a scan without ``absev`` then has no
+    energy column (flag :data:`BL15_2_ENERGY_MISSING_FLAG`), never another one. ``bl15_2_hint``: why this scan MAY be
+    a BL15-2 scan when that is not known (a fingerprint shared with another beamline, a folder name naming another
+    one): a scan without ``absev`` is read on the usual energy column and flagged
+    :data:`BL15_2_BEAMLINE_UNCONFIRMED_FLAG` for the scientist to confirm the beamline."""
     cp = params["channels"]
     flags: list[str] = []
     present = [c for c in cp["energy_candidates"] if table.has(c)]
     energy = present[0] if present else None
     if len(present) > 1:
         flags.append("energy_column_alternatives")
-    if energy is None:
+    bl15_col = cp.get("bl15_2_energy_column")
+    bl15_missing = bl15_unconfirmed = bl15_moved = False
+    if bl15_col and table.has(bl15_col):
+        # absev, when a scan has it, is always the right axis (pq-001)
+        bl15_moved = energy != bl15_col
+        energy = bl15_col
+        present = [bl15_col] + [c for c in present if c != bl15_col]
+    elif bl15_col and bl15_2:
+        energy, bl15_missing = None, True
+        flags.append(BL15_2_ENERGY_MISSING_FLAG)
+    elif bl15_col and bl15_2_hint:
+        bl15_unconfirmed = True
+        flags.append(BL15_2_BEAMLINE_UNCONFIRMED_FLAG)
+    if energy is None and not bl15_missing:
         lo, hi = cp["energy_value_range_eV"]
         energy = _energy_by_shape(table, lo, hi)
         if energy is not None:
@@ -191,12 +214,14 @@ def choose_channels(
                     flags.append("dead_detector_elements_excluded")
                 break
         flags.append("channel_choice_needs_review")
-    dt = cp.get("dead_time_rate_prefix")
-    if dt and choice.mode == MODE_FLUORESCENCE and _family(table, dt):
-        # Input-count-rate columns exist (XDAC ICR1_n): a dead-time correction is possible
-        # but no rule for it is approved, so none is applied — flagged for the scientist.
-        flags.append("dead_time_correction_not_applied")
-        choice.basis["dead_time_rate_columns"] = _family(table, dt)
+    if bl15_col and (bl15_2 or bl15_unconfirmed or bl15_moved):
+        # set after the signal choice, which may replace the basis (the BL15-2 selector's proposal). Absent for a scan
+        # read on absev as it always was, with no beamline hint (no result id moves)
+        choice.basis["energy_rule"] = {
+            "rule_id": BL15_2_ENERGY_RULE_ID, "column": bl15_col,
+            **({"bl15_2_basis": bl15_2} if bl15_2 else {}),
+            **({"missing": True, "statement": bl15_2_missing_statement(bl15_col, bl15_2)} if bl15_missing else {}),
+            **({"beamline_unconfirmed": bl15_2_hint, "used": energy} if bl15_unconfirmed else {})}
     if len(alternatives) > 1:
         flags.append("multiple_signal_alternatives")
     if choice.mode is None:
@@ -205,6 +230,30 @@ def choose_channels(
         flags.append("no_energy_column_found")
     choice.flags = flags
     return choice
+
+
+#: pq-001 (beamline scientist answers relayed by Krish, 17 Nov 2026): a BL15-2 scan's energy axis is always ``absev``
+BL15_2_ENERGY_RULE_ID = "isaac.xas.bl15_2_energy_is_absev.v0"
+BL15_2_ENERGY_MISSING_FLAG = "bl15_2_energy_column_missing"
+#: a scan with no absev whose beamline MAY be BL15-2 but is not known: read on its usual energy column, flagged
+BL15_2_BEAMLINE_UNCONFIRMED_FLAG = "absev_missing_beamline_unconfirmed"
+
+
+def bl15_2_missing_statement(column: str, basis: str) -> str:
+    return (f"This is a BL15-2 scan ({basis}), whose energy axis is always the '{column}' column (beamline scientist "
+            f"answers relayed by Krish, 17 Nov 2026), and it has no '{column}' column. It is not read on another energy "
+            "column; a person checks the file.")
+
+
+def bl15_2_unconfirmed_statement(column: str, files: Sequence[str], used: str | None, hint: str) -> str:
+    """The plain sentence for flag :data:`BL15_2_BEAMLINE_UNCONFIRMED_FLAG`: which scans have no absev, what they were
+    read on, and that the beamline needs confirming."""
+    names = ", ".join(files[:10]) + (f" and {len(files) - 10} more" if len(files) > 10 else "")
+    one = len(files) == 1
+    return (f"{'This scan has' if one else f'{len(files)} scans have'} no '{column}' column ({names}); if this is "
+            f"BL15-2 data, '{column}' is required (beamline scientist answers relayed by Krish, 17 Nov 2026) — confirm "
+            f"the beamline. The beamline is not known: {hint}. {'It was' if one else 'They were'} read on "
+            f"'{used or 'no energy column'}', so the curve needs review before it is approved.")
 
 
 def needs_review_statement(choice: ChannelChoice) -> str:

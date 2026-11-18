@@ -43,6 +43,11 @@ PURE_ELEMENT_NAMES = [
 # --- HIGH: a group's own edge always needs --accept-shift; names are a hint -------------------------------------
 
 
+#: pq-005/pq-007 (beamline scientist answers relayed by Krish, 17 Nov 2026): Athena is never used, so the Athena
+#: behaviour these tests checked no longer runs (processing reads no Athena project; no Athena result composes a record)
+ATHENA_RETIRED = pytest.mark.skip(reason="Athena is never used (pq-005/pq-007, 17 Nov 2026): retired behaviour")
+
+
 @pytest.mark.parametrize("name", REVIEWER_FALSE_NAMES)
 def test_a_reviewer_false_proposal_name_is_never_proposed_nor_applied_without_accept_shift(name):
     c = REF.calibrant_identity([name])
@@ -139,6 +144,7 @@ def _select(bdir, isa, version_id):
     M.decide(bdir, target_ids=[isa["result_id"]], decision="select_athena_version", value=version_id, **BY)
 
 
+@ATHENA_RETIRED
 def test_a_selection_survives_a_new_isaac_result_id(tmp_path, capsys):
     _processing()
     bdir, root = _versions_case(tmp_path)
@@ -160,6 +166,7 @@ def test_a_selection_survives_a_new_isaac_result_id(tmp_path, capsys):
     assert ath["result_id"] in fresh["qc"]["statements"]["athena_version_selected"]
 
 
+@ATHENA_RETIRED
 def test_a_selection_that_no_longer_resolves_is_said_not_carried_over(tmp_path, capsys):
     _processing()
     from test_local_import_polish_c10m import _prj
@@ -187,6 +194,7 @@ def test_a_selection_that_no_longer_resolves_is_said_not_carried_over(tmp_path, 
     assert note["statement"] in out["summary"]["lines"]
 
 
+@ATHENA_RETIRED
 def test_reselecting_after_an_approval_says_the_order_and_the_old_result_stops_claiming_the_choice(tmp_path, capsys):
     _processing()
     from isaac_api.local_import.processing import run as RUN

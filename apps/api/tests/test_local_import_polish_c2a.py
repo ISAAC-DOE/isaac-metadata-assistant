@@ -49,6 +49,11 @@ from test_local_import_processing import E0, GRID, fluo_scan, isaac, make_case, 
 FINE = np.arange(4900.0, 5100.0 + 1e-9, 0.25)
 
 
+#: pq-005/pq-007 (beamline scientist answers relayed by Krish, 17 Nov 2026): Athena is never used, so the Athena
+#: behaviour these tests checked no longer runs (processing reads no Athena project; no Athena result composes a record)
+ATHENA_RETIRED = pytest.mark.skip(reason="Athena is never used (pq-005/pq-007, 17 Nov 2026): retired behaviour")
+
+
 def _normalised(seed=1, noise=0.01):
     """A SYNTHETIC already-normalised spectrum (pre-edge 0, post-edge 1) with noise."""
     rng = np.random.default_rng(seed)
@@ -99,6 +104,7 @@ def test_the_degenerate_post_edge_fit_really_gives_an_absurd_step():
     assert g.edge_step > 1000
 
 
+@ATHENA_RETIRED
 def test_an_athena_group_imported_as_normalised_data_is_used_as_stored(tmp_path):
     bdir, root = _case(tmp_path, {"is_nor": "1", **DEGENERATE})
     isa, sci = _results(run_process(bdir, source_root=root))
@@ -115,6 +121,7 @@ def test_an_athena_group_imported_as_normalised_data_is_used_as_stored(tmp_path)
     assert float(rows[-1][2]) == pytest.approx(_normalised()[-1], abs=1e-6)
 
 
+@ATHENA_RETIRED
 def test_an_implausible_athena_edge_step_is_a_fail_never_compared(tmp_path):
     # not flagged as normalised, and (r5 review H1) no positive stored step: a re-fit is all there is. Athena's re-fit
     # (nnorm counted as coefficients) gives about 34 for a spectrum spanning about 1, larch's own reading over 1000:
@@ -170,7 +177,10 @@ def test_a_truncated_scan_warns_with_the_counts(tmp_path):
 def test_a_group_with_no_truncated_scan_says_nothing_new(tmp_path):
     bdir, root, _ = make_case(tmp_path, [("01_SYN_ZZ1", [spec_file(fluo_scan(s)) for s in (1, 2)], {"sample_name": "ZZ1"})])
     r = isaac(run_process(bdir, source_root=root))
-    assert set(r["qc"].get("statements") or ()) <= {"glitch_check_few_scans", "glitch_points_on_edge", "channel_choice_needs_review"} and "scan_range_truncated" not in r["review_flags"]  # c12-cal / r2-a: the glitch sentences only
+    # c12-cal / r2-a: the glitch sentences only, and (pq-001) the beamline check: the SYN scans have vortDT columns (a
+    # BL15-2 hint) but no absev, and nobody has said which beamline it was
+    assert set(r["qc"].get("statements") or ()) <= {"glitch_check_few_scans", "glitch_points_on_edge", "channel_choice_needs_review",
+                                                    "absev_missing_beamline_unconfirmed"} and "scan_range_truncated" not in r["review_flags"]
     assert "edge_step_implausible" not in r["qc"]["metrics"]
 
 
@@ -262,6 +272,7 @@ def test_record_processing_steps_list_only_what_was_applied(bdir):
     assert _steps(bdir, [CAL_NOT_APPLIED, one, NORM]) == ["normalization"]
 
 
+@ATHENA_RETIRED
 def test_a_curve_marked_normalised_that_is_not_is_never_used_as_the_scientists_result(tmp_path):
     """Review (cycle 2): the `is_nor` flag alone was trusted. A raw curve (pre-edge ~3, post-edge ~8)
     stored with the flag fails like an implausible step: not compared, not preferred."""

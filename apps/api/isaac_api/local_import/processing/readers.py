@@ -42,6 +42,9 @@ class ScanTable:
     notes: list[str] = field(default_factory=list)
     header_lines: list[str] = field(default_factory=list)
     error: str | None = None
+    #: a SPEC file's ``#O<i>`` motor-name lines (file level) and its scan's ``#P<i>`` position lines, uncapped by
+    #: ``header_lines``' 40-line limit: paired by index as ``bl15.spec`` pairs them (the spot, pq-002)
+    motor_lines: list[str] = field(default_factory=list)
 
     def has(self, name: str) -> bool:
         return name in self.columns
@@ -110,8 +113,19 @@ def _spec_block(lines: list[str], scan: int, table: ScanTable) -> list[str] | No
     return lines[hits[0]:end]
 
 
+_MOTOR_LINE = re.compile(r"^#[OP]\d+(\s|$)")
+_MAX_MOTOR_LINES = 200
+
+
 def _read_spec(lines: list[str], table: ScanTable, scan: int | None = None) -> ScanTable:
     if scan is not None:
+        # the file-level #O lines sit before the first #S: kept for the #O/#P pairing of the block read below
+        for raw in lines:
+            line = raw.strip()
+            if _S_LINE.match(line):
+                break
+            if line.startswith("#O") and _MOTOR_LINE.match(line) and len(table.motor_lines) < _MAX_MOTOR_LINES:
+                table.motor_lines.append(line)
         block = _spec_block(lines, scan, table)
         if block is None:
             return table
@@ -130,6 +144,10 @@ def _read_spec(lines: list[str], table: ScanTable, scan: int | None = None) -> S
                 if blocks > 1 and rows:
                     table.notes.append("multiple_scan_blocks_first_read")
                     break
+                # a new block's #P lines are its own: an earlier block's are dropped (its #O names kept)
+                table.motor_lines = [x for x in table.motor_lines if x.startswith("#O")]
+            if _MOTOR_LINE.match(line) and len(table.motor_lines) < _MAX_MOTOR_LINES:
+                table.motor_lines.append(line)
             m = _L_LINE.match(line)
             if m:
                 labels = m.group(1).split()

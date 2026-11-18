@@ -15,6 +15,11 @@ import json
 import pytest
 
 
+#: pq-005/pq-007 (beamline scientist answers relayed by Krish, 17 Nov 2026): Athena is never used, so the Athena
+#: behaviour these tests checked no longer runs (processing reads no Athena project; no Athena result composes a record)
+ATHENA_RETIRED = pytest.mark.skip(reason="Athena is never used (pq-005/pq-007, 17 Nov 2026): retired behaviour")
+
+
 def _proc():
     pytest.importorskip("numpy", reason="needs the optional `processing` extra (numpy)")
     pytest.importorskip("larch", reason="needs the optional `processing` extra (xraylarch)")
@@ -138,6 +143,7 @@ def _case_with_merge(T, tmp_path, name, extra=()):
     return T._athena_case(d, {"SYN.prj": groups})
 
 
+@ATHENA_RETIRED
 def test_process_says_a_merge_exists_but_was_not_matched_and_no_id_moves(tmp_path):
     T = _proc()
     from isaac_api.local_import.processing import run as RUN
@@ -168,6 +174,7 @@ def test_process_says_a_merge_exists_but_was_not_matched_and_no_id_moves(tmp_pat
     assert not any(RUN.UNMATCHED_MERGE_KEY in (r.get("review_flags") or ()) for r in plain["processing_results"])
 
 
+@ATHENA_RETIRED
 def test_process_uses_a_merge_the_scientist_tied_and_records_the_tie(tmp_path):
     T = _proc()
     mu = T.mu_edge(T.GRID) * 1e-2
@@ -238,6 +245,7 @@ def test_show_prints_how_the_curve_was_made_and_a_set_names_its_basis():
 # --- G4: larch's different reading is said once ----------------------------------------------------------------------
 
 
+@ATHENA_RETIRED
 def test_larchs_reading_is_recorded_on_each_result_and_said_once(tmp_path, monkeypatch):
     T = _proc()
     A = _A()
@@ -378,6 +386,7 @@ def _of(bdir, source):
     return [r for r in M.load(bdir)["processing_results"] if r["source"] == source]
 
 
+@ATHENA_RETIRED
 def test_a_tied_merge_is_approved_on_its_own_and_its_approval_and_record_say_the_tie(tmp_path, capsys):
     from isaac_api.local_import import mutations as M
     from isaac_api.local_import import records as R

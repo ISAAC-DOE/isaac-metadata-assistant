@@ -25,6 +25,11 @@ from test_local_import_records import BY, _decide_everything, bdir, pristine  # 
 SKILL = Path(__file__).resolve().parents[3] / ".claude" / "skills" / "isaac-historical-import"
 
 
+#: pq-005/pq-007 (beamline scientist answers relayed by Krish, 17 Nov 2026): Athena is never used, so the Athena
+#: behaviour these tests checked no longer runs (processing reads no Athena project; no Athena result composes a record)
+ATHENA_RETIRED = pytest.mark.skip(reason="Athena is never used (pq-005/pq-007, 17 Nov 2026): retired behaviour")
+
+
 def _run(capsys, *argv):
     code = cli.main(list(argv))
     cap = capsys.readouterr()
@@ -54,6 +59,7 @@ def _athena_run(tmp_path, label, *, stem="01_SYN_ZZ1"):
     return isa, sci
 
 
+@ATHENA_RETIRED
 def test_an_athena_label_that_names_scans_says_which_and_marks_the_group_used(tmp_path):
     isa, sci = _athena_run(tmp_path, "01_SYN_ZZ1_1-2")
     [ref] = sci["inputs"]
@@ -63,6 +69,7 @@ def test_an_athena_label_that_names_scans_says_which_and_marks_the_group_used(tm
     assert sci["qc"]["metrics"]["scans_used"] is None and sci["qc"]["verdict"] == "pass"  # the verdict is not moved
 
 
+@ATHENA_RETIRED
 def test_an_athena_label_naming_no_scan_says_the_project_does_not_say(tmp_path):
     isa, sci = _athena_run(tmp_path, "01_SYN_ZZ1")
     [ref] = sci["inputs"]
@@ -93,7 +100,8 @@ def test_a_skipped_scan_gets_a_sentence_and_no_result_id_moves(tmp_path):
 def test_a_group_with_no_skipped_scan_has_no_skip_sentence(tmp_path):
     P, NA = _processing_helpers()
     r = NA._one(tmp_path, [P.spec_file(P.fluo_scan(2)), P.spec_file(P.fluo_scan(3))])
-    assert set(r["qc"].get("statements") or ()) <= {"glitch_check_few_scans", "glitch_points_on_edge", "channel_choice_needs_review"}  # c12-cal / r2-a: the glitch sentences only
+    assert set(r["qc"].get("statements") or ()) <= {"glitch_check_few_scans", "glitch_points_on_edge", "channel_choice_needs_review",
+                                                    "absev_missing_beamline_unconfirmed"}  # c12-cal / r2-a: the glitch sentences only; pq-001: the SYN vortDT scans have no absev and no beamline answer
 
 
 def test_list_row_and_show_carry_a_scans_line(bdir, capsys):

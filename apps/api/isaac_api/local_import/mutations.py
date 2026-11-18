@@ -843,7 +843,11 @@ BULK_APPROVE_REVIEW = (("glitch_points_from_one_scan", "one scan's glitch on the
                                                      "athena_match, not by its name"),
                        # scan selection (processing.run.SCAN_SELECTION_FLAG): scans proposed for leaving out of the
                        # merge, or to look at, that the scientist has not confirmed
-                       ("scan_selection_proposed", "open scan-selection proposals"))
+                       ("scan_selection_proposed", "open scan-selection proposals"),
+                       # processing.channels.BL15_2_BEAMLINE_UNCONFIRMED_FLAG (pq-001): scans read without absev while
+                       # the beamline is not known; the scientist confirms the beamline first
+                       ("absev_missing_beamline_unconfirmed", "scans read without an absev column while the beamline "
+                                                              "is not confirmed"))
 
 #: the statement that says a BULK_APPROVE_REVIEW key's sentence, when it is not the key itself
 _BULK_SENTENCE_KEY = {"scan_selection_proposed": "scan_selection"}
@@ -1068,6 +1072,40 @@ def approval_is_stale(approval: Mapping | None, result: Mapping) -> bool:
     return bound is not None and json.dumps(bound, sort_keys=True) != json.dumps(approval_files(result), sort_keys=True)
 
 
+#: ``processing.run.ATHENA_NEVER_RULE_ID`` (pq-005/pq-007; not imported: processing is an optional extra)
+C_ATHENA_NEVER_RULE_ID = "isaac.processing.athena_never_used.v0"
+C_ATHENA_SOURCE = "scientist_athena"
+
+
+def isaac_results_for(bundle: Mapping, group_id: str | None) -> list[str]:
+    """The ISAAC-processed results of ``group_id`` a scientist can approve instead of an Athena curve: from
+    ``isaac process`` (never Athena), not rejected, not "protocol does not apply", a curve first."""
+    rs = [r for r in bundle.get("processing_results") or ()
+          if r.get("group_id") == group_id and r.get("source") == "isaac_protocol"
+          and not B.processing_not_applicable(r) and r.get("state") != B.STATE_REJECTED]
+    rs.sort(key=lambda r: not (r.get("outputs") or {}).get("files"))
+    return [B.processing_id(r) for r in rs]
+
+
+def athena_approval_problem(bundle: Mapping, obj: Mapping) -> str | None:
+    """Why approving ``obj`` is refused because it is the scientist's Athena curve (``None`` for any other result).
+    Athena is never the result of record (pq-005/pq-007, beamline scientist answers relayed by Krish, 17 Nov 2026):
+    processing works from the raw scan files only. Names the group's ISAAC result(s) to approve instead."""
+    if obj.get("source") != C_ATHENA_SOURCE:
+        return None
+    pid, gid = B.processing_id(obj), obj.get("group_id")
+    ids = isaac_results_for(bundle, gid)
+    if ids:
+        how = (f"Approve the group's ISAAC-processed result instead: "
+               + " / ".join(f'`isaac bundle decide <bundle_dir> --target {x} --decision approve --qc-status <value> '
+                            f'--by "<your name>"`' for x in ids[:3]) + ".")
+    else:
+        how = ("The group has no ISAAC-processed result yet: run `isaac process <bundle_dir> --source <the beamtime "
+               "folder you imported>` and approve the result it makes.")
+    return (f"{pid} cannot be approved: it is the scientist's Athena curve, and Athena is never the result of record "
+            f"({C_ATHENA_NEVER_RULE_ID}; processing works from the raw scan files only). {how} Nothing was recorded.")
+
+
 def approved_sibling_problem(bundle: Mapping, obj: Mapping, planned: Sequence[Mapping] = ()) -> str | None:
     """Why approving the processing result ``obj`` is refused because ANOTHER result of its group is already
     approved (or is approved in the same call, ``planned``), else ``None``.
@@ -1089,6 +1127,14 @@ def approved_sibling_problem(bundle: Mapping, obj: Mapping, planned: Sequence[Ma
     if not others:
         return None
     old = B.processing_id(others[0])
+    if others[0].get("source") == C_ATHENA_SOURCE:
+        # pq-005/pq-007: an Athena approval an older build let through is never kept: "keep it" would be no option
+        return (f"{pid} cannot be approved yet: {old} (the scientist's Athena curve) is approved for group {gid} under "
+                f"an older build, and Athena is never the result of record ({C_ATHENA_NEVER_RULE_ID}), so no record "
+                f"uses it. Withdraw that approval first "
+                f'(`isaac bundle decide <bundle_dir> --target {old} --decision reject --by "<your name>"`), then approve '
+                f'{pid} (`isaac bundle decide <bundle_dir> --target {pid} --decision approve --qc-status <value> '
+                f'--by "<your name>"`). Nothing was recorded.')
     notes = " ".join(n for n in (scan_subset_note(bundle, r) for r in (others[0], obj)) if n)
     if approval_is_stale(state_of.get(("processing_result", old)), others[0]):
         # "keep it (nothing more to do)" would be false: the composer uses nothing from a stale approval
@@ -2880,7 +2926,8 @@ def record_decision(
                     # when no target is refused for any other reason, whatever order the targets came in
                     off_list = off_list or exc
                 if kind == "processing_result" and decision == "approve":
-                    problem = approved_sibling_problem(bundle, obj, [o for k, o in planned if k == "processing_result"])
+                    problem = (athena_approval_problem(bundle, obj)
+                               or approved_sibling_problem(bundle, obj, [o for k, o in planned if k == "processing_result"]))
                     if problem is not None:
                         raise MutationRefused(problem)
                     if bulk and (why := bulk_approve_problem(obj)) is not None:

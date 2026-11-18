@@ -25,12 +25,17 @@ from isaac_api.local_import import mutations as M
 from isaac_api.local_import import records as R
 
 from test_local_import_extract import make_docx
-from test_local_import_polish_c4a import ATHENA_PRJ, _add_athena, _approve, _exported
+from test_local_import_polish_c4a import ATHENA_PRJ, _add_athena, _add_second, _approve, _exported
 from test_local_import_records import (  # noqa: F401  (fixtures)
     BY, _decide_everything, _portal, bdir, fake_upstream, pristine)
 from test_local_import_template_adopt import corpus, grouped, grouped_base  # noqa: F401  (fixtures)
 
 FOLDER = "Syn_Person_ZZ1_norm"  # a folder name that could carry a sample's or a person's name
+
+
+#: pq-005/pq-007 (beamline scientist answers relayed by Krish, 17 Nov 2026): Athena is never used, so the Athena
+#: behaviour these tests checked no longer runs (processing reads no Athena project; no Athena result composes a record)
+ATHENA_RETIRED = pytest.mark.skip(reason="Athena is never used (pq-005/pq-007, 17 Nov 2026): retired behaviour")
 
 
 def _athena_inputs(bdir, **change):
@@ -58,6 +63,7 @@ def _record_and_sidecar(bdir, tmp_path):
 # --- (1) a per-scan set is ISAAC's mean, never "read unchanged" ----------------------------------------------
 
 
+@ATHENA_RETIRED
 def test_a_per_scan_set_descriptor_says_isaac_computed_the_mean_of_the_named_groups(bdir, tmp_path):
     _decide_everything(bdir)
     _add_athena(bdir, subset=False)
@@ -78,6 +84,7 @@ def test_a_per_scan_set_descriptor_says_isaac_computed_the_mean_of_the_named_gro
     assert "ISAAC did not change it" not in e0["definition"] and "computed by ISAAC" in e0["definition"]
 
 
+@ATHENA_RETIRED
 def test_a_per_scan_set_from_an_older_build_with_no_member_list_still_says_isaac_computed_it(bdir, tmp_path):
     _decide_everything(bdir)
     _add_athena(bdir, subset=False)
@@ -88,6 +95,7 @@ def test_a_per_scan_set_from_an_older_build_with_no_member_list_still_says_isaac
     assert out["descriptors"][0]["source"] == "auto"
 
 
+@ATHENA_RETIRED
 def test_one_matched_athena_group_is_still_the_scientists_own_imported_value(bdir, tmp_path):
     _decide_everything(bdir)
     _add_athena(bdir, subset=False)
@@ -100,6 +108,7 @@ def test_one_matched_athena_group_is_still_the_scientists_own_imported_value(bdi
 # --- (2) the record names the project's file name, never its folders -----------------------------------------
 
 
+@ATHENA_RETIRED
 @pytest.mark.parametrize("kind", ["exact", "per_scan_set"])
 def test_the_record_names_the_athena_project_by_file_name_only(bdir, tmp_path, kind):
     _decide_everything(bdir)
@@ -118,6 +127,7 @@ def test_the_record_names_the_athena_project_by_file_name_only(bdir, tmp_path, k
 # --- (1) the result of a per-scan set names its member groups ------------------------------------------------
 
 
+@ATHENA_RETIRED
 def test_a_per_scan_set_result_names_its_member_groups_and_does_not_say_unchanged(tmp_path):
     pytest.importorskip("larch", reason="needs the optional `processing` extra")
     from isaac_api.local_import.processing.cli_entry import run_process
@@ -214,7 +224,7 @@ def _make_p1_stale(bdir):
 
 def test_the_refusal_says_when_the_approved_results_approval_no_longer_matches_its_files(bdir):
     _decide_everything(bdir)
-    _add_athena(bdir)
+    _add_second(bdir)
     _make_p1_stale(bdir)
     with pytest.raises(M.MutationRefused) as exc:
         _approve(bdir, "p2")
@@ -226,7 +236,7 @@ def test_the_refusal_says_when_the_approved_results_approval_no_longer_matches_i
 
 def test_the_refusal_still_says_keep_it_when_the_approval_matches(bdir):
     _decide_everything(bdir)
-    _add_athena(bdir)
+    _add_second(bdir)
     with pytest.raises(M.MutationRefused) as exc:
         _approve(bdir, "p2")
     assert "keep p1 (nothing more to do)" in str(exc.value) and "no longer matches" not in str(exc.value)

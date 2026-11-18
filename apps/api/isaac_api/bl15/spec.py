@@ -62,6 +62,7 @@ counted, and deliberately not turned into statements.
 from __future__ import annotations
 
 import re
+from collections.abc import Iterable
 from datetime import datetime, timezone
 
 from ._emit import EvidenceBuilder, oversize_reason, refusal
@@ -544,6 +545,25 @@ def _repeated_scan_numbers(lines: list[str]) -> set[str]:
     return repeated
 
 
+def pair_motor_positions(names: list[str] | None, values: list[str]) -> list[tuple[str, str]] | None:
+    """:data:`RULE_O_P_PAIRING`: ``#P<i>``'s ``values`` named by ``#O<i>``'s ``names``, zipped by column position, or
+    ``None`` when there is no ``#O<i>`` line or the two counts differ (refused, never guessed: one missing field would
+    shift every later position onto the wrong motor's name)."""
+    if names is None or len(names) != len(values):
+        return None
+    return list(zip(names, values))
+
+
+def motor_name_lines(lines: Iterable[str]) -> dict[int, list[str]]:
+    """``{i: names}`` from the ``#O<i>`` lines of ``lines`` (the names split on whitespace, as this reader splits them)."""
+    out: dict[int, list[str]] = {}
+    for line in lines:
+        m = _HEADER_LINE.match(str(line).strip())
+        if m and m.group(1) == "O" and m.group(2).isdigit():
+            out[int(m.group(2))] = m.group(3).split()
+    return out
+
+
 def _read_positions(
     builder: EvidenceBuilder,
     *,
@@ -583,7 +603,7 @@ def _read_positions(
             position_count=len(values),
         )
         return
-    for column, (name, value) in enumerate(zip(names, values)):
+    for column, (name, value) in enumerate(pair_motor_positions(names, values) or ()):
         builder.add(
             locator=(
                 f"line {line_number} header #P{index} column {column} "

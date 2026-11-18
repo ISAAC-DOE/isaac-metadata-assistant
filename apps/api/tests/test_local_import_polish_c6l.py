@@ -26,6 +26,11 @@ from test_local_import_polish_c5a import ABSORBER, COUNTER, WHO, _absorber_argv,
 from test_local_import_records import BY, _decide_everything, bdir, fake_upstream, pristine  # noqa: F401  (fixtures)
 
 
+#: pq-005/pq-007 (beamline scientist answers relayed by Krish, 17 Nov 2026): Athena is never used, so the Athena
+#: behaviour these tests checked no longer runs (processing reads no Athena project; no Athena result composes a record)
+ATHENA_RETIRED = pytest.mark.skip(reason="Athena is never used (pq-005/pq-007, 17 Nov 2026): retired behaviour")
+
+
 def _never_asked(bundle_dir) -> None:
     """The grouping step did not ask the counter question (the answer below is given straight to ``decide``)."""
     b = M.load(bundle_dir)
@@ -85,6 +90,7 @@ def test_a_dry_run_statement_says_would_record_and_a_real_one_says_recorded(grou
 # --- (3) the per-scan mean's descriptor explains generated_utc ----------------------------------------------------
 
 
+@ATHENA_RETIRED
 def test_a_per_scan_mean_descriptor_says_generated_utc_is_the_approval_time(bdir, tmp_path):
     _decide_everything(bdir)
     _add_athena(bdir, subset=False)

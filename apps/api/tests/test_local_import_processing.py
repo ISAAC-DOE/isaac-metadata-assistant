@@ -32,6 +32,11 @@ E0 = 4966.0  # synthetic edge position (eV); values are invented
 GRID = np.arange(4900.0, 5100.0 + 1e-9, 0.5)
 
 
+#: pq-005/pq-007 (beamline scientist answers relayed by Krish, 17 Nov 2026): Athena is never used, so the Athena
+#: behaviour these tests checked no longer runs (processing reads no Athena project; no Athena result composes a record)
+ATHENA_RETIRED = pytest.mark.skip(reason="Athena is never used (pq-005/pq-007, 17 Nov 2026): retired behaviour")
+
+
 def mu_edge(e, e0=E0, step=1.5, offset=0.2, width=0.5):
     return offset + 0.0001 * (e - e[0]) + step * (0.5 + np.arctan((e - e0) / width) / np.pi)
 
@@ -199,7 +204,9 @@ def test_channels_prefer_achieved_energy_and_flag_missing_i0_and_icr():
     xd = parse_text(xdac_file({"Achieved Energy": GRID[:10], "I0": np.ones(10), "I1": np.ones(10), "I2": np.ones(10), "SCA1_1": np.ones(10), "SCA1_2": np.zeros(10), "ICR1_1": np.ones(10)}))
     c3 = choose_channels(xd, params=params)
     assert c3.energy == "Achieved Energy" and c3.signal_columns == ["SCA1_1"] and c3.reference_pair == ["I1", "I2"]
-    assert {"dead_time_correction_not_applied", "dead_detector_elements_excluded", "channel_choice_needs_review"} <= set(c3.flags)
+    # pq-006 (17 Nov 2026): dead time is not ISAAC's job: ICR columns raise no flag
+    assert {"dead_detector_elements_excluded", "channel_choice_needs_review"} <= set(c3.flags)
+    assert "dead_time_correction_not_applied" not in c3.flags
     assert {a["mode"] for a in c3.alternatives} == {"fluorescence", "transmission"}
     ref = choose_channels(xd, params=params, role="reference")
     assert ref.mode == "transmission" and ref.signal_name == "ln(I0/I1)"
@@ -377,7 +384,9 @@ def test_version_provenance_states_years_from_the_path_only():
 
 def test_protocol_questions_are_machine_readable_and_reach_params_json(tmp_path):
     ids = [q["question_id"] for q in P.PROTOCOL_QUESTIONS]
-    assert len(ids) == len(set(ids)) and all(q["status"] == "open" and q["text"] and q["affects"] for q in P.PROTOCOL_QUESTIONS)
+    # every question is answered (beamline scientist answers relayed by Krish, 17 Nov 2026): closed, with its answer
+    assert len(ids) == len(set(ids)) and all(q["status"] == "closed" and q["answer"] and q["text"] and q["affects"]
+                                             for q in P.PROTOCOL_QUESTIONS)
     topics = {q["topic"] for q in P.PROTOCOL_QUESTIONS}
     assert {"energy_column", "grouping.new_spot", "calibration.foil_shift_to_samples", "athena.e0_frame"} <= topics
     bdir, root, _ = make_case(tmp_path, [("01_SYN_ZZ1", [spec_file(fluo_scan(1))], {"sample_name": "ZZ1"})])
@@ -399,6 +408,7 @@ def test_name_matching_rules_and_scan_selection():
     assert A.scan_selection("01_SYN_ZZ1_again", ["01_SYN_ZZ1"]) is None
 
 
+@ATHENA_RETIRED
 def test_athena_match_agree_and_scientist_result_preferred(tmp_path):
     mean = mu_edge(GRID) * 1e-2
     bdir, root = _athena_case(tmp_path, {"Athena/SYN.prj": [("01_SYN_ZZ1_1-2", GRID, mean)]})
@@ -414,6 +424,7 @@ def test_athena_match_agree_and_scientist_result_preferred(tmp_path):
     assert "athena_normalized" in {f["role"] for f in isa["outputs"]["files"]}
 
 
+@ATHENA_RETIRED
 def test_athena_differs_when_the_scientist_spectrum_is_shifted(tmp_path):
     bdir, root = _athena_case(tmp_path, {"SYN.prj": [("01_SYN_ZZ1", GRID, mu_edge(GRID, E0 + 3.0) * 1e-2)]})
     isa = isaac(run_process(bdir, source_root=root))
@@ -421,6 +432,7 @@ def test_athena_differs_when_the_scientist_spectrum_is_shifted(tmp_path):
     assert "athena_disagrees" in isa["review_flags"]
 
 
+@ATHENA_RETIRED
 def test_athena_not_comparable_on_a_tiny_overlap(tmp_path):
     e = GRID[(GRID > 5080)]
     bdir, root = _athena_case(tmp_path, {"SYN.prj": [("01_SYN_ZZ1", e, mu_edge(e) * 1e-2)]})
@@ -428,6 +440,7 @@ def test_athena_not_comparable_on_a_tiny_overlap(tmp_path):
     assert isa["comparison"]["verdict"] == "not_comparable" and "overlap_too_small" in isa["comparison"]["flags"]
 
 
+@ATHENA_RETIRED
 def test_athena_ambiguous_projects_mean_no_match(tmp_path):
     bdir, root = _athena_case(
         tmp_path,
@@ -452,6 +465,7 @@ def test_athena_ambiguous_projects_mean_no_match(tmp_path):
     assert out["athena"]["record_groups_with_unselected_versions"] == 1
 
 
+@ATHENA_RETIRED
 def test_athena_per_scan_groups_are_compared_as_a_set(tmp_path):
     groups = [("01_SYN_ZZ1_001", GRID, mu_edge(GRID) * 1e-2), ("01_SYN_ZZ1_002", GRID, mu_edge(GRID) * 1.01e-2)]
     bdir, root = _athena_case(tmp_path, {"SYN.prj": groups})
@@ -462,6 +476,7 @@ def test_athena_per_scan_groups_are_compared_as_a_set(tmp_path):
     assert sci["source"] == "scientist_athena"
 
 
+@ATHENA_RETIRED
 def test_evaluation_harness_counts(tmp_path):
     bdir, root = _athena_case(tmp_path, {"SYN.prj": [("01_SYN_ZZ1", GRID, mu_edge(GRID) * 1e-2)]})
     run_process(bdir, source_root=root)
