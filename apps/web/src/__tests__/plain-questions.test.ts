@@ -101,10 +101,10 @@ describe('plainQuestion', () => {
 describe('sampleLabel and the counter example', () => {
   it('names the sample in the files’ own spelling, else from the partition', () => {
     const said = q({
-      partition: 'sample={"sample_name": "jk1", "sample_or_electrode_number": "06"}',
-      text: "… with the same sample reading (sample name 'JK1', sample or electrode number '06', as the files write it) — …",
+      partition: 'sample={"sample_name": "zz1", "sample_or_electrode_number": "06"}',
+      text: "… with the same sample reading (sample name 'ZZ1', sample or electrode number '06', as the files write it) — …",
     });
-    expect(sampleLabel(said)).toBe('Sample JK1, no. 06');
+    expect(sampleLabel(said)).toBe('Sample ZZ1, no. 06');
     expect(sampleLabel(q({ partition: 'sample={"sample_name": "irtio2", "loading_or_thickness": "2nm"}' }))).toBe('Sample irtio2, 2nm');
     expect(sampleLabel(q({ partition: 'sample=unrecorded' }))).toBe('Groups whose files name no sample');
     expect(sampleLabel(q({}))).toBeNull();

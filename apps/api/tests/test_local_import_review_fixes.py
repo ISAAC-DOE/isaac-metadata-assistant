@@ -198,11 +198,14 @@ def test_a_standing_resolution_is_carried_and_has_a_conflict_entry(resolved_bund
 #: fixture_name=<key>)) and hash
 #: `json.dumps([reading.to_state(), [c.to_state() for c in candidates]], sort_keys=True,
 #: default=str)` with sha256. Branch HEAD reproduces both digests exactly.
+#: re-pinned 18 Nov 2026 (both): the file-name rules' statements (``bl15.filenames``, carried on every candidate as its
+#: ``normalization_rule``) no longer quote real sample codes (``JK1``/``JK2`` -> ``ZZ1``/``ZZ2``); with those statements
+#: as they were, this build reproduces the previous digests (6ec55ca8…, 8d873eb8…) exactly, so only that wording moved them
 GOLDEN = {
-    "bl15_synthetic_mini_corpus": ("6ec55ca84db75f43661f4daa247dfb9af7a5777f858795ac92d912dd81bae770", 5, 100),
+    "bl15_synthetic_mini_corpus": ("cc9240192e5bd1151d9b09dc128bcb8c1385d906ecc1a339ce89a6132e222342", 5, 100),
     # re-pinned 17 Nov 2026: the corpus's .dat exports gained an `absev` column (pq-001); this build reproduces the
     # main digest acf0ba4a… exactly on the corpus as it was, so only the fixture bytes moved it
-    "bl15_synthetic_semantics_corpus": ("8d873eb88aa6252be9a5cf78af6475b46d1cdfd436996b223185e440ff59a8b5", 9, 200),
+    "bl15_synthetic_semantics_corpus": ("1315342ab102c548730215984795cddd72420e4bc7c6bcde40682f17ce191ab9", 9, 200),
 }
 
 

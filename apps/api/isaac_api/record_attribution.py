@@ -8,7 +8,7 @@ The official schema declares one field the SERVER owns
     "Authenticated identity that submitted this record. Set by the server; any
      client value is overwritten."
 
-and the block-level description names the decision that put it there (D. Sokaras,
+and the block-level description names the decision that put it there (the domain owner,
 2026-06-15): *"uploaded_by is SERVER-STAMPED from the authenticated identity at
 ingestion — client-supplied values are overwritten (tamper-proof attribution)."*
 

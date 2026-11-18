@@ -32,7 +32,7 @@ from typing import Any
 # worth recognising; `bl15.filenames` recognises them by SHAPE and by alias, not
 # by position, because the real corpus omits, reorders and adds fields — measured:
 # `71_07_IrTiO2_0p5nm_AsIs_NoElectrolyte` carries no potential and no filter,
-# `52_05_JK1_base_after1stCycling_filter20_850mV_step05` carries a step index the
+# `52_05_ZZ1_base_after1stCycling_filter20_850mV_step05` carries a step index the
 # convention does not mention, and `46_04_..._ffilter35_...` misspells one.
 
 CONCEPT_LEGACY_NUMBER = "legacy_run_or_file_number"

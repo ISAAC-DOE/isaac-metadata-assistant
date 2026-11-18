@@ -1693,7 +1693,7 @@ work, and nothing about it has been decided. `MCP-020`/`MCP-021`/`SEC-001` stay 
 > ***`EXT-10` IS MATERIALLY RESOLVED AS OF 2026-09-16, AND THE PARAGRAPH ABOVE IS KEPT STRUCK
 > RATHER THAN DELETED BECAUSE "no representative corpus exists" IS EXACTLY THE KIND OF CLAIM A
 > FUTURE SESSION ACTS ON — by declining to build a parser that is now buildable.*** The project
-> owner supplied a real SSRL BL15-2 beamtime archive directly (April 2025, Sokaras/IrOx, 1,192
+> owner supplied a real SSRL BL15-2 beamtime archive directly (April 2025, SYNPI/IrOx, 1,192
 > files, 88 MB) together with the beamtime notes in three representations. **The paragraph was
 > RIGHT in every particular while it stood**, including its distinction between a question to ask
 > and material to request — the material arrived, which is the one thing that could retire it.
@@ -1893,7 +1893,7 @@ reason Historical Import exists, and a slice that "cleans" any of them has broke
    beside it carrying the rule that produced it. **The source is never rewritten.**
 4. **The notes contradict themselves about the electrolyte** — a broad sentence beginning
    *"In ALL experiments we used …"* and naming ONE alkaline electrolyte sits above
-   `Sample 1 JK3 in acid`, in a document whose own preparation section specifies an acid. A broad human statement is **candidate shared
+   `Sample 1 ZZ3 in acid`, in a document whose own preparation section specifies an acid. A broad human statement is **candidate shared
    context**; sample-specific
    contrary evidence is a **conflict**, never an app-wide overwrite.
 
@@ -5706,7 +5706,7 @@ call it.** §12's extended contract requires both on any slice touching producti
 and this session read a real, private scientific document in full.
 
 **Authorization basis.** The project owner's in-session instruction of 2026-09-17, which directs
-reading *"the real `250411 BL 15 IrOx NP HERFD acid base.docx` completely"* and says *"Do not rely
+reading *"the real `YYMMDD BL 15 IrOx NP HERFD acid base.docx` completely"* and says *"Do not rely
 on an old summary of it."* The disclosure boundary applied to what came out of it is the committed
 one: [`docs/evidence/bl15-2-corpus-characterization-2026-09-16.md`](../../evidence/bl15-2-corpus-characterization-2026-09-16.md) §0.
 
@@ -5714,7 +5714,7 @@ one: [`docs/evidence/bl15-2-corpus-characterization-2026-09-16.md`](../../eviden
 
 | question | answer |
 |---|---|
-| what was touched | one private beamtime document, `250411 BL 15 IrOx NP HERFD acid base.docx`, read in full (639 extracted lines, 14 tables). **Untracked** — `git ls-files` returns nothing for it |
+| what was touched | one private beamtime document, `YYMMDD BL 15 IrOx NP HERFD acid base.docx`, read in full (639 extracted lines, 14 tables). **Untracked** — `git ls-files` returns nothing for it |
 | where it lived | the owner's local `~/Downloads` corpus folder, plus a plain-text extraction in this session's scratchpad, outside the repository |
 | how long | the session only. **Nothing was copied into the repository** |
 | what left the process | **structural facts and question classifications only.** No electrolyte, concentration, pH, energy, coordinate or potential value beyond tokens already present in the filenames the authorizing brief itself quoted verbatim. Procedure prose: **none** — see §4b, where the first draft did quote some and was corrected |

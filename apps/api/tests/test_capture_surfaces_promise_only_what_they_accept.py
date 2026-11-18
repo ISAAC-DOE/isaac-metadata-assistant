@@ -616,7 +616,7 @@ def test_the_record_level_arm_needs_no_run_at_all(client):
 
     # (1) PERMANENT. `attribution.uploaded_by` is declared SERVER-STAMPED by the official
     # schema itself, with any client value overwritten (tamper-proof attribution,
-    # D. Sokaras 2026-06-15), and `export._enforce_server_owned_invariant` strips it from
+    # the domain owner 2026-06-15), and `export._enforce_server_owned_invariant` strips it from
     # the assembled record as a structural backstop after every writer. A client can
     # therefore never be given this path — but the permanence rests on the SCHEMA
     # DECLARATION, on the block guard, and on the export invariant, NOT on the write

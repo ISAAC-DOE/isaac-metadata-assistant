@@ -2196,8 +2196,26 @@ def apply_dose_damage(table: dict, recs: Sequence[Mapping], stability: Mapping, 
     centre = float(np.median(wle)) if wle else float(E_edge) + 3.0
     win = [centre - DOSE["wl_half_eV"], centre + DOSE["wl_half_eV"]]
 
-    def diff(f, s_):
+    def raw(f, s_):
         return _norm_difference(f, s_, float(E_edge), win, np)
+
+    # 2026-11-18: a GLOBAL trend in time order is taken out first: a change it explains is the sample's (the stability
+    # rule's "still changing"), never settling or damage; only a within-spot change beyond it (and the noise) is judged.
+    # It is a trend only when the fresh spots' first scans (across spots) and the scans within each spot change at the
+    # same rate (within 2x, the same way); a spot-to-spot offset, damage or a settling first scan is not one
+    pos = {r["scan_id"]: i for i, r in enumerate(judged)}
+    firsts = [rs[0] for rs in by_spot.values()]
+    pts = [(pos[r["scan_id"]], 0.0 if r is firsts[0] else (raw(firsts[0], r) or (None,))[0]) for r in firsts]
+    pts = [p for p in pts if p[1] is not None]
+    across = float(np.polyfit([p[0] for p in pts], [p[1] for p in pts], 1)[0]) if len(pts) >= 2 else 0.0
+    inner = [(pos[r["scan_id"]] - pos[rs[0]["scan_id"]], x[0]) for rs in repeat.values() for r in rs[1:]
+             if (x := raw(rs[0], r)) is not None]
+    within = sum(n * v for n, v in inner) / sum(n * n for n, _ in inner) if inner else 0.0
+    slope = across if across * within > 0 and 0.5 <= across / within <= 2.0 else 0.0
+
+    def diff(f, s_):
+        x = raw(f, s_)
+        return x and (x[0] - slope * (pos[s_["scan_id"]] - pos[f["scan_id"]]), x[1])
 
     def beyond(x):
         return x is not None and abs(x[0]) > max(DOSE["floor"], DOSE["noise_mult"] * x[1])
@@ -2219,7 +2237,7 @@ def apply_dose_damage(table: dict, recs: Sequence[Mapping], stability: Mapping, 
                 x.update(kind="grows", direction=s13)
             elif s12 and s13 == s12 and not s23:
                 x.update(kind="plateau", direction=s12)
-            elif not s12 and not s13:
+            elif not s12 and (not s13 or not s23):  # 2026-11-18: no scan-to-scan step is a change (a slow trend)
                 x.update(kind="none", direction=0)
             else:
                 x.update(kind="mixed", direction=s13 or s12)

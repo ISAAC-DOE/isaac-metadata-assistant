@@ -306,7 +306,8 @@ def render_summary(bundle: Mapping) -> str:
         f"number with another run; all are kept)"
     )
     quick = [p for p in bundle.get("processed_outputs") or [] if B.is_engine_classified(p)]
-    pos = [p for p in bundle.get("processed_outputs") or [] if not B.is_engine_classified(p)]
+    folder = [p for p in bundle.get("processed_outputs") or [] if B.is_quick_merge(p) and not B.is_engine_classified(p)]
+    pos = [p for p in bundle.get("processed_outputs") or [] if not B.is_quick_merge(p)]
     if pos:
         n_files = sum(len(p["files"]) for p in pos)
         linked = sum(1 for p in pos if p["proposed_links"])
@@ -321,6 +322,8 @@ def render_summary(bundle: Mapping) -> str:
         )
     if quick:
         add(f"- {_quick_merges_text(quick)}")
+    if folder:
+        add(f"- {_merge_folder_text(folder)}")
     add(
         f"- Values: {counts['candidates']} — {counts['candidate_extracted']} extracted, "
         f"{counts['needs_review']} need review, {counts['conflicting_candidates']} conflicting, "
@@ -674,14 +677,19 @@ def cmd_import(args) -> int:
     if n_kept := len(B.files_not_opened(bundle)):
         print(f"  {_not_opened_text(n_kept)}, not counted as unread: `isaac bundle list {out} unread --all` lists them")
     n_quick = sum(len(p["files"]) for p in bundle.get("processed_outputs") or [] if B.is_engine_classified(p))
-    if c.get("processed_output_files") and c["processed_output_files"] > n_quick:
+    n_folder = sum(len(p["files"]) for p in bundle.get("processed_outputs") or []
+                   if B.is_quick_merge(p) and not B.is_engine_classified(p))
+    if c.get("processed_output_files") and c["processed_output_files"] > n_quick + n_folder:
         print(
-            f"  {_processed_files_text(c['processed_output_files'] - n_quick)} from the scientists (Athena/Demeter), "
+            f"  {_processed_files_text(c['processed_output_files'] - n_quick - n_folder)} from the scientists (Athena/Demeter), "
             "kept as reference results, not records"
         )
     if n_quick:
         print(f"  {_processed_files_text(n_quick)} the engine reads as processed spectra (the scientists' quick merges), "
               "kept as rough reference results, not records or runs")
+    if n_folder:
+        print(f"  {_processed_files_text(n_folder)} in a MERGE folder beside the SPEC acquisitions (the scientists' "
+              "averages), kept as rough reference results, not records or runs")
     print("  This is NOT a validated official ISAAC record. Start with summary.md.")
     return EXIT_OK
 
@@ -894,6 +902,8 @@ def group_list_extras(bundle: Mapping) -> dict[str, dict]:
             # a role a NAME proposes (SPEC or XDC) is a proposal: said as judged from the name, never as a fact
             row["role_proposed"] = {"role": g["role"], "judged_from": "file name", "token": basis.get("token"),
                                     "note": G.NAME_ROLE_NOTE}
+        elif basis.get("basis") == "scientist_decision":
+            row["role_set_by_scientist"] = {"role": g.get("role"), "decision_id": basis.get("decision_id")}
         reason = reasons.get(g["group_id"])
         if reason is not None:
             row["cannot_export_reason"] = reason
@@ -931,6 +941,16 @@ def _quick_merges_text(quick) -> str:
             + (f", {ambiguous} naming a legacy number several runs share" if ambiguous else "")
             + "). Not counted as runs; no question is asked about them; `isaac process` compares each linked one with "
             "ISAAC's merge as a rough reference, never as the result of record.")
+
+
+def _merge_folder_text(folder) -> str:
+    """bundle 1.13.0: the summary's line for the other processed outputs kept by their MERGE folder (e.g. .mca averages)."""
+    n_files = sum(len(p["files"]) for p in folder)
+    linked = sum(1 for p in folder if p["proposed_links"])
+    return (f"{_processed_files_text(n_files)} in a MERGE folder beside the SPEC acquisitions (the scientists' averages, "
+            "e.g. .mca files), kept as rough reference results, not records "
+            f"({linked} with a proposed link to a run by legacy number, {len(folder) - linked} unlinked). Not counted as "
+            "runs; no question is asked about them.")
 
 
 def _athena_read_by_process(n: int) -> str:
@@ -1909,7 +1929,7 @@ def cmd_bundle_check(args) -> int:
         print("  Remedy: any change re-derives it under this build and logs each value in `eligibility_rederived`; "
               "`isaac bundle build-records` does that under the bundle lock before composing.")
         if B.needs_format_upgrade(bundle):
-            print(f"  On that write: {B.upgrade_statement(bundle.get('format_version'), B._added_since(bundle.get('format_version')), B.import_rules_missing(bundle), B.quick_merge_runs(bundle))}.")
+            print(f"  On that write: {B.upgrade_statement(bundle.get('format_version'), B._added_since(bundle.get('format_version')), B.import_rules_missing(bundle), B.quick_merge_runs(bundle), B.merge_folder_runs(bundle))}.")
         else:  # the same format: only the export target's allowed values re-derive them (bundle.allowed_list_rederivations)
             print("  On that write: the format stays the same; only these values' eligibility is re-derived and logged.")
         _print_non_finite(bundle)
@@ -2960,7 +2980,8 @@ def build_parser(prog: str = "isaac") -> argparse.ArgumentParser:
     q.add_argument("--decision", required=True,
                    help="candidate / missing value / conflict: confirm correct reject defer; record group: confirm split merge "
                         "reject defer approve_calibration set_absorber set_scan_decision (with --value keep|drop and "
-                        "--scans: the scientist's keep / drop of those scans, isaac.xas.v1); processing result: approve "
+                        "--scans: the scientist's keep / drop of those scans, isaac.xas.v1) set_role (with --value "
+                        "sample|reference|alignment: what the group is, over the role grouping proposed); processing result: approve "
                         "reject needs_changes defer, "
                         "or select_athena_version --value <one of its athena_versions[].version_id> (the result of record, "
                         "bound to that version's project file, group and data hash, so a renumbering re-processing keeps it; "

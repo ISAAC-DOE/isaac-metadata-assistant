@@ -2534,7 +2534,7 @@ _LABEL_TOKEN_LIMIT = 10
 
 #: Concepts whose literals go in a Run label, in the order a scientist reads
 #: them. **The brief's §47 example is the specification** — "Legacy Run/File 44 ·
-#: Sample 04 · JK2 · Base · After 1500 mV cycling · Filter 35 · Potential 1.2 V ·
+#: Sample 04 · ZZ2 · Base · After 1500 mV cycling · Filter 35 · Potential 1.2 V ·
 #: New spot" — and this is that ordering expressed as concepts, with the literals
 #: left verbatim. A concept the sources did not state simply does not appear; no
 #: placeholder is emitted, because "unknown" in a run label is a claim about the

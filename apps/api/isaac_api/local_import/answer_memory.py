@@ -4,7 +4,7 @@ WHY
 ===
 
 Inside one beamtime an answer persists and one answer can cover many groups. Across beamtimes nothing carried over:
-"pellet" for sample JK3 on beamtime A was asked again from scratch on beamtime B. This module keeps a small,
+"pellet" for sample ZZ3 on beamtime A was asked again from scratch on beamtime B. This module keeps a small,
 OPT-IN memory of confirmed scientist decisions in ONE file on the scientist's own computer, and shows a matching
 earlier answer beside a new question as a HINT. It never sets a value: the person answering now confirms it with a
 normal decision (``decide ... --from-earlier-answer <entry_id>``), which records them as the decider and notes where
@@ -723,7 +723,7 @@ def _shown(value: Any) -> str:
 
 
 def said(entry: Mapping) -> str:
-    """``Earlier answer: pellet — Angel, 17 Nov 2026, beamtime SSRL_..._IrOxBase (same sample jk3)``."""
+    """``Earlier answer: pellet — Angel, 17 Nov 2026, beamtime SSRL_..._SynBase (same sample zz3)``."""
     return (f"Earlier answer: {_shown(entry.get('value'))} — {entry.get('by')}, {_date(entry.get('decided_utc'))}, "
             f"beamtime {entry.get('beamtime')} ({_scope_said(entry)})")
 

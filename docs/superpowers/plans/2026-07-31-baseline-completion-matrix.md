@@ -942,7 +942,7 @@ that change the shape of that phase, recorded here so they are not re-derived:
    identity source and group administration policy are untouched.
 4. **The schema already owns record attribution, and the app has never used it.** `/attribution/uploaded_by`
    is described in v1.05 as *"SERVER-STAMPED from the authenticated identity at ingestion … Decided by
-   D. Sokaras 2026-06-15"*, and `/attribution/contributors[]` carries `name|role|affiliation|orcid|email`.
+   the domain owner 2026-06-15"*, and `/attribution/contributors[]` carries `name|role|affiliation|orcid|email`.
    ~~`rg "uploaded_by" src/ apps/ tests/ scripts/` → **zero**.~~ **CORRECTED 2026-08-03:** the grep
    was accurate but the inference ("the app has never used it") was **wrong** — the passthrough was
    *structural*, so no code named the field while `export.transform` copied the whole `attribution`

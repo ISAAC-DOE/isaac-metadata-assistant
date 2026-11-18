@@ -311,12 +311,15 @@ def test_a_set_point_already_answered_names_the_scale_alone(grouped):
     assert "until the potential scale is confirmed:" in w["text"]
 
 
-def test_a_set_point_read_from_the_name_still_names_the_scale_alone(grouped):
+def test_a_set_point_read_from_the_name_is_asked_with_the_scale(grouped):
+    """2026-11-18: one parsed set-point (100mV, read as 0.1 V) waiting for a confirm is named WITH the scale, so the
+    scientist is not sent round twice (before: the scale alone, then the set-point)."""
     b = M.load(grouped)
     gid = _group_of_run(b, "run-001")
     _answer(b, gid, "confirm")
-    w = _warning(b, gid, grouped)  # 100mV, read as 0.1 V: the c3-q warning, unchanged
-    assert w["needs"] == SCALE and "also_needs" not in w and "read as 0.1 V" in w["text"]
+    w = _warning(b, gid, grouped)
+    assert w["needs"] == SCALE and w["also_needs"] == SETPOINT and "read as 0.1 V" in w["text"]
+    assert w["setpoint_parsed_V"] == 0.1 and "no second question follows" in w["text"]
 
 
 def test_the_minimum_recommends_both_questions(grouped):

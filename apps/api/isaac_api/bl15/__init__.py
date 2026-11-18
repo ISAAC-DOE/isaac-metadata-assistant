@@ -5,7 +5,7 @@
 parser) and ``HIST-002`` (first-wave deterministic parsers) were **BLOCKED** on
 ``EXT-10``: *"there is no representative BL15-2 corpus"*, and §5 forbids
 designing a parser against zero examples. On **2026-09-16 the project owner
-supplied one** — a real April-2025 Sokaras/IrOx beamtime archive. The blocker is
+supplied one** — a real April-2025 SYNPI/IrOx beamtime archive. The blocker is
 materially resolved **for the formats that archive contains** and for nothing
 else; the measured inventory is
 ``docs/evidence/bl15-2-corpus-characterization-2026-09-16.md``.

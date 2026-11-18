@@ -260,12 +260,12 @@ SSRL_BL152_HERFD_ECHEM_V1 = NamingProfile(
         "  * `71_07_IrTiO2_0p5nm_AsIs_NoElectrolyte` carries NO potential and "
         "NO filter, so a positional reader would read the potential out of a "
         "sample-state token.\n"
-        "  * `52_05_JK1_base_after1stCycling_filter20_850mV_step05` carries a "
+        "  * `52_05_ZZ1_base_after1stCycling_filter20_850mV_step05` carries a "
         "step index the convention does not mention at all.\n"
-        "  * `03_01_JK3_acid_beforeCycling_060mV_filter10` puts the potential "
-        "BEFORE the filter; `06_01_JK3_acid_after1200mVCycling_filter10_060mV` "
+        "  * `03_01_ZZ3_acid_beforeCycling_060mV_filter10` puts the potential "
+        "BEFORE the filter; `06_01_ZZ3_acid_after1200mVCycling_filter10_060mV` "
         "puts it after. Same scientist, same sample, same week.\n"
-        "  * `46_04_JK2_base_after1500Cycling_ffilter35_newSpots_1600mV` "
+        "  * `46_04_ZZ2_base_after1500Cycling_ffilter35_newSpots_1600mV` "
         "misspells the filter prefix.\n"
         "  * `01_IrO2_oldPellet_f35` has ONE numeric token where the convention "
         "implies two.\n"
@@ -338,7 +338,7 @@ SSRL_BL152_HERFD_ECHEM_V1 = NamingProfile(
         ("IrO2", "IrO2"),
         ("IrTiO2", "IrTiO2"),
     ),
-    #: `JK1`, `JK2`, `JK3`, `JK1C` — uppercase code, digits, optional trailing
+    #: `ZZ1`, `ZZ2`, `ZZ3`, `ZZ1C` — uppercase code, digits, optional trailing
     #: letter. Checked against every token in the measured corpus: it matches
     #: those four and nothing else, so it introduces no false sample name.
     sample_code_pattern=r"^[A-Z]{2,}[0-9]+[A-Z]?$",

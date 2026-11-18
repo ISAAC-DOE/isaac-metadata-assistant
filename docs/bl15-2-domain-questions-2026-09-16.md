@@ -198,7 +198,7 @@ classes are different:
 | source | what it is | what a reader can verify |
 |---|---|---|
 | **Angel, relayed by the project owner 2026-09-17** | domain-owner confirmation of the filename convention | **nothing in-repo.** An owner instruction relayed in-session, the same class `CLAUDE.md` §15 records for Dean's answers. Only Krish can confirm it was given |
-| **The beamtime document** | `250411 BL 15 IrOx NP HERFD acid base.docx`, read in full on 2026-09-17 — 639 extracted lines, 14 tables | the file itself; extraction is `zipfile` + the WordprocessingML namespace, no dependency |
+| **The beamtime document** | `YYMMDD BL 15 IrOx NP HERFD acid base.docx`, read in full on 2026-09-17 — 639 extracted lines, 14 tables | the file itself; extraction is `zipfile` + the WordprocessingML namespace, no dependency |
 | **Project-owner decision** | `ISAAC_PRODUCT_DECISIONS.md` §B4 | the register row |
 
 **A correction to this packet's own preamble, first.** It says *"leaves **14** needing a
@@ -253,8 +253,8 @@ changed is that the MEANINGS are now domain-confirmed for this profile.
 wherever it appears. The corpus holds two distinct acquisitions:
 
 ```text
-32_03_JK2_base_after1400Cycling_filter20_1500mV
-32_03_JK2_base_after1500Cycling_filter20_1500mV
+32_03_ZZ2_base_after1400Cycling_filter20_1500mV
+32_03_ZZ2_base_after1500Cycling_filter20_1500mV
 ```
 
 **The beamtime document's Sample 3 table settles which one the final log describes.** Its
@@ -320,7 +320,7 @@ exportable — see §2 for three reasons unrelated to anything Angel can decide.
 ### Sample identity and structure
 
 **Q1. Does the second numeric token always mean the sample/electrode instance?**
-`03_01_JK3_acid_…` through `10_01_JK3_acid_…` all carry `01`; `11_02_JK2_base_…` through
+`03_01_ZZ3_acid_…` through `10_01_ZZ3_acid_…` all carry `01`; `11_02_ZZ2_base_…` through
 `22_02_…` all carry `02`. Measured over all 94 acquisitions the second token yields **10
 groups with contiguous, non-overlapping legacy-number ranges** (8/12/13/13/12/11/12/5/4
 measurements, plus 2 files with no group token at all — legacy 1 and 2).
@@ -330,14 +330,14 @@ deliberately kept**: the ranges being contiguous is strong corroboration of the 
 could produce contiguous ranges too.*
 
 **Q2. Which naming concepts are Experiment-level and which are Run-level?**
-Within group `01`, eight acquisitions share `01_JK3_acid` and differ only in cycling state
+Within group `01`, eight acquisitions share `01_ZZ3_acid` and differ only in cycling state
 and potential. So `sample name`, `sample/electrode number` and `electrolyte` look
 Experiment-level while `potential`, `filter` and `cycling state` look Run-level — but the
 `AsIs`/`NoElectrolyte` acquisitions in group `07` break that for `electrolyte`.
 *→ No enum. A list per concept is the useful form.*
 
 **Q3. Which `sample.material.name` does each sample stem correspond to?**
-The filenames carry `JK3`, `JK2`, `JK1`, `JK1C`, `IrO2`, `IrTiO2`. `sample.material.name` is
+The filenames carry `ZZ3`, `ZZ2`, `ZZ1`, `ZZ1C`, `IrO2`, `IrTiO2`. `sample.material.name` is
 a free-text string, so the question is whether these stems ARE the material name, whether
 they are internal sample codes with a material name behind them, or both.
 *→ No enum.*
@@ -440,8 +440,8 @@ was the correction.*
 **Q16. Two distinct acquisitions carry legacy number `32`. Is one a re-acquisition of the
 other, a mislabel, or two different measurements — and does the legacy number identify a
 MEASUREMENT or a FILE?**
-`32_03_JK2_base_after1400Cycling_filter20_1500mV` and
-`32_03_JK2_base_after1500Cycling_filter20_1500mV`; their `#E` epochs are ~25 minutes apart.
+`32_03_ZZ2_base_after1400Cycling_filter20_1500mV` and
+`32_03_ZZ2_base_after1500Cycling_filter20_1500mV`; their `#E` epochs are ~25 minutes apart.
 Across the corpus there are **91 distinct legacy numbers over 94 acquisitions, range 1–91
 with no gaps**, and exactly one number carried by more than one file.
 *→ This decides whether the legacy number may be a stable scientist-facing identifier at

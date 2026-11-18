@@ -147,7 +147,7 @@ export function counterAsk(positions: number[]): string {
 
 /**
  * One example file name for the counter question, read from the server's own wording ("e.g. the 1st token:
- * [03]_01_JK3_…"): the whole name, and the part asked about. `null` when the wording carries none.
+ * [03]_01_ZZ3_…"): the whole name, and the part asked about. `null` when the wording carries none.
  */
 export function counterExample(text: string | null | undefined): { name: string; part: string } | null {
   if (!text) return null;
@@ -197,8 +197,8 @@ export function plainQuestion(q: LocalQuestion): string | null {
 
 /**
  * The sample a per-sample question is asked for, in the files' own spelling where the server's wording gives it
- * ("… with the same sample reading (sample name 'JK1', sample or electrode number '06', as the files write it)"),
- * else from its `partition` (`sample={"sample_name": "jk1", …}`). `null` for a question not asked per sample.
+ * ("… with the same sample reading (sample name 'ZZ1', sample or electrode number '06', as the files write it)"),
+ * else from its `partition` (`sample={"sample_name": "zz1", …}`). `null` for a question not asked per sample.
  */
 export function sampleLabel(q: LocalQuestion): string | null {
   const partition = q.partition ?? '';
@@ -488,7 +488,7 @@ export interface EarlierAnswerLine {
 
 /**
  * THE EARLIER ANSWERS of a question (the opt-in answer memory): each said as the server says it ("Earlier answer:
- * pellet — Angel, 17 Nov 2026, beamtime … (same sample JK3)"), the field named first when the card asks several
+ * pellet — Angel, 17 Nov 2026, beamtime … (same sample ZZ3)"), the field named first when the card asks several
  * fields, and one plain sentence when earlier beamtimes answered differently. A hint, never an answer: nothing here
  * is recorded, and no value is chosen for the person.
  */

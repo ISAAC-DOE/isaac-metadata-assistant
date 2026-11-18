@@ -40,7 +40,7 @@ no reader in this package maps it to an actor.
 
 **THE ``#F`` DECLARATION IS THE CONFLICT-DETECTION ANCHOR, AND THIS READER
 DETECTS NOTHING.** Four measured files disagree with their own external names —
-``29``/``30``/``31``/``32_03_JK2_base_after1500Cycling_...`` all declare
+``29``/``30``/``31``/``32_03_ZZ2_base_after1500Cycling_...`` all declare
 ``..._beforeCycling_...`` internally. This reader reports what the file says, at
 ``#F``, and stops. Comparing it with the external name is :mod:`bl15.relate`'s
 job, and choosing between them is nobody's job in this repository: it is a
