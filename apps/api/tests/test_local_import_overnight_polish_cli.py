@@ -88,6 +88,18 @@ def test_a_group_question_answered_for_a_group_it_does_not_reach_exits_2(grouped
     assert out == "" and (grouped / "bundle.json").read_bytes() == before
 
 
+def test_only_an_open_question_missing_the_scope_turns_not_found_into_refused(grouped):
+    """Review of PR #335: a question no longer open (answered, of a kind not answered again) stays exit 6, as before;
+    only an OPEN question that reaches none of the named scopes is exit 2."""
+    b = M.load(grouped)
+    payload = Q.consolidate(b)
+    qid = payload["questions"][0]["question_id"]
+    exc = M.MutationRefused(f"No open question {qid!r} for group:x.", code=6)
+    assert M._scope_refused(exc, b, None, None, payload, qid).code == 2
+    assert M._scope_refused(exc, b, None, None, payload, "Q-0000000000") is exc  # not open (answered, or unknown)
+    assert M._scope_refused(exc, b, None, None, None, qid) is exc                # nothing open was resolved
+
+
 def test_an_unknown_question_or_group_is_still_not_found(grouped, capsys):
     b = M.load(grouped)
     qid = _experiment_question(b)["question_id"]
@@ -195,6 +207,47 @@ def test_set_role_refuses_another_word_and_another_target(grouped, capsys):
     assert any("set_role needs --value" in e for e in B.validate_bundle(B.apply_derivations(b)))
 
 
+def test_set_role_keeps_the_proposed_basis_beside_the_decision(grouped, capsys):
+    b = M.load(grouped)
+    g = Q.live_groups(b)[0]
+    proposed_role, proposed_basis = g["role"], g["role_basis"]
+    for value in ("reference", "alignment"):
+        assert _decide(capsys, grouped, "--target", g["group_id"], "--decision", "set_role", "--value", value)[0] == 0
+        basis = next(x for x in M.load(grouped)["record_groups"] if x["group_id"] == g["group_id"])["role_basis"]
+        assert basis["basis"] == "scientist_decision" and basis["proposed_role"] == proposed_role
+        assert basis["proposed_basis"] == proposed_basis
+
+
+def test_a_role_is_carried_onto_regrouped_groups_whose_runs_all_come_from_the_decided_group(grouped, capsys):
+    b = M.load(grouped)
+    g1, g2, g3 = [g["group_id"] for g in Q.live_groups(b)][:3]
+    k = {g["group_id"]: g["member_run_keys"][0] for g in b["record_groups"]}
+    M.record_decision(b, target_ids=[g1], decision="set_role", value="reference", by=WHO, orcid=None)
+    # g1 retired by a regroup into what it held (its run and g2's), then split into one group per run; a third group
+    # holds g1's run and another one (a merge): it is not all from g1, so it keeps its own role
+    old = next(g for g in b["record_groups"] if g["group_id"] == g1)
+    b["record_groups"].remove(old)
+    b["superseded_record_groups"] = [{**old, "member_run_keys": [k[g1], k[g2]]}]
+    merged = {**next(g for g in b["record_groups"] if g["group_id"] == g3), "group_id": "rg-zz-merged",
+              "member_run_keys": [k[g1], k[g3]]}
+    b["record_groups"].append(merged)
+    B.apply_derivations(b)
+    part = next(g for g in b["record_groups"] if g["group_id"] == g2)
+    assert part["role"] == "reference" and part["role_basis"]["carried_from_group"] == g1
+    assert part["role_basis"]["proposed_role"] == "sample"
+    assert next(g for g in b["record_groups"] if g["group_id"] == "rg-zz-merged")["role"] == "sample"
+
+
+def test_a_role_survives_a_regroup(grouped, capsys):
+    b = M.load(grouped)
+    g = Q.live_groups(b)[0]
+    assert _decide(capsys, grouped, "--target", g["group_id"], "--decision", "set_role", "--value", "reference")[0] == 0
+    M.group(grouped, regroup=True)
+    after = M.load(grouped)
+    [same] = [x for x in Q.live_groups(after) if x["member_run_keys"] == g["member_run_keys"]]
+    assert same["role"] == "reference" and B.validate_bundle(after) == []
+
+
 def test_a_name_proposed_role_says_how_to_make_it_a_sample():
     from isaac_api.local_import import grouping as G
 
@@ -262,6 +315,29 @@ def test_a_global_trend_is_never_a_dose_decision_or_question(tmp_path, monkeypat
     assert EX.DOSE_QUESTION_FLAG not in r["review_flags"]
     codes = {y["code"] for x in r[EX.DECISIONS_KEY]["rows"] for y in x["reasons"]}
     assert not codes & {EX.DOSE_CODE, EX.SETTLING_CODE}
+
+
+def _dose_of(tmp_path, monkeypatch, wl):
+    import test_local_import_engine_xas as EXT
+
+    monkeypatch.setenv("ISAAC_PROCESSING_ENGINE", "v1")
+    bdir, _ = EXT.imported(tmp_path, EXT._dose_run(wl))
+    return EXT._dose(EXT.by_run(EXT.v1_results(bdir), "02_SYN_ZZ2"))
+
+
+@pytest.mark.parametrize("case,wl,outcomes", [
+    # review of PR #335: a within-spot change that resets at every fresh spot is never silent
+    ("slow_damage_0.02", lambda j, k: 3.0 - 0.02 * j, {"question", "beam_damage"}),
+    ("damage_0.04", lambda j, k: 3.0 - 0.04 * j, {"beam_damage"}),
+    ("damage_0.3", lambda j, k: 3.0 - 0.3 * j, {"beam_damage"}),
+    ("trend_plus_damage", lambda j, k: 3.0 - 0.02 * k - 0.3 * j, {"question", "beam_damage"}),
+    ("settling", lambda j, k: 2.5 if j == 0 else 3.0, {"first_scan_settling"}),
+    ("rise", lambda j, k: 3.0 + 0.3 * j, {"question"}),
+    ("offset_only_spots", lambda j, k: 3.0 + 0.15 * (k // 3), {None}),
+])
+def test_the_dose_rule_still_sees_every_within_spot_change(tmp_path, monkeypatch, case, wl, outcomes):
+    d = _dose_of(tmp_path, monkeypatch, wl)
+    assert d.get("outcome") in outcomes, (case, d.get("outcome"), d.get("why"))
 
 
 def test_a_very_slow_trend_within_each_spot_raises_no_dose_question(tmp_path, monkeypatch):

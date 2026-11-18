@@ -688,8 +688,8 @@ def cmd_import(args) -> int:
         print(f"  {_processed_files_text(n_quick)} the engine reads as processed spectra (the scientists' quick merges), "
               "kept as rough reference results, not records or runs")
     if n_folder:
-        print(f"  {_processed_files_text(n_folder)} in a MERGE folder beside the SPEC acquisitions (the scientists' "
-              "averages), kept as rough reference results, not records or runs")
+        print(f"  {_processed_files_text(n_folder)} whose scan title states an average, beside the SPEC acquisitions "
+              "(the scientists' averages), kept as rough reference results, not records or runs")
     print("  This is NOT a validated official ISAAC record. Start with summary.md.")
     return EXIT_OK
 
@@ -944,11 +944,11 @@ def _quick_merges_text(quick) -> str:
 
 
 def _merge_folder_text(folder) -> str:
-    """bundle 1.13.0: the summary's line for the other processed outputs kept by their MERGE folder (e.g. .mca averages)."""
+    """bundle 1.13.0: the summary's line for the processed outputs whose scan title states an average (e.g. .mca)."""
     n_files = sum(len(p["files"]) for p in folder)
     linked = sum(1 for p in folder if p["proposed_links"])
-    return (f"{_processed_files_text(n_files)} in a MERGE folder beside the SPEC acquisitions (the scientists' averages, "
-            "e.g. .mca files), kept as rough reference results, not records "
+    return (f"{_processed_files_text(n_files)} whose scan title states an average of several spectra, beside the SPEC "
+            "acquisitions (the scientists' averages, e.g. .mca files), kept as rough reference results, not records "
             f"({linked} with a proposed link to a run by legacy number, {len(folder) - linked} unlinked). Not counted as "
             "runs; no question is asked about them.")
 
@@ -1929,7 +1929,7 @@ def cmd_bundle_check(args) -> int:
         print("  Remedy: any change re-derives it under this build and logs each value in `eligibility_rederived`; "
               "`isaac bundle build-records` does that under the bundle lock before composing.")
         if B.needs_format_upgrade(bundle):
-            print(f"  On that write: {B.upgrade_statement(bundle.get('format_version'), B._added_since(bundle.get('format_version')), B.import_rules_missing(bundle), B.quick_merge_runs(bundle), B.merge_folder_runs(bundle))}.")
+            print(f"  On that write: {B.upgrade_statement(bundle.get('format_version'), B._added_since(bundle.get('format_version')), B.import_rules_missing(bundle), B.quick_merge_runs(bundle), B.average_title_runs(bundle))}.")
         else:  # the same format: only the export target's allowed values re-derive them (bundle.allowed_list_rederivations)
             print("  On that write: the format stays the same; only these values' eligibility is re-derived and logged.")
         _print_non_finite(bundle)

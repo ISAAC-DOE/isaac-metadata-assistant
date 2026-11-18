@@ -386,7 +386,7 @@ def test_an_older_bundle_without_scan_notes_still_validates_and_the_section_is_c
     ("lines 1-100000", False, "too wide"),
     ("lines 1-21", False, "too wide"),
     ("lines 1-20", True, None),
-    ("line10", True, None), ("Line #10", True, None), ("l. 10", True, None), ("L10", False, "not a line reference"),
+    ("line10", True, None), ("Line #10", True, None), ("l. 10", True, None), ("L10", True, None),
     ("row 10", True, None), ("ll. 9-11", True, None), ("Lines 8 to 12", True, None),
     ("line30", False, "the quote is at line 10"),
     ("step 27 of the table", False, "not a line reference"),

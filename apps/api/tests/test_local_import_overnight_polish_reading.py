@@ -35,7 +35,9 @@ REPO = Path(__file__).resolve().parents[3]
 
 @pytest.mark.parametrize(("locator", "span"), [
     ("Ir L3-edge note, line 151", (151, 151)),
-    ("L3 edge", None), ("L10", None), ("K-edge, L2", None),
+    ("L3 edge", None), ("K-edge, L2", None), ("L1", None), ("Pt L3", None),
+    # review of PR #335: only L1-L3 are edges; L + 4 or more, or two or more digits, is still a line
+    ("L10", (10, 10)), ("L4", (4, 4)), ("L 151", (151, 151)), ("L12-14", (12, 14)),
     ("l. 10", (10, 10)), ("ll. 9-11", (9, 11)), ("row 4", (4, 4)), ("line12", (12, 12)), ("Lines 8 to 12", (8, 12)),
 ])
 def test_an_element_edge_token_is_never_a_line_reference(locator, span):

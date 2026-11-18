@@ -2237,7 +2237,7 @@ def apply_dose_damage(table: dict, recs: Sequence[Mapping], stability: Mapping, 
                 x.update(kind="grows", direction=s13)
             elif s12 and s13 == s12 and not s23:
                 x.update(kind="plateau", direction=s12)
-            elif not s12 and (not s13 or not s23):  # 2026-11-18: no scan-to-scan step is a change (a slow trend)
+            elif not s12 and not s13:
                 x.update(kind="none", direction=0)
             else:
                 x.update(kind="mixed", direction=s13 or s12)

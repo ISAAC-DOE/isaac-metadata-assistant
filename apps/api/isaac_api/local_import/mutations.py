@@ -2354,12 +2354,16 @@ def _reach_statement(bundle: Mapping, recorded_ids: Sequence[str], override: Map
     return text, {**reach, "groups_reached": reached_groups, "not_reached": kept}
 
 
-def _scope_refused(exc: MutationRefused, bundle: Mapping, only: str | None,
-                   only_scopes: Sequence[str] | None) -> MutationRefused:
-    """``decide --question`` on a question that EXISTS but has no open target in the scope named (``--only``): a
-    refused decision, exit 2 (reference/commands.md), never "not found". Only an unknown id is exit 6: the question
-    (the caller checks that) or a ``group:<id>`` scope naming no live record group."""
+def _scope_refused(exc: MutationRefused, bundle: Mapping, only: str | None, only_scopes: Sequence[str] | None,
+                   open_payload: Mapping | None, question_id: str) -> MutationRefused:
+    """``decide --question`` on an OPEN question that has no open target in the scope named (``--only``): a refused
+    decision, exit 2 (reference/commands.md), never "not found". Exit 6 stays for an unknown id (the question, or a
+    ``group:<id>`` scope naming no live record group) and for a question no longer open (answered, of a kind not
+    answered again), as before."""
     from . import questions as Q
+
+    if open_payload is None or Q.question(open_payload, question_id) is None:
+        return exc
 
     live = {g.get("group_id") for g in Q.live_groups(bundle)}
     named = [s for s in ([only] if only else []) + list(only_scopes or ()) if s]
@@ -2461,6 +2465,7 @@ def decide_question(
         override = None
         slots_added: list[str] = []
         asked_now = None  # r6 I1: the question as resolved (open, or answered), for a kind answered its own way
+        open_payload = None
         try:
             if question_id == Q.COUNTER_QUESTION_ID and decision == B.KEEP_APART_DECISION:
                 found = _said_not_counter_keep_apart(bundle, only, field, positions, only_scopes, extra_targets)
@@ -2479,7 +2484,7 @@ def decide_question(
             if asked is None:
                 raise
             if asked["kind"] not in Q.RESOLVABLE_WHEN_ANSWERED:
-                raise _scope_refused(exc, bundle, only, only_scopes) from None
+                raise _scope_refused(exc, bundle, only, only_scopes, open_payload, question_id) from None
             asked_now = asked
             try:
                 found, positions = question_targets(answered, question_id, **resolve)
@@ -2489,7 +2494,8 @@ def decide_question(
                 got = (group_answer_targets(bundle, asked, only, field, decision)
                        if again.code == 6 and only and not only_scopes else None)
                 if got is None:
-                    raise (_scope_refused(exc, bundle, only, only_scopes) if again.code == 6 else again) from None
+                    raise (_scope_refused(exc, bundle, only, only_scopes, open_payload, question_id)
+                           if again.code == 6 else again) from None
                 found, slots_added, override = got
             if asked["kind"] == "confirm_absorber" and decision == "set_absorber" and only is None:
                 found, kept_overrides = _keep_absorber_overrides(bundle, found)

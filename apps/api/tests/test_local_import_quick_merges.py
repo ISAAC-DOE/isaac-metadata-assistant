@@ -339,7 +339,7 @@ def test_the_summary_says_what_the_quick_merges_are(built):
 def test_a_1_10_0_bundle_still_validates_and_its_first_save_says_what_1_11_0_added(tmp_path, capsys, monkeypatch):
     # what an older build made: the quick merges as runs (the engine classification not yet a processed-output rule)
     monkeypatch.setattr(B, "ENGINE_PROCESSED_SOURCE_TYPE", "no_such_class")
-    monkeypatch.setattr(B, "in_merge_folder", lambda rel: False)  # nor the 1.13.0 MERGE-folder rule
+    monkeypatch.setattr(B, "is_average_title", lambda literal: False)  # nor the 1.13.0 average-title rule
     out = tmp_path / "old"
     old = _import(capsys, _beamtime(tmp_path / "src"), out)
     monkeypatch.undo()
@@ -397,7 +397,7 @@ def _workbook(path: Path, folder: str, rows: list[tuple[str, str]]) -> Path:
 def test_answers_to_the_quick_merge_runs_an_older_build_asked_about_are_reported_never_applied(tmp_path, capsys, monkeypatch):
     src = _beamtime(tmp_path / "src")
     monkeypatch.setattr(B, "ENGINE_PROCESSED_SOURCE_TYPE", "no_such_class")
-    monkeypatch.setattr(B, "in_merge_folder", lambda rel: False)  # nor the 1.13.0 MERGE-folder rule
+    monkeypatch.setattr(B, "is_average_title", lambda literal: False)  # nor the 1.13.0 average-title rule
     old_dir = tmp_path / "old"
     old_b = _import(capsys, src, old_dir)
     monkeypatch.undo()

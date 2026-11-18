@@ -70,10 +70,12 @@ FAIL = "fail"
 
 #: A line reference in every form a reader writes: ``line 12``, ``line:12``, ``line12``, ``Line #12``, ``l. 12``,
 #: ``ll. 4-9``, ``lines 4-9``, ``lines 1379–1391``, ``lines 4..9``, ``lines 4 to 9``, ``row 12`` (a text file's row is
-#: its line); never an Igor ``history line N``, and never a bare ``L`` + number: ``L3`` in ``Ir L3-edge note, line 151``
-#: is an absorption edge, not line 3 (``l.`` needs its dot). A locator holding a number that is none of these FAILS.
+#: its line), ``L12`` / ``L 4``; never an Igor ``history line N``, and never an absorption-edge token: ``L1``, ``L2`` and
+#: ``L3`` are edges (``Ir L3-edge note, line 151`` is line 151, not line 3), so a bare ``L`` is a line only before a
+#: number of 4 or more or of two or more digits (``l.`` with its dot is always one). A locator holding a number that is
+#: none of these FAILS.
 _LINE_RE = re.compile(
-    r"(?<![A-Za-z])(?<!history )(?:lines?|rows?|ll?\.)\s*[.:#]?\s*#?\s*(?P<first>\d+)"
+    r"(?<![A-Za-z])(?<!history )(?:lines?|rows?|ll?\.|l(?=\s*#?\s*(?:[4-9]|\d{2})))\s*[.:#]?\s*#?\s*(?P<first>\d+)"
     r"(?:\s*(?:-|–|—|\.\.|to)\s*(?P<last>\d+))?(?!\d)", re.I)
 #: A document locator the extractor's text can be held to: a paragraph, a table, a slide, a sheet's row.
 _DOC_RE = re.compile(r"(?<![A-Za-z])(?P<kind>paragraphs?|paras?\.?|¶|tables?|slides?|rows?)\s*[.:#]?\s*#?\s*(?P<n>\d+)\b", re.I)
