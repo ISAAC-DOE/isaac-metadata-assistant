@@ -491,7 +491,9 @@ def export_draft(
     record, removed = _compose(draft, record_id=record_id, now=now)
     _report_rejected(draft, record, removed, draft_report)
     if not draft_report.ok:
-        return ExportResult(False, record, None, draft_report, None)
+        # Refused: hand back no record, like every other refusal, so a caller that ignores
+        # `ok` still has nothing that could carry a rejected value.
+        return ExportResult(False, None, None, draft_report, None)
 
     # EXACTNESS, on the ASSEMBLED RECORD, before official validation.
     #
