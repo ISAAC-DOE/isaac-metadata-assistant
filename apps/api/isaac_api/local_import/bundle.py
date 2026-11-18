@@ -4312,6 +4312,13 @@ def build_bundle(
                 for sc in run_scans
             ]
             first = scans[0]["source_id"] if scans else None
+            # grouping.XDC_NOT_MEASUREMENT_RULE_ID: an XDC alignment, reference-foil or calibration run (its name, or
+            # every scan header) is not a measurement run, as the SPEC classifier marks an alignment file
+            not_measured = None
+            if g.profile == XDC_PROFILE_ID and scans:
+                from .grouping import xdc_not_a_measurement
+
+                not_measured = xdc_not_a_measurement(g.label, run_statements)
             runs.append(
                 {
                     "run_id": run_id,
@@ -4319,7 +4326,7 @@ def build_bundle(
                     "label": g.label,
                     "stem": g.label,
                     "source_type": f"generic:{g.profile}",
-                    "run_candidate": bool(scans),
+                    "run_candidate": bool(scans) and not_measured is None,
                     "legacy_number": None,
                     "legacy_number_shared": False,
                     "shares_legacy_number_with": [],
@@ -4336,6 +4343,7 @@ def build_bundle(
                         "anomalies": (disagreements + engine_noted
                                       + [a for a in g.anomalies if a.get("source_relative_path") not in processed_paths])[:50],
                         "header_differences": list(g.header_differences)[:50],
+                        **({"not_a_measurement": not_measured} if not_measured else {}),
                     },
                     "candidate_ids": [],
                     "conflict_ids": [],

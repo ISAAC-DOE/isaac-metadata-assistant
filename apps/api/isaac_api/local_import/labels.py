@@ -1320,6 +1320,14 @@ def _slot_index(bundle: Mapping) -> dict[tuple[str, str | None], Mapping]:
     return {(m["target_field_path"], m.get("run_id")): m for m in bundle.get("missing_values") or () if is_label_slot(m)}
 
 
+def answered_electrode_position(bundle: Mapping) -> int | None:
+    """The 1-based file-name position a scientist said is the electrode (question :data:`POSITION_PATH`), or ``None``
+    while unanswered, deferred or answered "no number is the electrode" (``reject``)."""
+    d = _answered(_slot_index(bundle).get((POSITION_PATH, None)),
+                  B._decisions_by_target(bundle.get("scientist_decisions") or ()))
+    return None if d is None or d.get("decision") == "reject" else _as_position(d.get("value"))
+
+
 def _answered(slot: Mapping | None, decisions: Mapping) -> Mapping | None:
     if slot is None:
         return None

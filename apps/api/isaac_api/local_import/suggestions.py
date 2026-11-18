@@ -250,6 +250,100 @@ def facility_hints(bundle: Mapping) -> list[dict]:
     return hints
 
 
+#: TECHNIQUE HINTS NEVER SHOW CODE (measured on two real BL15-2 beamtimes: the ``system.technique`` hints were
+#: ``IrL3_xas`` and ``trigger`` from macro ``def`` lines, ``Pt_XAS.mac`` from a ``qdo`` include and
+#: ``extract_voltage_and_save(target_directory,`` from a Python helper read as a macro). A technique hint is shown
+#: unless it is code that names no technique (:func:`technique_hint_is_code`: a technique word is looked for FIRST).
+#: The readings stay evidence on their candidates and conflicts; only the hints leave them out, and say so.
+TECHNIQUE_HINT_RULE_ID = "isaac.suggest.technique_hint_not_code.v1"
+TECHNIQUE_PATH = "system.technique"
+#: the hint kinds that quote what a file holds (an AI reading is a reading, said as one, and is never filtered here)
+LITERAL_HINT_KINDS = frozenset({"file_literal", "related_reading", "reading"})
+#: a file that holds code: a SPEC macro, a script or a notebook
+_CODE_FILE = re.compile(r"\.(?:mac|py|pyc|ipynb|m|pro|sh|bash|pl|bat|cmd|js|r)$", re.IGNORECASE)
+#: a locator that is a macro statement (``line 2 `def```, ``line 1 `qdo` (before any newfile declaration)``)
+_MACRO_LOCATOR = re.compile(r"`(?:def|qdo|rdef|cdef|macro)`", re.IGNORECASE)
+#: an identifier with an underscore and no space (``syn_helper``, ``IrL3_xas``): a function or macro name
+_IDENTIFIER = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*_[A-Za-z0-9_]*$")
+#: SPEC and beamline macro words that are never a technique
+_MACRO_WORDS = frozenset({"trigger", "qdo", "def", "newfile", "ascan", "dscan", "gscan", "mono", "mv", "umv", "ct",
+                          "setup", "init", "run", "scan", "loop", "wait", "sleep", "move"})
+#: words that name a technique beside the schema's own values (matched as whole words, without case)
+_TECHNIQUE_WORDS = frozenset({"xas", "xanes", "exafs", "xafs", "herfd", "xes", "rixs", "xrf", "xrd", "saxs", "waxs",
+                              "xps", "absorption", "emission", "diffraction", "ptychography", "tomography",
+                              "kbeta", "kalpha", "vtc"})
+
+
+def _technique_values() -> frozenset[str]:
+    return frozenset(str(v).casefold() for v in (B.allowed_values(TECHNIQUE_PATH) or ()))
+
+
+#: what a technique hint is split on before its words are compared (``HERFD_XAS``, ``XANES,EXAFS``,
+#: ``fluorescence XAS (Lytle)``, ``HERFD-XAS``, ``XAS/XES``)
+_TECHNIQUE_SPLIT = re.compile(r"[_,()\-/\s]+")
+#: a path: a folder separator, or a file name with an extension (``Pt_XAS.mac``, ``scans/run/plot.py``)
+_PATH_LIKE = re.compile(r"/|\\|\.[A-Za-z0-9]{1,5}$")
+
+
+def _words(text: Any) -> list[str]:
+    return [w for w in _TECHNIQUE_SPLIT.split(str(text or "").casefold()) if w]
+
+
+def names_a_technique(text: Any) -> bool:
+    """Does ``text`` name a technique? Its words (split on ``_ , ( ) - /`` and spaces, without case) hold a technique
+    word (:data:`_TECHNIQUE_WORDS`) or, word for word in order, one of ``system.technique``'s allowed values
+    (``cyclic_voltammetry``, ``UV_Vis``, ``HERFD-XAS``)."""
+    words = _words(text)
+    if not words:
+        return False
+    if set(words) & _TECHNIQUE_WORDS:
+        return True
+    for value in _technique_values():
+        v = _words(value)
+        if v and any(words[i:i + len(v)] == v for i in range(len(words) - len(v) + 1)):
+            return True
+    return False
+
+
+def looks_like_code(hint: Mapping) -> bool:
+    """A call (``(``), a macro or function name (read at a macro ``def`` / ``qdo`` line, a macro word, an underscore
+    identifier, a bare name read from a code file) or a path."""
+    lit = str(hint.get("literal") or "").strip()
+    if "(" in lit or _PATH_LIKE.search(lit) or _CODE_FILE.search(lit):
+        return True
+    if _MACRO_LOCATOR.search(str(hint.get("locator") or "")) or lit.casefold() in _MACRO_WORDS or _IDENTIFIER.match(lit):
+        return True
+    return bool(_CODE_FILE.search(str(hint.get("relative_path") or ""))) and " " not in lit
+
+
+def technique_hint_is_code(hint: Mapping) -> bool:
+    """:data:`TECHNIQUE_HINT_RULE_ID`: is this technique hint (``literal``, ``locator``, ``relative_path``) code to
+    leave out? A hint that NAMES A TECHNIQUE is kept, whatever its spelling (checked first: ``HERFD_XAS``,
+    ``IrL3_xas``, ``fluorescence XAS (Lytle)``); of the rest, only what looks like code (:func:`looks_like_code`) is
+    left out, and an empty one."""
+    lit = str(hint.get("literal") or "").strip()
+    if not lit:
+        return True
+    if names_a_technique(lit):
+        return False
+    return looks_like_code(hint)
+
+
+def technique_hints(path: str | None, hints: list[dict]) -> tuple[list[dict], int]:
+    """``(hints kept, how many were left out)`` for a question at ``path``: at ``system.technique`` every literal
+    hint that is code naming no technique is left out (:func:`technique_hint_is_code`); any other path, unchanged."""
+    if path != TECHNIQUE_PATH:
+        return hints, 0
+    kept = [h for h in hints if h.get("kind") not in LITERAL_HINT_KINDS or not technique_hint_is_code(h)]
+    return kept, len(hints) - len(kept)
+
+
+def technique_hints_left_out_sentence(n: int) -> str:
+    """The sentence a technique question adds when :func:`technique_hints` left ``n`` hints out."""
+    return (f" {n} of the files' readings for it are macro or script names (a `def` or `qdo` line, a helper script) "
+            "that name no technique, so they are not shown as hints: name the technique from allowed_values.")
+
+
 def beamline_hints_sentence(bundle: Mapping) -> str:
     """r5d H2: one plain sentence for the beamline question when the SPEC headers' fingerprint disagrees with the
     folder's name, matches several beamlines, or is not the build's default system; ``""`` otherwise."""
