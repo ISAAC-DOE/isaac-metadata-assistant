@@ -2675,7 +2675,9 @@
             "set_clock_time_zone",
             "keep_apart",
             "select_athena_version",
-            "set_not_counter_positions"
+            "set_not_counter_positions",
+            "set_scan_decision",
+            "set_dose_reading"
           ]
         },
         "value": {},

@@ -239,7 +239,7 @@ versioned processing protocol in the repository, reviewed by the processing revi
   it)"). Say that reading when you ask. A number the files do not settle as the electrode is said as a
   "file-name number '10' (the 5th token of …; whether it names an electrode or counts runs is not yet said)":
   never call it the electrode; the counter question (or the electrode-position question) settles it.
-- **Per-group questions that share a reading** (73 groups' material name `'JK1C'`, one set-point per potential) are
+- **Per-group questions that share a reading** (73 groups' material name `'ZZ1C'`, one set-point per potential) are
   kept one per group (each record carries its own answer; their ids never change), but share a `same_reading_group`
   (`same_reading_count` of them), and the text says "N questions share this reading (…); answer them together with
   … --same-reading …". Ask once ("are all N the same thing?"); on a yes, run its `same_reading_command`. Runs whose
