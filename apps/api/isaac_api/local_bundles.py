@@ -21,6 +21,12 @@ WHAT IT SERVES, AND WHAT IT NEVER DOES
 * Only what a bundle already holds — its questions, the quotes and locators its evidence
   records, its counts — and the ``validation/<group>.json`` reports ``isaac bundle validate``
   wrote into it. Never a source file: nothing here opens the imported folder.
+* ONE IMAGE AT A TIME (``…/file``): a processing plot inside the bundle folder, or an image the extract
+  tool wrote into the bundle's notes folder (``<bundle>-notes``), named in a question's ``context``
+  (``question_context``). Only a PNG or JPEG, by suffix AND first bytes (never an SVG: it can carry
+  script); a relative path with no ``..``, no absolute or drive path, no symlink anywhere on the way, and
+  one that resolves inside that folder (``question_context.resolve_context_file``). Only the bytes check
+  reads the file, and only its first bytes.
 * A bundle is named by its folder name directly inside the directory. A name with a path
   separator, ``..``, a leading dot, or one that resolves (symlinks followed) outside the
   directory is refused as "no such bundle"; ``bundle.json`` is opened only through
@@ -55,7 +61,7 @@ from pathlib import Path
 from typing import Any, Mapping, Sequence
 
 from fastapi import APIRouter, Body, Depends, HTTPException, Path as PathParam, Query, Request
-from fastapi.responses import JSONResponse
+from fastapi.responses import FileResponse, JSONResponse
 from pydantic import BaseModel, ConfigDict, Field
 
 LOCAL_BUNDLES_ENV = "ISAAC_LOCAL_BUNDLES_DIR"
@@ -1626,6 +1632,7 @@ def get_local_bundle_questions(
 ):
     from .local_import import answer_memory as AM
     from .local_import import mutations as M
+    from .local_import import question_context as QC
     from .local_import import questions as Q
 
     bdir, refused = _open(bundle)
@@ -1651,6 +1658,9 @@ def get_local_bundle_questions(
         page = rows[offset: offset + limit]
         # EARLIER ANSWERS (answer_memory, opt-in): an additive hint, after the counts and the paging (nothing when off)
         page = AM.annotate(page, data)
+        # QUESTION CONTEXT (question_context): the evidence beside each question (quotes, values, plots, images),
+        # additive, after the counts and the paging; each file value it states is an exposure, recorded below
+        page, context_shown = QC.annotate(page, data, bdir, full=True)
         # THE EXPOSURES `bundle questions` RECORDS (hint candidates, conflicts), plus every candidate
         # whose extracted value this page shows beside a confirm question
         shown = [("candidate", h["candidate_id"]) for q in page for h in q["hints"] if h.get("candidate_id")]
@@ -1681,11 +1691,16 @@ def get_local_bundle_questions(
         minimum = Q.minimum_answers_for_one_group(payload, data, scope=scope, bundle_dir=bdir, reports=reports)
         # ...and every candidate whose value the nearest record's warnings state (c7-r MED-4)
         shown += Q.minimum_exposures(minimum)
+        # the minimum's context, as `bundle questions` prints it: its questions' (compact) and its decisions'
+        # (`decision_context`: confirming the group, approving its processing result)
+        minimum, more_context = QC.annotate_minimum(minimum, payload, data, bdir, full=False, idx=QC.Index(data, bdir))
+        context_shown = list(dict.fromkeys([*context_shown, *more_context]))
         capture = capture_items(data)
         added = _record_shown(data, shown, "bundle questions")
         # an earlier answer (answer_memory) this page shows beside an open question is a value shown too
         added += _record_shown(data, AM.exposures([q for q in out_questions if q["display"].get("earlier_answers")]),
                                AM.EXPOSURE_COMMAND)
+        added += _record_shown(data, context_shown, QC.EXPOSURE_COMMAND)
         if added:
             try:
                 M.save_bundle(bdir, data)
@@ -1867,6 +1882,7 @@ def get_local_bundle_answered_questions(
     offset: int = Query(0, ge=0, le=1_000_000, description="Questions to skip."),
 ):
     from .local_import import mutations as M
+    from .local_import import question_context as QC
     from .local_import import questions as Q
 
     bdir, refused = _open(bundle)
@@ -1890,14 +1906,20 @@ def get_local_bundle_answered_questions(
                 rows.append(seen)
         page = rows[offset: offset + limit]
         idx = BundleIndex(data)
-        shown: list[tuple[str, str]] = []
+        context_idx = QC.Index(data, bdir)
+        added = 0
         out_questions = []
         for seen in page:
-            shown += answered_exposures(data, seen)
+            shown = answered_exposures(data, seen)
             display, more = describe_question(data, seen, folder=bundle, idx=idx, answered=True)
             shown += more  # by construction among the CLI's own (answered=True)
-            out_questions.append({**seen, "display": display})
-        added = _record_shown(data, shown, "bundle show question")
+            # QUESTION CONTEXT, as `bundle show question` prints it (in full) and records it, question by question in
+            # the command's own order, so the bundle's exposures are the CLI's to the byte
+            context_shown: list[tuple[str, str]] = []
+            context = QC.context_for(seen, context_idx, context_shown)
+            added += _record_shown(data, shown, "bundle show question")
+            added += _record_shown(data, list(dict.fromkeys(context_shown)), QC.EXPOSURE_COMMAND)
+            out_questions.append({**seen, **({"context": context} if context else {}), "display": display})
         if added:
             try:
                 M.save_bundle(bdir, data)
@@ -2093,6 +2115,57 @@ def post_local_bundle_decision(
         "statement": (f"Recorded in this bundle as a local, unverified statement by {body.by.strip()!r}. "
                       "Nothing was uploaded."),
     }
+
+
+# --- one context image ----------------------------------------------------------------------------------------
+
+#: Served images never run as a page: no script, no request, no sniffing, no caching. Only PNG and JPEG are served,
+#: by suffix AND bytes (``question_context.resolve_context_file``); never an SVG, which can carry script.
+CONTEXT_FILE_HEADERS = {"Content-Security-Policy": "default-src 'none'; style-src 'unsafe-inline'; sandbox",
+                        "X-Content-Type-Options": "nosniff", "Cache-Control": "no-store",
+                        "Cross-Origin-Resource-Policy": "same-origin"}
+
+
+@router.get(
+    "/{bundle}/file",
+    summary="Show One Context Image",
+    description=(
+        "One image a question's `context` names: a processing plot inside the bundle folder (`base=bundle`), or an "
+        "image the extract tool wrote into the bundle's notes folder (`base=notes`, the `<bundle>-notes` folder "
+        "beside it). Only a PNG or JPEG, by its name AND its first bytes (never an SVG); the path is relative to that "
+        "folder, with no `..`, no absolute path and no symbolic link anywhere on the way. Nothing else is served, and "
+        "nothing is written."
+    ),
+    response_description="The image's bytes.",
+    responses={**_R_UNAUTHORIZED, **_R_LOCAL, **_R_NOT_FOUND,
+               400: {"description": "The path is not a plain relative path inside the folder."},
+               415: {"description": "Not a PNG or JPEG image (by its name and its bytes)."}},
+)
+@_io_refusals
+def get_local_bundle_file(
+    bundle: str = PathParam(..., max_length=255, description="The bundle's folder name."),
+    path: str = Query(..., min_length=1, max_length=512, description="The file's path inside the folder."),
+    base: str = Query("bundle", pattern="^(bundle|notes)$", description="`bundle` or `notes`."),
+):
+    from .local_import import question_context as QC
+
+    bdir, refused = _open(bundle)
+    if refused is not None:
+        return refused
+    folder = bdir if base == "bundle" else bdir.parent / f"{bdir.name}-notes"
+    if base == "notes":
+        # the notes folder sits directly inside the local bundles directory, beside its bundle
+        root = _root()
+        try:
+            if folder.is_symlink() or root is None or folder.resolve(strict=True).parent != root:
+                return _refuse(404, "file_not_found", "No such image in this bundle.")
+        except OSError:
+            return _refuse(404, "file_not_found", "No such image in this bundle.")
+    try:
+        target, media_type = QC.resolve_context_file(folder, path)
+    except QC.ContextFileRefused as exc:
+        return _refuse(exc.status, exc.error, exc.message)
+    return FileResponse(target, media_type=media_type, headers=dict(CONTEXT_FILE_HEADERS))
 
 
 __all__ = [

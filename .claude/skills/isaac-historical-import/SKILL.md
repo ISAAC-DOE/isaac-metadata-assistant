@@ -176,7 +176,7 @@ stay incomplete) and continue.
 ## Step 7 · Questions
 
 Read `reference/questions-and-decisions.md`. Use the consolidated list, never the raw one. Each
-question has plain text, why it blocks export, hints (a hint is never an answer) and an
+question has plain text, why it blocks export, hints (a hint is never an answer), a `context` (quote its lines, show its values, open its plots and images with Read, say where each came from; never the answer: reference "Context beside a question") and an
 `answer_command` template; allowed values are in `allowed_values_by_field`. A question blocks only
 when a live group's record needs it. Ask 3 to 5 per message, by theme, with progress, in this order:
 

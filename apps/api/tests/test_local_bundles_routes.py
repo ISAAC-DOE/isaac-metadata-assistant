@@ -127,7 +127,8 @@ def test_the_boot_refuses_it_beside_a_base_path_or_naming_no_directory(root, mon
 
 def test_the_new_operations_meet_the_documentation_rules_every_operation_meets(client):
     """The pinned OpenAPI tests run with the variable unset (so the hosted count is unchanged); this
-    holds the six operations that appear only when it is set to the same rules."""
+    holds the seven operations that appear only when it is set to the same rules (the seventh, `…/file`, serves one
+    context image: test_local_import_question_context)."""
     from test_about_and_openapi import (
         _FORBIDDEN_SUBSTRINGS,
         _INTERNAL_MARKERS,
@@ -143,6 +144,7 @@ def test_the_new_operations_meet_the_documentation_rules_every_operation_meets(c
     assert sorted((p, m) for p, m, _ in mine) == [
         ("/api/local-bundles", "get"),
         ("/api/local-bundles/{bundle}/decisions", "post"),
+        ("/api/local-bundles/{bundle}/file", "get"),
         ("/api/local-bundles/{bundle}/progress", "get"),
         ("/api/local-bundles/{bundle}/questions", "get"),
         ("/api/local-bundles/{bundle}/questions/answered", "get"),
@@ -161,7 +163,7 @@ def test_the_new_operations_meet_the_documentation_rules_every_operation_meets(c
         if "local-bundles" in where:
             assert not any(p.search(text) for p in _INTERNAL_MARKERS), where
     total = sum(1 for _ in _operations(schema))
-    assert total == 102 + 6  # the hosted 102 (test_about_and_openapi) plus these six
+    assert total == 102 + 7  # the hosted 102 (test_about_and_openapi) plus these seven
 
 
 # --- the directory boundary -------------------------------------------------------------------
