@@ -23,6 +23,56 @@ from .official import OfficialReport, validate_official
 
 ISAAC_VERSION = "1.05"
 
+#: Field-envelope statuses whose value never enters the record or the sidecar, whatever it
+#: carries: ``missing`` (nothing is known) and ``rejected`` (a person turned the value down).
+#: ``needs_confirmation`` is not here: it is an open question, and ``export_draft`` refuses it.
+DROPPED_STATUSES = ("missing", "rejected")
+
+
+def rejected_paths(draft: dict) -> list[str]:
+    """Every `fields` path whose envelope is ``rejected``, with or without a value, in draft order."""
+    fields = draft.get("fields")
+    if not isinstance(fields, dict):
+        return []
+    return [p for p, env in fields.items() if isinstance(env, dict) and env.get("status") == "rejected"]
+
+
+def _within(path: str, roots) -> str | None:
+    """The rejected root that `path` is, or lies under (dotted), if any."""
+    for root in roots:
+        if path == root or path.startswith(root + "."):
+            return root
+    return None
+
+
+def _remove_rejected_paths(record: dict, rejected: list[str]) -> list[str]:
+    """Remove every rejected path from the composed record; return the paths actually removed.
+
+    A REJECT IS ON THE PATH, NOT ON ONE WRITER (review of the reject fix, MEDIUM). Skipping the
+    rejected envelope in the `fields` loop was not enough: a non-rejected PARENT envelope
+    (`fields["system.facility"]` holding the whole object) or a structured block writes the same
+    path a second way, and the turned-down value went out while the export warned it had been
+    left out. So, as `_enforce_server_owned_invariant` does for its field, the rule is applied
+    to the OUTPUT, after every writer: nothing is exported at or under a rejected path. This
+    covers the reverse overlap too: a verified child under a rejected parent goes with it (and
+    `export_draft` says so). If the removal leaves the record schema-invalid, official
+    validation refuses it, honestly, for the missing property.
+
+    Copy-on-write along the path, never an in-place delete: `set_path` writes by reference, so a
+    nested dict here may BE the caller's draft (see `_enforce_server_owned_invariant`)."""
+    removed: list[str] = []
+    for path in rejected:
+        if not get_path(record, path)[1]:
+            continue
+        parts = path.split(".")
+        node = record
+        for part in parts[:-1]:
+            node[part] = dict(node[part])
+            node = node[part]
+        del node[parts[-1]]
+        removed.append(path)
+    return removed
+
 
 def _now_iso() -> str:
     return datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
@@ -165,6 +215,12 @@ def _write_not_reported_temperature(record: dict, draft: dict) -> None:
 
 def transform(draft: dict, *, record_id: str | None = None, now: str | None = None) -> dict:
     """Build the official-shape record from a draft (no validation here)."""
+    return _compose(draft, record_id=record_id, now=now)[0]
+
+
+def _compose(draft: dict, *, record_id: str | None, now: str | None) -> tuple[dict, list[str]]:
+    """`transform`, plus the rejected paths it removed from the record (for `export_draft`'s
+    warnings, which must describe what actually happened)."""
     now = now or _now_iso()
     meta = draft.get("meta") or {}
     record: dict = {
@@ -175,11 +231,15 @@ def transform(draft: dict, *, record_id: str | None = None, now: str | None = No
         if meta.get(key) is not None:
             record[key] = meta[key]
 
-    # Scalar fields: drop the envelope, keep the value. Skip honestly-missing fields.
+    # Scalar fields: drop the envelope, keep the value. Skip honestly-missing fields, and
+    # REJECTED ones: a reject says "nothing goes in this field", so a value it still carries
+    # (the one a person turned down, kept as the draft's history) is never written. The field
+    # is then absent, exactly as a `missing` one is, so a field the schema requires refuses
+    # the export for the missing property: a reject never satisfies a required field.
     for path, env in (draft.get("fields") or {}).items():
         if not isinstance(env, dict):
             continue
-        if env.get("status") == "missing" or env.get("value") is None:
+        if env.get("status") in DROPPED_STATUSES or env.get("value") is None:
             continue
         set_path(record, path, env["value"])
 
@@ -241,15 +301,19 @@ def transform(draft: dict, *, record_id: str | None = None, now: str | None = No
     if draft.get("tags"):
         record["tags"] = list(draft["tags"])
 
+    removed = _remove_rejected_paths(record, rejected_paths(draft))
     _enforce_server_owned_invariant(record)
-    return record
+    return record, removed
 
 
 def build_sidecar(draft: dict, record: dict) -> dict:
     """Evidence map keyed by official JSON-path / asset / descriptor / implicit."""
     ev: dict = {}
     for path, env in (draft.get("fields") or {}).items():
-        if isinstance(env, dict) and env.get("evidence") and env.get("value") is not None:
+        # Exactly the envelopes `transform` writes: a rejected value is not in the record, so
+        # its evidence is not cited for that path.
+        if (isinstance(env, dict) and env.get("evidence") and env.get("value") is not None
+                and env.get("status") not in DROPPED_STATUSES):
             ev[path] = env["evidence"]
     for asset in draft.get("assets") or []:
         if asset.get("evidence"):
@@ -258,16 +322,36 @@ def build_sidecar(draft: dict, record: dict) -> dict:
         for d in out.get("descriptors") or []:
             if d.get("evidence"):
                 ev[f"descriptors:{d.get('name', '?')}"] = d["evidence"]
+    rejected = rejected_paths(draft)
     for imp in draft.get("implicit") or []:
-        ev[f"implicit:{imp.get('about', '?')}"] = {
-            "value": imp.get("value"),
-            "evidence": imp.get("evidence", []),
-        }
+        entry = {"value": imp.get("value"), "evidence": imp.get("evidence", [])}
+        # AN IMPLICIT ENTRY ABOUT A REJECTED PATH IS KEPT, MARKED (review of the reject fix,
+        # LOW). `implicit` is sidecar-only by design: it never claims to be a record value,
+        # sits in its own `implicit:` namespace, and the audit treats it as informational.
+        # Dropping it would silently delete authored content (the defect the note below
+        # records), and matching `about` text is no boundary anyway. What it must not do is
+        # read as an unqualified claim beside a decision that turned the value down, so it
+        # says the path was rejected and the value is not in the record.
+        root = _within(str(imp.get("about")), rejected)
+        if root is not None:
+            entry["status"] = "rejected"
+            entry["note"] = f"fields.{root} is rejected: this value is not in the record"
+        ev[f"implicit:{imp.get('about', '?')}"] = entry
     # Block-level provenance (series/qc/links/attribution natural keys) passes through
-    # verbatim: its namespaces cannot collide with dotted paths or assets:/descriptors:/
-    # implicit: keys.
+    # verbatim.
     for key, entries in (draft.get("block_evidence") or {}).items():
         ev[key] = entries
+    # A BARE DOTTED KEY AT OR UNDER A REJECTED PATH IS NOT CITED, whichever map filed it (review
+    # of the reject fix, LOW). Unlike `implicit:`, a key without a namespace IS the record-path
+    # namespace: the sidecar's convention, the audit and the evidence trail all read it as
+    # "evidence for the record's value at this path", resolving that value from the record. A
+    # `block_evidence` key spelled as the rejected path therefore re-cited the very evidence the
+    # `fields` loop above declines to cite, for a value the record does not hold; and a verified
+    # child under a rejected parent is no longer in the record either. This is exact matching on
+    # the sidecar's own keys against the draft's own rejected paths, not the free-text denylist
+    # the note below warns against, and `export_draft` warns for each key left out.
+    for key in [k for k in ev if ":" not in k and _within(k, rejected) is not None]:
+        del ev[key]
     # THE SIDECAR IS DELIBERATELY NOT FILTERED FOR THE REFUSED FIELD, and that is a
     # reversal — two earlier attempts in this branch filtered it. Both were wrong, and the
     # reason is worth keeping so a fourth attempt is not made.
@@ -311,6 +395,46 @@ class ExportResult:
     sidecar: dict | None
     draft_report: DraftReport
     official_report: OfficialReport | None
+
+
+def _report_rejected(draft: dict, record: dict, removed: list[str], report: DraftReport) -> None:
+    """Say what each reject did to THIS record, checked against the record itself.
+
+    Not an error: a reject is a decision, and `_compose` honours it by leaving the path out.
+    Said, so the omission (and any missing-required refusal it causes) is never silent. Each
+    "left out" is stated only after `get_path` confirms the path is absent from the composed
+    record; a rejected path still present would be a defect in `_remove_rejected_paths`, and it
+    refuses the export rather than being reported as left out."""
+    rejected = rejected_paths(draft)
+    if not rejected:
+        return
+    fields = draft["fields"]
+    for path in rejected:
+        if get_path(record, path)[1]:
+            report.err(f"fields.{path}", "status 'rejected', but a value is still in the composed record")
+        elif path in removed:
+            report.warn(f"fields.{path}", "status 'rejected': left out of the exported record, including "
+                        "the value an enclosing field or block placed at this path")
+        elif fields[path].get("value") is not None:
+            report.warn(f"fields.{path}", "status 'rejected': its value is left out of the exported record")
+    for path, env in fields.items():
+        root = _within(path, rejected)
+        if (root is None or root == path or not isinstance(env, dict)
+                or env.get("status") in DROPPED_STATUSES or env.get("value") is None):
+            continue
+        if not get_path(record, path)[1]:
+            report.warn(f"fields.{path}", f"left out of the exported record: it lies inside "
+                        f"'{root}', which is rejected")
+    for imp in draft.get("implicit") or []:
+        root = _within(str(imp.get("about")), rejected) if isinstance(imp, dict) else None
+        if root is not None:
+            report.warn("implicit", f"the entry about '{imp.get('about')}' names rejected field "
+                        f"'{root}': kept in the evidence sidecar marked rejected, never in the record")
+    for key in draft.get("block_evidence") or {}:
+        root = _within(key, rejected) if ":" not in key else None
+        if root is not None:
+            report.warn(f"block_evidence.{key}", f"names rejected field '{root}': not cited in the "
+                        "evidence sidecar")
 
 
 def export_draft(
@@ -361,10 +485,14 @@ def export_draft(
             f"an uppercase letter A-Z or a digit 0-9, and nothing before or after "
             f"them.{detail}",
         )
+    # The rejected-path check is part of the DRAFT gate (it reports into draft_report), so
+    # it shares the draft gate's single refusal rather than adding a fourth gate: export
+    # still has exactly three checks (draft, exactness, official schema).
+    if draft_report.ok:
+        record, removed = _compose(draft, record_id=record_id, now=now)
+        _report_rejected(draft, record, removed, draft_report)
     if not draft_report.ok:
         return ExportResult(False, None, None, draft_report, None)
-
-    record = transform(draft, record_id=record_id, now=now)
 
     # EXACTNESS, on the ASSEMBLED RECORD, before official validation.
     #
