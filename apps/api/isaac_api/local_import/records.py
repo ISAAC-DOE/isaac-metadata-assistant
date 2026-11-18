@@ -44,6 +44,7 @@ from typing import Any, Iterable, Mapping, Sequence
 
 from . import bundle as B
 from . import labels as L
+from . import provenance as PV
 
 DRAFTS_DIR = "drafts"
 VALIDATION_DIR = "validation"
@@ -183,6 +184,40 @@ FIELD_REMAP = {"context.electrochemistry.reaction": "context.reaction.name"}
 #: Approved processing step -> the upstream vocabulary token (measurement.processing.steps),
 #: exactly as `data/vocabulary.json` @ a1cb1c8 spells it. `deglitch` and `qc` have none.
 PROCESSING_STEP_VOCABULARY = {"calibration": "calibration", "merge": "spectrum_merging", "normalize": "normalization"}
+
+
+#: isaac.xas.v1's per-scan alignment (its "calibration" step, outcome kind per_scan_alignment) -> the vocabulary token
+ALIGNMENT_STEP_TOKEN = "energy_alignment"
+
+
+def _compose_merged_series(draft: dict, used: dict, files: Sequence[Mapping], bundle_dir: Path, group_id: str,
+                           conf: Mapping) -> str | None:
+    """isaac.xas.v1: the merged RAW average (``merged.csv``) as the record's second series, beside the normalised one,
+    when its file is in the bundle with the sha256 the result recorded. Returns its series id, or ``None`` (and
+    ``used["merged_series"]`` says why)."""
+    merged = next((f for f in files if f.get("role") == "merged"), None)
+    if merged is None:
+        used["merged_series"] = "not used: the result lists no merged file"
+        return None
+    fpath = contained_file(bundle_dir, str(merged.get("relative_path") or ""))
+    if fpath is None or hashlib.sha256(fpath.read_bytes()).hexdigest() != merged.get("sha256"):
+        used["merged_series"] = "not used: the merged file is missing or its sha256 differs"
+        return None
+    series, said, stderr = PV.merged_series(group_id, fpath)
+    if series is None:
+        used["merged_series"] = said
+        return None
+    for one in series:
+        draft["series"].append(one)
+        draft["block_evidence"][f"series:{one['series_id']}"] = [
+            conf,
+            {"source_type": "document", "source_file": merged["relative_path"], "locator": f"sha256 {merged['sha256']}",
+             "quote": said},
+        ]
+    used["merged_series"] = merged["relative_path"]
+    used["merged_series_id"] = series[0]["series_id"]
+    used["merged_stderr"] = stderr
+    return series[0]["series_id"]
 
 
 def step_was_applied(step: Mapping) -> bool:
@@ -969,6 +1004,9 @@ def compose_group(bundle: Mapping, group: Mapping, bundle_dir: Path, index: dict
                         {"source_type": "document", "source_file": spectrum["relative_path"], "locator": f"sha256 {spectrum['sha256']}", "quote": f"{len(cols[0])} points"},
                     ]
                     used["series"] = spectrum["relative_path"]
+                    if PV.is_v1(r):
+                        merged_sid = _compose_merged_series(draft, used, files, Path(bundle_dir), group["group_id"], conf)
+                        draft["series"][0]["notes"] = PV.normalized_series_note(r, merged_sid)
                 elif "series" not in used:
                     used["series"] = "not used: no data"
             else:
@@ -976,6 +1014,12 @@ def compose_group(bundle: Mapping, group: Mapping, bundle_dir: Path, index: dict
         steps = []
         for step in r.get("steps") or ():
             token = PROCESSING_STEP_VOCABULARY.get(step.get("step"))
+            if (step.get("step") == "calibration"
+                    and ((step.get("outcome") or {}) if isinstance(step.get("outcome"), Mapping) else {}).get("kind")
+                    == "per_scan_alignment"):
+                # isaac.xas.v1: every scan ALIGNED to one beamtime reference; no absolute calibration was applied
+                # (the mono is staff-calibrated), so the vocabulary's word is energy_alignment, never calibration
+                token = ALIGNMENT_STEP_TOKEN
             if token and token not in steps and step_was_applied(step):
                 steps.append(token)
         if steps:
@@ -1015,6 +1059,13 @@ def compose_group(bundle: Mapping, group: Mapping, bundle_dir: Path, index: dict
                 "E0 reported by the scientist-approved processing result.",
             )
             evidence = [conf]
+            if PV.is_v1(r):
+                # the full story of the curve, in the record (generated_by) and in the sidecar (processing block)
+                generated_by = PV.generated_by(r, merged_series_id=used.get("merged_series_id"),
+                                               merged_stderr=used.get("merged_stderr"))
+                definition = ("E0 of the merged, normalised curve (larch find_e0), reported by the scientist-approved "
+                              f"{PV.V1_PROTOCOL_ID} processing result.")
+                used["provenance"] = {"generated_by_version": generated_by["version"]}
             if r.get("source") == "scientist_athena":
                 ref = next(iter(r.get("inputs") or ()), {}) or {}
                 # THE PROJECT'S FILE NAME ONLY in the record: a folder name can carry a sample's or a person's
@@ -2973,6 +3024,8 @@ def evidence_changes(old: Mapping | None, new: Mapping) -> list[str]:
         lines.append("the schemas used to validate it")
     if old.get("notes") != new.get("notes"):
         lines.append("its notes on what the record is written without")
+    if old.get("processing") != new.get("processing"):
+        lines.append("how the record's curve was processed (processing)")
     return lines
 
 
@@ -3037,6 +3090,24 @@ def _artifact_sources(bundle: Mapping, bundle_dir: Path, group_id: str) -> list[
                     src = None
                 out.append((f, src))
     return out
+
+
+def processing_sidecar(bundle: Mapping, bundle_dir: Path, group_id: str, composition: Mapping | None,
+                       record: Mapping) -> dict | None:
+    """The evidence sidecar's ``processing`` block for the approved isaac.xas.v1 result whose curve this record
+    carries (:func:`provenance.sidecar_block`), or ``None`` (another protocol, or no curve in the record)."""
+    used = (composition or {}).get("processing") or {}
+    pid = used.get("result")
+    if not pid or not str(used.get("series") or "").endswith(".csv"):
+        return None
+    result = next((r for r in bundle.get("processing_results") or () if B.processing_id(r) == pid), None)
+    if result is None or not PV.is_v1(result):
+        return None
+    outputs = (record.get("descriptors") or {}).get("outputs") or []
+    gb = next((o.get("generated_by") for o in outputs if (o.get("generated_by") or {}).get("agent") == PV.V1_PROTOCOL_ID),
+              None)
+    return PV.sidecar_block(result, Path(bundle_dir), group_id=group_id, generated=gb,
+                            merged_series_id=used.get("merged_series_id"), merged_stderr=used.get("merged_stderr"))
 
 
 def _remove_withdrawn_copy(out: Path, record_id: str) -> list[str]:
@@ -3185,6 +3256,9 @@ def export_records(bundle_dir: Path, out: Path, *, run_portal=None) -> dict:
             continue
         sidecar = build_sidecar(dict(draft), record)
         sidecar["schemas_used"] = report["schemas_used"]
+        if (proc := processing_sidecar(bundle, bundle_dir, group_id, composition, record)) is not None:
+            # how the record's curve was made, in full (provenance.sidecar_block): the record itself carries the summary
+            sidecar["processing"] = proc
         left_out = [w["text"] for w in warned if w["group_id"] == group_id
                     and w.get("code") in (START_TIME_WARNING, IN_SITU_WARNING)]
         if link_left_out:
@@ -3221,6 +3295,10 @@ def export_records(bundle_dir: Path, out: Path, *, run_portal=None) -> dict:
         _atomic_write(sidecar_path, (json.dumps(sidecar, indent=2) + "\n").encode("utf-8"))
         artifacts = []
         for f, src in sources:
+            if PV.bundle_relative(f.get("relative_path")) is None:
+                # never echoed: a path outside the bundle is not written into the reply
+                artifacts.append({"role": f.get("role"), "refused": PV.UNSAFE_PATH_NOTE})
+                continue
             if src is None:
                 artifacts.append({"relative_path": f.get("relative_path"), "refused": "outside the bundle, missing, or sha256 mismatch"})
                 continue

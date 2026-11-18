@@ -576,7 +576,8 @@ def test_an_approved_v1_result_composes_the_record_series(tmp_path):
     R.build_records(bdir)
     comp = json.loads((bdir / "drafts" / f"{r['group_id']}.composition.json").read_text())["processing"]
     assert comp["result"] == r["result_id"] and comp["series"].endswith("normalized.csv")
-    assert comp["processing_steps"] == ["calibration", "spectrum_merging", "normalization"]
+    # v1 ALIGNS each scan to one reference and applies no absolute calibration: the vocabulary's energy_alignment
+    assert comp["processing_steps"] == ["energy_alignment", "spectrum_merging", "normalization"]
     draft = json.loads((bdir / "drafts" / f"{r['group_id']}.draft.json").read_text())
     assert draft["descriptors_outputs"][0]["generated_by"]["agent"] == "isaac.xas.v1"
     assert len(draft["series"][0]["independent_variables"][0]["values"]) == r["outputs"]["points"]
@@ -905,7 +906,7 @@ def test_a_weaker_spot_with_the_same_shape_is_kept_in_any_position(tmp_path, whe
     for k in weak:
         notes = [n for n in rows[k + 1]["notes"] if n.get("source") == "spots"]
         assert notes and notes[0]["said"].startswith("weaker signal at this spot (spot Sz -7.15: edge step -6"), notes
-        assert notes[0]["said"].endswith("same shape: kept")
+        assert notes[0]["said"].endswith("same shape: not a reason to drop")  # a remark never says the decision
     assert r["spots"]["outcome"] in ("consistent", "intensity_only_kept")
     assert next(s for s in r["steps"] if s["step"] == "merge")["outcome"]["n_scans"] == 9
 

@@ -67,6 +67,43 @@ unexplained.
 
 When a scientist asks "what should this record hold?", answer from the upstream record contract, not from memory: `~/.cache/isaac/portal-validator/<sha>/src/data/record_contract.json` (the pinned clone; `definition`, `kinds`, `procedure`, `never_a_record`) and the wiki page "What an ISAAC record is". One record is one result: one sample, one measurement, one set of conditions, the values that measurement produced, and the one work they come from.
 
+## What a record of an approved curve carries
+
+A record built from an approved `isaac.xas.v1` result (the vendored xas-analysis engine) says how its curve was
+made, in fields the official schema has:
+
+- `measurement.series`: `<group>_normalized` (the normalised curve) and `<group>_merged`, the merged RAW average it
+  was normalised from (IF/I0 in `arb`, role `derived_signal`, with the scans averaged at each energy, role
+  `quality_monitor`). Its standard error is given only where two or more scans contribute (the engine writes 0 where
+  one scan does, which is no measured spread): a channel of the merged series when that is every energy, else its
+  own series `<group>_merged_stderr` on those energies, else none. Each series has a one-line `notes`.
+- `measurement.processing.steps`: `energy_alignment`, `spectrum_merging`, `normalization`. v1 aligns each scan to one
+  beamtime reference and applies no absolute calibration (the mono is staff-calibrated), so `calibration` is not listed.
+- `descriptors.outputs[].generated_by`: agent `isaac.xas.v1`; `version` names the protocol, the adapter rule and the
+  vendored engine ("protocol 1.0.0; adapter isaac.xas.engine_adapter.v1; xas-analysis 0.1.0.dev0 (vendored, see
+  src/xas_analysis/PROVENANCE.md)"); `notes` says in plain words: no absolute calibration and why, the energy
+  reference (route, fit, window, the reference group and anchor), the per-scan shift range, scans kept and dropped
+  with the main reasons, the merge grid's scan, the normalisation model and windows, the edge step, and points
+  excluded (I0 dropouts). The edge step is in the notes, not a descriptor: the descriptor vocabulary has no
+  edge-step name. The only descriptor is `edge_position` (E0).
+- The evidence file `<ULID>.evidence.json` has a `processing` block with the full detail: result id, protocol,
+  versions, `energy` (absolute calibration, alignment, the reference evidence), the per-scan shift table, the decision
+  table (each scan: keep or drop, who decided, reason codes, reasons and remarks with their evidence), the merge,
+  normalisation parameters, excluded points, QC, and `artifacts` (params.json, scan_decisions.json, merged.csv,
+  normalized.csv, plot.png, qc.json), each with its path relative to the bundle and its sha256 (`matches_file`); a
+  path that is not bundle-relative is left out with a note. The block's `generated_by` is the record's own (none,
+  with `generated_by_note`, when the record has no descriptors output); `summary` always says the processing. The
+  same files are copied beside the record in `<ULID>.artifacts/`.
+
+A record of any other result (`isaac.xas.v0`) is written as before: the normalised series, its steps and E0. No
+`processing` block. The record body changed for v1, so re-exporting an earlier v1 record gives it a new id
+(`export: replaced`).
+
+In `show processing-result`, a v1 result's `calibration` block says the two things apart:
+`absolute_calibration` (none applied, none needed) and `alignment` (the per-scan shifts to the one reference). A
+scan's remarks never state its decision ("not a reason to drop"), so a dropped scan never carries a remark saying
+"kept".
+
 ## Verdicts, in plain words, and the fix
 
 | Verdict | Tell the scientist | Fix |
