@@ -1,6 +1,6 @@
 # ISAAC Local Import Bundle — contract v1
 
-Status: **v1.11.0** (a file the engine classifies `processed_spectrum` — the scientists' quick merges — is a processed output linked by legacy number, never a run, 2026-11-09, §9 "What 1.11.0 added"; v1.10.0 an answer refused only because it is not on its field's list is kept as a vocabulary request, `vocabulary_requests`, and `bundle propose-terms` drafts it, 2026-10-30, §9 "What 1.10.0 added", §29; v1.9.0 (`set_counter_positions` may name the LAST file-name token, `--positions last`, and a scientist's merge has a working path, 2026-10-30, §9 "What 1.9.0 added", §27; v1.8.0 the bounds on `scientist_decisions` and `ai_interpretations` raised to 200,000, so an append-only log can no longer lock a bundle; decide refuses a value its field refuses, 2026-10-29, §9 "What 1.8.0 added", §25; v1.7.0 `context.electrochemistry.current_setpoint_mA_cm2` answerable, so a confirmed galvanostatic record can complete, 2026-10-29, §9 "What 1.7.0 added", DEC-92; v1.6.0 capture decisions — keep apart, the Athena result of record, "no counter" — a merge decision applied as one combined group, and question ids that survive answers, 2026-10-29, §9 "What 1.6.0 added"; v1.5.0 control mode answerable the same day; v1.4.0 the SSRL XDC scan start time, the instrument clock's time zone and its binding, 2026-10-29, §9 "What 1.4.0 added"; v1.3.0 absorber readings on record groups, a larger writable set and STALE bundles, the same day; v1.2.0 processed outputs 2026-10-28; v1.1.0 LOCAL-2 and v1.0.0 LOCAL-1 the same day). Machine contract:
+Status: **v1.12.0** (a reading pass's quotes are checked against the cited file when it is loaded, and its notes about a run's scans are kept as `scan_notes`, AI readings never decisions, 2026-11-17, §9 "What 1.12.0 added"; v1.11.0 a file the engine classifies `processed_spectrum` — the scientists' quick merges — is a processed output linked by legacy number, never a run, 2026-11-09, §9 "What 1.11.0 added"; v1.10.0 an answer refused only because it is not on its field's list is kept as a vocabulary request, `vocabulary_requests`, and `bundle propose-terms` drafts it, 2026-10-30, §9 "What 1.10.0 added", §29; v1.9.0 (`set_counter_positions` may name the LAST file-name token, `--positions last`, and a scientist's merge has a working path, 2026-10-30, §9 "What 1.9.0 added", §27; v1.8.0 the bounds on `scientist_decisions` and `ai_interpretations` raised to 200,000, so an append-only log can no longer lock a bundle; decide refuses a value its field refuses, 2026-10-29, §9 "What 1.8.0 added", §25; v1.7.0 `context.electrochemistry.current_setpoint_mA_cm2` answerable, so a confirmed galvanostatic record can complete, 2026-10-29, §9 "What 1.7.0 added", DEC-92; v1.6.0 capture decisions — keep apart, the Athena result of record, "no counter" — a merge decision applied as one combined group, and question ids that survive answers, 2026-10-29, §9 "What 1.6.0 added"; v1.5.0 control mode answerable the same day; v1.4.0 the SSRL XDC scan start time, the instrument clock's time zone and its binding, 2026-10-29, §9 "What 1.4.0 added"; v1.3.0 absorber readings on record groups, a larger writable set and STALE bundles, the same day; v1.2.0 processed outputs 2026-10-28; v1.1.0 LOCAL-2 and v1.0.0 LOCAL-1 the same day). Machine contract:
 [`apps/api/isaac_api/local_import/bundle-v1.schema.json`](../apps/api/isaac_api/local_import/bundle-v1.schema.json)
 (JSON Schema draft 2020-12) plus the checks in
 [`bundle.py`](../apps/api/isaac_api/local_import/bundle.py) `validate_bundle` that JSON
@@ -794,6 +794,46 @@ group and questions.
   and says a re-import keeps them as processed outputs. Answers given to questions about those runs do not carry over: `isaac bundle answers import`
   reports each such row as `not_resolving` and applies nothing for it.
 
+### What 1.12.0 added (the quote check, and scan notes)
+
+Measured on a real BL15-2 beamtime: a careful reading pass over a 1,936-line logbook found the electrolyte per
+sample, every potential set-point (linked by the step table's "File Number" = the run folder's leading number), the
+cell, atmosphere, reaction and reference electrode, and the logbook's notes on which scans to leave out. The loader
+took every quote as the reader gave it. Now:
+
+- **The quote check** (`reading_check.py`; `annotate --from-readings [--root <folder>]`, `bundle check-readings`).
+  Each finding's quote is held, whitespace-normalised (non-breaking spaces, curly quotes and dashes as their plain
+  forms; case kept), against the file it cites under the imported folder (`--root`, else
+  `source_root.local_root_hint`): within 3 lines of a `line N` / `lines N-M` locator for text (found elsewhere:
+  fails, saying the line it is on); in `extract`'s text for `.docx/.pptx/.xlsx`, produced again in a temporary
+  folder (no image written; every sheet paged to its end); in the `#` header lines (one scan's, for `scan N #C`)
+  for a SPEC header locator; in a `.pdf`'s text layer, read page by page with `pypdf` (the `reading` extra, which
+  `scripts/setup_isaac_local.sh` installs): a `page N` locator is checked on that page (on another page: fails,
+  naming it), any other locator searches every page and reports the page. A page with no text layer (a scan)
+  fails with "no text layer; quote from a text copy or report it instead"; without `pypdf` a PDF quote fails,
+  naming the install command. An absolute
+  path, a `..` part, a symbolic link anywhere along the path, a missing or non-regular file, or a bundle source
+  whose bytes changed since the import (`content_sha256`) fails. The preview reports `pass`/`fail` per finding
+  (`quote_check`); `--apply` records no finding that fails, and refuses (exit 2, nothing written) when no folder is
+  known to check against. There is no flag to skip it. `check-readings` prints the same report and exits 1 when a
+  quote was not found. A pass says the quote is in the file near its locator, never that the reading is right.
+- **Refusals** are listed in `skipped` with `refused` (`quote_not_found`, `unknown_run`, `ambiguous_run`,
+  `not_allowed_value`: a vocabulary field's value off its allowed list, `bundle.allowed_values`), counted in
+  `refused_by_reason`. Before 1.12.0 an off-list value was recorded as an AI reading.
+- **`scan_notes`** (optional section; `scan_notes.py`): a finding `{"kind": "scan_note", "applies_to": {"scope":
+  "runs", "runs": [...]}, "action", "scans", "reason", "source", "quote", "strength", "reasoning"}`. `exclude` and
+  `keep_only` list scan numbers, `start_from` exactly one, `flag` none (advice that changes nothing). Numbers are the
+  file's own. Stored once (`scan_note_id`, a digest of runs, action, scans and citation) with its citation, `model`,
+  `authority: ai_reading` and `recorded_utc`; a number past a run's `scan_count` adds `scan_count_note`. The
+  validator checks the shape per action and that every run and source it names is in the bundle. Read by
+  `scan_notes.scan_notes_for_run(bundle, run_id)` (the processing step's accessor), `bundle show <dir> run <id>`
+  (`scan_notes`) and `bundle list <dir> scan-notes`. AN AI READING, NEVER A DECISION: no record reads it and no scan
+  is left out by it; the processing step may cite it in a scan-selection proposal, which the scientist decides.
+- **A 1.12.0 validator accepts 1.0.0–1.11.0 bundles;** a 1.11.0 validator refuses a 1.12.0 one (the label), and one
+  holding the section. Nothing becomes newly writable; `processed_outputs` is required at 1.12.0 as at 1.2.0–1.11.0.
+- **The upgrade is disclosed**: the first write of an older bundle appends one `format_upgrades` entry whose
+  statement includes `bundle.CHANGES_ADDED_IN["1.12.0"]`.
+
 ## 10. Exit codes (`isaac import` / `isaac bundle`)
 
 0 ok · 1 `check` found the bundle invalid, or STALE (stored by an older build, §9 "What 1.3.0
@@ -1220,9 +1260,10 @@ anything `scientist_confirmed`.
 - **A Claude reading pass**: `bundle annotate <bundle> --from-readings <findings.json> --model <id>`.
   - The file has format `isaac.reading_findings`. Each finding gives `field_path`, `value`,
     `applies_to` (`experiment`, or `runs` with exact run labels), `source.path`,
-    `source.locator`, a `quote` (as the reader gives it: this build does not check it against
-    the file), `strength` (`stated` or `inferred`) and `reasoning`. `source.path` must be relative
-    to the imported folder, or carry one leading `../` for a document beside it.
+    `source.locator`, a `quote`, `strength` (`stated` or `inferred`) and `reasoning`. `source.path`
+    must be relative to the imported folder. Since 1.12.0 every quote is CHECKED against the cited
+    file (§9 "What 1.12.0 added"); a `../` document beside the folder cannot be checked, so its
+    findings are refused.
   - Each finding becomes one AI interpretation per target it reaches: the missing value or
     extracted candidate of that field on every live run it names (the record group, for an
     absorber finding; below).

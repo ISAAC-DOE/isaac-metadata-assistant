@@ -282,7 +282,7 @@ from test_local_import_suggestions import _absorber_findings, _load, grouped  # 
 def test_the_absorber_question_does_not_deny_a_region_file_name_processing_reads(grouped):
     out = grouped(processed=False)
     M.annotate_from_readings(out, _absorber_findings(("system.element", "Zz"), ("system.edge", "K")),
-                             model_id="synthetic-model", apply=True)
+                             model_id="synthetic-model", apply=True, check_quotes=False)
     b = _load(out)
     [q] = [q for q in Q.consolidate(b)["questions"] if q["kind"] == "confirm_absorber"]
     assert "no file the import parsed states the absorber" not in q["text"]
