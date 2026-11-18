@@ -147,7 +147,10 @@ def _subset_hint(e, y, M, grid, used_entries: Sequence[Mapping], inputs: Sequenc
 
 
 def compare_one(po: Mapping, link: Mapping, *, group: Mapping, root: Path | None, grid_ok, mean, nm: Mapping, M, grid,
-                used_entries: Sequence[Mapping], inputs: Sequence[Mapping], params: Mapping, np, xafs) -> dict:
+                used_entries: Sequence[Mapping], inputs: Sequence[Mapping], params: Mapping, np, xafs,
+                normalizer=None) -> dict:
+    """``normalizer``: ``callable(energy, signal) -> (norm, edge_step)``, the result's OWN normalisation (isaac.xas.v1:
+    the engine's Victoreen + McMaster with the result's window); absent, larch with ISAAC's v0 parameters."""
     f = (po.get("files") or [{}])[0]
     out: dict = {
         "rule_id": RULE_ID,
@@ -223,17 +226,29 @@ def compare_one(po: Mapping, link: Mapping, *, group: Mapping, root: Path | None
                                  "statement": "Its raw signal against ISAAC's merged mu, after one median scale."}
         p = {**params, "normalize": {**params["normalize"], "e0": e0, "pre1": rp.get("pre1"), "pre2": rp.get("pre2"),
                                      "norm1": rp.get("norm1"), "norm2": rp.get("norm2"), "nnorm": rp.get("nnorm")}}
-        try:
-            snm = C.normalize(e, y, p, np, xafs)
-        except C.StepError as exc:
-            out["reason"] = f"Not compared: normalising it with ISAAC's own parameters failed ({exc.code})."
-            return out
-        out["assumptions"].append(
-            "not normalised: normalised here with ISAAC's OWN parameters (E0 "
-            f"{e0:g} eV, pre1 {rp.get('pre1')}, pre2 {rp.get('pre2')}, norm1 {rp.get('norm1')}, norm2 {rp.get('norm2')}, "
-            f"nnorm {rp.get('nnorm')}), not the scientist's")
-        sci_norm = snm["norm"]
-        m["edge_step_scientist"] = snm["edge_step"]
+        if normalizer is not None:
+            try:
+                sci_norm, step_ = normalizer(e, y)
+            except Exception as exc:  # noqa: BLE001
+                out["reason"] = f"Not compared: normalising it as ISAAC's result is normalised failed ({type(exc).__name__})."
+                return out
+            out["assumptions"].append(
+                "not normalised: normalised here exactly as ISAAC's result is (the engine's Victoreen + McMaster, the "
+                f"result's window {rp.get('pre1') + e0:g}-{rp.get('pre2') + e0:g} / {rp.get('norm1') + e0:g}-"
+                f"{rp.get('norm2') + e0:g} eV), not the scientist's")
+            m["edge_step_scientist"] = step_
+        else:
+            try:
+                snm = C.normalize(e, y, p, np, xafs)
+            except C.StepError as exc:
+                out["reason"] = f"Not compared: normalising it with ISAAC's own parameters failed ({exc.code})."
+                return out
+            out["assumptions"].append(
+                "not normalised: normalised here with ISAAC's OWN parameters (E0 "
+                f"{e0:g} eV, pre1 {rp.get('pre1')}, pre2 {rp.get('pre2')}, norm1 {rp.get('norm1')}, norm2 {rp.get('norm2')}, "
+                f"nnorm {rp.get('nnorm')}), not the scientist's")
+            sci_norm = snm["norm"]
+            m["edge_step_scientist"] = snm["edge_step"]
         out["scan_subset_hint"] = _subset_hint(e, y, M, grid, used_entries, inputs, group["group_id"], np)
     isaac_norm = np.interp(e, grid_ok, nm["norm"], left=np.nan, right=np.nan)
     ok = np.isfinite(isaac_norm)
@@ -252,13 +267,14 @@ def compare_one(po: Mapping, link: Mapping, *, group: Mapping, root: Path | None
 
 
 def compare_group(group: Mapping, ctx: Any, *, grid_ok, mean, nm: Mapping, M, grid, used_entries: Sequence[Mapping],
-                  inputs: Sequence[Mapping]) -> list[dict]:
+                  inputs: Sequence[Mapping], normalizer=None) -> list[dict]:
     """Every linked quick merge of ``group`` compared with ISAAC's result (empty when none is linked)."""
     out = []
     for po, link in linked_quick_merges(ctx.bundle or {}, group):
         try:
             out.append(compare_one(po, link, group=group, root=ctx.root, grid_ok=grid_ok, mean=mean, nm=nm, M=M, grid=grid,
-                                   used_entries=used_entries, inputs=inputs, params=ctx.params, np=ctx.np, xafs=ctx.xafs))
+                                   used_entries=used_entries, inputs=inputs, params=ctx.params, np=ctx.np, xafs=ctx.xafs,
+                                   normalizer=normalizer))
         except Exception as exc:  # noqa: BLE001 - a reference that cannot be compared never fails ISAAC's result
             out.append({"rule_id": RULE_ID, "processed_output_id": po.get("processed_output_id"), "role": ROLE,
                         "preferred_for_record": False, "treated_as_truth": False, "verdict": "not_comparable",

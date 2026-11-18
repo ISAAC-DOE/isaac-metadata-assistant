@@ -44,7 +44,8 @@ def require() -> dict:
 
 def versions() -> dict:
     out = {}
-    for name in ("numpy", "larch", "xraydb", "matplotlib"):
+    # scipy and xas_analysis (the vendored reduction engine, src/xas_analysis) are isaac.xas.v1's
+    for name in ("numpy", "larch", "xraydb", "matplotlib", "scipy", "xas_analysis"):
         try:
             m = importlib.import_module(name)
             out[name] = getattr(m, "__version__", "?")

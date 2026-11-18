@@ -26,10 +26,12 @@ dependencies = [
 # parses the workflow rather than pattern-matching it — and must never skip.
 dev = ["pytest>=8", "pyyaml>=6"]
 api = ["fastapi>=0.110", "uvicorn>=0.29", "httpx>=0.27", "psycopg2-binary>=2.9"]
-# Local-first XAS processing (`isaac process`, draft protocol isaac.xas.v0). Optional and
-# imported lazily: without it, processing reports `processing_unavailable`. Not in `api`,
-# so the Docker image does not change.
-processing = ["numpy>=2", "xraylarch>=2026.3"]
+# Local-first XAS processing (`isaac process`: isaac.xas.v1 = the vendored xas-analysis reduction engine,
+# src/xas_analysis, plus the ISAAC adapter; isaac.xas.v0 for what that engine does not cover). Optional and
+# imported lazily: without it, processing reports `processing_unavailable`. Not in `api`, so the Docker
+# image does not change. scipy, pyyaml and matplotlib are xas-analysis's own dependencies (xraylarch
+# pulls them in too; named here so the engine does not depend on that).
+processing = ["numpy>=2", "xraylarch>=2026.3", "scipy>=1.10", "pyyaml>=6", "matplotlib>=3.7"]
 # Reading a PDF logbook's text for the quote check (`annotate --from-readings`, `bundle check-readings`,
 # local_import/reading_check.py). Pure Python, imported lazily; `scripts/setup_isaac_local.sh` installs it
 # by default. Without it a finding citing a PDF is refused, naming this extra.
@@ -40,6 +42,12 @@ isaac = "isaac_records.cli:main"
 
 [tool.setuptools.packages.find]
 where = ["src"]
+
+[tool.setuptools.package-data]
+# the vendored xas-analysis engine reads its McMaster table and FEFF reference from package data, and ships its
+# own skill references as documentation (src/xas_analysis/PROVENANCE.md)
+xas_analysis = ["data/*.json", "data/*.dat", "skill/SKILL.md", "skill/scope.md", "skill/references/calibration.md",
+                "skill/references/normalization.md", "skill/references/recipe.md", "PROVENANCE.md"]
 
 [tool.pytest.ini_options]
 # `src` is listed FIRST so a test run always exercises the checkout it was
