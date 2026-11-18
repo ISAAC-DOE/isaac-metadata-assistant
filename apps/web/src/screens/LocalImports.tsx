@@ -53,10 +53,14 @@ import {
   type LocalOwnSuggestion,
   type LocalProgress,
   type LocalScope,
+  type LocalContextItem,
   type LocalQuestion,
   type LocalSuggestion,
   type LocalValueRule,
   type QuestionSection,
+  contextRowsText,
+  servedContextFile,
+  SHOWN_IMAGE_TYPES,
 } from '../lib/localImports';
 import {
   cannotExportLines,
@@ -841,7 +845,7 @@ function QuestionsBody({
         <span id="li-reject-hint">“{COPY.reject}” means: {COPY.rejectHint}</span>
       </p>
       {sections.length + (optionalCount > 0 ? 1 : 0) > 1 && <SectionJumps sections={sections} optional={optionalCount} />}
-      {data.minimum_for_one_group && <NearestRecord m={data.minimum_for_one_group} />}
+      {data.minimum_for_one_group && <NearestRecord m={data.minimum_for_one_group} bundle={data.bundle.name} />}
       {data.total === 0 && <p className="li-note">No open questions match.</p>}
       {sections.map((sec) => sectionView(sec))}
       {optionalCount > 0 && (
@@ -1117,7 +1121,7 @@ function CardLink({ id, children }: { id: string; children: ReactNode }) {
  * needs by field and group (each a link to its card), what is recommended with its warning, the processing QC
  * verdict when it failed, and every field its record is missing now.
  */
-function NearestRecord({ m }: { m: NonNullable<LocalProgress['minimum_for_one_group']> }) {
+function NearestRecord({ m, bundle }: { m: NonNullable<LocalProgress['minimum_for_one_group']>; bundle?: string }) {
   const names = useGroupNames();
   const qs = m.questions ?? [];
   const recommended = m.recommended ?? [];
@@ -1175,6 +1179,12 @@ function NearestRecord({ m }: { m: NonNullable<LocalProgress['minimum_for_one_gr
             ))}
           </ul>
         </>
+      )}
+      {bundle && m.decision_context?.confirm_the_group && (
+        <QuestionContext items={m.decision_context.confirm_the_group} bundle={bundle} heading={COPY.contextConfirmGroup} />
+      )}
+      {bundle && m.decision_context?.approve_its_processing_result && (
+        <QuestionContext items={m.decision_context.approve_its_processing_result} bundle={bundle} heading={COPY.contextApproveCurve} />
       )}
       {missing.length > 0 && (
         <details className="li-details">
@@ -2382,6 +2392,8 @@ function QuestionCard({
         />
       )}
 
+      {q.context && q.context.length > 0 && <QuestionContext items={q.context} bundle={handlers.name} />}
+
       {multi && d.answer_kind !== 'informational' && !startTimes && (
         <fieldset className="li-fieldset">
           <legend>Answer for</legend>
@@ -2580,6 +2592,160 @@ function reachText(q: LocalQuestion): string {
   if (runs === 0) return groups > 0 ? `${n(groups, 'group')} · the whole beamtime` : 'The whole beamtime';
   // values are counted only where they outnumber the runs (a run with several values); fewer says nothing useful
   return `For ${n(groups, 'group')}, ${n(runs, 'run')}${targets > runs ? `, ${n(targets, 'value')}` : ''}`;
+}
+
+/**
+ * BEAMTIME CONTEXT under a question (`question_context`): the lines the files and my readings hold, the values each
+ * run's files state, the group's processing plot and the documents' images — each with where it came from. It helps
+ * the person answer; it is never the answer, and nothing in it is recorded or chosen.
+ */
+function QuestionContext({ items, bundle, heading }: { items: LocalContextItem[]; bundle: string; heading?: string }) {
+  const headingId = useId();
+  return (
+    <section className="li-context" aria-labelledby={headingId} data-testid="li-context">
+      <h5 className="li-h5" id={headingId}>
+        {heading ?? COPY.contextHeading}
+      </h5>
+      <p className="li-hint">{COPY.contextNote}</p>
+      <ul className="li-context-list">
+        {items.map((item, n) => (
+          <li key={`${item.kind}:${n}`} className="li-context-item" data-testid={`li-context-${item.kind}`}>
+            <p className="li-context-label">{item.label}</p>
+            <ContextBody item={item} bundle={bundle} />
+            <p className="li-context-source">From {item.source}.</p>
+          </li>
+        ))}
+      </ul>
+    </section>
+  );
+}
+
+function ContextBody({ item, bundle }: { item: LocalContextItem; bundle: string }) {
+  switch (item.kind) {
+    case 'quote':
+      return (
+        <figure className="li-context-quote">
+          <blockquote>{item.quote}</blockquote>
+          <figcaption>
+            {item.path ?? 'a file'}
+            {item.locator ? `, ${item.locator}` : ''}
+          </figcaption>
+        </figure>
+      );
+    case 'values': {
+      const more = contextRowsText(item.rows.length, item.rows_total);
+      return (
+        <div className="li-context-table-wrap">
+          <table className="li-context-table">
+            <caption className="sr-only">{item.label}</caption>
+            <thead>
+              <tr>
+                {item.columns.map((c) => (
+                  <th key={c} scope="col">
+                    {c}
+                  </th>
+                ))}
+              </tr>
+            </thead>
+            <tbody>
+              {item.rows.map((row, r) => (
+                <tr key={r}>
+                  {row.map((cell, c) => (c === 0 ? <th key={c} scope="row">{cell}</th> : <td key={c}>{cell}</td>))}
+                </tr>
+              ))}
+            </tbody>
+          </table>
+          {more && <p className="li-hint">{more}</p>}
+          {item.note && <p className="li-hint">{item.note}</p>}
+        </div>
+      );
+    }
+    case 'plot':
+    case 'image': {
+      if (item.not_shown) {
+        return (
+          <p className="li-hint" data-testid="li-context-not-shown">
+            {COPY.contextNotShown} {item.not_shown}.
+          </p>
+        );
+      }
+      const served = servedContextFile(item);
+      if (!served || !item.path) {
+        return (
+          <p className="li-hint">
+            {COPY.contextImageInFolder} <code>{item.path}</code>
+          </p>
+        );
+      }
+      return <ContextImage bundle={bundle} path={served.path} base={served.base} alt={item.alt ?? item.label} />;
+    }
+    case 'example_files':
+      return (
+        <>
+          <ul className="li-bullets">
+            {item.names.map((n) => (
+              <li key={n}>
+                <code>{n}</code>
+              </li>
+            ))}
+          </ul>
+          {contextRowsText(item.names.length, item.total) && <p className="li-hint">{contextRowsText(item.names.length, item.total)}</p>}
+        </>
+      );
+    case 'table_row':
+      return (
+        <dl className="li-context-cells">
+          {Object.entries(item.cells).map(([k, v]) => (
+            <div key={k}>
+              <dt>{k}</dt>
+              <dd>{v}</dd>
+            </div>
+          ))}
+          <div>
+            <dt>Where</dt>
+            <dd>
+              {item.path ?? 'the logbook'}
+              {item.locator ? `, ${item.locator}` : ''}
+            </dd>
+          </div>
+        </dl>
+      );
+    default:
+      return null;
+  }
+}
+
+/** One plot or image, fetched with the local header (an `<img src>` cannot send it) and shown from an object URL —
+ *  only a PNG or JPEG (`SHOWN_IMAGE_TYPES`), re-typed as that image: never an SVG, which would run as a page. */
+function ContextImage({ bundle, path, base, alt }: { bundle: string; path: string; base: 'bundle' | 'notes'; alt: string }) {
+  const [src, setSrc] = useState<string | null>(null);
+  const [failed, setFailed] = useState(false);
+  useEffect(() => {
+    let url: string | null = null;
+    let live = true;
+    setSrc(null);
+    setFailed(false);
+    api
+      .getLocalBundleFile(bundle, path, base)
+      .then((blob) => {
+        if (!live) return;
+        const type = (blob.type || '').split(';')[0].trim().toLowerCase();
+        if (typeof URL.createObjectURL !== 'function' || !SHOWN_IMAGE_TYPES.includes(type)) {
+          setFailed(true);
+          return;
+        }
+        url = URL.createObjectURL(new Blob([blob], { type }));
+        setSrc(url);
+      })
+      .catch(() => live && setFailed(true));
+    return () => {
+      live = false;
+      if (url && typeof URL.revokeObjectURL === 'function') URL.revokeObjectURL(url);
+    };
+  }, [bundle, path, base]);
+  if (failed) return <p className="li-hint">{COPY.contextImageFailed}</p>;
+  if (!src) return <p className="li-hint" role="status">{COPY.contextImageLoading}</p>;
+  return <img className="li-context-image" src={src} alt={alt} loading="lazy" />;
 }
 
 /** The beamtime start-time question, asked as the choice it is. */
