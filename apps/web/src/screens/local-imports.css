@@ -319,3 +319,24 @@
 .li-hint { max-width: 66ch; }
 .li-progress > .li-h4 { margin-top: var(--space-sm); }
 .li-bundle-head > .li-meta { text-wrap: pretty; }
+
+/* Beamtime context under a question (question_context): evidence beside the question, never its answer. Quiet,
+   ruled like the suggestions; tables scroll inside their own box so the page never scrolls sideways. */
+.li-context { display: flex; flex-direction: column; gap: var(--space-xs); padding-top: var(--space-sm); border-top: 1px dashed var(--border-strong); }
+.li-context-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: var(--space-md); }
+.li-context-item { display: flex; flex-direction: column; gap: var(--space-2xs); min-width: 0; }
+.li-context-label { margin: 0; font-weight: var(--font-weight-semibold); color: var(--text-strong); }
+.li-context-source { margin: 0; font-size: var(--font-size-meta); color: var(--text-muted); max-width: 66ch; }
+.li-context-quote { margin: 0; }
+.li-context-quote blockquote { margin: 0; padding-left: var(--space-sm); border-left: 2px solid var(--border-strong); color: var(--text-primary); overflow-wrap: anywhere; max-width: 70ch; }
+.li-context-quote figcaption { font-size: var(--font-size-meta); color: var(--text-secondary); overflow-wrap: anywhere; }
+.li-context-table-wrap { max-width: 100%; overflow-x: auto; }
+.li-context-table { border-collapse: collapse; font-size: var(--font-size-meta); }
+.li-context-table th,
+.li-context-table td { padding: var(--space-2xs) var(--space-sm); border-bottom: 1px solid var(--border-faint); text-align: left; vertical-align: top; overflow-wrap: anywhere; }
+.li-context-table thead th { font-weight: var(--font-weight-semibold); color: var(--text-secondary); }
+.li-context-table tbody th { font-weight: var(--font-weight-medium); font-family: var(--font-mono); }
+.li-context-image { display: block; max-width: min(100%, 40rem); height: auto; border: 1px solid var(--border); border-radius: var(--radius-control); background: var(--surface); }
+.li-context-cells { margin: 0; display: flex; flex-wrap: wrap; gap: var(--space-xs) var(--space-lg); }
+.li-context-cells dt { font-size: var(--font-size-meta); color: var(--text-muted); }
+.li-context-cells dd { margin: 0; overflow-wrap: anywhere; }

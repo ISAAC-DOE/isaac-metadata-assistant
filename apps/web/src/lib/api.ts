@@ -3177,6 +3177,16 @@ export const api = {
     );
   },
 
+  /** One image a question's context names (a processing plot in the bundle, or an extracted document image in its
+   *  notes folder), as a Blob: an `<img>` cannot send the local header, so the page shows it from an object URL. */
+  async getLocalBundleFile(name: string, path: string, base: 'bundle' | 'notes'): Promise<Blob> {
+    const query = new URLSearchParams({ path, base });
+    const route = `/local-bundles/${enc(name)}/file?${query.toString()}`;
+    const res = await request(route, { headers: { ...LOCAL_HEADERS, Accept: 'image/*' } });
+    if (!res.ok) throw await httpErrorWithReason(res, route);
+    return res.blob();
+  },
+
   recordLocalDecision(name: string, input: LocalDecisionInput): Promise<ApiLocalDecisionRecorded> {
     return localPost<ApiLocalDecisionRecorded>(`/local-bundles/${enc(name)}/decisions`, definedOnly({ ...input }));
   },

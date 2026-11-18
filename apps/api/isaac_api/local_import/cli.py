@@ -1745,6 +1745,13 @@ def cmd_bundle_show(args) -> int:
     for obj in bundle.get(section) or ():
         if obj.get(key) == args.id:
             exposed = _exposed_by_show(args.kind, obj)
+            context: list = []
+            if args.kind == "merge-candidate":
+                # QUESTION CONTEXT (question_context): its groups' runs' conditions side by side; each value an exposure
+                from . import question_context as QC
+
+                context, more = QC.merge_candidate_context(bundle, obj, Path(args.bundle_dir))
+                exposed = list(dict.fromkeys([*exposed, *more]))
             if exposed:
                 from . import mutations as M
 
@@ -1755,6 +1762,8 @@ def cmd_bundle_show(args) -> int:
                     return exc.code
             if args.kind == "merge-candidate":
                 obj = _merge_candidate_view(bundle, obj)
+                if context:
+                    obj = {**obj, "context": context}
             elif args.kind == "group":
                 obj = _group_view(bundle, obj)
             elif args.kind == "source":
@@ -1788,6 +1797,7 @@ def _show_consolidated_question(args) -> int:
     """``bundle show <dir> question <Q-…>`` for a consolidated question id: that one question, compact as
     in `bundle questions`, with the exposures `bundle questions` would record for it, written before printing."""
     from . import mutations as M
+    from . import question_context as QC
     from . import questions as Q
 
     def run():
@@ -1811,9 +1821,14 @@ def _show_consolidated_question(args) -> int:
             raise M.MutationRefused(
                 f"No question with id {args.id!r} in this bundle (`isaac bundle questions <dir>` lists the ids).", code=EXIT_NOT_FOUND)
         shown = _question_exposures([q], bundle)
-        if shown:
-            M.expose_and_load(Path(args.bundle_dir), shown, "bundle show question")
-        return {**{k: v for k, v in _compact_question(q).items() if k not in extra}, **extra}
+        # QUESTION CONTEXT (question_context), in full: evidence beside the question, never its answer; its file
+        # values are recorded with the question's own, in ONE write, before printing
+        context_shown: list = []
+        context = QC.context_for(q, QC.Index(bundle, Path(args.bundle_dir)), context_shown)
+        _expose_each(Path(args.bundle_dir), [(shown, "bundle show question"),
+                                             (list(dict.fromkeys(context_shown)), QC.EXPOSURE_COMMAND)])
+        return {**{k: v for k, v in _compact_question(q).items() if k not in extra}, **extra,
+                **({"context": QC.with_files(context, Path(args.bundle_dir)), "context_note": QC.NOTE} if context else {})}
 
     return _mutation(run)
 
@@ -1996,6 +2011,7 @@ def _targets_from(args) -> list[str]:
 def cmd_bundle_questions(args) -> int:
     from . import answer_memory as AM
     from . import mutations as M
+    from . import question_context as QC
     from . import questions as Q
 
     if args.limit < 1 or args.limit > MAX_LIMIT or args.offset < 0:
@@ -2021,14 +2037,24 @@ def cmd_bundle_questions(args) -> int:
         page = AM.annotate(page, bundle)
         earlier = AM.exposures(page)
         minimum = AM.annotate_minimum(minimum, payload, bundle, exposed=earlier)
+        # QUESTION CONTEXT (question_context): the evidence beside each question (quotes, values, plots, images, file
+        # names), compact; additive, after the counts and the paging. --no-context leaves it out
+        context_shown: list = []
+        if not getattr(args, "no_context", False):
+            page, context_shown = QC.annotate(page, bundle, Path(args.bundle_dir), full=False)
+            page = [{**q, "context": QC.with_files(q["context"], Path(args.bundle_dir))} if q.get("context") else q
+                    for q in page]
+            minimum, more = QC.annotate_minimum(minimum, payload, bundle, Path(args.bundle_dir), full=False)
+            minimum = _minimum_with_files(minimum, Path(args.bundle_dir))
+            context_shown += more
         # HINTS SHOW PARSER LITERALS: that is an exposure, recorded before printing — and so do the values the
         # nearest record's warnings state (c7-r MED-4)
         shown = list(_question_exposures(page, bundle)) + Q.minimum_exposures(minimum)
-        if shown:
-            M.expose_and_load(Path(args.bundle_dir), shown, "bundle questions")
-        # ...and so does every earlier answer shown (answer_memory), under its own command
-        if earlier:
-            M.expose_and_load(Path(args.bundle_dir), list(dict.fromkeys(earlier)), AM.EXPOSURE_COMMAND)
+        # ...and so does every earlier answer shown (answer_memory), and every file value a context states
+        # (question_context), each under its own command: all recorded in ONE write, in that order
+        _expose_each(Path(args.bundle_dir), [(shown, "bundle questions"),
+                                             (list(dict.fromkeys(earlier)), AM.EXPOSURE_COMMAND),
+                                             (list(dict.fromkeys(context_shown)), QC.EXPOSURE_COMMAND)])
         return {
             "format": payload["format"], "format_version": payload["format_version"],
             "blocking_basis": payload["blocking_basis"],
@@ -2044,10 +2070,48 @@ def cmd_bundle_questions(args) -> int:
             **Q.hidden_outside_live_groups(outside, "--include-outside-live-groups"),
             **Q.folded_answered_at_once(folded, "--each-group"),
             "minimum_for_one_group": minimum,
+            **({} if getattr(args, "no_context", False) else {"context_note": QC.NOTE + " `bundle show <dir> question <id>` shows the "
+                                                           "full context; --no-context leaves it out."}),
             **({"questions": page} if args.with_targets else _compact_page(page)),
         }
 
     return _mutation(run)
+
+
+def _expose_each(bundle_dir: Path, batches) -> None:
+    """Record each ``(targets, command)`` batch's exposures as ``mutations.expose_and_load`` records one, all in ONE
+    write and in order (a large bundle is validated and written once, not once per command)."""
+    from . import mutations as M
+
+    batches = [(list(targets), command) for targets, command in batches if targets]
+    if not batches:
+        return
+
+    def change(bundle):
+        for targets, command in batches:
+            for kind, tid in targets:
+                M.record_exposure(bundle, kind, tid, command)
+                if kind == "conflict":
+                    _, conflict = M.resolve_target(bundle, tid)
+                    if conflict.get("candidate_id"):
+                        M.record_exposure(bundle, "candidate", conflict["candidate_id"], command)
+        return bundle
+
+    M.mutate(bundle_dir, change)
+
+
+def _minimum_with_files(minimum, bundle_dir: Path):
+    """The minimum's contexts with each plot's and image's file to open with Read (question_context.with_files)."""
+    from . import question_context as QC
+
+    if not minimum:
+        return minimum
+    for m in minimum.get("questions") or ():
+        if m.get("context"):
+            m["context"] = QC.with_files(m["context"], bundle_dir)
+    for k, items in (minimum.get("decision_context") or {}).items():
+        minimum["decision_context"][k] = QC.with_files(items, bundle_dir)
+    return minimum
 
 
 #: How many of a long id list a compact question keeps (the count says how many there are).
@@ -2903,6 +2967,9 @@ def build_parser(prog: str = "isaac") -> argparse.ArgumentParser:
     q.add_argument("--each-group", action="store_true",
                    help="also list each per-group question a beamtime-wide question answers at once (e.g. the start "
                         "time); by default they are counted, not listed")
+    q.add_argument("--no-context", action="store_true",
+                   help="leave out each question's context (the quotes, values, plots and images beside it; "
+                        "`bundle show <dir> question <id>` prints it in full)")
     q.add_argument("--limit", type=int, default=DEFAULT_LIMIT)
     q.add_argument("--offset", type=int, default=0)
     q.set_defaults(func=cmd_bundle_questions)
