@@ -716,8 +716,8 @@ textarea.input {
   margin: 0 0 8px;
   padding: 10px 12px;
   background: var(--quote-bg);
-  border-left: 3px solid var(--action);
-  border-radius: 6px;
+  border: 1px solid var(--action-border);
+  border-radius: 8px;
 }
 
 .quote q {
