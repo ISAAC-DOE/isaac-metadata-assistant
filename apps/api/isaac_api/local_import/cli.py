@@ -1670,6 +1670,13 @@ def _processing_result_view(bundle: Mapping, r: Mapping, *, full: bool = False) 
     })
     # added after the compaction: bounded by their own row limits (SELECTION_ROWS_SHOWN, QUICK_MERGES_SHOWN), so
     # ``--full`` can print every row without a long list being counted away
+    spots = _spots_view(r)
+    if spots:
+        view["spots"] = spots
+    # pq-001: a curve read without absev while the beamline is not known needs review: said on its own line
+    beamline_check = ((r.get("qc") or {}).get("statements") or {}).get("absev_missing_beamline_unconfirmed")
+    if beamline_check:
+        view["beamline_check"] = beamline_check
     selection = _scan_selection_view(r, full=full)
     if selection is not None:
         view["scan_selection"] = selection
@@ -1677,6 +1684,20 @@ def _processing_result_view(bundle: Mapping, r: Mapping, *, full: bool = False) 
     if quick is not None:
         view["scientist_quick_merges"] = quick
     return view
+
+
+def _spots_view(r: Mapping) -> list[str]:
+    """pq-002 (beamline scientist answers relayed by Krish, 17 Nov 2026): each merged scan's spot in plain words, from
+    the stage motors its header states (a new spot of one condition is merged, never a new result)."""
+    out = []
+    for i in r.get("inputs") or ():
+        sp = i.get("spot") if isinstance(i, Mapping) else None
+        if i.get("used") and isinstance(sp, Mapping):
+            where = ", ".join(f"{m}={sp[m]:g}" for m in ("Sx", "Sy", "Sz", "Sr") if isinstance(sp.get(m), (int, float)))
+            out.append(f"{i.get('relative_path')}: {sp.get('label')} ({where})")
+        elif i.get("used") and i.get("spot_not_read"):
+            out.append(f"{i.get('relative_path')}: spot not read ({i['spot_not_read']})")
+    return out
 
 
 #: ``bundle list`` kinds printed one row per line (see :func:`_dumps_rows_inline`).

@@ -33,6 +33,8 @@ RULE_VERSIONS_SINCE_PROTOCOL_VERSION: dict[str, Any] = {
         "isaac.athena.project_normalisation.v1",
         "isaac.athena.scientist_merge_label.v0",
         "isaac.processed_output.quick_merge_compare.v0",
+        "isaac.processing.athena_never_used.v0",
+        "isaac.xas.bl15_2_energy_is_absev.v0",
         "isaac.xas.calibration_overrides_stricter_only.v0",
         "isaac.xas.calibration_shift_size_confirmed.v0",
         "isaac.xas.edge_above_noise.v0",
@@ -82,9 +84,10 @@ DEFAULT_PARAMS: dict[str, Any] = {
         "reference_after_reference": ["I2", "Iref", "IR"],
         "energy_value_range_eV": [1000.0, 100000.0],
         "use_bl15_signal_selection": True,
-        # Columns of input count rates (XDAC ICR1_1..7). Their presence is FLAGGED; no
-        # dead-time correction is applied until a rule is approved.
-        "dead_time_rate_prefix": "ICR1_",
+        # isaac.xas.bl15_2_energy_is_absev.v0 (pq-001, answered 17 Nov 2026): a BL15-2 scan's energy axis is always
+        # this column, used whenever a scan has it; a scan KNOWN to be a BL15-2 scan without it is flagged with a plain
+        # reason, never read on another column (run.bl15_2_status: the fingerprint alone is a hint)
+        "bl15_2_energy_column": "absev",
     },
     "calibration": {
         "use_in_scan_reference_channel": True,
@@ -159,7 +162,13 @@ DEFAULT_PARAMS: dict[str, Any] = {
 #: path -> (meaning, scientist_must_approve)
 PARAM_DOCS: Mapping[str, tuple[str, bool]] = {
     "channels.energy_candidates": ("Energy column names in priority order (achieved/encoder energy first: absev, Achieved Energy).", True),
-    "channels.dead_time_rate_prefix": ("Input-count-rate column family; present -> flag dead_time_correction_not_applied (no correction rule approved).", True),
+    "channels.bl15_2_energy_column": ("The energy axis of every BL15-2 scan (pq-001, beamline scientist answers relayed by "
+                                      "Krish, 17 Nov 2026: always absev), used whenever a scan has it. A scan KNOWN to "
+                                      "be a BL15-2 scan (the scientist's beamline answer, or a fingerprint matching "
+                                      "BL15-2 alone with nothing disagreeing) without it is flagged "
+                                      "bl15_2_energy_column_missing and never read on another column; one that may be "
+                                      "BL15-2 is read on its usual column and flagged "
+                                      "absev_missing_beamline_unconfirmed.", True),
     "channels.i0_candidates": ("Incident-intensity column names. None found: signal used un-normalised and flagged i0_missing.", True),
     "channels.fluorescence_candidates": ("Fluorescence/HERFD signal columns in priority order (sum:<prefix> sums a detector-element family).", True),
     "channels.transmission_after_sample": ("Transmission detector after the sample: mu = ln(I0/I1).", True),
@@ -209,42 +218,65 @@ PARAM_DOCS: Mapping[str, tuple[str, bool]] = {
 
 #: Open questions for the scientists (Oscar / Angel), machine-readable so the skill can ask
 #: them. ``affects`` names the protocol parameters or grouping keys an answer would change.
+#: Who answered the closed questions (each closed question's ``answered_by``).
+ANSWERED_17_NOV = "beamline scientist answers relayed by Krish, 17 Nov 2026"
+
 PROTOCOL_QUESTIONS: list[dict] = [
     {
         "question_id": "pq-001",
         "topic": "energy_column",
         "ask": "angel_or_oscar",
         "text": "At SSRL BL15-2, is `absev` (encoder/absolute energy) the energy axis to use, rather than `energy`? Measured: the scientists' Athena energy arrays equal `absev`, 1.7-3.4 eV from `energy`.",
-        "affects": ["channels.energy_candidates"],
-        "current_default": "absev before energy",
-        "status": "open",
+        "affects": ["channels.energy_candidates", "channels.bl15_2_energy_column"],
+        "current_default": "BL15-2: always absev; a BL15-2 scan without absev is flagged, never read on energy",
+        "status": "closed",
+        "answer": "Always absev at BL15-2. A BL15-2 scan with no absev is flagged with a plain reason; it is never "
+                  "silently read on energy. Other beamlines are unchanged.",
+        "answered_by": ANSWERED_17_NOV,
     },
     {
         "question_id": "pq-002",
         "topic": "grouping.new_spot",
         "ask": "angel_or_oscar",
         "text": "Is a measurement on a NEW SPOT of the same sample, at the same condition, a repeat (one record) or a different result?",
-        "affects": ["grouping.UNKNOWN_KEYS.new_spot"],
-        "current_default": "unknown: separate groups plus a merge candidate",
-        "status": "open",
+        "affects": ["grouping.BOOKKEEPING_KEYS.new_spot", "processing_results[].inputs[].spot"],
+        "current_default": "one group: spots of one sample at one condition merge as raw mu",
+        "status": "closed",
+        "answer": "A new spot is NOT a new result. Each sample is measured at several spots under the same condition "
+                  "to improve statistics; the conditions stay the same. Scans of one sample at one condition on "
+                  "different spots are one group, merged as raw mu. The spot (stage motors Sx Sy Sz Sr in the header) "
+                  "is recorded per scan; it is never a condition key.",
+        "answered_by": ANSWERED_17_NOV,
     },
     {
         "question_id": "pq-003",
         "topic": "grouping.step_number",
         "ask": "angel_or_oscar",
         "text": "Is a numbered step (`stepNN`) a repeat at the same condition, or a different point in a protocol?",
-        "affects": ["grouping.UNKNOWN_KEYS.step_number"],
-        "current_default": "unknown: separate groups plus a merge candidate",
-        "status": "open",
+        "affects": ["grouping.CONDITION_KEYS.step_number"],
+        "current_default": "a condition: different steps are never merged",
+        "status": "closed",
+        "answer": "stepNN is the order of potential steps in one sequence. Different potential steps are NEVER merged, "
+                  "even when two steps share the same potential (step05 and step08 both at 850 mV: one after the 1st "
+                  "cycling, the other after the 2nd). The step number is the group's sequence position; spots within "
+                  "one step still merge.",
+        "answered_by": ANSWERED_17_NOV,
     },
     {
         "question_id": "pq-004",
         "topic": "calibration.foil_shift_to_samples",
         "ask": "oscar",
         "text": "Should the energy shift measured on a reference-foil group be applied to the beamtime's sample groups (and under which conditions)?",
-        "affects": ["calibration.proposed_reference", "calibration.apply_shift_when_confirmed"],
-        "current_default": "never propagated automatically",
-        "status": "open",
+        "affects": ["calibration.proposed_reference", "calibration.apply_shift_when_confirmed",
+                    "calibration.align_scans_by_reference"],
+        "current_default": "never propagated automatically (alignment pending the xas-analysis engine)",
+        "status": "closed",
+        "answer": "Align every scan to the in-scan reference: a foil in transmission (on I1/I2) or a glitch in I0. The "
+                  "monochromator is foil-calibrated by the beamline staff at the start of the beamtime, so the energy "
+                  "axis is already calibrated. The reference foil is the element under study.",
+        "answered_by": ANSWERED_17_NOV,
+        "implementation": "pending: per-scan alignment will be done by the xas-analysis reduction engine (integration "
+                          "pending); this build does not align scans yet",
     },
     {
         "question_id": "pq-005",
@@ -252,26 +284,33 @@ PROTOCOL_QUESTIONS: list[dict] = [
         "ask": "oscar",
         "text": "Is the E0 stored in an Athena project in the energy-SHIFTED frame (after bkg_eshift) or the stored-energy frame? This build follows larch's read_athena reproduction (stored frame) and compares in the shifted frame.",
         "affects": ["athena comparison: e0_delta_eV"],
-        "current_default": "larch read_athena convention",
-        "status": "open",
+        "current_default": "Athena projects are never read",
+        "status": "closed",
+        "answer": "Never use Athena. Process from raw data only; an Athena project is no source of any value.",
+        "answered_by": ANSWERED_17_NOV,
     },
     {
         "question_id": "pq-006",
         "topic": "channels.dead_time",
         "ask": "oscar",
         "text": "For SSRL XDAC data, should SCA fluorescence channels be dead-time corrected with the ICR columns, and by which rule?",
-        "affects": ["channels.dead_time_rate_prefix"],
-        "current_default": "no correction; flag dead_time_correction_not_applied",
-        "status": "open",
+        "affects": ["channels.dead_time_rate_prefix (removed)"],
+        "current_default": "not ISAAC's job: no correction, no flag",
+        "status": "closed",
+        "answer": "Dead time is not ISAAC's job: no correction, no flag, no warning.",
+        "answered_by": ANSWERED_17_NOV,
     },
     {
         "question_id": "pq-007",
         "topic": "athena.result_of_record",
         "ask": "scientist_of_the_beamtime",
         "text": "When several Athena projects hold different versions of one measurement (re-normalised, glitch-removed, smoothed), which is the result of record?",
-        "affects": ["processing_results[].athena_versions"],
-        "current_default": "none selected; each listed and compared",
-        "status": "open",
+        "affects": ["processing_results[].athena_versions (no longer made)"],
+        "current_default": "Athena projects are never the result of record",
+        "status": "closed",
+        "answer": "Never use Athena: an Athena project is never the result of record, never a source of processing "
+                  "parameters and never an input to a QC verdict or an agreement check.",
+        "answered_by": ANSWERED_17_NOV,
     },
 ]
 

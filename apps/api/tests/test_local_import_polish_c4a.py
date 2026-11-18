@@ -35,6 +35,11 @@ from test_local_import_records import (  # noqa: F401  (fixtures)
 ATHENA_PRJ = "SYN_project.prj"
 
 
+#: pq-005/pq-007 (beamline scientist answers relayed by Krish, 17 Nov 2026): Athena is never used, so the Athena
+#: behaviour these tests checked no longer runs (processing reads no Athena project; no Athena result composes a record)
+ATHENA_RETIRED = pytest.mark.skip(reason="Athena is never used (pq-005/pq-007, 17 Nov 2026): retired behaviour")
+
+
 def _add_athena(bdir: Path, *, subset: bool = True) -> None:
     """A SYNTHETIC result for the scientist's own Athena curve beside ISAAC's ``p1`` (group g1)."""
     b = M.load(bdir)
@@ -59,6 +64,16 @@ def _add_athena(bdir: Path, *, subset: bool = True) -> None:
     M.save_bundle(bdir, b)
 
 
+def _add_second(bdir: Path) -> None:
+    """A second ISAAC-processed result ``p2`` of group g1 beside ``p1``: pq-005/pq-007 (17 Nov 2026) refuse every
+    approval of an Athena result, so the one-approval-per-group rule is shown on two ISAAC results."""
+    _add_athena(bdir, subset=False)
+    b = M.load(bdir)
+    p2 = next(r for r in b["processing_results"] if r["result_id"] == "p2")
+    p2.update(source="isaac_protocol", review_flags=[], comparison=None)
+    M.save_bundle(bdir, b)
+
+
 def _approve(bdir, pid):
     return M.decide(bdir, target_ids=[pid], decision="approve", value=None, qc_status="valid", **BY)
 
@@ -69,6 +84,10 @@ def _approve(bdir, pid):
 def test_approving_a_second_result_of_a_group_is_refused_naming_the_approved_one(bdir):
     _decide_everything(bdir)  # approves p1 (ISAAC)
     _add_athena(bdir)
+    with pytest.raises(M.MutationRefused) as athena:  # pq-005/pq-007: an Athena result is never approved
+        _approve(bdir, "p2")
+    assert "it is the scientist's Athena curve" in str(athena.value)
+    _add_second(bdir)
     before = (bdir / "bundle.json").read_bytes()
     with pytest.raises(M.MutationRefused) as exc:
         _approve(bdir, "p2")
@@ -81,18 +100,18 @@ def test_approving_a_second_result_of_a_group_is_refused_naming_the_approved_one
     assert M.decide(bdir, target_ids=["p1"], decision="approve", value=None, qc_status="valid", **BY)["unchanged"] == ["p1"]
 
 
-def test_after_deferring_the_approved_result_the_other_can_be_approved_and_says_its_scan_subset(bdir):
+def test_after_deferring_the_approved_result_the_other_can_be_approved(bdir):
+    # (the Athena scan-subset sentence this test also checked is retired with Athena, pq-005/pq-007)
     _decide_everything(bdir)
-    _add_athena(bdir)
+    _add_second(bdir)
     M.decide(bdir, target_ids=["p1"], decision="defer", value=None, **BY)
     out = _approve(bdir, "p2")
     assert out["recorded"] == ["p2"]
-    assert "scans 2, 3 of the 3" in out["statement"] and "scientist_selected_subset_of_scans" in out["statement"]
 
 
 def test_two_results_of_one_group_in_one_call_are_refused(bdir):
     _decide_everything(bdir)
-    _add_athena(bdir)
+    _add_second(bdir)
     M.decide(bdir, target_ids=["p1"], decision="defer", value=None, **BY)
     with pytest.raises(M.MutationRefused) as exc:
         M.decide(bdir, target_ids=["p1", "p2"], decision="approve", value=None, qc_status="valid", **BY)
@@ -131,6 +150,7 @@ def _exported(bdir, tmp_path):
     return json.loads((out / f"{result['exported'][0]['record_id']}.json").read_text())
 
 
+@ATHENA_RETIRED
 def test_an_exported_record_from_an_approved_athena_result_names_athena(bdir, tmp_path):
     _decide_everything(bdir)
     _add_athena(bdir)

@@ -20,6 +20,8 @@ import re
 import shlex
 from pathlib import Path
 
+import pytest
+
 from isaac_api.local_import import bundle as B
 from isaac_api.local_import import cli
 from isaac_api.local_import import mutations as M
@@ -35,6 +37,11 @@ SCALE = "context.electrochemistry.potential_scale"
 CM = B.CONTROL_MODE_PATH
 REPO = Path(__file__).resolve().parents[3]
 SKILL = REPO / ".claude" / "skills" / "isaac-historical-import"
+
+
+#: pq-005/pq-007 (beamline scientist answers relayed by Krish, 17 Nov 2026): Athena is never used, so the Athena
+#: behaviour these tests checked no longer runs (processing reads no Athena project; no Athena result composes a record)
+ATHENA_RETIRED = pytest.mark.skip(reason="Athena is never used (pq-005/pq-007, 17 Nov 2026): retired behaviour")
 
 
 def _potentiostatic(bdir: Path, *, confirm_setpoint: bool = True, decided: bool = False) -> None:
@@ -149,6 +156,7 @@ def test_the_skill_reference_says_the_scale_is_named(bdir):
 # --- LOW: plain words in an exported record's notes ------------------------------------------------------------------
 
 
+@ATHENA_RETIRED
 def test_an_exported_records_notes_carry_no_group_id_and_no_flag_code(bdir, tmp_path):
     from test_local_import_polish_c4a import _add_athena, _approve, _exported
 

@@ -29,6 +29,8 @@ GRID = np.concatenate([np.arange(4900.0, 4955.0, 5.0), np.arange(4955.0, 4990.0,
                        np.arange(4990.0, 5040.0, 1.0), np.arange(5040.0, 5251.0, 5.0)])
 #: the achieved (encoder) energy scatters about the nominal point, a different draw in every scan
 JITTER_EV = 0.02
+#: the SYN `energy` column's offset from `absev` (invented): it proves the curves are read on absev
+ENERGY_OFFSET_EV = 3.0
 I0 = 1.0e5
 
 
@@ -52,11 +54,13 @@ def counts(seed, *, e=GRID, scale=1.0, shift=0.0, wl=0.8, extra_noise=0.0, i0_fa
     n = rng.poisson(lam).astype(float)
     if extra_noise:
         n = np.clip(np.round(n + rng.normal(0, extra_noise * np.sqrt(lam + 1))), 0, None)
-    return {"energy": e, "I0": np.round(i0), "vortDT": n, "spear": np.full(e.size, 500.0)}
+    # absev: the BL15-2 energy axis (pq-001, 17 Nov 2026), the true energy; `energy` is 3 eV off it, so a curve read on
+    # `energy` would put the edge 3 eV low (the E0 checks below then fail)
+    return {"energy": e - ENERGY_OFFSET_EV, "absev": e, "I0": np.round(i0), "vortDT": n, "spear": np.full(e.size, 500.0)}
 
 
 def scan_dicts(cols_list):
-    return [{"key": k, "number": k + 1, "energy": c["energy"], "mu": c["vortDT"] / c["I0"], "counts": c["vortDT"],
+    return [{"key": k, "number": k + 1, "energy": c["absev"], "mu": c["vortDT"] / c["I0"], "counts": c["vortDT"],
              "i0": c["I0"], "ring": c["spear"], "i0_nonpositive": 0, "setup": {}, "seed": 1000 + k}
             for k, c in enumerate(cols_list)]
 
@@ -400,6 +404,8 @@ def test_a_proposal_is_attached_after_the_run_id_and_said(tmp_path):
     assert series["command"] == "gscan energy" and abs(series["e0_eV"] - E0) < 2.0
     got = _by_stem(payload)
     a, b = got["01_SYN_ZZ1_dir"], got["02_SYN_ZZ2_dir"]
+    assert a["channel_choice"]["energy"] == b["channel_choice"]["energy"] == "absev"  # never `energy`, 3 eV off
+    assert abs(a["outputs"]["e0_eV"] - E0) < 2.0
     sel = a[RUN.SCAN_SELECTION_KEY]
     assert sel["rule_id"] == C.SCAN_SELECTION_RULE_ID and sel["e0_basis"] == "series"
     assert sel["exclude_proposed"] == ["01_SYN_ZZ1_005.dat"] and sel["open"]

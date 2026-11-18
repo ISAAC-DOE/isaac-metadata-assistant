@@ -898,6 +898,21 @@ def compose_group(bundle: Mapping, group: Mapping, bundle_dir: Path, index: dict
                if any(statements.get(x) for x in reasons) else {}),
             "reason": "the approved processing result is not a usable spectrum; nothing from it is used",
         }
+    elif approved and approved[0].get("source") == "scientist_athena":
+        # isaac.processing.athena_never_used.v0 (pq-005/pq-007, beamline scientist answers relayed by Krish, 17 Nov
+        # 2026): an Athena project is NEVER the result of record. An Athena result approved under an older build
+        # composes nothing; the record waits for an approved ISAAC result processed from the raw data.
+        from .mutations import isaac_results_for
+
+        r = approved[0]
+        report["processing"] = {
+            "used": None, "result": B.processing_id(r), "group_id": group["group_id"],
+            "athena_never_used": True,
+            "isaac_results": isaac_results_for(bundle, group["group_id"]),
+            "reason": ("the approved processing result is the scientist's Athena curve; Athena is never the result of "
+                       "record (processing works from the raw data only), so nothing from it is used: approve the "
+                       "group's ISAAC result instead"),
+        }
     elif approved and (carried := _unconfirmed_carried_shift(bundle, approved[0], index)) is not None:
         # c12-r: AN APPROVAL AN OLDER BUILD LET THROUGH for a curve that carries a calibration shift the current rules
         # would not apply (an in-scan reference usable in one scan; a large shift whose size nobody confirmed). It is
@@ -2387,6 +2402,8 @@ def processing_blocker(processing: Mapping) -> str:
     if processing.get("approved_results"):
         return "more_than_one_approved_result"
     if processing.get("result"):
+        if processing.get("athena_never_used"):
+            return "approved_result_is_athena"
         if processing.get("calibration_unconfirmed"):
             return "approved_result_calibration_unconfirmed"
         if processing.get("no_curve"):
@@ -2427,6 +2444,22 @@ def processing_remedy(processing: Mapping) -> str:
                 + " / ".join(f'`isaac bundle decide <bundle_dir> --target {pid} --decision defer --by "<your name>"`'
                              for pid in several)
                 + " (or --decision reject).")
+    if processing.get("result") and processing.get("athena_never_used"):
+        # pq-005/pq-007: never "re-run and approve the new result": the Athena approval is kept on re-processing and
+        # blocks a second approval, so it is withdrawn first, then the group's ISAAC result is approved
+        pid = processing["result"]
+        withdraw = f'`isaac bundle decide <bundle_dir> --target {pid} --decision reject --by "<your name>"`'
+        ids = list(processing.get("isaac_results") or ())
+        if ids:
+            approve = " / ".join(f'`isaac bundle decide <bundle_dir> --target {x} --decision approve --qc-status <value> '
+                                 f'--by "<your name>"`' for x in ids[:3])
+            then = f"then approve the group's ISAAC-processed result {ids[0]}, stating its QC status: {approve}"
+        else:
+            then = ("then run `isaac process <bundle_dir> --source <the beamtime folder you imported>` and approve the "
+                    "ISAAC result it makes for this group, stating its QC status")
+        return (f"the approved result {pid} is the scientist's Athena curve, approved under an older build; Athena is "
+                "never the result of record (processing works from the raw scan files only), so nothing from it is "
+                f"used. Withdraw that approval ({withdraw}), {then}; or {leave_out}.")
     if processing.get("result") and processing.get("calibration_unconfirmed"):
         # c12-r: never "re-run and approve": the approved result is kept on re-processing, and so is its shift
         pid = processing["result"]

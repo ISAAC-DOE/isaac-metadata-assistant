@@ -28,6 +28,11 @@ from isaac_api.local_import import bundle as B
 from test_local_import_polish_r3b import FIXED, _athena_pair, _entry, _fixed_e0, _group, _process
 
 
+#: pq-005/pq-007 (beamline scientist answers relayed by Krish, 17 Nov 2026): Athena is never used, so the Athena
+#: behaviour these tests checked no longer runs (processing reads no Athena project; no Athena result composes a record)
+ATHENA_RETIRED = pytest.mark.skip(reason="Athena is never used (pq-005/pq-007, 17 Nov 2026): retired behaviour")
+
+
 def _processing():
     pytest.importorskip("numpy", reason="XAS processing tests need the optional `processing` extra (numpy)")
     pytest.importorskip("larch", reason="XAS processing tests need the optional `processing` extra (xraylarch)")
@@ -69,6 +74,7 @@ XDAC_RUNS = ("22_SYN_ZZ1_dry_016_A", "22_SYN_ZZ1_dry_017_A")
 XDAC_SCANS = [(f"{s}.{n:03d}", 1e-2 + 1e-4 * (2 * i + n), 0.0) for i, s in enumerate(XDAC_RUNS) for n in (1, 2)]
 
 
+@ATHENA_RETIRED
 def test_a_two_run_xdac_groups_merge_named_after_its_base_name_is_matched(tmp_path):
     bdir, root = _case(tmp_path, XDAC_RUNS, XDAC_SCANS + [("merge4_22_SYN_ZZ1_dry", 1.003e-2, 0.0)])
     _, [isa], [ath] = _process(bdir, root)
@@ -89,6 +95,7 @@ ONE_RUN = "01_SYN_ZZ1_dry_016"
 PER_SCAN = [(f"{ONE_RUN}_A.{n:03d}", 1e-2 + 1e-4 * n, 0.0) for n in (1, 2, 3)]
 
 
+@ATHENA_RETIRED
 def test_a_merge_that_agrees_with_the_full_set_beside_it_stays_preferred_and_the_set_is_said(tmp_path):
     from isaac_api.local_import.processing import run as RUN
 
@@ -104,6 +111,7 @@ def test_a_merge_that_agrees_with_the_full_set_beside_it_stays_preferred_and_the
     assert RUN.MERGE_DIFFERS_FROM_SET_FLAG not in ath["review_flags"] and not ath.get("questions")
 
 
+@ATHENA_RETIRED
 def test_a_stale_merge_that_differs_from_the_full_set_is_not_preferred_and_asked(tmp_path):
     from isaac_api.local_import.processing import run as RUN
 
@@ -122,6 +130,7 @@ def test_a_stale_merge_that_differs_from_the_full_set_is_not_preferred_and_asked
     assert "Which is the result of record: the merge, or the per-scan groups?" in q["text"]
 
 
+@ATHENA_RETIRED
 def test_a_set_that_does_not_cover_every_scan_is_said_but_not_compared(tmp_path):
     from isaac_api.local_import.processing import run as RUN
 
@@ -134,6 +143,7 @@ def test_a_set_that_does_not_cover_every_scan_is_said_but_not_compared(tmp_path)
     assert ath["preferred_for_record"] is True and RUN.MERGE_DIFFERS_FROM_SET_FLAG not in ath["review_flags"]
 
 
+@ATHENA_RETIRED
 def test_without_a_merge_nothing_is_said_set_aside(tmp_path):
     from isaac_api.local_import.processing import run as RUN
 

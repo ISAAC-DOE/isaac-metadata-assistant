@@ -153,9 +153,13 @@ def test_real_process_group_keeps_other_groups_and_an_approval_stays_bound(bdir,
     pytest.importorskip("numpy")
     pytest.importorskip("larch")
     src = str(SEMANTICS)
+    # the committed SYN corpus matches the BL15-2 fingerprint, and its scan exports carry `absev` (pq-001, 17 Nov
+    # 2026: the BL15-2 energy axis), 0.5 eV above `synenergy`: every curve is read on absev
+    assert (M.load(bdir)["experiment"]["acquisition_system"]["fingerprint"]["matches"][0]["beamline"]) == "BL15-2"
     assert cli.main(["process", str(bdir), "--source", src]) == 0
     first = {r["group_id"]: r for r in M.load(bdir)["processing_results"] if r["source"] == "isaac_protocol"}
     assert len(first) == 9
+    assert {r["channel_choice"]["energy"] for r in first.values()} == {"absev"}
     g1, g2 = sorted(first)[:2]
     approved = first[g1]["result_id"]
     M.decide(bdir, target_ids=[approved], decision="approve", value=None, by=BY, orcid=None, qc_status="valid")

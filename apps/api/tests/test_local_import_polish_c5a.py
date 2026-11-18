@@ -41,6 +41,11 @@ COUNTER = "Q-36dcf727f3"  # _qid("experiment", "naming_counter_positions", "rgq-
 ZONE = "Q-5b4328bd6a"  # _qid("experiment", "clock_time_zone", "instrument_clock")
 
 
+#: pq-005/pq-007 (beamline scientist answers relayed by Krish, 17 Nov 2026): Athena is never used, so the Athena
+#: behaviour these tests checked no longer runs (processing reads no Athena project; no Athena result composes a record)
+ATHENA_RETIRED = pytest.mark.skip(reason="Athena is never used (pq-005/pq-007, 17 Nov 2026): retired behaviour")
+
+
 def _run(capsys, *argv):
     code = cli.main([str(a) for a in argv])
     cap = capsys.readouterr()
@@ -343,6 +348,7 @@ def test_a_marked_name_keeps_its_separators_and_signs():
 # --- LOW6: the Athena descriptor's time is explained ------------------------------------------------------------
 
 
+@ATHENA_RETIRED
 def test_an_imported_athena_descriptor_says_its_time_is_the_approval_in_isaac(bdir, tmp_path):
     _decide_everything(bdir)
     _add_athena(bdir, subset=False)
