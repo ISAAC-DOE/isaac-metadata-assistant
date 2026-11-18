@@ -736,9 +736,12 @@ def _matches(entry: Mapping, want: Mapping) -> bool:
     if cls == SCOPE_SAMPLE:
         if not have.get("sample") or have.get("sample") != want.get("sample"):
             return False
-        # STRICT: a group or organization confirmed on BOTH sides and equal; one missing on either side is no match
-        shared = [k for k in ("research_group", "organization") if have.get(k) and want.get(k)]
-        return bool(shared) and all(_norm(have[k]) == _norm(want[k]) for k in shared)
+        # STRICT: every research group / organization the earlier answer was given under must be confirmed in the
+        # new beamtime too, and equal (at least one of them). An earlier answer from group A at university U is not
+        # offered to a beamtime where only U is confirmed: another group at U could own a different "S1".
+        # Symmetric: a key confirmed on EITHER side must be confirmed on both and equal.
+        keys = [k for k in ("research_group", "organization") if have.get(k) or want.get(k)]
+        return bool(keys) and all(have.get(k) and want.get(k) and _norm(have[k]) == _norm(want[k]) for k in keys)
     if cls == SCOPE_BEAMLINE:
         a, b = have.get("beamline") or {}, want.get("beamline") or {}
         ka, kb = beamline_key(a.get("beamline")), beamline_key(b.get("beamline"))

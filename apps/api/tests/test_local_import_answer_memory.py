@@ -538,6 +538,22 @@ def test_a_sample_fact_needs_a_group_or_organization_confirmed_on_both_sides(bun
     assert not AM._matches({**a_entry, "scope": {**a_entry["scope"], "research_group": "SYN Other Lab"}}, want)
 
 
+def test_a_sample_fact_given_under_group_and_organization_needs_both_confirmed():
+    """LOW: group A at university U answered "S1"; a beamtime where only U is confirmed must not see it, because
+    another group at U could own a different "S1"."""
+    entry = {"scope_class": AM.SCOPE_SAMPLE,
+             "scope": {"sample": {"sample_name": "s1"}, "research_group": "SYN Lab A", "organization": "SYN University"}}
+    only_org = {"sample": {"sample_name": "s1"}, "organization": "SYN University"}
+    assert not AM._matches(entry, only_org)
+    assert not AM._matches(entry, {**only_org, "research_group": "SYN Lab B"})
+    assert AM._matches(entry, {**only_org, "research_group": "SYN Lab A"})
+    # symmetric: an answer recorded under the organization alone is not offered to a beamtime that has a group
+    # confirmed (its group is unknown, so it could be another group's), only to one at the same organization alone
+    org_entry = {"scope_class": AM.SCOPE_SAMPLE, "scope": {"sample": {"sample_name": "s1"}, "organization": "SYN University"}}
+    assert not AM._matches(org_entry, {**only_org, "research_group": "SYN Lab B"})
+    assert AM._matches(org_entry, only_org)
+
+
 def test_forget_all_removes_an_unreadable_file_and_the_error_names_a_command_that_works(memory):
     """MED: a corrupt file could never be cleared (``forget --all`` parsed it first), and the error pointed there."""
     memory.parent.mkdir(parents=True)
