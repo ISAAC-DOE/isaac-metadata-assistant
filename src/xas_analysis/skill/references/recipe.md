@@ -1,7 +1,7 @@
 # Recipe fields
 
 ```yaml
-data_root: ~/xas_work/<beamtime>      # spec paths resolve here
+data_root: <data root>/<beamtime>    # spec paths resolve here
 reader: spec | ssrl_xdc               # SPEC (BL15-2, ...) or EXAFS Data Collector (BL4-3, ...)
 sca_channels: [1, 2, 3]               # ssrl_xdc: subset of SCA windows (default: all summed)
 column_map: {IF: vortDT}              # spec: logical channel -> SPEC column (Energy_eV absev, IF vortDT,

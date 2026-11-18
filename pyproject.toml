@@ -42,7 +42,8 @@ where = ["src"]
 [tool.setuptools.package-data]
 # the vendored xas-analysis engine reads its McMaster table and FEFF reference from package data, and ships its
 # own skill references as documentation (src/xas_analysis/PROVENANCE.md)
-xas_analysis = ["data/*.json", "data/*.dat", "skill/*.md", "skill/references/*.md", "PROVENANCE.md"]
+xas_analysis = ["data/*.json", "data/*.dat", "skill/SKILL.md", "skill/scope.md", "skill/references/calibration.md",
+                "skill/references/normalization.md", "skill/references/recipe.md", "PROVENANCE.md"]
 
 [tool.pytest.ini_options]
 # `src` is listed FIRST so a test run always exercises the checkout it was

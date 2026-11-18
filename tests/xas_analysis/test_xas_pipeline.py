@@ -1,8 +1,12 @@
 """End to end: synthetic SPEC files with known per-scan mono drifts -> reduce()."""
-import numpy as np
-import yaml
+import pytest
 
-from xas_analysis.pipeline import reduce
+np = pytest.importorskip("numpy", reason="needs the optional `processing` extra")
+pytest.importorskip("scipy", reason="needs the optional `processing` extra")
+yaml = pytest.importorskip("yaml", reason="needs the optional `processing` extra")
+
+
+from xas_analysis.pipeline import reduce  # noqa: E402
 
 GLITCH = 11232.70          # true glitch energy in the reference frame
 

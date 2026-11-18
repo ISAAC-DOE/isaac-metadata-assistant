@@ -1,9 +1,13 @@
 """SSRL EXAFS Data Collector reader + foil_timeline calibration on synthetic files."""
-import numpy as np
-import yaml
+import pytest
 
-from xas_analysis.io.ssrl_xdc import read_xdc_scans
-from xas_analysis.pipeline import reduce
+np = pytest.importorskip("numpy", reason="needs the optional `processing` extra")
+pytest.importorskip("scipy", reason="needs the optional `processing` extra")
+yaml = pytest.importorskip("yaml", reason="needs the optional `processing` extra")
+
+
+from xas_analysis.io.ssrl_xdc import read_xdc_scans  # noqa: E402
+from xas_analysis.pipeline import reduce  # noqa: E402
 
 COLS = ["Real time clock", "Sum_RTC", "Requested Energy", "Achieved Energy", "I0", "I1", "I2",
         "Lytle", "SCA1_1", "SCA1_2", "ICR1_1", "ICR1_2"]

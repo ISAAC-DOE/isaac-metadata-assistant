@@ -13,10 +13,14 @@ constrained background). Normalised data are never merged (Angel and Krish, 17 N
 
 ONCE PER BEAMTIME (:func:`prepare`): the engine's survey (``xas_analysis.survey.survey_files``) over every group's
 scans picks the energy reference (an in-scan foil in transmission when the sample scans carry one, else the I0
-glitch, else a foil timeline, else none), its anchor method and window, and reads the ``mono reset`` lines. The
-reference is the engine's convention: the EARLIEST group (closest in time to the staff's foil calibration of the mono
-at the start of the beamtime), the MEAN anchor of its scans. Every scan of every group is aligned to that ONE
-reference, never to its own sample's edge.
+glitch, else a foil timeline, else none), its anchor method and window, and reads the ``mono reset`` lines. The I0
+glitch is then located by a ROBUST CONSENSUS of every scan's own dips (:data:`CONSENSUS`): a minority of scans without
+it, or far shifted, never moves it, never makes the beamtime "no reference" and never degrades the other scans (the
+survey runs again without them). The reference is the EARLIEST group (closest in time to the staff's foil calibration
+of the mono at the start of the beamtime) with good anchors, the robust MEDIAN anchor of its validated scans. Every
+scan's anchor is validated against the consensus (:func:`_judge`); a scan that fails is not aligned, says why in plain
+words, and is not merged. Every other scan of every group is aligned to that ONE reference, never to its own
+sample's edge. No reference at all is a loud state (:data:`NO_REFERENCE_FLAG`) that a bulk approval refuses.
 
 THE SCAN DECISIONS (:data:`DECISION_RULE_ID`, :func:`decide_scans`): the skill DECIDES which scans are kept and which
 dropped, by this documented rule, never as a proposal waiting on a person; every decision carries its reasons and
@@ -84,6 +88,25 @@ WINDOW_SPREAD_WARN = 0.20
 POST_LEVEL_RANGE = (0.0, 2.0)          # core.POST_EDGE_LEVEL_RANGE: norm / McMaster mu over the post-edge window
 EDGE_MIN_NOISE_MULTIPLE = 5.0          # core.EDGE_MIN_NOISE_MULTIPLE
 DROP_REASON = "dropped_by_scan_decision"
+#: THE GLITCH CONSENSUS (review of 2ddb27e7, HIGH 1): the I0 glitch is located by a robust consensus of per-scan
+#: dips, never by a few sampled scans, so a minority of bad scans (no glitch, a far shift) cannot move it, flip the
+#: beamtime to "no reference" or degrade the other scans. A dip is a local minimum of ln I0 minus its quadratic
+#: Savitzky-Golay trend (the survey's own glitch_candidates residual), on a step of at most ``max_step_eV``, clear of
+#: the tabulated edge by ``edge_clear_eV``; FOUND at ``min_depth`` and ``noise_mult`` robust sigmas of the scan's own
+#: residual; CONFIRMED in a scan (the validation) at a quarter of the consensus depth and ``confirm_noise_mult``
+#: sigmas. The consensus is the position most scans share (within ``cluster_eV``), then the median of each scan's
+#: nearest dip; it holds when more than ``majority`` of the scans carry it. A per-scan anchor is accepted when its
+#: fit is ok, inside the fit window, and its offset from its own dip agrees with the beamtime's median offset within
+#: max(``fit_tol_eV``, ``fit_tol_steps`` grid steps).
+CONSENSUS = {"min_depth": 0.003, "noise_mult": 6.0, "confirm_noise_mult": 3.0, "confirm_depth_frac": 0.25,
+             "edge_clear_eV": 3.0, "max_step_eV": 1.0, "cluster_eV": 1.0, "majority": 0.5, "recenter_eV": 0.5,
+             "fit_tol_eV": 0.25, "fit_tol_steps": 1.5}
+CONSENSUS_RULE_ID = "isaac.xas.glitch_consensus.v1"
+#: the plain reasons a scan is not aligned (decide_scans codes)
+NO_REFERENCE = ("no_energy_reference", "no energy reference found in this scan")
+FIT_FAILED = ("reference_fit_failed", "reference feature fit failed")
+#: the beamtime has no energy reference at all: a loud state, a review flag that blocks a bulk approval
+NO_REFERENCE_FLAG = "no_energy_reference"
 
 DECISION_RULE = {
     "rule_id": DECISION_RULE_ID,
@@ -408,13 +431,16 @@ def _prepare(groups, ctx, *, stored, wanted) -> dict:
     bt["fingerprint"] = fp
     bt["reused"] = False
     bt["reads"] = reads
+    if bt.get("calibration"):
+        cons, without = _glitch_consensus(reads, (bt.get("edge") or {}).get("E_edge_eV"), ctx.np)
+        _apply_consensus(bt, cons, without, reads, groups, ctx)
     _reference(bt, reads, ctx)
     _anchor_all(bt, reads, ctx)
     _windows(bt, reads)
     return bt
 
 
-def _survey(reads: Mapping, groups: Sequence[Mapping], ctx) -> dict:
+def _survey(reads: Mapping, groups: Sequence[Mapping], ctx, *, exclude: frozenset = frozenset()) -> dict:
     from xas_analysis.survey import FileInfo, _jsonable, identify_edge, survey_files
 
     from . import run as R
@@ -436,7 +462,9 @@ def _survey(reads: Mapping, groups: Sequence[Mapping], ctx) -> dict:
             continue
         fi = FileInfo(path=gid, name=(gr["stems"][0] if gr["stems"] else gid), fmt="spec", role=frole,
                       n_all=len(gr["inputs"]))
-        fi.scans = [_scaninfo(r, gr) for r in gr["recs"]]
+        fi.scans = [_scaninfo(r, gr) for r in gr["recs"] if r["scan_id"] not in exclude]
+        if not fi.scans:
+            continue
         fi._group_id = gid
         files.append(fi)
     files.sort(key=lambda f: min([s.time for s in f.scans if s.time] or [datetime.max]))
@@ -459,6 +487,191 @@ def _survey(reads: Mapping, groups: Sequence[Mapping], ctx) -> dict:
     cal = dict((rep.get("recommendation") or {}).get("calibration") or {"mode": "none"})
     return {"calibration": _jsonable(cal), "survey": summary, "edge": _jsonable(edge), "logs": logs,
             "file_groups": {f.name: f._group_id for f in files}, "glitch": _jsonable(rep.get("glitch"))}
+
+
+# --- the glitch consensus (review of 2ddb27e7, HIGH 1) --------------------------------------------------------------
+
+
+def _scan_dips(E, I0, E0, np, *, min_depth: float | None = None, mult: float | None = None,
+               near: float | None = None, within: float | None = None) -> list[dict]:
+    """The sharp dips of one scan's ln I0 (minus its quadratic Savitzky-Golay trend, as the survey's
+    ``glitch_candidates`` does on the median of the scans), deepest first: the 3 deepest, or with ``near`` every dip
+    within ``within`` eV of it. Each dip: its position (a parabola through its 3 points), depth, FWHM, the grid step
+    there and the scan's residual noise. See :data:`CONSENSUS`."""
+    from scipy.signal import savgol_filter
+
+    E = np.asarray(E, float)
+    I0 = np.asarray(I0, float)
+    if E.size < 25 or not np.all(np.isfinite(I0)) or np.any(I0 <= 0):
+        return []
+    with np.errstate(all="ignore"):
+        y = np.log(I0)
+    w = min(21, (len(y) // 2) * 2 - 1)
+    # a ROBUST trend: the points of a dip are bridged (interpolated) and the trend fitted again, so the dip does not
+    # pull its own trend down (a plain trend leaves side-lobe "dips" about 1.6 eV either side of a deep glitch)
+    yt = y
+    for _ in range(3):
+        r = y - savgol_filter(yt, w, 2)
+        noise = 1.4826 * float(np.median(np.abs(r - np.median(r))))
+        m = r < -max(0.5 * CONSENSUS["min_depth"], 3 * noise)
+        if not m.any() or m.all():
+            break
+        m = m | np.r_[m[1:], False] | np.r_[False, m[:-1]]
+        yt = y.copy()
+        yt[m] = np.interp(E[m], E[~m], y[~m])
+    r = y - savgol_filter(yt, w, 2)
+    noise = 1.4826 * float(np.median(np.abs(r - np.median(r))))
+    dE = np.gradient(E)
+    step_change = np.r_[False, np.abs(np.diff(dE)) > 0.3 * np.minimum(dE[1:], dE[:-1])]
+    thr = max(CONSENSUS["min_depth"] if min_depth is None else min_depth,
+              (CONSENSUS["noise_mult"] if mult is None else mult) * noise)
+    out = []
+    for k in range(2, E.size - 2):
+        if not (r[k] < r[k - 1] and r[k] <= r[k + 1]):
+            continue
+        depth = -float(r[k])
+        if depth < thr or dE[k] > CONSENSUS["max_step_eV"]:
+            continue
+        if E0 is not None and abs(E[k] - E0) <= CONSENSUS["edge_clear_eV"]:
+            continue
+        if near is not None and abs(E[k] - near) > within:
+            continue
+        if step_change[max(0, k - 2):k + 3].any() and depth < 0.01:
+            continue                     # a shallow dip at a grid-region boundary: a trend-filter artefact
+        c2, c1, _c0 = np.polyfit(E[k - 1:k + 2] - E[k], r[k - 1:k + 2], 2)
+        pos = float(E[k] - c1 / (2 * c2)) if c2 > 0 else float(E[k])
+        if not (E[k - 1] <= pos <= E[k + 1]):
+            pos = float(E[k])
+        half = r[k] / 2
+        j1 = k
+        while j1 > 0 and r[j1] < half:
+            j1 -= 1
+        j2 = k
+        while j2 < E.size - 1 and r[j2] < half:
+            j2 += 1
+        out.append({"E_eV": pos, "depth": depth, "fwhm_eV": float(E[j2] - E[j1]), "step_eV": float(dE[k]),
+                    "noise": noise})
+    out.sort(key=lambda d: -d["depth"])
+    return out if near is not None else out[:3]
+
+
+def _glitch_consensus(reads: Mapping, E0: float | None, np) -> tuple[dict, frozenset]:
+    """Where the I0 glitch is, by a robust consensus of every in-scope scan's own dips (:data:`CONSENSUS`): the
+    position most scans share, then the median of each scan's nearest dip (and its robust spread). Scans with no dip
+    there are counted and named; they never move it."""
+    per: dict[str, list[dict]] = {}
+    for gr in reads.values():
+        if gr.get("scope") is not None:
+            continue
+        for r in gr["recs"]:
+            per[r["scan_id"]] = _scan_dips(r["E"], r["I0"], E0, np)
+    n = len(per)
+    out: dict = {"rule_id": CONSENSUS_RULE_ID, "scans": n, "found": False, "with_dip": 0}
+    idx = np.array([i for i, ds in enumerate(per.values()) for _ in ds], int)
+    pos = np.array([d["E_eV"] for ds in per.values() for d in ds], float)
+    if not n or not pos.size:
+        out["statement"] = f"No scan of the {n} in scope shows a sharp I0 dip: there is no I0 glitch to align on."
+        return out, frozenset()
+    cl = CONSENSUS["cluster_eV"]
+
+    def support(p):
+        return int(np.unique(idx[np.abs(pos - p) <= cl]).size)
+
+    deepest = [ds[0]["E_eV"] for ds in per.values() if ds]
+    best = max(deepest, key=lambda p: (support(p), float(sum(d["depth"] for ds in per.values() for d in ds
+                                                               if abs(d["E_eV"] - p) <= cl))))
+    c = best
+    hits: list[dict] = []
+    for _ in range(2):                   # the median of each scan's nearest dip, then once more around it
+        hits = [min((d for d in ds if abs(d["E_eV"] - c) <= cl), key=lambda d: abs(d["E_eV"] - c))
+                for ds in per.values() if any(abs(d["E_eV"] - c) <= cl for d in ds)]
+        c = float(np.median([d["E_eV"] for d in hits]))
+    hp = np.array([d["E_eV"] for d in hits])
+    # other dips most scans share (a second glitch): the fit window stays clear of them
+    others = []
+    for p in sorted(deepest, key=lambda p: -support(p)):
+        if support(p) > CONSENSUS["majority"] * n and abs(p - c) > cl and all(abs(p - q) > cl for q in others):
+            others.append(float(p))
+    without = sorted(sid for sid, ds in per.items() if not any(abs(d["E_eV"] - c) <= cl for d in ds))
+    found = len(hits) >= 2 and len(hits) > CONSENSUS["majority"] * n
+    out.update(found=found, E_eV=c, mad_eV=1.4826 * float(np.median(np.abs(hp - c))),
+               depth=float(np.median([d["depth"] for d in hits])), fwhm_eV=float(np.median([d["fwhm_eV"] for d in hits])),
+               with_dip=len(hits), without_dip=len(without), scans_without_dip=without[:50], other_dips_eV=others)
+    out["statement"] = (f"I0 glitch consensus ({CONSENSUS_RULE_ID}): {len(hits)} of {n} scans carry a sharp I0 dip at "
+                        f"{c:.2f} eV (robust spread {1000 * out['mad_eV']:.0f} meV, depth {100 * out['depth']:.1f} %)"
+                        + (f"; {len(without)} scan(s) show no dip there and are not aligned on it" if without else "")
+                        + ("." if found else ": not a majority, so it is not used on its own."))
+    return out, frozenset(without)
+
+
+def _apply_consensus(bt: dict, cons: Mapping, without: frozenset, reads: Mapping, groups: Sequence[Mapping], ctx) -> None:
+    """Put the glitch where the per-scan consensus says it is. When some scans lack the glitch there (none, or far
+    shifted), the engine's survey (which samples a few scans per file and the median of them) is RUN AGAIN without
+    those scans, so its own method choice and window rules see only scans that carry the glitch; a minority of bad
+    scans then never moves the glitch, changes the method, or makes the beamtime "no reference"."""
+    from xas_analysis.survey import glitch_window
+
+    bt["consensus"] = dict(cons)
+    cal = bt.get("calibration")
+    if not cal:
+        return
+    said = bt.setdefault("consensus_said", [])
+    if not cons.get("found"):
+        g = bt.get("glitch") or {}
+        if cal.get("mode") == "glitch_I0" and g.get("E_eV") is not None:
+            bt["consensus"]["center_eV"] = float(g["E_eV"])
+            bt["consensus"]["center_basis"] = "the survey's glitch (no per-scan majority)"
+        return
+    c = float(cons["E_eV"])
+    if cal.get("mode") in ("none", "glitch_I0") and without:
+        again = _survey(reads, groups, ctx, exclude=without)
+        cal2 = again.get("calibration") or {}
+        if cal2.get("mode") == "glitch_I0" and again.get("glitch"):
+            said.append(f"The survey was run again without the {len(without)} scan(s) that show no I0 glitch at "
+                        f"{c:.2f} eV (first pass: {cal.get('mode')}"
+                        + (f", glitch at {float(bt['glitch']['E_eV']):.2f} eV" if (bt.get("glitch") or {}).get("E_eV") else "")
+                        + f", method {cal.get('method')}, window {cal.get('shape_window_eV')}): "
+                          f"{cal2.get('method')} fit, window {cal2.get('shape_window_eV')}.")
+            bt["calibration"], bt["glitch"] = cal2, again["glitch"]
+            bt["survey"]["recommendation_first_pass"] = (bt["survey"] or {}).get("recommendation")
+            bt["survey"]["recommendation"] = (again.get("survey") or {}).get("recommendation")
+            cal = cal2
+    g = dict(bt.get("glitch") or {})
+    mode = cal.get("mode")
+    # the window keeps clear of the other dips MOST SCANS share
+    cands = [{"E_eV": p} for p in cons.get("other_dips_eV") or ()]
+    newg = {**g, "E_eV": c, "fwhm_eV": float(g.get("fwhm_eV") or cons.get("fwhm_eV") or 0.5),
+            "consensus": CONSENSUS_RULE_ID}
+    bt["consensus"]["center_eV"] = c
+    bt["consensus"]["center_basis"] = "the per-scan consensus"
+    if mode == "none":
+        w = glitch_window(newg, cands)
+        bt["calibration"] = {"mode": "glitch_I0", "method": "model", "window_eV": [round(c - 1.2, 2), round(c + 1.4, 2)],
+                             "shape_window_eV": w, "max_shift_eV": 1.0, "reference_sample": "earliest",
+                             "reference_scan": "median", "basis": CONSENSUS_RULE_ID}
+        bt["glitch"] = newg
+        said.append(f"The survey gave no energy reference, but {cons['with_dip']} of {cons['scans']} scans carry the "
+                    f"I0 glitch at {c:.2f} eV: aligned on it (Gaussian-dip model, window {w}).")
+    elif mode == "glitch_I0":
+        old = g.get("E_eV")
+        w = list(cal.get("shape_window_eV") or cal.get("window_eV") or [c - 2.5, c + 2.5])
+        if int(cal.get("glitch_dips", 1)) == 2:
+            if not (w[0] < c < w[1]) and old is not None:
+                d = c - float(old)
+                cal["shape_window_eV"] = [round(w[0] + d, 2), round(w[1] + d, 2)]
+                cal["window_eV"] = list(cal["shape_window_eV"])
+                bt["glitch"] = newg
+                said.append(f"The survey placed the glitch doublet at {float(old):.2f} eV; the per-scan consensus "
+                            f"puts a dip at {c:.2f} eV: the window moved by {d:+.2f} eV.")
+        elif old is None or abs(float(old) - c) > CONSENSUS["recenter_eV"]:
+            cal["shape_window_eV"] = glitch_window(newg, cands)
+            cal["window_eV"] = [round(c - 1.2, 2), round(c + 1.4, 2)]
+            bt["glitch"] = newg
+            said.append(f"The survey placed the I0 glitch at {old if old is None else round(float(old), 2)} eV (window "
+                        f"{w}); {cons['with_dip']} of {cons['scans']} scans put it at {c:.2f} eV: the fit window is "
+                        f"{cal['shape_window_eV']}.")
+    elif mode == "ref_foil" and (g.get("E_eV") is None or abs(float(g["E_eV"]) - c) > CONSENSUS["recenter_eV"]):
+        bt["glitch"] = newg               # the fallback route's window
 
 
 def _routes(bt: Mapping) -> list[dict]:
@@ -490,8 +703,61 @@ def _anchor_fns(route: Mapping, template_rec: Mapping | None):
     return make_anchor_fn(dict(route))
 
 
+def _is_glitch(route: Mapping) -> bool:
+    return route.get("mode") == "glitch_I0"
+
+
+def _own_dip(r: Mapping, info: Mapping, route: Mapping, np) -> dict | None:
+    """The scan's own I0 dip near the consensus glitch (the deepest within the shift limit), or None."""
+    c = info.get("consensus_eV")
+    if c is None:
+        return None
+    ms = float(route.get("max_shift_eV") or MAX_SHIFT_EV["glitch_I0"])
+    depth = info.get("consensus_depth")
+    dips = _scan_dips(r["E"], r["I0"], info.get("edge_eV"), np,
+                      min_depth=CONSENSUS["confirm_depth_frac"] * depth if depth else None,
+                      mult=CONSENSUS["confirm_noise_mult"], near=float(c), within=ms)
+    return dips[0] if dips else None
+
+
+def _judge(r: Mapping, fit: tuple, info: Mapping, route: Mapping, np) -> tuple[bool, tuple | None, str | None, dict]:
+    """Is this scan's anchor good? ``(ok, (code, plain reason) or None, detail, evidence)``. A glitch anchor must
+    have the scan's own dip near the consensus, an ok fit, lie inside the fit window, and sit at the beamtime's usual
+    offset from that dip (:data:`CONSENSUS`); a foil anchor needs an ok fit."""
+    a, ok, detail = fit
+    ev: dict = {}
+    if _is_glitch(route) and info.get("consensus_eV") is not None:
+        dip = _own_dip(r, info, route, np)
+        ms = float(route.get("max_shift_eV") or MAX_SHIFT_EV["glitch_I0"])
+        if dip is None:
+            c = float(info["consensus_eV"])
+            E = r["E"]
+            if float(E[-1]) < c + 0.5 * ms or float(E[0]) > c - 0.5 * ms or not np.any(np.abs(E - c) <= 0.5 * ms):
+                return False, NO_REFERENCE, (f"the scan does not reach the beamtime's glitch at {c:.2f} eV (it covers "
+                                             f"{float(E[0]):.1f}-{float(E[-1]):.1f} eV: aborted, or another grid)"), ev
+            return False, NO_REFERENCE, f"no I0 dip within {ms:g} eV of the beamtime's glitch at {c:.2f} eV", ev
+        ev = {"own_dip_eV": dip["E_eV"], "own_dip_depth": dip["depth"]}
+        if not ok or a is None:
+            return False, FIT_FAILED, detail.get("reason") or "the fit did not converge", ev
+        w = route.get("shape_window_eV") or route.get("window_eV")
+        if route.get("method") == "model" and w and not (w[0] < a < w[1]):
+            return False, FIT_FAILED, f"the fitted centre {a:.2f} eV is outside the fit window {w}", ev
+        off, med = a - dip["E_eV"], info.get("fit_offset_eV")
+        ev["offset_from_own_dip_eV"] = off
+        tol = max(CONSENSUS["fit_tol_eV"], CONSENSUS["fit_tol_steps"] * dip["step_eV"])
+        if med is not None and abs(off - med) > tol:
+            return False, FIT_FAILED, (f"the fitted anchor is {off - med:+.2f} eV away from where this scan's own dip "
+                                       f"puts it (tolerance {tol:.2f} eV): the fit took another feature"), ev
+        return True, None, None, ev
+    if not ok or a is None:
+        return False, FIT_FAILED, detail.get("reason") or "fit not ok", ev
+    return True, None, None, ev
+
+
 def _reference(bt: dict, reads: Mapping, ctx) -> None:
-    """The beamtime reference (the engine's 'earliest file, mean anchor' convention), per route."""
+    """The beamtime reference, per route: the EARLIEST group with good anchors, the ROBUST MEDIAN of its validated
+    scans' anchors (a scan with no glitch, or a fit that took another feature, never enters it)."""
+    np = ctx.np
     bt["routes"] = []
     cal = bt.get("calibration")
     if not cal:
@@ -499,26 +765,35 @@ def _reference(bt: dict, reads: Mapping, ctx) -> None:
     inscope = [gr for gr in reads.values() if gr.get("scope") is None and gr.get("recs")]
     if not inscope:
         return
+
     def t0(gr):
         ts = [r["time"] for r in gr["recs"] if r.get("time")]
         return min(ts) if ts else datetime.max
-    ref = min(inscope, key=t0)
+
+    ordered = sorted(inscope, key=t0)
+    cons = bt.get("consensus") or {}
+    edge = (bt.get("edge") or {}).get("E_edge_eV")
     for route in _routes(bt):
         mode = route.get("mode")
-        info = {"route": route, "reference_group_id": ref["group_id"], "reference_name": ref["stems"][0] if ref["stems"] else None}
+        ref = ordered[0]
+        info = {"route": route, "reference_group_id": ref["group_id"],
+                "reference_name": ref["stems"][0] if ref["stems"] else None}
         if mode == "none":
             info.update(anchor_eV=0.0, scans=[], anchors=[], std_eV=None, statement=(
-                "No energy reference was found (no in-scan foil, no I0 glitch, no foil scans): energies are only as "
-                "good as the beamline calibration, and no scan was shifted."))
+                "NO ENERGY REFERENCE: no in-scan foil, no I0 glitch in most scans, no foil scans. No scan was aligned "
+                "(every shift is 0): energies are only as good as the beamline calibration. Each result must be "
+                "looked at and approved on its own."))
             bt["routes"].append(info)
             continue
         if mode == "foil_timeline":
             info.update(_foil_timeline(route, bt, reads))
             bt["routes"].append(info)
             continue
+        if _is_glitch(route) and cons.get("center_eV") is not None:
+            info.update(consensus_eV=float(cons["center_eV"]), consensus_depth=cons.get("depth"), edge_eV=edge)
         template = None
         if route.get("method") == "shape":
-            template = next((r for r in ref["recs"]), None)
+            template = _pick_template(ordered, info, route, np)
         try:
             fn = _anchor_fns(route, template)
         except Exception as exc:  # noqa: BLE001
@@ -527,18 +802,55 @@ def _reference(bt: dict, reads: Mapping, ctx) -> None:
             info.update(anchor_eV=None, scans=[], anchors=[], statement="the reference anchor could not be made")
             bt["routes"].append(info)
             continue
+        fits = {r["scan_id"]: _anchor_one(fn, r, route) for gr in inscope for r in gr["recs"]}
+        if _is_glitch(route) and info.get("consensus_eV") is not None:
+            offs = []
+            for gr in inscope:
+                for r in gr["recs"]:
+                    a, ok, _d = fits[r["scan_id"]]
+                    dip = _own_dip(r, info, route, np) if ok and a is not None else None
+                    if dip is not None:
+                        offs.append(a - dip["E_eV"])
+            info["fit_offset_eV"] = float(np.median(offs)) if offs else None
+        judged = {r["scan_id"]: _judge(r, fits[r["scan_id"]], info, route, np) for gr in inscope for r in gr["recs"]}
         got = []
-        for r in ref["recs"]:
-            a, ok, _i = _anchor_one(fn, r, route)
-            if ok:
-                got.append((r["scan_id"], a))
+        for gr in ordered:
+            got = [(r["scan_id"], fits[r["scan_id"]][0]) for r in gr["recs"] if judged[r["scan_id"]][0]]
+            if got:
+                ref = gr
+                break
+        info.update(reference_group_id=ref["group_id"], reference_name=ref["stems"][0] if ref["stems"] else None)
+        if ref is not ordered[0]:
+            info["reference_moved"] = (f"the earliest group {ordered[0]['group_id']} has no scan with a good anchor on "
+                                       f"this route; the reference is the next earliest, {ref['group_id']}")
         info["scans"] = [s for s, _ in got]
         info["anchors"] = [a for _, a in got]
-        info["anchor_eV"] = float(statistics.fmean(info["anchors"])) if got else None
+        info["statistic"] = "median"
+        info["anchor_eV"] = float(np.median(info["anchors"])) if got else None
         info["std_eV"] = float(statistics.stdev(info["anchors"])) if len(got) > 1 else None
+        info["mad_eV"] = (1.4826 * float(np.median(np.abs(np.array(info["anchors"]) - info["anchor_eV"])))
+                          if got else None)
         info["template_scan"] = template["scan_id"] if template else None
+        info["template_group_id"] = next((gr["group_id"] for gr in ordered if any(r is template for r in gr["recs"])),
+                                         None) if template else None
         bt["routes"].append(info)
-        bt.setdefault("_fns", {})[len(bt["routes"]) - 1] = fn
+        k = len(bt["routes"]) - 1
+        bt.setdefault("_fns", {})[k] = fn
+        bt.setdefault("_fits", {})[k] = fits
+
+
+def _pick_template(ordered: Sequence[Mapping], info: Mapping, route: Mapping, np) -> dict | None:
+    """The shape-fit template: on the glitch, the scan of the earliest group that has its own dip closest to that
+    group's median dip (never a scan without the glitch); on a foil, the earliest group's first scan."""
+    if not (_is_glitch(route) and info.get("consensus_eV") is not None):
+        return next((r for r in ordered[0]["recs"]), None)
+    for gr in ordered:
+        dips = [(r, _own_dip(r, info, route, np)) for r in gr["recs"]]
+        dips = [(r, d) for r, d in dips if d is not None]
+        if dips:
+            med = float(np.median([d["E_eV"] for _r, d in dips]))
+            return min(dips, key=lambda x: abs(x[1]["E_eV"] - med))[0]
+    return None
 
 
 def _foil_timeline(route: Mapping, bt: Mapping, reads: Mapping) -> dict:
@@ -588,11 +900,13 @@ def _anchor_one(fn, rec: Mapping, route: Mapping) -> tuple[float | None, bool, d
 
 
 def _anchor_all(bt: dict, reads: Mapping, ctx) -> None:
-    """Every in-scope scan's anchor and shift: the first route whose anchor is ok, within the shift limit."""
+    """Every in-scope scan's anchor and shift: the first route whose anchor is GOOD (:func:`_judge`), within the
+    shift limit. A scan no route anchors is not aligned, and says why; it never changes another scan's shift."""
     routes = bt.get("routes") or []
     fns = bt.get("_fns") or {}
     if bt.get("reused"):
-        # a reused beamtime block: the anchor functions are rebuilt from the stored routes
+        # a reused beamtime block: the anchor functions are rebuilt from the stored routes (their consensus and fit
+        # offset are stored with them, so a --group run judges a scan exactly as the full run did)
         fns = {}
         for k, info in enumerate(routes):
             route = info.get("route") or {}
@@ -604,15 +918,17 @@ def _anchor_all(bt: dict, reads: Mapping, ctx) -> None:
                         continue
                 fns[k] = _anchor_fns(route, tmpl)
         bt["_fns"] = fns
+        bt["_fits"] = {}
+    fits = bt.get("_fits") or {}
     for gr in reads.values():
         if gr.get("scope") is not None:
             continue
         for r in gr["recs"]:
-            r["alignment"] = _align_rec(r, routes, fns)
+            r["alignment"] = _align_rec(r, routes, fns, fits, ctx.np)
 
 
 def _stored_template(info: Mapping, reads: Mapping, ctx) -> dict | None:
-    gid = info.get("reference_group_id")
+    gid = info.get("template_group_id") or info.get("reference_group_id")
     gr = reads.get(gid)
     if gr is None:
         g = next((x for x in getattr(ctx, "_engine_groups", ()) if x["group_id"] == gid), None)
@@ -622,41 +938,43 @@ def _stored_template(info: Mapping, reads: Mapping, ctx) -> dict | None:
     return next((r for r in gr.get("recs") or () if r["scan_id"] == info.get("template_scan")), None)
 
 
-def _align_rec(r: Mapping, routes: Sequence[Mapping], fns: Mapping) -> dict:
+def _align_rec(r: Mapping, routes: Sequence[Mapping], fns: Mapping, fits: Mapping, np) -> dict:
     tried = []
     for k, info in enumerate(routes):
         route = info.get("route") or {}
         mode = route.get("mode")
         if mode == "none":
             return {"route": "none", "anchor_eV": None, "reference_anchor_eV": None, "shift_eV": 0.0, "ok": True,
-                    "tried": tried}
+                    "tried": tried, "unreferenced": True}
         if mode == "foil_timeline":
             tl = info.get("timeline") or []
             if not tl or not r.get("time") or info.get("anchor_eV") is None:
-                tried.append({"route": mode, "reason": "no foil timeline or no scan time"})
+                tried.append({"route": mode, "code": NO_REFERENCE[0], "reason": "no foil timeline or no scan time"})
                 continue
-            import numpy as np
-
             ts = [datetime.fromisoformat(x["time"]).timestamp() for x in tl]
             a = float(np.interp(r["time"].timestamp(), ts, [x["anchor_eV"] for x in tl]))
             return {"route": mode, "anchor_eV": a, "reference_anchor_eV": info["anchor_eV"],
                     "shift_eV": info["anchor_eV"] - a, "ok": True, "tried": tried}
         fn = fns.get(k)
         if fn is None or info.get("anchor_eV") is None:
-            tried.append({"route": mode, "reason": "no reference anchor for this route"})
+            tried.append({"route": mode, "code": FIT_FAILED[0], "reason": "no reference anchor for this route"})
             continue
-        a, ok, detail = _anchor_one(fn, r, route)
+        fit = (fits.get(k) or {}).get(r["scan_id"]) or _anchor_one(fn, r, route)
+        good, why, detail, ev = _judge(r, fit, info, route, np)
+        a, _ok, fdetail = fit
         shift = (info["anchor_eV"] - a) if a is not None else None
         limit = float(route.get("max_shift_eV") or MAX_SHIFT_EV.get(mode, 1.0))
-        if ok and shift is not None and abs(shift) > limit:
-            ok, detail = False, {**detail, "reason": f"shift {shift:+.3f} eV beyond the {limit:g} eV limit"}
-        if ok:
+        if good and shift is not None and abs(shift) > limit:
+            good, why, detail = False, FIT_FAILED, f"shift {shift:+.3f} eV beyond the {limit:g} eV limit"
+        if good:
             return {"route": mode + ("_fallback" if route.get("fallback") else ""), "method": route.get("method"),
                     "anchor_eV": a, "reference_anchor_eV": info["anchor_eV"], "shift_eV": shift, "ok": True,
-                    "fit": detail, "tried": tried}
-        tried.append({"route": mode, "anchor_eV": a, "reason": detail.get("reason") or "fit not ok"})
+                    "fit": {**fdetail, **ev}, "tried": tried}
+        tried.append({"route": mode, "anchor_eV": a, "code": why[0], "reason": f"{why[1]}: {detail}", **ev})
+    codes = {t.get("code") for t in tried}
+    code = NO_REFERENCE if codes == {NO_REFERENCE[0]} else FIT_FAILED
     return {"route": None, "anchor_eV": None, "reference_anchor_eV": None, "shift_eV": None, "ok": False,
-            "tried": tried}
+            "code": code[0], "said": "; ".join(t["reason"] for t in tried) or code[1], "tried": tried}
 
 
 def _windows(bt: dict, reads: Mapping) -> None:
@@ -687,7 +1005,7 @@ def _windows(bt: dict, reads: Mapping) -> None:
 def beamtime_payload(bt: Mapping) -> dict:
     """The beamtime block written into processing_results.json (no arrays, no functions)."""
     keep = ("fingerprint", "reused", "calibration", "survey", "edge", "routes", "windows", "glitch", "file_groups",
-            "error", "statement")
+            "error", "statement", "consensus", "consensus_said")
     out = {k: bt.get(k) for k in keep if k in bt}
     out["protocol_id"], out["engine_version"] = PROTOCOL_ID, engine_version()
     out["in_scope_groups"] = sorted(k for k, v in (bt.get("reads") or {}).items() if v.get("scope") is None)
@@ -763,6 +1081,11 @@ def process_group_v1(group: Mapping, ctx) -> list[dict]:
                                      "reduction engine (Oscar's validated package) and the ISAAC adapter. A draft "
                                      "until the ISAAC processing reviewers (Oscar and Angel) review the adapter.")}
     res["review_flags"] = ["protocol_draft_unreviewed"]
+    res["measurement_mode"] = measurement_mode_block(gr.get("mode_check"))
+    if res["measurement_mode"]["mode"] != "fluorescence":
+        res["review_flags"].append("measurement_mode_unknown")
+    if ((bt.get("routes") or [{}])[0].get("route") or {}).get("mode") == "none":
+        res["review_flags"].append(NO_REFERENCE_FLAG)        # loud, and a bulk approval is refused for it
     res["channel_choice"] = gr["choice"].to_state()
     inputs = gr["inputs"]
     res["inputs"] = inputs
@@ -893,7 +1216,14 @@ def process_group_v1(group: Mapping, ctx) -> list[dict]:
         res["review_flags"].append("plot_unavailable")
     roles = [("merged", "merged.csv"), ("normalized", "normalized.csv"), ("scan_decisions", "scan_decisions.json"),
              ("qc", "qc.json"), ("params", "params.json")] + ([("plot", "plot.png")] if plotted else [])
-    data_hashes = sorted((name, R.sha256_file(gdir / name)) for _r, name in roles if name != "plot.png")
+    # the decision table enters by its CONTENT (decision_content), never by its file: the file carries the
+    # override's decision id and time, which a restated override changes
+    data_hashes = sorted((name, R.sha256_file(gdir / name)) for _r, name in roles
+                         if name not in ("plot.png", "scan_decisions.json", "qc.json"))
+    data_hashes.append(("scan_decisions", hashlib.sha256(json.dumps(decision_content(res[DECISIONS_KEY]["rows"]),
+                                                                    default=str).encode()).hexdigest()))
+    data_hashes.append(("qc", hashlib.sha256(json.dumps([res["qc"]["verdict"], res["qc"]["reasons"],
+                                                         res["qc"]["metrics"]], default=str).encode()).hexdigest()))
     input_hashes = sorted((ctx.sources.get(r["entry"].get("source_id") or "") or {}).get("content_sha256")
                           or str(r["entry"].get("relative_path")) for r in kept)
     h = hashlib.sha256(json.dumps([PROTOCOL_ID, PROTOCOL_VERSION, group["group_id"], input_hashes,
@@ -929,10 +1259,34 @@ def process_group_v1(group: Mapping, ctx) -> list[dict]:
     return [res]
 
 
+def measurement_mode_block(mc: Mapping | None) -> dict:
+    """What the engine's measurement-mode check said, in plain words (review of 2ddb27e7, MEDIUM 5): v1 runs on a
+    fluorescence reading and on an UNKNOWN one (then flagged: v1 reduced it as fluorescence / HERFD anyway)."""
+    if not mc:
+        return {"mode": None, "statement": ("The measurement mode was not checked (no tabulated edge for the check): v1 "
+                                            "reduced it as fluorescence / HERFD (IF/I0) anyway; check the mode.")}
+    out = {k: mc.get(k) for k in ("mode", "basis", "fluorescence_contrast", "transmission_step",
+                                  "name_says_transmission", "scans", "thresholds")}
+    if mc.get("mode") == "fluorescence":
+        out["statement"] = f"Measured in fluorescence / HERFD: {mc.get('basis')}."
+    else:
+        out["statement"] = (f"The measurement mode is UNKNOWN ({mc.get('basis')}; fluorescence contrast "
+                            f"{mc.get('fluorescence_contrast')}, ln(I0/I1) step {mc.get('transmission_step')}): v1 "
+                            "reduced it as fluorescence / HERFD (IF/I0) anyway; check the mode.")
+    return out
+
+
+def decision_content(rows: Sequence[Mapping] | None) -> list:
+    """What a run id depends on from the decision table: each scan's keep / drop and who decided it, never an
+    override's decision id, time or note (restating the same override keeps the run id; review LOW 7)."""
+    return [[x.get("scan_id"), x.get("decision"), x.get("decided_by"), x.get("rule_decision"), bool(x.get("merged")),
+             sorted(str(y.get("code")) for y in x.get("reasons") or ())] for x in rows or ()]
+
+
 def _finish_ids(res: dict, group: Mapping) -> None:
     """A failed v1 result: its id names the v1 protocol (R._fail hashes v0's id)."""
     h = hashlib.sha256(json.dumps([PROTOCOL_ID, PROTOCOL_VERSION, group["group_id"], res.get("failure"),
-                                   (res.get(DECISIONS_KEY) or {}).get("rows")], default=str).encode())
+                                   decision_content((res.get(DECISIONS_KEY) or {}).get("rows"))], default=str).encode())
     res["run_id"] = "r-" + h.hexdigest()[:16]
     res["result_id"] = f"proc-{group['group_id']}-{res['run_id']}-isaac"
     for e in res.get("inputs") or ():
@@ -1033,6 +1387,7 @@ def decide_scans(recs, screen_flags, stability, notes, overrides, inputs, target
     """THE RULE (:data:`DECISION_RULE_ID`): keep or drop for every scan, with its reasons and evidence."""
     rows, by_id = [], {}
     stab_rows = (stability or {}).get("rows") or {}
+    matched: set[str] = set()
     for r in recs:
         drop, noted = [], []
         sid = r["scan_id"]
@@ -1055,9 +1410,11 @@ def decide_scans(recs, screen_flags, stability, notes, overrides, inputs, target
                               "decides": False})
         al = r.get("alignment") or {}
         if not al.get("ok"):
-            drop.append({"source": "screening", "code": "anchor_failed",
-                         "said": "no energy anchor: " + "; ".join(f"{t.get('route')}: {t.get('reason')}"
-                                                                  for t in al.get("tried") or ()),
+            code = al.get("code") or FIT_FAILED[0]
+            plain = NO_REFERENCE[1] if code == NO_REFERENCE[0] else FIT_FAILED[1]
+            detail = "; ".join(f"{t.get('route')}: {t.get('reason')}" for t in al.get("tried") or ())
+            drop.append({"source": "alignment", "code": code,
+                         "said": f"{plain}; not aligned, so not merged" + (f" ({detail})" if detail else ""),
                          "evidence": {"tried": al.get("tried")}})
         for f in screen_flags.get(sid) or ():
             test = f["test"]
@@ -1084,8 +1441,10 @@ def decide_scans(recs, screen_flags, stability, notes, overrides, inputs, target
             drop.append(item)
         decision = "drop" if drop else "keep"
         by = "rule"
-        ov = overrides.get(sid) or overrides.get(PurePosixPath(str(r["entry"].get("relative_path"))).name) \
-            or overrides.get(str(r["entry"].get("relative_path")))
+        keys = [k for k in (sid, PurePosixPath(str(r["entry"].get("relative_path"))).name,
+                            str(r["entry"].get("relative_path"))) if k in overrides]
+        matched.update(keys)
+        ov = overrides[keys[0]] if keys else None
         if ov:
             by = "scientist"
             decision = ov["decision"]
@@ -1096,6 +1455,12 @@ def decide_scans(recs, screen_flags, stability, notes, overrides, inputs, target
                "shift_eV": al.get("shift_eV"), "anchor_route": al.get("route")}
         if ov:
             row["override"] = ov
+        # a scan is merged only when it is kept AND aligned: a scientist's keep on a scan with no energy anchor is
+        # shown as such and never merged with a wrong (or no) shift
+        row["merged"] = decision == "keep" and bool(al.get("ok"))
+        if decision == "keep" and not al.get("ok"):
+            plain = NO_REFERENCE[1] if al.get("code") == NO_REFERENCE[0] else FIT_FAILED[1]
+            row["cannot_merge"] = f"kept by the scientist but cannot be merged: {plain}"
         rows.append(row)
         by_id[sid] = row
     for e in inputs:
@@ -1105,19 +1470,34 @@ def decide_scans(recs, screen_flags, stability, notes, overrides, inputs, target
                          "decided_by": "rule", "rule_decision": "drop",
                          "reasons": [{"source": "params_file" if e.get("excluded_as") else "input",
                                       "code": e["skip_reason"], "said": f"not usable: {e['skip_reason']}"}],
-                         "notes": [], "shift_eV": None, "anchor_route": None})
+                         "notes": [], "shift_eV": None, "anchor_route": None, "merged": False})
+    # an override naming no scan of the group as it is now (after a regroup or a split): said, never silently lost
+    stale = []
+    for key, ov in overrides.items():
+        if key in matched:
+            continue
+        unusable = next((x for x in rows if x["run"] is None and x["scan_id"] == key), None)
+        why = (f"{key} is in this group but not usable ({unusable['reasons'][0]['code']})" if unusable else
+               f"{key} is not a scan of this group now (regrouped or split?)")
+        stale.append({"scan": key, "decision": ov.get("decision"), "decision_id": ov.get("decision_id"),
+                      "decided_by": ov.get("decided_by"),
+                      "said": f"override not applied: {why}; the scientist's {ov.get('decision')} "
+                              f"({ov.get('decision_id')}) stays in the bundle"})
     kept = [x for x in rows if x["decision"] == "keep"]
     dropped = [x for x in rows if x["decision"] == "drop"]
     overridden = [x for x in rows if x["decided_by"] == "scientist"]
+    merged = [x for x in rows if x.get("merged")]
     return {"rule_id": DECISION_RULE_ID, "rule": DECISION_RULE["statement"], "rows": rows, "by_id": by_id,
             "counts": {"scans": len(rows), "kept": len(kept), "dropped": len(dropped),
-                       "overridden_by_scientist": len(overridden)},
-            "statement": decisions_statement(rows),
+                       "overridden_by_scientist": len(overridden), "merged": len(merged),
+                       "kept_not_merged": len(kept) - len(merged)},
+            "overrides_not_applied": stale,
+            "statement": decisions_statement(rows, stale),
             "override_command": ('isaac bundle decide <bundle_dir> --target <group id> --decision set_scan_decision '
                                  '--value keep|drop --scans "<scan id>[,<scan id>...]" --note "<why>" --by "<name>"')}
 
 
-def decisions_statement(rows: Sequence[Mapping]) -> str:
+def decisions_statement(rows: Sequence[Mapping], stale: Sequence[Mapping] = ()) -> str:
     kept = [x for x in rows if x["decision"] == "keep"]
     dropped = [x for x in rows if x["decision"] == "drop"]
     def name(x):
@@ -1134,10 +1514,16 @@ def decisions_statement(rows: Sequence[Mapping]) -> str:
     ov_keep = [x for x in kept if x["decided_by"] == "scientist" and x["rule_decision"] == "drop"]
     if ov_keep:
         said += " Kept on the scientist's word although the rule dropped them: " + ", ".join(name(x) for x in ov_keep) + "."
+    unmerged = [x for x in kept if x.get("cannot_merge")]
+    if unmerged:
+        said += (f" {len(unmerged)} kept scan(s) are NOT in the merge: " + "; ".join(f"{name(x)} ({x['cannot_merge']})"
+                                                                               for x in unmerged[:20]) + ".")
     noted = [x for x in kept if x["notes"]]
     if noted:
         said += " Kept, with a remark: " + "; ".join(f"{name(x)} ({'; '.join(n['said'] for n in x['notes'])})"
                                                      for x in noted[:10]) + "."
+    if stale:
+        said += " " + " ".join(x["said"][:1].upper() + x["said"][1:] + "." for x in stale[:20])
     return said
 
 
@@ -1295,10 +1681,21 @@ def _qc(res, recs, kept, table, nm, E, y, e0, absorber, bt, np):
                                             "instead (both tied to the one beamtime reference).")
     route0 = ((bt.get("routes") or [{}])[0].get("route") or {}).get("mode")
     if route0 == "none":
-        reasons_warn.append("no_energy_reference")
-        st["no_energy_reference"] = (bt.get("routes") or [{}])[0].get("statement")
+        reasons_warn.append(NO_REFERENCE_FLAG)
+        st[NO_REFERENCE_FLAG] = (bt.get("routes") or [{}])[0].get("statement")
     if table["counts"]["dropped"] > table["counts"]["kept"]:
         reasons_warn.append("most_scans_dropped")
+    if table["counts"].get("kept_not_merged"):
+        reasons_warn.append("kept_scan_not_merged")
+        st["kept_scan_not_merged"] = "; ".join(f"{x['scan_id']}: {x['cannot_merge']}" for x in table["rows"]
+                                               if x.get("cannot_merge"))
+    if table.get("overrides_not_applied"):
+        reasons_warn.append("override_not_applied")
+        st["override_not_applied"] = "; ".join(x["said"] for x in table["overrides_not_applied"])
+    mc = res.get("measurement_mode") or {}
+    if mc.get("mode") in ("unknown", None):
+        reasons_warn.append("measurement_mode_unknown")
+        st["measurement_mode_unknown"] = mc.get("statement")
     if any(rr["source"] == "logbook" and rr.get("strength") == "inferred"
            for x in table["rows"] if x["decision"] == "drop" for rr in x["reasons"]):
         reasons_warn.append("logbook_inferred_note_applied")
@@ -1337,21 +1734,38 @@ def _reference_view(bt, recs) -> dict:
                        "ref_signal": route.get("ref_signal"), "glitch_dips": route.get("glitch_dips"),
                        "fallback": bool(route.get("fallback")), "reference_group_id": info.get("reference_group_id"),
                        "reference_name": info.get("reference_name"), "reference_anchor_eV": info.get("anchor_eV"),
-                       "reference_scans": len(info.get("scans") or ()), "reference_anchor_std_eV": info.get("std_eV")})
+                       "reference_scans": len(info.get("scans") or ()), "reference_anchor_std_eV": info.get("std_eV"),
+                       "reference_statistic": info.get("statistic", "median"),
+                       **({"consensus_eV": info["consensus_eV"], "fit_offset_eV": info.get("fit_offset_eV")}
+                          if info.get("consensus_eV") is not None else {}),
+                       **({"reference_moved": info["reference_moved"]} if info.get("reference_moved") else {})})
     sv = bt.get("survey") or {}
     why = list(((sv.get("recommendation") or {}).get("why")) or ())
+    cons = bt.get("consensus") or {}
+    if cons.get("statement"):
+        why.append(cons["statement"])
+    why += list(bt.get("consensus_said") or ())
     mode = routes[0]["mode"] if routes else None
     plain = {"ref_foil": "an in-scan reference foil in transmission", "glitch_I0": "the I0 glitch",
              "foil_timeline": "separate foil scans over time", "none": "no energy reference"}.get(mode, str(mode))
     first = routes[0] if routes else {}
     stmt = (f"Energy reference: {plain}"
             + (f" ({first.get('method')} fit, window {first.get('window_eV')})" if first.get("window_eV") else "")
-            + (f", anchored on the earliest group {first.get('reference_name')} (mean of {first.get('reference_scans')} "
-               f"scans, {first.get('reference_anchor_eV'):.4f} eV)" if first.get("reference_anchor_eV") else "")
+            + (f", anchored on the earliest group {first.get('reference_name')} (median of {first.get('reference_scans')} "
+               f"scans with a good anchor, {first.get('reference_anchor_eV'):.4f} eV)" if first.get("reference_anchor_eV") else "")
             + ". The mono was foil-calibrated by the beamline staff at the start of the beamtime; every scan of every "
               "sample is aligned to this one reference, never to its own sample's edge.")
     if len(routes) > 1:
         stmt += " A scan whose foil edge is not usable is aligned on the I0 glitch instead."
+    if mode == "none":
+        stmt = ("NO ENERGY REFERENCE: no in-scan foil, no I0 glitch in most scans, no foil scans. No scan was aligned "
+                "(every shift is 0); energies are only as good as the beamline calibration. Look at each result and "
+                "approve it on its own (a bulk approval refuses it).")
+    bad = [r["scan_id"] for r in recs if not (r.get("alignment") or {}).get("ok")]
+    if bad:
+        stmt += (f" {len(bad)} scan(s) of this group are not aligned (no energy reference found in the scan, or the "
+                 f"reference feature fit failed) and are not merged: {', '.join(bad[:10])}"
+                 + (f" and {len(bad) - 10} more" if len(bad) > 10 else "") + ".")
     return {"routes": routes, "why": why, "mono_reset_lines": (sv.get("calibration_log") or [])[:20],
             "survey_warnings": list(sv.get("warnings") or ())[:10], "statement": stmt,
             "beamtime_fingerprint": bt.get("fingerprint")}
@@ -1444,6 +1858,10 @@ def list_brief(r: Mapping) -> str | None:
     s = f"{c.get('kept')} of {c.get('scans')} scans kept, {c.get('dropped')} dropped"
     if c.get("overridden_by_scientist"):
         s += f" ({c['overridden_by_scientist']} by the scientist)"
+    if c.get("kept_not_merged"):
+        s += f", {c['kept_not_merged']} kept but not merged (no energy reference)"
+    if t.get("overrides_not_applied"):
+        s += f", {len(t['overrides_not_applied'])} override(s) not applied"
     return s + f" ({DECISION_RULE_ID})"
 
 
@@ -1451,6 +1869,9 @@ def show_blocks(r: Mapping, *, full: bool = False) -> dict:
     """``bundle show processing-result``'s v1 blocks, in plain words: the engine, the energy reference and its
     evidence, the shift table, the decision table and the normalisation convention."""
     out: dict = {}
+    if NO_REFERENCE_FLAG in (r.get("review_flags") or ()):
+        out["warning"] = ("NO ENERGY REFERENCE for this beamtime: no scan was aligned (every shift is 0). Look at this "
+                          "result and approve it on its own; a bulk approval refuses it.")
     eng = r.get(ENGINE_KEY)
     if isinstance(eng, Mapping):
         out["engine"] = {k: eng.get(k) for k in ("protocol_id", "engine", "engine_version", "reason", "statement") if eng.get(k)}
@@ -1477,6 +1898,8 @@ def show_blocks(r: Mapping, *, full: bool = False) -> dict:
                 s += f" (the scientist's decision, {ov.get('decided_by')}, {ov.get('decision_id')}; the rule said {x['rule_decision']}: {why})"
             else:
                 s += f" ({why})"
+            if x.get("cannot_merge"):
+                s += f" - {x['cannot_merge'].upper()[:1]}{x['cannot_merge'][1:]}"
             if x.get("notes"):
                 s += " - remark: " + "; ".join(n["said"] for n in x["notes"])
             return s
@@ -1484,7 +1907,12 @@ def show_blocks(r: Mapping, *, full: bool = False) -> dict:
         out["scan_decisions"] = {"rule_id": t.get("rule_id"), "rule": t.get("rule"), "counts": t.get("counts"),
                                  "rows": [line(x) for x in shown],
                                  **({"rows_not_shown": len(rows) - len(shown)} if len(rows) > len(shown) else {}),
+                                 **({"overrides_not_applied": [x["said"] for x in t["overrides_not_applied"]]}
+                                    if t.get("overrides_not_applied") else {}),
                                  "override": t.get("override_command")}
+    mm = r.get("measurement_mode")
+    if isinstance(mm, Mapping):
+        out["measurement_mode"] = mm.get("statement")
     lb = r.get(LOGBOOK_KEY)
     if isinstance(lb, Mapping):
         out["logbook_notes"] = {"statement": lb.get("statement"),

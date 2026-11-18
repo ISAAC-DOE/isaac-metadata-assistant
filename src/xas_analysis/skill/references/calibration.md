@@ -55,7 +55,7 @@ common grid (`recipe init` does this).
 - **Doublet glitch** (BL15-2 May 2019, Pt L3: dips at ~11702.1 / 11703.5 eV, ~1.5 % each): a
   one-dip fit jumps between the two dips (anchors bimodal by 1.4 eV, 295 meV per-file scatter;
   single-dip survey window warning 107 meV). The doublet midpoint scatters 34 meV per file and
-  agrees with Thom's published per-scan Athena alignment to 34 meV median (corr 0.93). The
+  agrees with an independent published per-scan alignment to 34 meV median (corr 0.93). The
   glitch drifted ~0.65 eV in mono units over 43 h: per-scan alignment is essential there.
 - **Doublet that looks single** (BL6-2 2018: dips 1.5 eV apart, the one-dip fit 10 meV per file):
   the per-file scatter hides wrong-dip files. The survey decides by the two-dip fit itself
@@ -63,7 +63,7 @@ common grid (`recipe init` does this).
   mean anchors: a file offset by ~ the dip separation (or half of it) is a wrong-dip file.
 - **Doublet midpoint is a convention** (BL6-2 2018): the dip separation changed by ~0.02-0.04 eV
   between files (1.52-1.54 vs 1.50 eV), which moves the midpoint ~10-15 meV relative to either dip.
-  A shape- or one-dip alignment (Thom's Igor) then differs by that much. Report it as a systematic
+  A shape- or one-dip alignment then differs by that much. Report it as a systematic
   (~half the separation change) and check difference-spectrum conclusions against it.
 - **Dark transmission chamber** (BL6-2 2018: I1 a flat ~987-count offset): ln(I0/I1) shows noise
   "edges". The survey skips a channel whose relative spread is < 0.5 % and < 0.3 x that of I0.

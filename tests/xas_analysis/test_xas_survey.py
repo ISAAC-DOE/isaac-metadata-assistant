@@ -1,10 +1,14 @@
 """survey + recipe init on synthetic beamtime folders (glitch-only and in-scan foil)."""
-import numpy as np
-import yaml
+import pytest
 
-from xas_analysis.pipeline import reduce
-from xas_analysis.recipe_init import write_draft
-from xas_analysis.survey import survey
+np = pytest.importorskip("numpy", reason="needs the optional `processing` extra")
+pytest.importorskip("scipy", reason="needs the optional `processing` extra")
+yaml = pytest.importorskip("yaml", reason="needs the optional `processing` extra")
+
+
+from xas_analysis.pipeline import reduce  # noqa: E402
+from xas_analysis.recipe_init import write_draft  # noqa: E402
+from xas_analysis.survey import survey  # noqa: E402
 
 E_EDGE = 11215.0
 GLITCH = 11226.6

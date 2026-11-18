@@ -544,8 +544,8 @@ MODE_TRANS_STEP_ALONE = 0.05      # ...and with no fluorescence edge at all (the
 def measurement_mode(scans, E_edge: float, name: str = "") -> dict:
     """Is this sample measured in TRANSMISSION (mu = ln(I0/I1)) rather than fluorescence / HERFD (IF/I0)? The
     pipeline reduces IF/I0 only, and scope.md lists transmission-mode samples as NOT SUPPORTED, yet reduce() used
-    to read a transmission file's IF column as if it were the measurement (ISAAC, PROVENANCE.md M3: the BL15-2
-    2025 IrO2 pellet named ``..._transmission`` was reduced as HERFD).
+    to read a transmission file's IF column as if it were the measurement (ISAAC, PROVENANCE.md M3: a reference
+    pellet named ``..._transmission`` in a real BL15-2 beamtime was reduced as HERFD).
 
     Evidence per scan (median over the scans): the fluorescence edge contrast of the best channel (``_best_fluo``)
     and the transmission step of ln(I0/I1) (I1 lit, not a dark chamber). ``transmission`` when the name says so

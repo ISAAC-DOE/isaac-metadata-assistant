@@ -18,6 +18,7 @@ import pytest
 np = pytest.importorskip("numpy", reason="XAS processing tests need the optional `processing` extra (numpy)")
 pytest.importorskip("larch", reason="XAS processing tests need the optional `processing` extra (xraylarch)")
 pytest.importorskip("scipy", reason="the xas-analysis engine needs scipy")
+pytest.importorskip("yaml", reason="the xas-analysis engine needs pyyaml (the optional `processing` extra)")
 
 from isaac_api.local_import.processing import engine_xas as EX  # noqa: E402
 
@@ -164,6 +165,84 @@ def test_the_beamtime_pass_is_said_once_with_its_evidence(tmp_path):
     assert M.load(bdir)["processing_results"]
 
 
+# --- robust alignment: a minority of bad scans never degrades the others (review of 2ddb27e7, HIGH 1) ---------------
+
+
+def _rows_by_scan_id(results):
+    out = {}
+    for r in results:
+        for x in r[EX.DECISIONS_KEY]["rows"]:
+            out[x["scan_id"]] = (r, x)
+    return out
+
+
+def _check_robust(bdir, ref_ds, smp_ds, bad):
+    """Every good scan's shift within 5 meV of (median good reference anchor - its own offset); ONLY ``bad`` flagged,
+    with a plain reason; the beamtime stays on the glitch route."""
+    res = v1_results(bdir)
+    assert len(res) == 2
+    rows = _rows_by_scan_id(res)
+    good_ref = [d for k, d in enumerate(ref_ds) if f"01_SYN_ZZ1_060mV#{k + 1}" not in bad]
+    ref_anchor = float(np.median(good_ref))
+    errs = {}
+    for stem, ds in (("01_SYN_ZZ1_060mV", ref_ds), ("02_SYN_ZZ2_060mV", smp_ds)):
+        for k, d in enumerate(ds):
+            sid = f"{stem}#{k + 1}"
+            r, row = rows[sid]
+            shift = {x["scan_id"]: x for x in r[EX.SHIFTS_KEY]["rows"]}[sid]
+            if sid in bad:
+                assert row["decision"] == "drop", row
+                codes = {y["code"] for y in row["reasons"]}
+                assert codes & {"no_energy_reference", "reference_fit_failed"}, row["reasons"]
+                said = " ".join(y["said"] for y in row["reasons"])
+                assert "no energy reference found in this scan" in said or "reference feature fit failed" in said
+                assert shift["shift_eV"] is None                                     # not aligned at all
+            else:
+                assert row["decision"] == "keep", (sid, row["reasons"])
+                errs[sid] = 1000 * (shift["shift_eV"] - (ref_anchor - d))
+    assert max(abs(e) for e in errs.values()) < 5.0, errs
+    for r in res:
+        assert r[EX.REFERENCE_KEY]["routes"][0]["mode"] == "glitch_I0"
+    return res
+
+
+@pytest.mark.parametrize("where", ["reference", "sample"])
+def test_one_glitchless_scan_is_flagged_and_never_moves_the_glitch(tmp_path, where):
+    ref_ds, smp_ds = REF_D, SMP_D + [0.09]
+    ref = [scan_cols(10 + k, d=d) for k, d in enumerate(ref_ds)]
+    smp = [scan_cols(20 + k, d=d) for k, d in enumerate(smp_ds)]
+    if where == "reference":
+        ref[0] = scan_cols(10, d=ref_ds[0], glitch=False)
+        bad = {"01_SYN_ZZ1_060mV#1"}
+    else:
+        smp[0] = scan_cols(20, d=smp_ds[0], glitch=False)
+        bad = {"02_SYN_ZZ2_060mV#1"}
+    bdir, _ = imported(tmp_path, [("01_SYN_ZZ1_060mV", 9, ref), ("02_SYN_ZZ2_060mV", 11, smp)])
+    _check_robust(bdir, ref_ds, smp_ds, bad)
+
+
+def test_two_glitchless_scans_of_nine_never_flip_the_beamtime_to_no_reference(tmp_path):
+    ref = [scan_cols(10 + k, d=d) for k, d in enumerate(REF_D)]
+    smp = [scan_cols(20 + k, d=d) for k, d in enumerate(SMP_D)]
+    ref[1] = scan_cols(11, d=REF_D[1], glitch=False)
+    smp[0] = scan_cols(20, d=SMP_D[0], glitch=False)
+    bdir, _ = imported(tmp_path, [("01_SYN_ZZ1_060mV", 9, ref), ("02_SYN_ZZ2_060mV", 11, smp)])
+    _check_robust(bdir, REF_D, SMP_D, {"01_SYN_ZZ1_060mV#2", "02_SYN_ZZ2_060mV#1"})
+
+
+@pytest.mark.parametrize("where", ["reference", "sample"])
+def test_one_scan_shifted_far_is_flagged_and_the_others_keep_their_shifts(tmp_path, where):
+    ref_ds, smp_ds = list(REF_D), list(SMP_D)
+    if where == "reference":
+        ref_ds[0], bad = 1.6, {"01_SYN_ZZ1_060mV#1"}
+    else:
+        smp_ds[2], bad = 1.6, {"02_SYN_ZZ2_060mV#3"}
+    ref = [scan_cols(10 + k, d=d) for k, d in enumerate(ref_ds)]
+    smp = [scan_cols(20 + k, d=d) for k, d in enumerate(smp_ds)]
+    bdir, _ = imported(tmp_path, [("01_SYN_ZZ1_060mV", 9, ref), ("02_SYN_ZZ2_060mV", 11, smp)])
+    _check_robust(bdir, ref_ds, smp_ds, bad)
+
+
 # --- normalisation: once, Victoreen + McMaster -----------------------------------------------------------------------
 
 
@@ -242,9 +321,11 @@ def test_each_input_of_the_rule_decides_with_its_reason():
     assert row["SYN_A#4"]["decision"] == "drop" and row["SYN_A#4"]["reasons"][0]["strength"] == "inferred"
     assert row["SYN_A#5"]["decision"] == "keep" and row["SYN_A#5"]["notes"][0]["code"] == "logbook_flag"
     assert row["SYN_A#6"]["decision"] == "drop" and row["SYN_A#6"]["reasons"][0]["code"] == "coverage"
-    assert row["SYN_A#7"]["decision"] == "drop" and row["SYN_A#7"]["reasons"][0]["code"] == "anchor_failed"
+    assert row["SYN_A#7"]["decision"] == "drop" and row["SYN_A#7"]["reasons"][0]["code"] == "reference_fit_failed"
+    assert row["SYN_A#7"]["reasons"][0]["said"].startswith("reference feature fit failed")
     assert row["SYN_A#8"]["decision"] == "drop" and row["SYN_A#8"]["reasons"][0]["code"] == "anchor"
-    assert t["counts"] == {"scans": 8, "kept": 2, "dropped": 6, "overridden_by_scientist": 0}
+    assert t["counts"] == {"scans": 8, "kept": 2, "dropped": 6, "overridden_by_scientist": 0, "merged": 2,
+                           "kept_not_merged": 0}
     for x in t["rows"]:
         assert x["decided_by"] == "rule" and all(y["said"] for y in x["reasons"])
     assert "Dropped:" in t["statement"] and "set_scan_decision" in t["override_command"]
@@ -489,3 +570,226 @@ def test_an_approved_v1_result_composes_the_record_series(tmp_path):
     draft = json.loads((bdir / "drafts" / f"{r['group_id']}.draft.json").read_text())
     assert draft["descriptors_outputs"][0]["generated_by"]["agent"] == "isaac.xas.v1"
     assert len(draft["series"][0]["independent_variables"][0]["values"]) == r["outputs"]["points"]
+
+
+# --- no reference at all: loud, and a bulk approval refuses it ------------------------------------------------------
+
+
+def test_no_reference_at_all_is_loud_and_blocks_a_bulk_approval(tmp_path, capsys):
+    from isaac_api.local_import import cli
+    from isaac_api.local_import import mutations as M
+
+    bdir, _ = imported(tmp_path, _two_groups(glitch=False))
+    res = v1_results(bdir)
+    assert len(res) == 2
+    for r in res:
+        assert r[EX.REFERENCE_KEY]["routes"][0]["mode"] == "none"
+        assert EX.NO_REFERENCE_FLAG in r["review_flags"] and EX.NO_REFERENCE_FLAG in r["qc"]["reasons"]
+        assert r[EX.REFERENCE_KEY]["statement"].startswith("NO ENERGY REFERENCE")
+        assert M.bulk_approve_problem(r) and "no energy reference" in M.bulk_approve_problem(r)
+    for r in res:
+        M.decide(bdir, target_ids=[r["group_id"]], decision="confirm", value=None, **BY)
+    with pytest.raises(M.MutationRefused, match="no energy reference"):
+        M.decide(bdir, target_ids=[r["result_id"] for r in res], decision="approve", value=None, qc_status="valid", **BY)
+    capsys.readouterr()
+    assert cli.main(["bundle", "show", str(bdir), "processing-result", res[0]["result_id"]]) == 0
+    view = json.loads(capsys.readouterr().out)
+    assert view["warning"].startswith("NO ENERGY REFERENCE")
+
+
+# --- a keep override on a scan with no energy reference (review MEDIUM 3) -------------------------------------------
+
+
+def test_a_keep_override_on_an_unaligned_scan_is_said_and_never_merged():
+    recs = [_rec(f"SYN_C#{k}", k, seed=k) for k in range(1, 4)]
+    recs[2] = _rec("SYN_C#3", 3, ok=False)
+    recs[2]["alignment"].update(code=EX.NO_REFERENCE[0])
+    ov = {"SYN_C#3": {"decision": "keep", "decision_id": "dec-SYN1", "decided_by": "SYN Scientist", "note": None,
+                      "decided_utc": "2026-11-17T00:00:00Z"}}
+    t = _decide(recs, overrides=ov)
+    row = t["by_id"]["SYN_C#3"]
+    assert row["decision"] == "keep" and row["decided_by"] == "scientist" and row["merged"] is False
+    assert row["cannot_merge"] == "kept by the scientist but cannot be merged: no energy reference found in this scan"
+    assert t["counts"]["kept"] == 3 and t["counts"]["merged"] == 2 and t["counts"]["kept_not_merged"] == 1
+    assert "NOT in the merge" in t["statement"]
+    view = EX.show_blocks({EX.DECISIONS_KEY: {k: v for k, v in t.items() if k != "by_id"}})
+    assert any("cannot be merged" in line for line in view["scan_decisions"]["rows"])
+
+
+def test_end_to_end_a_kept_glitchless_scan_stays_out_of_the_merge(tmp_path):
+    from isaac_api.local_import import mutations as M
+
+    smp = [scan_cols(20 + k, d=d) for k, d in enumerate(SMP_D)]
+    smp[0] = scan_cols(20, d=SMP_D[0], glitch=False)
+    runs = [("01_SYN_ZZ1_060mV", 9, [scan_cols(10 + k, d=d) for k, d in enumerate(REF_D)]), ("02_SYN_ZZ2_060mV", 11, smp)]
+    bdir, root = imported(tmp_path, runs)
+    r = by_run(v1_results(bdir), "02_SYN_ZZ2")
+    sid = "02_SYN_ZZ2_060mV#1"
+    M.decide(bdir, target_ids=[r["group_id"]], decision="set_scan_decision", value={"decision": "keep", "scans": [sid]}, **BY)
+    M.process(bdir, source=str(root), group_ids=[r["group_id"]])
+    new = [x for x in v1_results(bdir) if x["group_id"] == r["group_id"]][-1]
+    row = next(x for x in new[EX.DECISIONS_KEY]["rows"] if x["scan_id"] == sid)
+    assert row["decision"] == "keep" and row["merged"] is False and "cannot be merged" in row["cannot_merge"]
+    assert next(s for s in new["steps"] if s["step"] == "merge")["outcome"]["n_scans"] == 4
+    assert "kept_scan_not_merged" in new["qc"]["reasons"]
+    assert new[EX.DECISIONS_KEY]["counts"]["kept_not_merged"] == 1
+    shift = next(x for x in new[EX.SHIFTS_KEY]["rows"] if x["scan_id"] == sid)
+    assert shift["shift_eV"] is None
+
+
+# --- an override that names no current scan (review MEDIUM 4) --------------------------------------------------------
+
+
+def test_a_stale_override_is_reported_in_the_result_and_in_show(tmp_path, capsys):
+    from isaac_api.local_import import cli
+    from isaac_api.local_import import mutations as M
+
+    bdir, root = imported(tmp_path, _two_groups())
+    r = by_run(v1_results(bdir), "02_SYN_ZZ2")
+    sid = next(x["scan_id"] for x in r[EX.DECISIONS_KEY]["rows"] if x["scan"] == 2)
+    M.decide(bdir, target_ids=[r["group_id"]], decision="set_scan_decision", value={"decision": "drop", "scans": [sid]}, **BY)
+    # what a regroup or split leaves behind: the stored decision names a scan the group no longer has
+    data = json.loads((bdir / "bundle.json").read_text())
+    data["scientist_decisions"][-1]["value"]["scans"] = ["02_SYN_GONE_060mV#2"]
+    (bdir / "bundle.json").write_text(json.dumps(data))
+    M.process(bdir, source=str(root), group_ids=[r["group_id"]])
+    new = [x for x in v1_results(bdir) if x["group_id"] == r["group_id"]][-1]
+    [stale] = new[EX.DECISIONS_KEY]["overrides_not_applied"]
+    assert stale["scan"] == "02_SYN_GONE_060mV#2" and stale["said"].startswith("override not applied: ")
+    assert "override_not_applied" in new["qc"]["reasons"]
+    assert new[EX.DECISIONS_KEY]["counts"]["overridden_by_scientist"] == 0
+    capsys.readouterr()
+    assert cli.main(["bundle", "show", str(bdir), "processing-result", new["result_id"]]) == 0
+    view = json.loads(capsys.readouterr().out)
+    assert view["scan_decisions"]["overrides_not_applied"][0].startswith("override not applied: ")
+
+
+# --- the measurement-mode check is written (review MEDIUM 5) ---------------------------------------------------------
+
+
+def test_the_measurement_mode_is_written_and_an_unknown_mode_is_said(tmp_path, monkeypatch):
+    bdir, _ = imported(tmp_path / "a", _two_groups())
+    fl = by_run(v1_results(bdir), "02_SYN_ZZ2")
+    assert fl["measurement_mode"]["mode"] == "fluorescence" and fl["measurement_mode"]["fluorescence_contrast"] > 0.2
+    assert fl["measurement_mode"]["statement"].startswith("Measured in fluorescence")
+    assert "measurement_mode_unknown" not in fl["review_flags"]
+    # a reading neither way (the check's own "unknown"): v1 runs anyway, and says so
+    real = EX._transmission_check
+
+    def unclear(gread, E_edge):
+        got = real(gread, E_edge)
+        return {**got, "mode": "unknown", "basis": "neither reading is clear", "fluorescence_contrast": 0.1}
+
+    monkeypatch.setattr(EX, "_transmission_check", unclear)
+    bdir, _ = imported(tmp_path / "b", _two_groups())
+    unk = by_run(v1_results(bdir), "02_SYN_ZZ2")
+    assert unk["protocol_id"] == EX.PROTOCOL_ID and unk["measurement_mode"]["mode"] == "unknown"
+    assert "UNKNOWN" in unk["measurement_mode"]["statement"] and "anyway" in unk["measurement_mode"]["statement"]
+    assert "measurement_mode_unknown" in unk["review_flags"] and "measurement_mode_unknown" in unk["qc"]["reasons"]
+    assert EX.show_blocks(unk)["measurement_mode"] == unk["measurement_mode"]["statement"]
+
+
+# --- the run id follows the override's content (review LOW 7) --------------------------------------------------------
+
+
+def test_restating_the_same_override_keeps_the_run_id(tmp_path):
+    from isaac_api.local_import import mutations as M
+
+    bdir, root = imported(tmp_path, _two_groups())
+    r = by_run(v1_results(bdir), "02_SYN_ZZ2")
+    gid = r["group_id"]
+    sid = next(x["scan_id"] for x in r[EX.DECISIONS_KEY]["rows"] if x["scan"] == 2)
+    M.decide(bdir, target_ids=[gid], decision="set_scan_decision", value={"decision": "drop", "scans": [sid]}, **BY)
+    M.process(bdir, source=str(root), group_ids=[gid])
+    first = [x for x in v1_results(bdir) if x["group_id"] == gid][-1]
+    # the same override stated again (another decision id, another time, another note)
+    data = json.loads((bdir / "bundle.json").read_text())
+    d = dict(data["scientist_decisions"][-1])
+    d.update(decision_id="d-09999", decided_utc="2026-11-18T09:00:00Z", note="SYN: said again")
+    data["scientist_decisions"].append(d)
+    (bdir / "bundle.json").write_text(json.dumps(data))
+    M.process(bdir, source=str(root), group_ids=[gid])
+    again = [x for x in v1_results(bdir) if x["group_id"] == gid][-1]
+    ov1 = next(x for x in first[EX.DECISIONS_KEY]["rows"] if x["scan_id"] == sid)["override"]
+    ov2 = next(x for x in again[EX.DECISIONS_KEY]["rows"] if x["scan_id"] == sid)["override"]
+    assert ov1["decision_id"] != ov2["decision_id"]                      # a new decision...
+    assert again["run_id"] == first["run_id"] and again["result_id"] == first["result_id"]   # ...the same content
+
+
+# --- the default path keeps what the v0 suites protect (review MEDIUM 6) ---------------------------------------------
+
+
+def test_v1_process_group_reuses_the_beamtime_and_leaves_other_groups_alone(tmp_path):
+    from isaac_api.local_import import mutations as M
+
+    bdir, root = imported(tmp_path, _two_groups())
+    before = {r["group_id"]: r for r in v1_results(bdir)}
+    smp = by_run(list(before.values()), "02_SYN_ZZ2")
+    M.process(bdir, source=str(root), group_ids=[smp["group_id"]])
+    payload = json.loads((bdir / "processing" / "processing_results.json").read_text())
+    assert payload[EX.BEAMTIME_KEY]["reused"] is True
+    after = {r["group_id"]: r for r in v1_results(bdir)}
+    assert set(after) == set(before)
+    assert after[smp["group_id"]]["run_id"] == smp["run_id"]           # the same inputs, the same reference: same run
+    other = next(g for g in before if g != smp["group_id"])
+    assert after[other]["result_id"] == before[other]["result_id"]
+    old = {x["scan_id"]: x["shift_eV"] for x in smp[EX.SHIFTS_KEY]["rows"]}
+    new = {x["scan_id"]: x["shift_eV"] for x in after[smp["group_id"]][EX.SHIFTS_KEY]["rows"]}
+    assert new == pytest.approx(old, abs=1e-9)
+
+
+def test_v1_compares_the_scientists_quick_merge(tmp_path):
+    from isaac_api.local_import.processing import quick_merge as QM
+
+    runs = _two_groups()
+    root = tmp_path / "SYN_beamtime"
+    write_beamtime(root, runs)
+    cols = [scan_cols(20 + k, d=d) for k, d in enumerate(SMP_D)]
+    E = cols[0]["absev"]
+    quick = np.mean([c["vortDT"] / c["I0"] for c in cols], axis=0)
+    (root / "MERGE").mkdir()
+    (root / "MERGE" / "02_SYN_ZZ2.txt").write_text("".join(f"{e:.4f}  {v:.10e}\n" for e, v in zip(E, quick)))
+    from isaac_api.local_import import cli
+    from isaac_api.local_import import mutations as M
+
+    out = tmp_path / "out"
+    assert cli.main(["import", str(root), "--out", str(out)]) == 0
+    M.group(out)
+    M.process(out, source=str(root))
+    r = by_run(v1_results(out), "02_SYN_ZZ2")
+    [c] = r[QM.RESULT_KEY]
+    assert c["role"] == "rough_reference" and c["preferred_for_record"] is False
+    assert c["verdict"] in ("agree", "differs") and c["metrics"]["rms_norm"] is not None
+    raw = c.get("raw_comparison") or {}
+    if raw:
+        assert raw["median_ratio_to_isaac_merged_mu"] == pytest.approx(1.0, abs=0.05)
+
+
+def test_a_failed_engine_pass_keeps_every_group_on_v0_and_says_why(tmp_path, monkeypatch, capsys):
+    from isaac_api.local_import import cli
+    from isaac_api.local_import import mutations as M
+
+    def boom(*a, **k):
+        raise RuntimeError("SYN engine failure")
+
+    monkeypatch.setattr(EX, "_prepare", boom)
+    bdir, _ = imported(tmp_path, _two_groups())
+    res = [r for r in M.load(bdir)["processing_results"] if r["source"] == "isaac_protocol"]
+    assert res and {r["protocol_id"] for r in res} == {"isaac.xas.v0"}
+    for r in res:
+        assert "the engine's beamtime pass failed (RuntimeError: SYN engine failure)" in r[EX.ENGINE_KEY]["reason"]
+    payload = json.loads((bdir / "processing" / "processing_results.json").read_text())
+    assert payload[EX.BEAMTIME_KEY]["error"].startswith("RuntimeError")
+    capsys.readouterr()
+    assert cli.main(["bundle", "show", str(bdir), "processing-result", res[0]["result_id"]]) == 0
+    assert "SYN engine failure" in json.loads(capsys.readouterr().out)["engine"]["reason"]
+
+
+def test_without_the_processing_extra_the_default_path_says_unavailable(tmp_path, monkeypatch):
+    from isaac_api.local_import.processing.run import STATUS_FILE, process_bundle
+
+    monkeypatch.setitem(sys.modules, "larch", None)
+    bundle = {"bundle_id": "syn", "source_root": {"label": "SYN"}, "runs": [], "candidates": [], "sources": [], "unread_files": []}
+    out = process_bundle(tmp_path, bundle=bundle, created_utc="2026-11-17T00:00:00Z")
+    assert out["status"] == "processing_unavailable" and out["processing_results"] == []
+    assert json.loads((tmp_path / "processing" / STATUS_FILE).read_text())["status"] == "processing_unavailable"

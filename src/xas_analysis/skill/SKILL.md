@@ -19,7 +19,7 @@ The skill ships inside the package: `xas-analysis skill path` prints where;
   figure scripts read the package outputs.
 - Every choice lives in a recipe (YAML). Curation (dropped scans, flags, why) goes in the
   recipe as `scans` / `outliers` / `note`, with the logbook reason.
-- Never write into raw-data folders; never work on OneDrive copies (on-demand files stall):
+- Never write into raw-data folders; never work on cloud-synced copies (on-demand files stall):
   copy the beamtime to local disk first.
 - Report every warning (survey warnings, screening drops, normalize failures). Never hide one.
 - Keep the user's hand-picks. Automatic screening complements them; when it disagrees
@@ -71,4 +71,3 @@ split it (scan lists) instead of averaging.
 - `references/calibration.md`: energy reference decision guide, per mode, with the traps
 - `references/normalization.md`: Victoreen + McMaster model, windows, edge-jump uncertainty
 - `references/recipe.md`: recipe fields
-- `references/gotchas.md`: per-beamtime findings (BL15-2 2019/2021/2025, BL4-3 2025, Cu K 2024)

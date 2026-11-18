@@ -9,21 +9,24 @@
 | Vendored | 2026-11-17, into `src/xas_analysis/` of `ISAAC-DOE/isaac-metadata-assistant` |
 | Used by | `apps/api/isaac_api/local_import/processing/engine_xas.py` (processing protocol `isaac.xas.v1`) |
 
-## Permission
+## Permission and licence
 
-Both the package author (Oscar) and the ISAAC project scientist (Angel) gave permission to use and vendor this
-source in the ISAAC metadata assistant, relayed by the project owner (Krish) on 17 Nov 2026.
+The source zip has NO licence file. This copy is used under the authors' permission: the package author (Oscar) and
+the ISAAC project scientist (Angel) gave permission to use and vendor this source in the ISAAC metadata assistant,
+relayed by the project owner (Krish) on 17 Nov 2026. It carries no other licence grant.
 
 ## What was vendored, and what was not
 
-Vendored: `src/xas_analysis/` exactly as in the zip (code, `data/element.json` = the McMaster tables of `element.mat`,
+Vendored: `src/xas_analysis/` as in the zip (code, `data/element.json` = the McMaster tables of `element.mat`,
 `data/S0_graphite_q0.10.dat` = a FEFF10 computed graphite reference used by the soft-XAS engine, and the package's own
-skill documentation `skill/SKILL.md`, `skill/scope.md`, `skill/references/*.md`, kept as documentation of the engine),
-then the local modifications below. Unit tests that need no data file: `tests/xas_analysis/test_xas_*.py` (from the
+skill documentation `skill/SKILL.md`, `skill/scope.md`, `skill/references/calibration.md`, `normalization.md`,
+`recipe.md`, kept as documentation of the engine), then the local modifications below. Unit tests that need no data file: `tests/xas_analysis/test_xas_*.py` (from the
 zip's `tests/`, renamed with a `test_xas_` prefix; `test_xas_models.py` without its data-file tests).
 
 NOT vendored: `tests/data/` (real spectra: BL4-3 Ti K averages, soft-XAS inputs and deliverables), `tests/test_parity.py`
-(needs the MATLAB golden outputs), `recipes/` (real sample names and logbook notes), `reference/` (the MATLAB sources
+(needs the MATLAB golden outputs), `recipes/` (real sample names and logbook notes), `skill/references/gotchas.md`
+(per-beamtime notes naming people, samples and files; its general lessons are restated without names in ISAAC's
+`docs/xas-processing-protocol-v0.md`, "Energy-reference lessons"), `reference/` (the MATLAB sources
 and scripts), `examples/`, `docs/` (`PORT_STATUS.md` and the plan are summarised in `skill/` and below), the
 package's `pyproject.toml` / `README.md` (its dependencies are in the repository's `processing` extra).
 
@@ -46,11 +49,15 @@ the beamline scientists' rules (17 Nov 2026) are never Athena, and no dead-time 
   Test: `::test_survey_files_on_pooled_groups`.
 - **M3 transmission samples are detected** (`survey.py measurement_mode`, `pipeline.py sample_mode`, `reduce`).
   `scope.md` lists transmission-mode samples as NOT SUPPORTED, yet `reduce` read a transmission file's IF column as
-  the measurement (the BL15-2 2025 `IrO2_5wpc_pellet_transmission` was reduced as HERFD). `measurement_mode` decides
+  the measurement (a reference pellet named `..._transmission` in a real BL15-2 beamtime was reduced as HERFD).
+  `measurement_mode` decides
   from the fluorescence edge contrast, the ln(I0/I1) step (I1 lit) and the name; `reduce` now skips such a sample
   with a warning (`results["skipped_samples"]`, `reduce_diag.json`), unless the recipe sample says
   `mode: fluorescence`. ISAAC hands such groups to its own `isaac.xas.v0`.
   Tests: `::test_measurement_mode_detects_transmission`, `::test_reduce_skips_a_transmission_sample`.
 - **M4 `pipeline.tabulated_edge_eV`** (new helper): the McMaster table's K / L1-L3 edge in eV, used by M3.
+- **M6 documentation sanitised** (no code change): `skill/SKILL.md` (no named sync service, no `gotchas.md`
+  entry), `skill/scope.md` (no beamtime or dataset names), `skill/references/calibration.md` (no named colleague),
+  `skill/references/recipe.md` and the `pipeline.py` docstring (`<data root>` for the author's local folder).
 - **M5 an undated alignment scan no longer crashes the survey** (`survey.py`): the edge-scan finding formatted
   `s.time` with `%m-%d`, a `TypeError` for a scan without a `#D` date. Test: `::test_survey_undated_alignment_scan`.

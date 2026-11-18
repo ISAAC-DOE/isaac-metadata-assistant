@@ -86,14 +86,17 @@ data as transmission), alignment groups, other formats. `ISAAC_PROCESSING_ENGINE
 **Once per beamtime** (`engine_beamtime` in `processing_results.json`): every group is read with v0's own reader,
 channel choice and BL15-2 absev rule (hash-checked); the engine's survey (`survey_files`, one entry per record group,
 spots and repeats pooled) picks the energy reference, its anchor method and window, and reads the `mono reset` lines;
-the reference is the engine's convention, the EARLIEST group's MEAN anchor; the normalisation window is the engine's
+the I0 glitch is then located by a robust consensus of every scan's own dips (`isaac.xas.glitch_consensus.v1`, below);
+the reference is the EARLIEST group with good anchors, the robust MEDIAN of its validated scans' anchors; the
+normalisation window is the engine's
 default rule (`recipe_init.norm_range`) on the beamtime's modal grid, one per edge. With `--group`, the stored block is
 reused when its fingerprint (sources, groups, channel parameters, engine version) still holds.
 
 **Per group, in the engine's order:** anchor every scan (a foil in transmission when the survey finds one in the
 sample scans, its I0 glitch as the fallback route for a scan whose foil is not usable; else the I0 glitch, Gaussian-dip
-model fit; else the foil timeline; else none, said), shift = reference anchor - scan anchor (a shift beyond 1 eV for a
-glitch, 2 eV for a foil, is a failed anchor), ONE interpolation onto the group's modal grid; screen
+model fit; else the foil timeline; else none, said loudly), each anchor validated against the consensus (below),
+shift = reference anchor - scan anchor (a shift beyond 1 eV for a glitch, 2 eV for a foil, is a failed anchor), ONE
+interpolation onto the group's modal grid; screen
 (`screen_report`, report-only); decide (below); average the kept scans' raw IF/I0 (`average_scans`, points no kept
 scan covers dropped); normalise the average ONCE (`mback_xrs`, Victoreen + McMaster, constrained background, the step
 locked at the tabulated edge; element and edge from the scientist's `set_absorber`, else the files' agreeing absorber
@@ -101,9 +104,14 @@ evidence, else the edge the survey identified from the scan range, said as uncon
 average. Uncertainty note: the edge step over 12 windows around the one used (max - min over the median; warn above
 20 %). QC: `no_edge`, `edge_step_implausible`, `post_edge_not_at_1` fail (never offered for approval, as v0); warns
 `normalization_window_sensitive`, `most_scans_dropped`, `logbook_inferred_note_applied`, `anchor_fallback_route_used`,
-`normalization_window_group_own`, `single_scan`, `no_energy_reference`. Outputs (content-addressed run folder, as v0):
+`normalization_window_group_own`, `single_scan`, `no_energy_reference` (also a review flag: a bulk approval refuses
+it), `kept_scan_not_merged`, `override_not_applied`, `measurement_mode_unknown` (the engine's `measurement_mode` read
+neither fluorescence nor transmission, or could not run: v1 reduced the group as fluorescence anyway; the result's
+`measurement_mode` says it). Outputs (content-addressed run folder, as v0):
 `merged.csv` (raw average, its standard error, scans per point), `normalized.csv` (`energy_eV, norm, mcmaster_mu,
-background`), `scan_decisions.json` (the decision and shift tables; hashed, so a changed decision is a new result id),
+background`), `scan_decisions.json` (the decision and shift tables; the run id hashes their CONTENT, each scan's keep /
+drop and who decided it, never an override's decision id or time: a changed decision is a new result id, the same
+override stated again is the same one),
 `qc.json`, `params.json`, `plot.png`. The MERGE quick-merge comparison is kept (normalised the same way).
 
 **The scan-decision rule `isaac.xas.scan_decision.v1`** (Angel and Krish, 17 Nov 2026: the skill decides, by a
@@ -120,8 +128,42 @@ KEEP. An intensity drop alone never drops a scan: a dead-channel flag on a scan 
 off-shape flag within twice the scan's own noise (fewer counts), keep the scan and say why. Over-absorption and dead
 time are not judged (no flag). A scientist's `set_scan_decision` (`decide --target <group> --decision
 set_scan_decision --value keep|drop --scans <ids> --by <name>`) overrides the rule for those scans, is shown as theirs
-beside what the rule said, moves no group status, and takes effect when the group is re-processed. The scientist still
-approves each curve before it goes into a record.
+beside what the rule said, moves no group status, and takes effect when the group is re-processed. A KEEP on a scan
+with no energy anchor is shown as "kept by the scientist but cannot be merged" and counted apart (`counts.merged`,
+`counts.kept_not_merged`); it is never merged with a wrong or no shift. An override naming no scan of the group as it
+now is (after a regroup or a split) is listed as "override not applied: ..." in the result and in `bundle show`. The
+scientist still approves each curve before it goes into a record.
+
+**The glitch consensus `isaac.xas.glitch_consensus.v1`** (review of the first v1 build: one scan without the glitch
+made the survey place it 2.4 eV off and drop every scan; two of nine made the beamtime "no reference"; one scan
+shifted 1.6 eV gave wrong shifts to the others). The survey samples a few scans per file and their median, so a
+minority of bad scans could move it. Now every in-scope scan's own I0 dips are found (ln I0 minus a robust quadratic
+Savitzky-Golay trend: a dip's points are bridged before the trend is fitted again, so a deep glitch leaves no side-lobe
+dips ~1.6 eV away; a dip is at least 0.3 % deep and 6 robust sigmas of the scan's residual, on a step of at most 1 eV,
+3 eV clear of the edge). The glitch is where most scans have a dip (within 1 eV), then the median of each scan's nearest
+dip; it is used when more than half the scans carry it. When some scans have no dip there, the survey runs AGAIN without
+them, so its own method choice (model or shape) and window rules see only scans with the glitch; if the survey's glitch
+is more than 0.5 eV from the consensus, the fit window is re-made around the consensus, clear of other dips most scans
+share; a survey that found no reference while most scans carry the glitch is overruled (model fit). The shape-fit
+template is a scan with the glitch (the one nearest its group's median dip). Every scan's anchor is then VALIDATED: its
+own dip within the shift limit of the consensus (else "no energy reference found in this scan"), an ok fit inside the
+fit window, and the fitted anchor at the beamtime's usual offset from its own dip within max(0.25 eV, 1.5 grid steps)
+(else "reference feature fit failed": the fit took another feature). A scan that fails is not aligned and not merged,
+says why, and changes no other scan's shift. The reference anchor is the median over the validated scans of the
+earliest group that has any (else the next earliest, said). With no reference at all (no foil, no glitch in most
+scans, no foil scans) every result says NO ENERGY REFERENCE, carries the review flag `no_energy_reference`, and a bulk
+approval refuses it.
+
+**Energy-reference lessons** (general, from the engine author's per-beamtime notes, which are not vendored): read the
+encoder energy (`absev`), not the SPEC `energy` column, which can wander from it by a few eV; a sharp, symmetric I0
+glitch is the best in-scan anchor, and the Gaussian-dip model beats a shape fit when the glitch is narrower than about
+two grid steps (a shape fit then carries the template's grid phase, tens of meV); a second dip inside the fit window
+pulls a one-dip fit, so the window stays clear of it; a DOUBLET glitch (two dips ~1.5 eV apart) makes a one-dip fit
+jump between the dips in some files while looking fine per file, so the two-dip fit decides (ok on >= 70 % of scans,
+stable separation), and its midpoint is a convention worth ~half the separation change between files; a dark
+transmission chamber (a flat offset) shows noise "edges" in ln(I0/I1) and is skipped; a dip from an absorber in the I0
+path sits on an edge step, so its anchor depends on the window (say the window); and when the glitch "moves" between
+files while a foil does not, the mono moved, not the glitch: align per scan.
 
 ## 0. Why
 

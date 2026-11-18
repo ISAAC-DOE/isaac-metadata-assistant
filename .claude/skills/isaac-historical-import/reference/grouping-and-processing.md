@@ -78,19 +78,28 @@ beamtime reference and shifted once; the scans DECIDED (kept or dropped); the ke
 average normalised ONCE. Show per group, from `<isaac> bundle show <bundle> processing-result <id>`:
 
 - **`energy_reference`**: say its `statement` (which reference: a foil in transmission, the I0 glitch, a foil timeline,
-  or none; the fit and window; the earliest group whose mean anchor is the reference), and its `evidence` lines and
+  or none; the fit and window; the earliest group whose median anchor is the reference), and its `evidence` lines and
   `mono_reset_lines` when asked. Every scan of every sample is aligned to that one reference, never to its own edge (the
-  staff calibrate the mono on a foil at the start of the beamtime). A result with `no_energy_reference` (warn) was not
-  shifted: say so.
-- **`scan_shifts`**: the shift range in meV ("shifts +65 to +77 meV"); name a scan with `no anchor` (it is dropped).
+  staff calibrate the mono on a foil at the start of the beamtime). The I0 glitch is placed by a consensus of every
+  scan's own dips, so a few bad scans never move it. A result with `no_energy_reference` was not shifted at all: say
+  it first, loudly ("no energy reference was found for this beamtime; no scan was aligned"); `bundle show` gives a
+  `warning`, and a bulk approval refuses it, so it is approved on its own.
+- **`scan_shifts`**: the shift range in meV ("shifts +65 to +77 meV"); name a scan with `no anchor` (it is not aligned
+  and not merged: "no energy reference found in this scan", or "reference feature fit failed").
 - **`scan_decisions`** (rule `isaac.xas.scan_decision.v1`, its text in `rule`): the skill DECIDED which scans are kept,
   by that rule; these are decisions with their reasons, never proposals waiting for an answer. Say the `counts`, then
   each DROPPED scan with its reason in words: a logbook note (`logbook (stated)` or `logbook (inferred)`: say "the
   logbook says…" and, for inferred, "my reading of the logbook"), `before_stable_window` (the sample was still
-  changing), `coverage` (stopped early), `anchor` / `anchor_failed` (no reliable energy anchor), `shape` (another shape
+  changing), `coverage` (stopped early), `anchor` (an outlying anchor), `no_energy_reference` / `reference_fit_failed` (say the
+  words of its reason), `shape` (another shape
   than the other scans, beyond their noise), a dead channel with no edge. Then each KEPT scan with a remark (a weaker or
   noisier scan, `weak_signal` / `noisier_not_off_shape`, a logbook flag). An intensity drop alone never drops a scan:
-  never offer to drop one for being weaker. A row "the scientist's decision" was overridden: say whose.
+  never offer to drop one for being weaker. A row "the scientist's decision" was overridden: say whose. A row "kept by
+  the scientist but cannot be merged" is not in the curve (no energy anchor): say so (`counts.kept_not_merged`). Each
+  `overrides_not_applied` line ("override not applied: ...") names an override that matches no scan of the group now
+  (after a regroup or split): say it, and offer to state it again on the right scans.
+- **`measurement_mode`**: say it when it is not fluorescence ("the mode is unknown; v1 reduced it as fluorescence
+  anyway"; flag `measurement_mode_unknown`) and ask the scientist how it was measured.
 - **`logbook_notes`**: the notes read for these runs (exclude, start_from, keep_only apply; a flag changes nothing and is
   said). "No logbook scan notes: this build has no logbook scan-notes reader" means none was applied: say it once.
 - **`normalization`**: the convention in plain words (background + McMaster step; the post-edge follows McMaster and is
@@ -101,7 +110,7 @@ average normalised ONCE. Show per group, from `<isaac> bundle show <bundle> proc
   normalised curve with the McMaster step and the windows. The QC verdict uses `no_edge`, `edge_step_implausible` and
   `post_edge_not_at_1` as v0 does (never offered for approval), and warns `normalization_window_sensitive`,
   `most_scans_dropped`, `logbook_inferred_note_applied`, `anchor_fallback_route_used`, `normalization_window_group_own`,
-  `single_scan`: say each in words. The quick-merge block (`scientist_quick_merges`) is read as below, normalised the
+  `single_scan`, `kept_scan_not_merged`, `override_not_applied`, `measurement_mode_unknown`: say each in words. The quick-merge block (`scientist_quick_merges`) is read as below, normalised the
   way the result is.
 
 **The scientist overrides a decision**, only on their own word in this conversation, one call per keep / drop, naming the

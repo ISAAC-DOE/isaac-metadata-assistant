@@ -1,7 +1,12 @@
 """Difference-spectrum decomposition and model-free relative normalization (synthetic)."""
-import numpy as np
+import pytest
 
-from xas_analysis.diffspec import decompose, difference, model_free_difference
+np = pytest.importorskip("numpy", reason="needs the optional `processing` extra")
+pytest.importorskip("scipy", reason="needs the optional `processing` extra")
+pytest.importorskip("yaml", reason="needs the optional `processing` extra")
+
+
+from xas_analysis.diffspec import decompose, difference, model_free_difference  # noqa: E402
 
 
 def _spec(E, shift=0.0, sigma=0.0, scale=1.0):

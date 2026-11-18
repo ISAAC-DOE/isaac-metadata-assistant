@@ -1,11 +1,15 @@
 """Stage tests on synthetic inputs with known answers (no MATLAB needed)."""
-import numpy as np
 import pytest
 
-from xas_analysis.average import AlignedScan, average_scans
-from xas_analysis.calib import align_and_resample, find_inflection_point
-from xas_analysis.io.spec import parse_spec, read_xas_scans
-from xas_analysis.matlab_compat import gradient, mode_smallest, movmean, save_ascii
+np = pytest.importorskip("numpy", reason="needs the optional `processing` extra")
+pytest.importorskip("scipy", reason="needs the optional `processing` extra")
+pytest.importorskip("yaml", reason="needs the optional `processing` extra")
+
+
+from xas_analysis.average import AlignedScan, average_scans  # noqa: E402
+from xas_analysis.calib import align_and_resample, find_inflection_point  # noqa: E402
+from xas_analysis.io.spec import parse_spec, read_xas_scans  # noqa: E402
+from xas_analysis.matlab_compat import gradient, mode_smallest, movmean, save_ascii  # noqa: E402
 
 
 # ---------------- matlab_compat

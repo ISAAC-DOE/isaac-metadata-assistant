@@ -29,7 +29,7 @@ The recipe is a dict (or a YAML file) with the same fields as the MATLAB recipe 
     averaging: {weights: uniform, min_scans: 1, drop_empty_points: false}
     outputs: {output_dir: reduced_v2, save_per_scan: true, save_avg: true, save_diagnostic: true}
     column_map: {}                # e.g. {IF: vortDT2}
-    data_root: ~/xas_work/...     # optional base for relative spec paths
+    data_root: <data root>/...    # optional base for relative spec paths
     screening: {anchor_mad: 5, shape_mad: 6, window_eV: [11205, 11260]}   # optional, off if absent
         # anchor_mad: drop scans whose anchor is > k robust sigmas (1.4826 MAD, floor
         #             anchor_floor_eV = 0.03) from the file median; shape_mad: same on the RMS

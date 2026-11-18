@@ -2,11 +2,15 @@
 
 Vendored from xas-reduction (Oscar); the tests that read the package's tests/data spectra (real BL4-3 Ti K
 averages, soft-XAS deliverables) are not vendored (src/xas_analysis/PROVENANCE.md)."""
-import numpy as np
 import pytest
 
-from xas_analysis.model.mback import mback
-from xas_analysis.physics.mcmaster import atomic_number, element, elements, mcmaster
+np = pytest.importorskip("numpy", reason="needs the optional `processing` extra")
+pytest.importorskip("scipy", reason="needs the optional `processing` extra")
+pytest.importorskip("yaml", reason="needs the optional `processing` extra")
+
+
+from xas_analysis.model.mback import mback  # noqa: E402
+from xas_analysis.physics.mcmaster import atomic_number, element, elements, mcmaster  # noqa: E402
 
 # ---------------- McMaster
 def test_symbols_match_table():

@@ -4,12 +4,16 @@ Synthetic spectra only (unmistakably fake: SYN_ names, a smooth logistic edge at
 import warnings
 from datetime import datetime
 
-import numpy as np
-import yaml
+import pytest
 
-from xas_analysis.average import AlignedScan
-from xas_analysis.pipeline import reduce, screen_report, screen_scans
-from xas_analysis.survey import FileInfo, ScanInfo, measurement_mode, survey_files
+np = pytest.importorskip("numpy", reason="needs the optional `processing` extra")
+pytest.importorskip("scipy", reason="needs the optional `processing` extra")
+yaml = pytest.importorskip("yaml", reason="needs the optional `processing` extra")
+
+
+from xas_analysis.average import AlignedScan  # noqa: E402
+from xas_analysis.pipeline import reduce, screen_report, screen_scans  # noqa: E402
+from xas_analysis.survey import FileInfo, ScanInfo, measurement_mode, survey_files  # noqa: E402
 
 E_EDGE = 11215.0
 GLITCH = 11226.6
@@ -110,7 +114,7 @@ def test_measurement_mode_detects_transmission():
     assert measurement_mode(fluo, E_EDGE, "SYN_sample")["mode"] == "fluorescence"
     m = measurement_mode(trans, E_EDGE, "SYN_pellet")
     assert m["mode"] == "transmission" and m["transmission_step"] > 0.5
-    # a HERFD edge AND a name saying transmission, with ln(I0/I1) stepping: transmission (the 2025 IrO2 pellet case)
+    # a HERFD edge AND a name saying transmission, with ln(I0/I1) stepping: transmission (the transmission-named pellet case)
     both = [_scaninfo("SYN_b", n, 0.0, None, rng) for n in (1, 2)]
     for s in both:
         s.ch["I1"] = s.ch["I0"] * np.exp(-(0.5 + 0.07 / (1 + np.exp(-(s.E - E_EDGE) / 1.2))))
