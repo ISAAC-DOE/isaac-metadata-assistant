@@ -590,15 +590,87 @@ def annotate(
     return mutate(bundle_dir, change)
 
 
-def annotate_from_readings(bundle_dir: Path, findings: Mapping, *, model_id: str, apply: bool) -> dict:
+#: Why ``annotate --from-readings --apply`` refuses when no folder is known to check the quotes against.
+NO_QUOTE_ROOT = ("Every finding's quote is checked against the imported folder before anything is recorded, and this "
+                 "bundle does not record where that folder is (the default). Pass --root <the folder you imported>. "
+                 "Nothing was recorded.")
+
+
+def quote_root(bundle: Mapping, explicit: str | Path | None) -> Path | None:
+    """The folder a findings file's quotes are checked against: ``explicit`` (``--root``), else the bundle's recorded
+    ``source_root.local_root_hint`` (``import --record-local-root``), else ``None``.
+
+    ``--root`` IS TIED TO THE BUNDLE: when the bundle records its root, ``--root`` must be that folder; when it
+    records none, ``--root``'s name must be the imported folder's (``source_root.label``, a ZIP's name without
+    ``.zip``). Anything else is refused (exit 2), so a quote is never checked against some other folder's files. The
+    hash of every cited bundle source ties the content too (``reading_check``)."""
+    sr = bundle.get("source_root") or {}
+    hint = sr.get("local_root_hint")
+    if not explicit:
+        return Path(hint) if hint else None
+    root = Path(explicit).expanduser()
+    label = str(sr.get("label") or "")
+    if hint:
+        try:
+            same = root.resolve() == Path(hint).resolve()
+        except OSError:
+            same = False
+        if not same:
+            raise MutationRefused(
+                f"--root {root.name!r} is not the folder this bundle was imported from (it records that folder, named "
+                f"{Path(hint).name!r}): leave --root out to use it, or pass that folder. Nothing was checked or recorded.",
+                code=2)
+        return root
+    names = {label, label[:-4] if label.lower().endswith(".zip") else label}
+    if label and root.name not in names:
+        raise MutationRefused(
+            f"--root {root.name!r} is not the folder this bundle was imported from (that folder is named {label!r}): pass "
+            "the folder you imported. Nothing was checked or recorded.", code=2)
+    return root
+
+
+def check_readings(bundle: Mapping, findings: Mapping, root: Path) -> dict:
+    """:func:`reading_check.report` of every finding in ``findings`` against ``root``. Reads only."""
+    from . import reading_check as RC
+
+    if not isinstance(findings, Mapping) or not isinstance(findings.get("findings"), list):
+        raise MutationRefused("The findings file must be a JSON object with a `findings` list.")
+    results = RC.check_findings(findings["findings"], root, sources=bundle.get("sources") or ())
+    return {**RC.report(results, root_label=Path(root).name), "_by_finding": {r["finding"]: r for r in results}}
+
+
+def annotate_from_readings(bundle_dir: Path, findings: Mapping, *, model_id: str, apply: bool,
+                           root: str | Path | None = None, check_quotes: bool = True) -> dict:
     """A Claude reading pass's findings file (``isaac.reading_findings``) as AI
-    interpretations, one per target, in ONE write. Without ``apply`` nothing is written.
-    Re-applying the same findings adds nothing (an identical reading of a target is kept once)."""
+    interpretations, one per target, and its ``scan_note`` findings as scan notes, in ONE write.
+    Without ``apply`` nothing is written. Re-applying the same findings adds nothing (an identical
+    reading of a target, or the same scan note, is kept once).
+
+    THE QUOTE CHECK (:mod:`.reading_check`): every finding's quote is held against the file it cites under
+    ``root`` (or the bundle's recorded root). The preview reports it per finding; ``apply`` records no finding
+    whose quote was not found, and REFUSES to run at all when there is no folder to check against. The CLI has
+    no way to skip it; ``check_quotes=False`` exists only for this package's synthetic tests of what follows
+    the check."""
+    from . import scan_notes as SN
     from . import suggestions as S
 
+    current_bundle: list = []
+
     def plan(bundle):
+        current_bundle[:] = [bundle]
+        quote_check = None
+        if check_quotes:
+            where = quote_root(bundle, root)
+            if where is None:
+                if apply:
+                    raise MutationRefused(NO_QUOTE_ROOT)
+                quote_check = {"run": False, "statement": NO_QUOTE_ROOT.replace(" Nothing was recorded.", "")
+                               + " This preview did not check them, and --apply refuses until it can."}
+            else:
+                quote_check = check_readings(bundle, findings, where)
         try:
-            out = S.readings_to_interpretations(bundle, findings, model_id=model_id)
+            out = S.readings_to_interpretations(bundle, findings, model_id=model_id,
+                                                quote_results=(quote_check or {}).get("_by_finding"))
         except S.ReadingsRefused as exc:
             raise MutationRefused(str(exc)) from exc
         # ``field_path`` is part of the identity: one group can be read as element ``K``
@@ -617,24 +689,42 @@ def annotate_from_readings(bundle_dir: Path, findings: Mapping, *, model_id: str
                 continue
             seen.add(key)
             fresh.append((t, f))
-        return out, fresh, repeated
+        return out, fresh, repeated, quote_check
 
-    def summary(out, fresh, repeated, recorded):
+    def summary(out, fresh, repeated, recorded, quote_check, notes_new, notes_repeated):
         by_field: dict = {}
         for t, f in fresh:
             by_field.setdefault(f["finding_id"], 0)
             by_field[f["finding_id"]] += 1
-        return {"applied": recorded, "interpretations": len(fresh), "already_recorded": repeated,
-                "targets_per_finding": by_field, "skipped": out["skipped"]}
+        refused = [s for s in out["skipped"] if s.get("refused")]
+        live = SN.live_run_ids(current_bundle[0])
+        payload = {"applied": recorded, "interpretations": len(fresh), "already_recorded": repeated,
+                   "targets_per_finding": by_field,
+                   "scan_notes": notes_new, "scan_notes_already_recorded": notes_repeated,
+                   "scan_notes_on_runs_not_live": sum(1 for n in out.get("scan_notes") or () if set(n["run_ids"]) - live),
+                   "refused": len(refused),
+                   "refused_by_reason": {k: sum(1 for s in refused if s["refused"] == k) for k in sorted({s["refused"] for s in refused})},
+                   "skipped": out["skipped"]}
+        if quote_check is not None:
+            payload["quote_check"] = {k: v for k, v in quote_check.items() if k != "_by_finding"}
+        if refused:
+            payload["refused_statement"] = (
+                f"{len(refused)} finding(s) were refused and {'were not' if recorded else 'will not be'} recorded: a quote "
+                "not found as cited, a run reference that names no run (or more than one), or a value off its field's "
+                "list. Fix each in the findings file and load it again; nothing skips these checks.")
+        return payload
 
     if not apply:
         with locked(Path(bundle_dir)):
             bundle = load(bundle_dir)
-        out, fresh, repeated = plan(bundle)
-        return summary(out, fresh, repeated, False)
+        out, fresh, repeated, quote_check = plan(bundle)
+        held = {n.get("scan_note_id") for n in bundle.get("scan_notes") or ()}
+        planned = out.get("scan_notes") or []
+        new = len({n["scan_note_id"] for n in planned} - held)
+        return summary(out, fresh, repeated, False, quote_check, new, len(planned) - new)
 
     def change(bundle):
-        out, fresh, repeated = plan(bundle)
+        out, fresh, repeated, quote_check = plan(bundle)
         for t, f in fresh:
             kind, obj = resolve_target(bundle, t["id"])
             if kind not in _INTERPRETABLE:
@@ -645,7 +735,14 @@ def annotate_from_readings(bundle_dir: Path, findings: Mapping, *, model_id: str
                 is_blind=False, basis="A reading pass over the files; not requested as blind.",
                 extra={k: f[k] for k in ("source_path", "quote", "strength", "finding_id", "field_path", "run_ids")},
             )
-        return summary(out, fresh, repeated, True)
+        notes_new, notes_repeated = 0, 0
+        if out.get("scan_notes"):
+            held = len(bundle.get("scan_notes") or ())
+            if held + len(out["scan_notes"]) > SN.MAX_SCAN_NOTES:
+                raise MutationRefused(f"This bundle already holds {held:,} scan notes; recording {len(out['scan_notes']):,} "
+                                      f"more would pass the bound of {SN.MAX_SCAN_NOTES:,}, so nothing was written.")
+            notes_new, notes_repeated = SN.record_scan_notes(bundle, out["scan_notes"])
+        return summary(out, fresh, repeated, True, quote_check, notes_new, notes_repeated)
 
     return mutate(bundle_dir, change)
 

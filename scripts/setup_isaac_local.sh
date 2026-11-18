@@ -27,7 +27,8 @@
 #
 # What it does (idempotent; safe to re-run; needs no sudo):
 #   1. a Python >= 3.11 virtual environment in <this checkout>/.venv (uv if present, else
-#      python3.11/3.12/3.13/python3) and the `isaac` command  -> scripts/install_local_cli.sh
+#      python3.11/3.12/3.13/python3) and the `isaac` command  -> scripts/install_local_cli.sh,
+#      with the small PDF-reading extra (pypdf, for the quote check) -> pip install -e ".[reading]"
 #   2. the processing extra (numpy, xraylarch)                 -> pip install -e ".[processing]"
 #   3. the offline portal validator, pinned                    -> scripts/install_portal_validator.sh
 #   4. optionally, the skill, COPIED (not linked) into the skills folder, with a small
@@ -101,6 +102,7 @@ fi
 
 have_cli()        { ( cd / && "$VENV/bin/python" -c 'import isaac_api.local_import.cli, isaac_records.cli' ) >/dev/null 2>&1; }
 have_processing() { ( cd / && "$VENV/bin/python" -c 'import numpy, larch' ) >/dev/null 2>&1; }
+have_reading()    { ( cd / && "$VENV/bin/python" -c 'import pypdf' ) >/dev/null 2>&1; }
 have_portal()     { compgen -G "$HOME/.cache/isaac/portal-validator/*/venv/bin/python" >/dev/null 2>&1; }
 
 # The installed skill is a COPY. Scientists start `claude` outside this folder, so Claude Code runs
@@ -355,6 +357,10 @@ MSG
   if bash "$CHECKOUT/scripts/install_local_cli.sh"; then :; else
     echo "error: the command-line install failed; see the message above." >&2; PROBLEMS=$((PROBLEMS+1))
   fi
+  if [[ -x "$VENV/bin/python" ]] && ! have_reading; then
+    "$VENV/bin/python" -m pip install --quiet -e "$CHECKOUT[reading]" \
+      || { echo "warning: the PDF-reading extra (pypdf) did not install; quotes cited from a PDF cannot be checked." >&2; }
+  fi
 fi
 
 if [[ $CHECK_ONLY -eq 0 && $WITH_PROCESSING -eq 1 && $WITH_CLI -eq 1 && -x "$VENV/bin/python" ]]; then
@@ -434,6 +440,8 @@ else
 fi
 if have_processing; then echo "$OK processing           spectrum processing is available"
 else echo "$BAD processing           not installed (curves and quality checks unavailable). Run: scripts/setup_isaac_local.sh --with-processing"; fi
+if have_reading; then echo "$OK pdf reading         PDF text for the quote check is available"
+else echo "$BAD pdf reading         not installed (quotes cited from a PDF cannot be checked). Run: scripts/setup_isaac_local.sh"; fi
 if have_portal; then echo "$OK portal check         offline portal validator found"
 else echo "$BAD portal check         not installed (records cannot become 'exportable'). Run: scripts/install_portal_validator.sh"; fi
 echo "$SKILL_STATE"
