@@ -62,7 +62,7 @@ def grouped_base(corpus, tmp_path_factory):
          "source": {"path": THEIRS, "locator": "Campaign Info!B5"}, "quote": "Beamline/Instrument 62b",
          "strength": "stated", "reasoning": "the sheet"},
     ]}
-    rep = M.annotate_from_readings(bdir, findings, model_id="synthetic-model", apply=True)
+    rep = M.annotate_from_readings(bdir, findings, model_id="synthetic-model", apply=True, check_quotes=False)
     assert rep["interpretations"] >= 2, rep
     assert {r["run_id"] for r in b["runs"]} >= {"run-001", "run-005", "run-007", "run-009"}
     return bdir

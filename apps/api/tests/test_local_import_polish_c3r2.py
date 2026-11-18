@@ -42,7 +42,7 @@ def _annotate(bdir, run_id, path, value, *, model_id="synthetic-model"):
         {"field_path": path, "value": value, "applies_to": {"scope": "runs", "runs": [run_id]},
          "source": {"path": rel, "locator": "header line 3"}, "quote": f"sample: {value}", "strength": "stated",
          "reasoning": "the scan header names the sample form"}]}
-    rep = M.annotate_from_readings(bdir, findings, model_id=model_id, apply=True)
+    rep = M.annotate_from_readings(bdir, findings, model_id=model_id, apply=True, check_quotes=False)
     assert rep["interpretations"] >= 1, rep
     return rel
 
@@ -125,7 +125,7 @@ def test_an_ai_reading_of_their_sheet_itself_does_not_hold_an_adopted_value_back
     findings = {"format": "isaac.reading_findings", "findings": [
         {"field_path": FORM, "value": "pellet", "applies_to": {"scope": "runs", "runs": ["run-001"]},
          "source": {"path": THEIRS, "locator": "File List!E2"}, "quote": "pellet", "strength": "stated", "reasoning": "x"}]}
-    assert M.annotate_from_readings(grouped, findings, model_id="synthetic-model", apply=True)["interpretations"] >= 1
+    assert M.annotate_from_readings(grouped, findings, model_id="synthetic-model", apply=True, check_quotes=False)["interpretations"] >= 1
     code, rep, err = _import(grouped, earlier, capsys)
     assert code == 0, err
     assert [d for d in rep["decisions"] if d["target_field_path"] == FORM and d["run_id"] == "run-001"]

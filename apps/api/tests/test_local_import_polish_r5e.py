@@ -211,7 +211,7 @@ def holds_pristine(tmp_path_factory):
                              "source": {"path": src[r["acquisition_source_id"]]["relative_path"], "locator": "header line 3"},
                              "quote": f"vs {value}", "strength": "stated", "reasoning": "the scan header names the scale"})
     rep = M.annotate_from_readings(b, {"format": "isaac.reading_findings", "findings": findings},
-                                   model_id="synthetic-model", apply=True)
+                                   model_id="synthetic-model", apply=True, check_quotes=False)
     assert rep["interpretations"] >= 5, rep
     return b
 

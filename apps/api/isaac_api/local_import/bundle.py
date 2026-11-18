@@ -87,7 +87,13 @@ FORMAT_ID = "isaac.local-import-bundle"
 #: notes ``spans_several_runs`` and ``run_has_no_scans``). A 1.10.0 validator refuses a bundle holding
 #: either, hence the version. Nothing becomes newly writable; the upgrade is disclosed
 #: (:data:`CHANGES_ADDED_IN`): a bundle imported before holds such files as runs until re-imported.
-FORMAT_VERSION = "1.11.0"
+#: 1.12.0 (additive): the optional ``scan_notes`` section (:mod:`.scan_notes`) — what a file says about a run's
+#: scans (``exclude`` / ``start_from`` / ``keep_only`` / ``flag``), as a Claude reading pass found it and the loader
+#: found its quote in the cited file (:mod:`.reading_check`). An AI reading, never a decision: no record reads it,
+#: and the processing step may cite it in a scan-selection proposal (``scan_notes.scan_notes_for_run``). A 1.11.0
+#: validator refuses a bundle holding the section, hence the version. Nothing becomes newly writable; the upgrade
+#: is disclosed (:data:`CHANGES_ADDED_IN`).
+FORMAT_VERSION = "1.12.0"
 #: The electrochemical control mode. Its allowed values are the official schema's enum (read at
 #: runtime by :func:`value_problem`); the schema's conditional rules key the set-point a record
 #: requires on it (:func:`required_record_paths`). Never defaulted, never derived.
@@ -113,7 +119,7 @@ VALUE_IDS_APPEND_FROM = "1.5.0"
 IMPORT_RULES_ADDED_IN: Mapping[str, tuple] = {
     "1.4.0": (("generic:ssrl_xdc_v1", "ssrl_xdc_scan_start_v1"),),
 }
-_VERSION_ORDER = ("1.0.0", "1.1.0", "1.2.0", "1.3.0", "1.4.0", "1.5.0", "1.6.0", "1.7.0", "1.8.0", "1.9.0", "1.10.0", "1.11.0")
+_VERSION_ORDER = ("1.0.0", "1.1.0", "1.2.0", "1.3.0", "1.4.0", "1.5.0", "1.6.0", "1.7.0", "1.8.0", "1.9.0", "1.10.0", "1.11.0", "1.12.0")
 #: A change a format version made that moves no eligibility and adds no import rule, but that the
 #: first save by a newer build still DISCLOSES in its ``format_upgrades`` entry (never silently).
 CHANGES_ADDED_IN: Mapping[str, str] = {
@@ -126,6 +132,7 @@ CHANGES_ADDED_IN: Mapping[str, str] = {
     "1.11.0": ("1.11.0 keeps a file the engine reads as a processed spectrum (the scientists' quick merges) as a "
                "processed output linked by legacy number, never a run; a bundle imported before holds such files as runs "
                "until re-imported"),
+    "1.12.0": "1.12.0 keeps a reading pass's notes about a run's scans (scan_notes) as AI readings, never decisions",
 }
 #: A field composed into a draft only beside another of the SAME run (interim decision for the
 #: set-point, pending domain-owner review; ``records.compose_group`` applies it). The CURRENT
@@ -5732,6 +5739,16 @@ def validate_bundle(bundle: Any, *, max_errors: int = 50, encoded: bytes | None 
     for u in bundle["unread_files"]:
         if u["relative_path"] is not None and _safe_relative(u["relative_path"]) is None:
             errors.append("paths: an unread_files entry has an absolute or escaping path")
+    # 1.12.0: a scan note names runs and (when the cited file is one) a source of THIS bundle, once each
+    note_ids: set = set()
+    for n in bundle.get("scan_notes") or ():
+        if n["scan_note_id"] in note_ids:
+            errors.append(f"reference: duplicate scan_note_id {n['scan_note_id']}")
+        note_ids.add(n["scan_note_id"])
+        if [r for r in n["run_ids"] if r not in run_ids]:
+            errors.append(f"reference: scan note {n['scan_note_id']} names a run not in this bundle")
+        if n["source_id"] is not None and n["source_id"] not in source_ids:
+            errors.append(f"reference: scan note {n['scan_note_id']} names source {n['source_id']}, not in this bundle")
     held_ids = {g.get("group_id") for g in bundle.get("record_groups") or ()} | {
         g.get("group_id") for g in bundle.get("superseded_record_groups") or ()
     }

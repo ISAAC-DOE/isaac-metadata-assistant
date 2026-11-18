@@ -434,7 +434,7 @@ def test_a_listed_value_is_kept_whatever_its_case_and_a_findings_file_skips_noth
     findings = {"format": "isaac.reading_findings", "findings": [
         {"id": "f1", "field_path": CELL, "value": "not stated", "applies_to": {"scope": "runs", "runs": [run["stem"]]},
          "source": {"path": NOTES, "locator": "line 1"}, "quote": "SYNTHETIC"}]}
-    out = M.annotate_from_readings(grouped, findings, model_id="syn", apply=True)
+    out = M.annotate_from_readings(grouped, findings, model_id="syn", apply=True, check_quotes=False)
     assert out["interpretations"] == 0
     assert any("state no value" in s["reason"] for s in out["skipped"])
     assert not M.load(grouped).get("ai_interpretations")

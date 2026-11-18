@@ -60,13 +60,12 @@ Find the ISAAC folder: the path in `checkout-path.txt` beside this file. If ther
 the scientist where their ISAAC folder is (the one with `scripts/setup_isaac_local.sh`); if they have
 none, point them to `docs/local-skill-quickstart.md` and stop. `<skills>` is the folder holding this skill's folder (this copy may be in `~/.claude/skills` or a project's `.claude/skills`). Run, from the ISAAC folder,
 `scripts/setup_isaac_local.sh --check --skill-dir <skills>` (it changes no file in your ISAAC folder (it updates git's record of what's on GitHub) and sends no data): one
-`[ok]`/`[missing]` line each for the Python environment, the command, the processing extra and the portal check; this skill copy: `[ok]`, `[stale]` or `[skipped]`; the update check: `[ok]`, `[behind N commits]` or `[skipped]` (GitHub not reached: fine, say the reason it gives).
+`[ok]`/`[missing]` line each for the Python environment, the command, the processing extra, the PDF reader and the portal check; this skill copy: `[ok]`, `[stale]` or `[skipped]`; the update check: `[ok]`, `[behind N commits]` or `[skipped]` (GitHub not reached: fine, say the reason it gives).
 `<isaac>` is `<folder>/.venv/bin/isaac`, `<python>` is `<folder>/.venv/bin/python`.
 
 - `[stale]`, or (`[skipped]`, or this copy runs from elsewhere) it differs (`reference/troubleshooting.md`) → say "Your installed skill is out of date, I'm updating it", run `scripts/setup_isaac_local.sh --refresh-skill --skill-dir <skills>` (copies the skill only: no download, no install), Read the file its `Skill written to:` line names and follow THAT text from Step 0 on. **The re-read version wins wherever it differs from this one** (no restart). Refresh at most ONCE: if it fails, or `--check` still says `[stale]` after it, stop refreshing, tell the scientist the copy at that path could not be refreshed, and continue with this text.
 - `[behind N commits]` → ask once: "Your ISAAC folder is N updates behind. Update now? It only changes the ISAAC code, not your data." Yes → `scripts/setup_isaac_local.sh --update --skill-dir <skills>`: exit 0 → re-read as above; exit 3 → say the reason it gives and continue; any other non-zero exit → say it stopped and what its last line says, suggest `scripts/setup_isaac_local.sh --check`, and continue with the code as it is. No → continue, and say the version in use (the commit the line names).
-- command missing → the ONE fix is `scripts/setup_isaac_local.sh` (then `--install-skill` if there
-  was no `checkout-path.txt`); stop.
+- command missing → the ONE fix is `scripts/setup_isaac_local.sh` (then `--install-skill` if there was no `checkout-path.txt`); stop.
 - processing or portal check missing → say what it costs ("curves and quality checks need
   `scripts/setup_isaac_local.sh --with-processing`"; "records cannot reach *exportable* without
   `scripts/install_portal_validator.sh`") and continue with whatever is available.
@@ -108,15 +107,16 @@ the scientist does not want it; say that it was skipped.
 ## Step 4 · Read what code could not
 
 `<isaac> bundle list <bundle> unread --limit 50` (page). Read `reference/reading-unread-files.md`.
-Logbooks, beamtime notes and proposals first. A filled ISAAC metadata sheet in the folder: ask now
+Logbooks, beamtime notes and proposals first, EVERY line (in sections; parallel readers for a long one;
+a `.docx` and its images as well as any .txt copy). A filled ISAAC metadata sheet in the folder: ask now
 whether it is theirs and to use it (if yes: `template adopt`, Step 7). For `.docx/.pptx/.xlsx` run
 `<python> -m isaac_api.local_import.extract <file> --root <folder> --out <bundle>-notes/extracted` and
-read what it returns; open images, PDFs and plain text with the Read tool. Then read what code DID
-read for statements no parser maps (readmes, macro comments, run labels). Read only inside the
-approved folder: name a document beside it and ask before opening it. Write every finding to ONE
-findings file; load it with `annotate --from-readings` (preview, then `--apply`), naming runs by
-`stem` or `run_id` from `bundle list <bundle> runs`, never by `label`. Tell the scientist what each
-file held, and which binaries nobody could read.
+read what it returns; open images, PDFs and plain text with Read. Then read what code DID read for
+statements no parser maps (readmes, `#C` lines, macro comments, run labels). Read only inside the approved
+folder: name a document beside it and ask before opening it. Write every finding (scan notes too) to ONE
+findings file; load it with `annotate --from-readings --root <folder>` (preview, then `--apply`; a quote
+not found in its file is refused: fix it), naming runs by `stem` or `run_id`, never `label`. Tell the
+scientist what each file held, what fit no field (with line numbers), and which binaries nobody could read.
 
 ## Step 5 · Groups
 

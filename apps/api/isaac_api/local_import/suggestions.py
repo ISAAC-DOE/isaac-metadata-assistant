@@ -28,6 +28,7 @@ from collections import Counter
 from typing import Any, Iterable, Mapping
 
 from . import bundle as B
+from . import scan_notes as SN
 
 ABSORBER_RULE_ID = "isaac.suggest.absorber.v0"
 READINGS_FORMAT = "isaac.reading_findings"
@@ -491,10 +492,16 @@ def nothing_stated_reason(value: Any, path: str | None) -> str | None:
             "asked, and the scientist answers it. Say in your report that you found no statement of it.")
 
 
-def readings_to_interpretations(bundle: Mapping, findings: Mapping, *, model_id: str) -> dict:
+def readings_to_interpretations(bundle: Mapping, findings: Mapping, *, model_id: str,
+                                quote_results: Mapping[str, Mapping] | None = None) -> dict:
     """Plan the AI interpretations for one findings file. Pure: writes nothing.
 
-    ``{"planned": [(target, entry_fields)], "skipped": [{finding, reason}]}``. A finding
+    ``{"planned": [(target, entry_fields)], "scan_notes": [entry], "skipped": [{finding, reason}]}``.
+    ``quote_results`` (:func:`reading_check.check_findings`, by finding id): a finding whose quote was NOT
+    found is refused (``refused: quote_not_found``), never planned. A finding is also refused when a run
+    reference names no run (``unknown_run``) or more than one (``ambiguous_run``), or when its value is not
+    on its field's allowed list (``not_allowed_value``). A ``scan_note`` finding
+    (:mod:`.scan_notes`) is planned as a scan note. A finding
     targets every live run's missing value (or extracted candidate) of its field: all of
     them for ``scope: experiment``, the named runs for ``scope: runs``. A finding about the
     absorber (:data:`ABSORBER_FIELDS`) targets record GROUPS instead: every live group for
@@ -517,11 +524,29 @@ def readings_to_interpretations(bundle: Mapping, findings: Mapping, *, model_id:
     paths = {p for (_, p) in missing} | {p for (_, p) in cands}
 
     planned: list[tuple[dict, dict]] = []
+    scan_notes: list[dict] = []
     skipped: list[dict] = []
     for i, f in enumerate(findings["findings"]):
         fid = f"finding-{i + 1:03d}"
         if not isinstance(f, Mapping):
             skipped.append({"finding": fid, "reason": "not an object"})
+            continue
+        checked = (quote_results or {}).get(fid)
+        if checked is not None and checked.get("result") != "pass":
+            # THE QUOTE CHECK (reading_check): a quote not found as cited is never loaded; the reader fixes the file
+            skipped.append({"finding": fid, "field_path": f.get("field_path"), "kind": f.get("kind"), "refused": "quote_not_found",
+                            "reason": f"its quote was not found as cited: {checked.get('reason')}"})
+            continue
+        if f.get("kind") not in (None, "field", SN.KIND):
+            skipped.append({"finding": fid, "reason": f"unknown finding kind {str(f.get('kind'))[:40]!r}: a finding is a field reading or `{SN.KIND}`"})
+            continue
+        if f.get("kind") == SN.KIND:
+            entry, skip = SN.plan_scan_note(bundle, f, fid=fid, runs_by_ref=runs_by_ref, model_id=model_id,
+                                            canonical_path=(checked or {}).get("canonical_path"))
+            if skip is not None:
+                skipped.append(skip)
+            else:
+                scan_notes.append(entry)
             continue
         path = FIELD_ALIASES.get(str(f.get("field_path") or ""), str(f.get("field_path") or ""))
         source = f.get("source") if isinstance(f.get("source"), Mapping) else {}
@@ -560,6 +585,16 @@ def readings_to_interpretations(bundle: Mapping, findings: Mapping, *, model_id:
                 skipped.append({"finding": fid, "field_path": path, "did_you_mean": near,
                                 "reason": unknown_field_reason(path, paths, near)})
                 continue
+            off_list = [(m, allowed) for m in members if (allowed := B.allowed_values(m)) is not None and f["value"] not in allowed]
+            if off_list:
+                m, allowed = off_list[0]
+                near = [a for a in allowed if str(a).casefold() == str(f["value"]).strip().casefold()]
+                skipped.append({"finding": fid, "field_path": path, "refused": "not_allowed_value", "reason": (
+                    f"{f['value']!r} is not one of the allowed values for {m}"
+                    + (f" (did you mean {near[0]!r}? the value is compared exactly)" if near else
+                       f": {', '.join(map(str, allowed[:12]))}{', ...' if len(allowed) > 12 else ''}")
+                    + ". Write one allowed value, or no finding, and tell the scientist what the file says")})
+                continue
         scope = (f.get("applies_to") or {}).get("scope") if isinstance(f.get("applies_to"), Mapping) else None
         if scope == "experiment":
             run_ids = sorted(live) + [None]
@@ -575,14 +610,14 @@ def readings_to_interpretations(bundle: Mapping, findings: Mapping, *, model_id:
                 continue
             unknown = [l for l in labels if l not in runs_by_ref]
             if unknown:
-                skipped.append({"finding": fid, "field_path": path, "reason": (
+                skipped.append({"finding": fid, "field_path": path, "refused": "unknown_run", "reason": (
                     f"run labels not in this bundle: {unknown[:5]} (name a run by its file stem or run id, as "
                     "`bundle list <dir> runs` prints them)")})
                 continue
             ambiguous = {l: sorted(runs_by_ref[l]) for l in labels if len(runs_by_ref[l]) > 1}
             if ambiguous:
                 said = "; ".join(f"{l!r} names {', '.join(ids[:5])}" for l, ids in list(ambiguous.items())[:3])
-                skipped.append({"finding": fid, "field_path": path, "reason": (
+                skipped.append({"finding": fid, "field_path": path, "refused": "ambiguous_run", "reason": (
                     f"a run reference names more than one run ({said}): name each run by its run id (or its path "
                     "when two runs share a file stem); nothing was spread over both")})
                 continue
@@ -613,7 +648,8 @@ def readings_to_interpretations(bundle: Mapping, findings: Mapping, *, model_id:
         if not targets:
             skipped.append({"finding": fid, "field_path": path, "reason": "no target for this field on the runs it names"})
             continue
-        rel = str(source["path"])
+        # the path as the folder spells it (`./a.txt`, `A.TXT` on a case-insensitive disk): its source id is found by it
+        rel = str((checked or {}).get("canonical_path") or source["path"])
         if not _cited_path_ok(rel):
             skipped.append({"finding": fid, "field_path": path,
                             "reason": "source.path must be relative to the imported folder (one leading ../ for a document beside it), never absolute"})
@@ -635,7 +671,7 @@ def readings_to_interpretations(bundle: Mapping, findings: Mapping, *, model_id:
         }
         for t in targets:
             planned.append((t, {**fields, "run_ids": group_runs.get(t["id"]) if absorber else None}))
-    return {"planned": planned, "skipped": skipped}
+    return {"planned": planned, "scan_notes": scan_notes, "skipped": skipped}
 
 
 def ai_hints(bundle: Mapping, target_ids: Iterable[str], *, limit: int = 5) -> list[dict]:
