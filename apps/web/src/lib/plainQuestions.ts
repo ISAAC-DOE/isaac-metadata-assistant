@@ -20,7 +20,7 @@
  * own structured fields (`partition`, `asked_again`, `answers_differ`, `targets_without_a_value`, …), never by
  * matching the server's sentences.
  */
-import type { LocalQuestion, LocalScope } from './localImports';
+import type { LocalEarlierAnswer, LocalQuestion, LocalScope } from './localImports';
 
 /** How a field is ASKED when no file states it, in the words a scientist would use. Paths read from the schema. */
 const FIELD_ASK: Readonly<Record<string, string>> = {
@@ -476,3 +476,39 @@ export function cannotExportLines(byReason: Record<string, number>): string[] {
   });
 }
 
+
+/** One earlier beamtime's answer, in plain words, with the text "Use this" puts in the answer box. */
+export interface EarlierAnswerLine {
+  text: string;
+  /** The value as the answer box holds it. */
+  answer: string;
+  entryId: string;
+  field: string;
+}
+
+/**
+ * THE EARLIER ANSWERS of a question (the opt-in answer memory): each said as the server says it ("Earlier answer:
+ * pellet — Angel, 17 Nov 2026, beamtime … (same sample JK3)"), the field named first when the card asks several
+ * fields, and one plain sentence when earlier beamtimes answered differently. A hint, never an answer: nothing here
+ * is recorded, and no value is chosen for the person.
+ */
+export function earlierAnswerLines(q: LocalQuestion): { lines: EarlierAnswerLine[]; disagree: string | null } {
+  const earlier: LocalEarlierAnswer[] = q.display.earlier_answers ?? [];
+  const several = new Set(earlier.map((e) => e.field)).size > 1 || q.kind === 'optional_values';
+  const lines = earlier.map((e) => ({
+    text: several ? `${capitalised(fieldNoun(e.field))}: ${e.said}` : e.said,
+    answer: typeof e.value === 'string' ? e.value : JSON.stringify(e.value),
+    entryId: e.entry_id,
+    field: e.field,
+  }));
+  const differ = [...new Set(earlier.filter((e) => e.disagrees).map((e) => e.field))];
+  const disagree =
+    differ.length === 0
+      ? null
+      : `Earlier beamtimes gave different answers for the ${differ.map((f) => fieldNoun(f)).join(' and the ')}. Choose the one that applies here, or give your own; none is picked for you.`;
+  return { lines, disagree };
+}
+
+function capitalised(s: string): string {
+  return s.length > 0 ? s[0].toUpperCase() + s.slice(1) : s;
+}

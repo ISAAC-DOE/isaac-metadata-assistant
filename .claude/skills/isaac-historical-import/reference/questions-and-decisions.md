@@ -75,6 +75,43 @@ group is confirmed the minimum names it in `answer_first` (not counted; never af
 - Ask `produced_by` ("who made these measurements?") once, per beamtime; offer a folder-name hint
   as a question, not an answer. `--by` is the name the scientist gave in Step 1; do not ask again.
 
+## Earlier answers (opt-in, this computer only)
+
+ISAAC can remember what a scientist confirmed on EARLIER beamtimes and show it beside the same question on a new
+one. Off until they agree. **Ask once**, in plain words, when `<isaac> answer-memory status` says
+`enabled: false` and `file_exists: false`: "Shall I remember the answers you confirm, for your future beamtimes, on
+this computer only? Next time I'd show them as suggestions; nothing is ever filled in for you." Yes →
+`<isaac> answer-memory on --by "<name>"`; no → nothing, and do not ask again. If it was turned off
+(`file_exists: true`), do not ask: they chose. From then on every answer recorded with `--by`, and every applied
+template or workbook import, is remembered at the moment it is recorded (never "I don't know", a reject, my
+readings, a value no person confirmed, a dry run or a preview). Answers recorded before it was on are not: to also
+remember them, ask, and only on their yes run `<isaac> answer-memory learn <bundle> --by "<name>"`. They can see it
+(`<isaac> answer-memory list`), stop it (`<isaac> answer-memory off`) or forget answers
+(`<isaac> answer-memory forget --entry <id>`, `--beamtime <folder name>`, `--all`). A forgotten answer stays
+forgotten: only a new answer they give later is remembered. If the file cannot be read, `forget --all` removes it
+(every remembered answer is lost, and the memory is off until `on`): say so and ask first.
+
+A question that matches gains `earlier_answers` (hints of kind `earlier_answer`, each with `said`, `entry_id`,
+`matched_on`) and one `earlier_answers_statement`; the `minimum_for_one_group` questions carry them too. Nothing
+else changes: ids, counts, blocking and `text` are the same. Each target an earlier answer is shown for is recorded
+in the bundle's `exposures` (command `bundle questions (earlier answer)`), as the file values a page shows are. A
+hint is shown only for the same scope: a sample fact (`sample.*`) for the same sample name the grouping read AND a
+research group or organization confirmed in BOTH bundles and equal (none on either side: no hint), a beamline fact
+(endstation, site, facility organization, the clock's time zone) for the same facility and beamline confirmed in
+BOTH bundles (compared with the separator: `BL11-2` is never `BL1-12`; `BL152`, with none, matches nothing), the
+facility and beamline themselves for the same SPEC header fingerprint, the research group for the same confirmed
+organization and the organization for the same confirmed group. So answer the facility, beamline and who produced
+the data first: their earlier answers then appear.
+
+Say it as last time's answer, never as this beamtime's: "On SYN_2100-01 (17 Nov 2026) Angel said the ZZ1 pellet
+form: same here?" Record it only on their yes, as their own answer: the question's `answer_command` with
+`--decision correct --value <that exact value> --from-earlier-answer <entry_id>` (the clock zone:
+`--decision set_clock_time_zone --value <it> --from-earlier-answer <entry_id>`); the note says where it came from.
+Any other answer is an ordinary answer without the flag. `disagrees: true` (the statement starts "Earlier answers
+disagree"): read every value back with who and when, and ask which applies; never pick one. **Processing-method
+answers** (dead-time rules, which energy column a protocol reads) are not remembered here: they belong to the
+versioned processing protocol in the repository, reviewed by the processing reviewers.
+
 ## Questions that need care
 
 - **One-group questions** show `scope: group:<id>` even when their id was made at experiment scope
@@ -333,7 +370,8 @@ with `--only`, deferred or changed is never repeated for another group. The repl
   (beamline 4-3 style) scan headers write the start as a local clock time with no zone, so those
   start times have no value until the scientist states the zone the instrument clock was set to.
   Ask it in their words; **suggest no zone** — no file states one, and the facility's location is
-  not evidence about the clock. Record:
+  not evidence about the clock. (An `earlier_answers` hint for the same confirmed beamline is their own earlier
+  answer: read it back as such, as above.) Record:
   `<isaac> bundle decide <bundle> --question <Q> --decision set_clock_time_zone --value <the IANA name they give: Area/Location, or UTC> --by "<name>"` (an offset like
   `-08:00` or an abbreviation like `PST` is refused; ask again for the zone name; a value starting
   with `-` must be written `--value=-08:00` or the command line itself rejects it before any check). Then each start
