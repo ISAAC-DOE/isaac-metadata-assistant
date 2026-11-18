@@ -2235,7 +2235,7 @@ describe('beamtime context under a question: quotes, values and images, each wit
   function ctxQ(context?: LocalQuestion['context']): LocalQuestion {
     return question({ question_id: 'Q-ctx0000001', scope: 'experiment', ...(context ? { context } : {}) });
   }
-  function stubWith(q: LocalQuestion, body: ApiLocalQuestions = questionsBody([q])) {
+  function stubWith(q: LocalQuestion, body: ApiLocalQuestions = questionsBody([q]), blob = new Blob(['SYN'], { type: 'image/png' })) {
     vi.stubEnv('VITE_ISAAC_LOCAL_IMPORTS', '1');
     const calls = stubFetchRoutes({
       'GET /api/local-bundles': { body: listBody },
@@ -2247,7 +2247,7 @@ describe('beamtime context under a question: quotes, values and images, each wit
       const url = typeof input === 'string' ? input : input instanceof URL ? input.href : input.url;
       if (url.includes('/file?')) {
         files.push({ url, headers: (init?.headers ?? {}) as Record<string, string> });
-        return { ok: true, status: 200, headers: { get: () => null }, blob: async () => new Blob(['SYN'], { type: 'image/png' }) } as unknown as Response;
+        return { ok: true, status: 200, headers: { get: () => null }, blob: async () => blob } as unknown as Response;
       }
       return inner(input, init);
     }));
@@ -2326,6 +2326,35 @@ describe('beamtime context under a question: quotes, values and images, each wit
     expect(within(nearest).getByRole('heading', { name: COPY.contextApproveCurve })).toBeInTheDocument();
     expect(await within(nearest).findByRole('img', { name: 'Processing plot of the merged XAS curve for SYN_01_ZZ1_100mV.' })).toBeInTheDocument();
     expect(files).toHaveLength(1);
+  });
+
+  it('an SVG and a result with no plot are said not shown, and neither is fetched', async () => {
+    const q = ctxQ([
+      { kind: 'plot', label: "ISAAC's merged curve for SYN_01_ZZ1_100mV", source: "ISAAC's processing (a draft protocol)",
+        group_id: 'rg-syn', not_shown: 'this result has no plot' },
+      { kind: 'image', label: "An image from the beamtime's documents", source: 'a document, extracted by ISAAC',
+        path: 'extracted/abc/001_00.png', base: 'notes', not_shown: 'SVG' },
+      { kind: 'image', label: "An image from the beamtime's documents", source: 'a document, extracted by ISAAC',
+        path: 'extracted/abc/002_00.svg', base: 'notes', alt: 'Image from a document.' },
+    ]);
+    const { files } = stubWith(q);
+    renderAt(ROUTES.localImportBundle('synthetic-beamtime'));
+    const card = await cardOf(q);
+    const said = within(card).getAllByTestId('li-context-not-shown').map((p) => p.textContent);
+    expect(said).toEqual([`${COPY.contextNotShown} this result has no plot.`, `${COPY.contextNotShown} SVG.`]);
+    expect(within(card).queryByRole('img')).toBeNull();
+    expect(files).toHaveLength(0);
+  });
+
+  it('a served file that is not a PNG or JPEG is never shown as one', async () => {
+    const q = ctxQ([CONTEXT[2]]);
+    const { files } = stubWith(q, questionsBody([q]), new Blob(['<svg/>'], { type: 'image/svg+xml' }));
+    renderAt(ROUTES.localImportBundle('synthetic-beamtime'));
+    const card = await cardOf(q);
+    expect(await within(card).findByText(COPY.contextImageFailed)).toBeInTheDocument();
+    expect(files).toHaveLength(1);
+    expect(within(card).queryByRole('img')).toBeNull();
+    expect(URL.createObjectURL).not.toHaveBeenCalled();
   });
 
   it('a question with no context shows no context block and fetches no file', async () => {

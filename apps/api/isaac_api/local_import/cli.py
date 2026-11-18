@@ -1785,13 +1785,12 @@ def _show_consolidated_question(args) -> int:
             raise M.MutationRefused(
                 f"No question with id {args.id!r} in this bundle (`isaac bundle questions <dir>` lists the ids).", code=EXIT_NOT_FOUND)
         shown = _question_exposures([q], bundle)
-        if shown:
-            M.expose_and_load(Path(args.bundle_dir), shown, "bundle show question")
-        # QUESTION CONTEXT (question_context), in full: evidence beside the question, never its answer
+        # QUESTION CONTEXT (question_context), in full: evidence beside the question, never its answer; its file
+        # values are recorded with the question's own, in ONE write, before printing
         context_shown: list = []
         context = QC.context_for(q, QC.Index(bundle, Path(args.bundle_dir)), context_shown)
-        if context_shown:
-            M.expose_and_load(Path(args.bundle_dir), list(dict.fromkeys(context_shown)), QC.EXPOSURE_COMMAND)
+        _expose_each(Path(args.bundle_dir), [(shown, "bundle show question"),
+                                             (list(dict.fromkeys(context_shown)), QC.EXPOSURE_COMMAND)])
         return {**{k: v for k, v in _compact_question(q).items() if k not in extra}, **extra,
                 **({"context": QC.with_files(context, Path(args.bundle_dir)), "context_note": QC.NOTE} if context else {})}
 

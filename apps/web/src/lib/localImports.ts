@@ -384,10 +384,10 @@ export interface LocalQuestion {
 
 /** One item of a question's context, each with where it came from (`source`). */
 export type LocalContextItem =
-  | (LocalContextBase & { kind: 'quote'; origin: 'ai_reading' | 'parser'; path: string | null; locator: string | null; quote: string; field?: string | null; strength?: string | null })
+  | (LocalContextBase & { kind: 'quote'; origin: 'ai_reading' | 'parser' | 'document'; path: string | null; locator: string | null; quote: string; field?: string | null; strength?: string | null })
   | (LocalContextBase & { kind: 'values'; columns: string[]; rows: string[][]; rows_total: number; note?: string })
-  | (LocalContextBase & { kind: 'plot'; path: string; base: 'bundle'; group_id: string; alt: string; qc_verdict?: string })
-  | (LocalContextBase & { kind: 'image'; path: string; base: 'bundle' | 'notes' | 'source'; alt: string; document?: string; text_before?: string })
+  | (LocalContextBase & { kind: 'plot'; path?: string; base?: 'bundle'; group_id: string; result_id?: string; alt?: string; qc_verdict?: string; not_shown?: string })
+  | (LocalContextBase & { kind: 'image'; path: string; base: 'bundle' | 'notes' | 'source'; alt?: string; document?: string; text_before?: string; not_shown?: string })
   | (LocalContextBase & { kind: 'example_files'; names: string[]; total: number })
   | (LocalContextBase & { kind: 'table_row'; path: string | null; locator: string | null; cells: Record<string, string> });
 
@@ -674,10 +674,15 @@ export function contextRowsText(shown: number, total: number): string | null {
   return total > shown ? `Showing ${shown} of ${total}.` : null;
 }
 
-/** The context images the page can show inline: a plot in the bundle or an image in its notes folder (an image of
- *  the beamtime folder itself is named, never served). */
+/** The image types the page shows inline: PNG and JPEG only. Never an SVG, which can carry script. */
+export const SHOWN_IMAGE_TYPES: readonly string[] = ['image/png', 'image/jpeg'];
+
+/** The context images the page can show inline: a PNG or JPEG plot in the bundle or image in its notes folder. An
+ *  item the API says is `not_shown` (an SVG, a result with no plot) and an image of the beamtime folder itself are
+ *  never fetched. */
 export function servedContextFile(item: LocalContextItem): { path: string; base: 'bundle' | 'notes' } | null {
   if (item.kind !== 'plot' && item.kind !== 'image') return null;
+  if (item.not_shown || !item.path || !/\.(png|jpe?g)$/i.test(item.path)) return null;
   return item.base === 'bundle' || item.base === 'notes' ? { path: item.path, base: item.base } : null;
 }
 
@@ -814,6 +819,7 @@ export const LOCAL_IMPORTS_COPY = {
   contextImageLoading: 'Loading the image…',
   contextImageFailed: 'The image could not be shown here.',
   contextImageInFolder: 'In the beamtime folder:',
+  contextNotShown: 'Not shown:',
   earlierHeading: 'From an earlier beamtime',
   earlierUse: 'Use this',
   earlierFilled: 'Filled in the answer box. Nothing is recorded until you answer.',

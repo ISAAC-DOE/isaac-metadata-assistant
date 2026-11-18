@@ -60,6 +60,7 @@ import {
   type QuestionSection,
   contextRowsText,
   servedContextFile,
+  SHOWN_IMAGE_TYPES,
 } from '../lib/localImports';
 import {
   cannotExportLines,
@@ -2661,15 +2662,22 @@ function ContextBody({ item, bundle }: { item: LocalContextItem; bundle: string 
     }
     case 'plot':
     case 'image': {
+      if (item.not_shown) {
+        return (
+          <p className="li-hint" data-testid="li-context-not-shown">
+            {COPY.contextNotShown} {item.not_shown}.
+          </p>
+        );
+      }
       const served = servedContextFile(item);
-      if (!served) {
+      if (!served || !item.path) {
         return (
           <p className="li-hint">
             {COPY.contextImageInFolder} <code>{item.path}</code>
           </p>
         );
       }
-      return <ContextImage bundle={bundle} path={served.path} base={served.base} alt={item.alt} />;
+      return <ContextImage bundle={bundle} path={served.path} base={served.base} alt={item.alt ?? item.label} />;
     }
     case 'example_files':
       return (
@@ -2707,7 +2715,8 @@ function ContextBody({ item, bundle }: { item: LocalContextItem; bundle: string 
   }
 }
 
-/** One plot or image, fetched with the local header (an `<img src>` cannot send it) and shown from an object URL. */
+/** One plot or image, fetched with the local header (an `<img src>` cannot send it) and shown from an object URL —
+ *  only a PNG or JPEG (`SHOWN_IMAGE_TYPES`), re-typed as that image: never an SVG, which would run as a page. */
 function ContextImage({ bundle, path, base, alt }: { bundle: string; path: string; base: 'bundle' | 'notes'; alt: string }) {
   const [src, setSrc] = useState<string | null>(null);
   const [failed, setFailed] = useState(false);
@@ -2720,11 +2729,12 @@ function ContextImage({ bundle, path, base, alt }: { bundle: string; path: strin
       .getLocalBundleFile(bundle, path, base)
       .then((blob) => {
         if (!live) return;
-        if (typeof URL.createObjectURL !== 'function') {
+        const type = (blob.type || '').split(';')[0].trim().toLowerCase();
+        if (typeof URL.createObjectURL !== 'function' || !SHOWN_IMAGE_TYPES.includes(type)) {
           setFailed(true);
           return;
         }
-        url = URL.createObjectURL(blob);
+        url = URL.createObjectURL(new Blob([blob], { type }));
         setSrc(url);
       })
       .catch(() => live && setFailed(true));

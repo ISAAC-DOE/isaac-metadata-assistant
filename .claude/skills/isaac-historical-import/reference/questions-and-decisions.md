@@ -88,12 +88,15 @@ When you ask a question, present its context before the question:
 
 - `quote`: quote the lines word for word, with the file and locator ("the logbook, line 59: '…'").
   Say where each came from: `origin: ai_reading` is my reading of the files ("my reading of the logbook quotes …"),
-  never file evidence; `parser` is a line ISAAC's parser read.
+  never file evidence; `parser` is a line ISAAC's parser read; `document` is a line of a document the extract tool
+  read. For the group and organization questions the quotes are labelled "Who is named in the files": say who the
+  lines name and let the scientist say which group and organization it is; suggest no name.
 - `values` and `table_row`: show the values as a small table (a run per row, as the files write them: the potential
   its name states, filter, emission energy, Sx/Sy/Sz, scan files); say "N of M runs shown" from `rows_total`.
 - `plot` and `image`: open each with the Read tool (`open_with_read`) so the scientist sees it, describe what it
   shows in plain words, and say where it came from (ISAAC's draft processing; a document the extract tool read). An
-  image with `base: source` is in their beamtime folder: name it.
+  image with `base: source` is in their beamtime folder: name it. An item with `not_shown` (an SVG, a result with no
+  plot) is not opened: say what it says ("the plot is an SVG, not shown"; "this result has no plot").
 - `example_files`: show the names as they are.
 - The clock: `#D` local time beside the `#E` epoch, and the offset the two imply. The offset is a value read from
   two header lines, not a time zone: suggest no zone; the scientist says which zone the clock was set to.

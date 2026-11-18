@@ -23,9 +23,10 @@ WHAT IT SERVES, AND WHAT IT NEVER DOES
   wrote into it. Never a source file: nothing here opens the imported folder.
 * ONE IMAGE AT A TIME (``…/file``): a processing plot inside the bundle folder, or an image the extract
   tool wrote into the bundle's notes folder (``<bundle>-notes``), named in a question's ``context``
-  (``question_context``). Only ``.png``, ``.jpg``, ``.jpeg`` or ``.svg``; a relative path with no ``..``,
-  no absolute or drive path, no symlink anywhere on the way, and one that resolves inside that folder
-  (:func:`resolve_context_file`). Anything else is refused before a byte is read.
+  (``question_context``). Only a PNG or JPEG, by suffix AND first bytes (never an SVG: it can carry
+  script); a relative path with no ``..``, no absolute or drive path, no symlink anywhere on the way, and
+  one that resolves inside that folder (``question_context.resolve_context_file``). Only the bytes check
+  reads the file, and only its first bytes.
 * A bundle is named by its folder name directly inside the directory. A name with a path
   separator, ``..``, a leading dot, or one that resolves (symlinks followed) outside the
   directory is refused as "no such bundle"; ``bundle.json`` is opened only through
@@ -2118,56 +2119,11 @@ def post_local_bundle_decision(
 
 # --- one context image ----------------------------------------------------------------------------------------
 
-#: The media type of each image a question's context may name (``question_context.IMAGE_SUFFIXES``).
-CONTEXT_FILE_TYPES = {".png": "image/png", ".jpg": "image/jpeg", ".jpeg": "image/jpeg", ".svg": "image/svg+xml"}
-CONTEXT_FILE_MAX_BYTES = 25 * 1024 * 1024
-#: Served images never run as a page: no script, no request, no sniffing, no caching.
+#: Served images never run as a page: no script, no request, no sniffing, no caching. Only PNG and JPEG are served,
+#: by suffix AND bytes (``question_context.resolve_context_file``); never an SVG, which can carry script.
 CONTEXT_FILE_HEADERS = {"Content-Security-Policy": "default-src 'none'; style-src 'unsafe-inline'; sandbox",
                         "X-Content-Type-Options": "nosniff", "Cache-Control": "no-store",
                         "Cross-Origin-Resource-Policy": "same-origin"}
-
-
-class ContextFileRefused(Exception):
-    def __init__(self, status: int, error: str, message: str):
-        super().__init__(message)
-        self.status, self.error, self.message = status, error, message
-
-
-def resolve_context_file(base: Path, rel: str) -> Path:
-    """The image ``rel`` names inside ``base``, or :class:`ContextFileRefused`. ``rel`` is a relative POSIX path:
-    no ``..``, ``.`` or empty part, no absolute, home or drive path, no backslash or NUL; its suffix one of
-    :data:`CONTEXT_FILE_TYPES`; no part of it (and not ``base``) a symlink; it resolves inside ``base`` to a regular
-    file of at most :data:`CONTEXT_FILE_MAX_BYTES`."""
-    from pathlib import PurePosixPath
-
-    def refuse(status: int, error: str, message: str):
-        raise ContextFileRefused(status, error, message)
-
-    if not isinstance(rel, str) or not rel or "\x00" in rel or "\\" in rel or ":" in rel:
-        refuse(400, "path_refused", "The path must be a plain relative path inside the folder.")
-    pure = PurePosixPath(rel)
-    if pure.is_absolute() or rel.startswith(("/", "~")) or any(part in ("", ".", "..") for part in rel.split("/")):
-        refuse(400, "path_refused", "The path must be a plain relative path inside the folder (no `..`, no absolute path).")
-    if pure.suffix.lower() not in CONTEXT_FILE_TYPES:
-        refuse(415, "type_refused", "Only a .png, .jpg, .jpeg or .svg image is served.")
-    if base.is_symlink() or not base.is_dir():
-        refuse(404, "file_not_found", "No such image in this bundle.")
-    root = base.resolve(strict=True)
-    here = base
-    for part in pure.parts:
-        here = here / part
-        if here.is_symlink():
-            refuse(403, "symlink_refused", "A path through a symbolic link is not served.")
-    try:
-        target = here.resolve(strict=True)
-        target.relative_to(root)
-    except (OSError, ValueError):
-        refuse(404, "file_not_found", "No such image in this bundle.")
-    if not target.is_file():
-        refuse(404, "file_not_found", "No such image in this bundle.")
-    if target.stat().st_size > CONTEXT_FILE_MAX_BYTES:
-        refuse(413, "file_too_large", "This image is larger than the page shows.")
-    return target
 
 
 @router.get(
@@ -2176,13 +2132,14 @@ def resolve_context_file(base: Path, rel: str) -> Path:
     description=(
         "One image a question's `context` names: a processing plot inside the bundle folder (`base=bundle`), or an "
         "image the extract tool wrote into the bundle's notes folder (`base=notes`, the `<bundle>-notes` folder "
-        "beside it). Only `.png`, `.jpg`, `.jpeg` and `.svg`; the path is relative to that folder, with no `..`, no "
-        "absolute path and no symbolic link anywhere on the way. Nothing else is served, and nothing is written."
+        "beside it). Only a PNG or JPEG, by its name AND its first bytes (never an SVG); the path is relative to that "
+        "folder, with no `..`, no absolute path and no symbolic link anywhere on the way. Nothing else is served, and "
+        "nothing is written."
     ),
     response_description="The image's bytes.",
     responses={**_R_UNAUTHORIZED, **_R_LOCAL, **_R_NOT_FOUND,
                400: {"description": "The path is not a plain relative path inside the folder."},
-               415: {"description": "Not one of the image types served."}},
+               415: {"description": "Not a PNG or JPEG image (by its name and its bytes)."}},
 )
 @_io_refusals
 def get_local_bundle_file(
@@ -2190,6 +2147,8 @@ def get_local_bundle_file(
     path: str = Query(..., min_length=1, max_length=512, description="The file's path inside the folder."),
     base: str = Query("bundle", pattern="^(bundle|notes)$", description="`bundle` or `notes`."),
 ):
+    from .local_import import question_context as QC
+
     bdir, refused = _open(bundle)
     if refused is not None:
         return refused
@@ -2203,10 +2162,10 @@ def get_local_bundle_file(
         except OSError:
             return _refuse(404, "file_not_found", "No such image in this bundle.")
     try:
-        target = resolve_context_file(folder, path)
-    except ContextFileRefused as exc:
+        target, media_type = QC.resolve_context_file(folder, path)
+    except QC.ContextFileRefused as exc:
         return _refuse(exc.status, exc.error, exc.message)
-    return FileResponse(target, media_type=CONTEXT_FILE_TYPES[target.suffix.lower()], headers=dict(CONTEXT_FILE_HEADERS))
+    return FileResponse(target, media_type=media_type, headers=dict(CONTEXT_FILE_HEADERS))
 
 
 __all__ = [

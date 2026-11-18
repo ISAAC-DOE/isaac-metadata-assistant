@@ -22,6 +22,7 @@ Pinned, each by behaviour:
 from __future__ import annotations
 
 import contextlib
+import copy
 import hashlib
 import io
 import json
@@ -177,7 +178,9 @@ def _full(bdir: Path):
     ({"kind": "naming_counter_positions", "target_field_path": None}, "naming"),
     ({"kind": "condition_label", "target_field_path": "sample.sample_id"}, "naming"),
     ({"kind": "confirm_value", "target_field_path": "system.technique"}, "technique"),
-    ({"kind": "missing_value", "target_field_path": "attribution.produced_by.group"}, None),
+    ({"kind": "missing_value", "target_field_path": "attribution.produced_by.group"}, "people"),
+    ({"kind": "missing_value", "target_field_path": "attribution.produced_by.organization"}, "people"),
+    ({"kind": "missing_value", "target_field_path": "system.facility.site"}, None),
     ({"kind": "optional_values", "fields": {"system.facility.site": []}}, None),
 ])
 def test_each_question_kind_and_field_follows_its_documented_rule(q, theme):
@@ -234,6 +237,7 @@ def test_context_attaches_per_the_rules_and_every_item_is_bounded_and_says_its_s
     assert {i["kind"] for i in technique["context"]} <= {"quote", "example_files"} and technique["context"]
     label = _q(payload, lambda q: q["kind"] == "condition_label")
     assert [i["kind"] for i in label["context"]] == ["example_files"]
+    # the corpus's documents name nobody: the group question carries no context
     who = _q(payload, lambda q: q.get("target_field_path") == "attribution.produced_by.group")
     assert "context" not in who
 
@@ -353,6 +357,7 @@ def test_the_endpoint_serves_a_plot_and_an_extracted_image_with_safe_headers(cli
     ("../syn-notes/extracted/x.png", 400), ("processing/../../syn-notes/x.png", 400), ("/etc/passwd.png", 400),
     ("processing\\x.png", 400), ("C:/x.png", 400), ("./processing/x.png", 400), ("processing//x.png", 400),
     ("bundle.json", 415), ("summary.md", 415), ("processing/x.PNG.txt", 415), ("processing/none.png", 404),
+    ("processing/none.svg", 415),
 ])
 def test_the_endpoint_refuses_traversal_absolute_paths_and_other_types(client, path, status):
     r = client.get("/api/local-bundles/syn/file", params={"path": path, "base": "bundle"})
@@ -381,6 +386,29 @@ def test_the_endpoint_refuses_a_symlink_anywhere_on_the_way_and_a_symlinked_note
     assert r.status_code == 422
 
 
+SVG = b'<?xml version="1.0"?><svg xmlns="http://www.w3.org/2000/svg"><script>fetch("/api/x")</script></svg>'
+
+
+@pytest.mark.parametrize(("name", "data"), [
+    ("plot.svg", SVG),  # an SVG is never served: it can carry script
+    ("fake.png", SVG),  # an SVG named .png: the bytes decide
+    ("fake.jpg", png_bytes()),  # a PNG named .jpg: suffix and bytes must agree
+    ("text.png", b"SYNTHETIC not an image at all"),
+    ("empty.jpeg", b""),
+])
+def test_the_endpoint_serves_only_png_and_jpeg_checked_by_their_bytes(client, bdir, name, data):
+    (bdir / "processing" / name).write_bytes(data)
+    r = client.get("/api/local-bundles/syn/file", params={"path": f"processing/{name}"})
+    assert r.status_code == 415, (name, r.status_code)
+    assert r.headers["content-type"].startswith("application/json") and b"<svg" not in r.content
+
+
+def test_a_jpeg_is_served_as_image_jpeg(client, bdir):
+    (bdir / "processing" / "photo.jpg").write_bytes(b"\xff\xd8\xff\xe0" + b"\x00" * 32)
+    r = client.get("/api/local-bundles/syn/file", params={"path": "processing/photo.jpg"})
+    assert r.status_code == 200 and r.headers["content-type"] == "image/jpeg"
+
+
 def test_the_endpoint_needs_the_local_header_like_every_local_bundle_route(client, bdir):
     r = TestClient(create_app(), base_url=LOCAL["base_url"], client=LOCAL["client"]).get(
         "/api/local-bundles/syn/file", params={"path": _plot_path(bdir)})
@@ -402,6 +430,221 @@ def test_the_questions_route_carries_each_questions_context_and_records_its_expo
     plot = next(i for i in env["context"] if i["kind"] == "plot")
     assert client.get("/api/local-bundles/syn/file", params={"path": plot["path"], "base": plot["base"]}).status_code == 200
     assert any(e["command"] == QC.EXPOSURE_COMMAND for e in M.load(bdir)["exposures"])
+
+
+# --- review fixes: SVG never shown, the exact result's plot, exposures only for what is printed, token-boundary
+# sample matching, file containment, one write, bounded document reads, who the files name ----------------------
+
+POT = "context.electrochemistry.potential_setpoint_V"
+
+
+def _env(qs):
+    return _q({"questions": qs}, lambda q: q.get("target_field_path") == "context.environment")
+
+
+def _form(qs):
+    return _q({"questions": qs}, lambda q: q.get("target_field_path") == "sample.sample_form" and "'ZZ1'" in q["text"])
+
+
+def _extracted(bdir: Path, b) -> Path:
+    return QC.notes_dir_of(bdir) / "extracted" / str(_notes_source(b)["content_sha256"])[:12]
+
+
+def test_an_svg_plot_or_image_is_said_not_shown_and_never_given_to_open(bdir):
+    b = M.load(bdir)
+    gid = _group_of(b, "run-001")
+    res = next(r for r in b["processing_results"] if r["result_id"] == "proc-syn-isaac")
+    svg_plot = f"processing/{gid}/r-syn/plot.svg"
+    (bdir / svg_plot).write_bytes(SVG)
+    res["outputs"]["files"][0]["relative_path"] = svg_plot
+    (_extracted(bdir, b) / "001_0a1b2c3d.png").write_bytes(SVG)  # an SVG behind a .png name: the bytes decide
+    qs, _ = QC.annotate(Q.consolidate(b)["questions"], b, bdir)
+    [plot] = [i for i in _env(qs)["context"] if i["kind"] == "plot"]
+    assert plot["not_shown"] == "SVG"
+    [image] = [i for i in _form(qs)["context"] if i["kind"] == "image"]
+    assert image["not_shown"] == "SVG"
+    assert all("open_with_read" not in i for i in QC.with_files([plot, image], bdir))
+
+
+def test_the_plot_is_the_one_of_the_result_an_approval_would_name_and_none_is_said_so(bdir):
+    b = M.load(bdir)
+    gid = _group_of(b, "run-001")
+    isaac = next(r for r in b["processing_results"] if r["result_id"] == "proc-syn-isaac")
+    rejected = {**copy.deepcopy(isaac), "result_id": "proc-syn-rejected", "state": B.STATE_REJECTED}
+    latest = {**copy.deepcopy(isaac), "result_id": "proc-syn-latest", "outputs": {"files": [], "e0_eV": 9002.0}}
+    # the latest undecided result has no plot: an older plotted one is NOT shown in its place
+    b["processing_results"] = [rejected, isaac, latest]
+    assert Q.curve_result(b, gid)["result_id"] == "proc-syn-latest"
+    assert QC.Index(b, bdir).result_for(gid)["result_id"] == "proc-syn-latest"
+    qs, _ = QC.annotate(Q.consolidate(b)["questions"], b, bdir)
+    [plot] = [i for i in _env(qs)["context"] if i["kind"] == "plot"]
+    assert "path" not in plot and plot["not_shown"] == "this result has no plot"
+    absorber = _q({"questions": qs}, lambda q: q["kind"] == "confirm_absorber")
+    edge = next(i for i in absorber["context"] if i["label"] == "Where each group's curve has its edge")
+    assert edge["rows"][0][1] == "9002.0"
+    # a rejected result is never the one a question concerns
+    b["processing_results"] = [rejected]
+    assert QC.Index(b, bdir).result_for(gid) is None
+    qs, _ = QC.annotate(Q.consolidate(b)["questions"], b, bdir)
+    assert not [i for i in _env(qs)["context"] if i["kind"] == "plot"]
+    # a plot path from bundle.json that leaves the bundle folder is not shown, and its path is not repeated
+    b["processing_results"] = [isaac]
+    isaac["outputs"]["files"][0]["relative_path"] = "../syn-notes/../../outside.png"
+    qs, _ = QC.annotate(Q.consolidate(b)["questions"], b, bdir)
+    [plot] = [i for i in _env(qs)["context"] if i["kind"] == "plot"]
+    assert "path" not in plot and plot["not_shown"] == "its plot file is not in the bundle folder"
+
+
+def _strings(obj) -> list[str]:
+    if isinstance(obj, str):
+        return [obj]
+    if isinstance(obj, dict):
+        return [s for v in obj.values() for s in _strings(v)]
+    if isinstance(obj, list):
+        return [s for v in obj for s in _strings(v)]
+    return []
+
+
+def _said(c) -> list[str]:
+    out = [re.sub(r"\s*eV$", "", str(x)) for x in c.get("observed_literals") or () if x is not None]
+    for e in c.get("evidence") or ():
+        if e.get("literal_value") is not None:
+            m = re.search(r"motor `(S[xyz])`", str(e.get("locator") or ""))
+            v = str(e["literal_value"])
+            out.append(v.removeprefix(m.group(1)).strip() if m else v)
+    return [" ".join(s.split())[:30] for s in out if s.strip()]
+
+
+@pytest.mark.parametrize("full", [True, False])
+def test_exposures_are_recorded_only_for_the_values_the_printed_context_holds(bdir, full):
+    b = M.load(bdir)
+    cands = {c["candidate_id"]: c for c in b["candidates"]}
+    payload = Q.consolidate(b)
+    qs, shown = QC.annotate(payload["questions"], b, bdir, full=full)
+    printed = "\n".join(_strings([q.get("context") for q in qs]))
+    assert shown
+    for _, cid in shown:
+        assert any(s in printed for s in _said(cands[cid])), (full, cid, _said(cands[cid]))
+    # the environment question: a potential is exposed for exactly the rows printed (3 compact, 8 full, of 9)
+    [env], shown = QC.annotate([_env(payload["questions"])], b, bdir, full=full)
+    values = next(i for i in env["context"] if i["kind"] == "values")
+    rows = {r[0] for r in values["rows"]}
+    assert len(rows) == (QC.MAX_ROWS if full else QC.COMPACT_ROWS)
+    idx = QC.Index(b)
+    assert {idx.run_name(cands[cid]["run_id"]) for _, cid in shown if cands[cid].get("target_field_path") == POT} == rows
+
+
+def test_the_cli_page_records_only_the_compact_contexts_exposures(bdir):
+    b = M.load(bdir)
+    cands = {c["candidate_id"]: c for c in b["candidates"]}
+    code, page = _cli(["bundle", "questions", bdir, "--limit", "200", "--with-targets"])
+    assert code == 0
+    printed = "\n".join(_strings([q.get("context") for q in page["questions"]] + [page["minimum_for_one_group"]]))
+    exposed = [e["target"]["id"] for e in M.load(bdir)["exposures"] if e["command"] == QC.EXPOSURE_COMMAND]
+    assert exposed
+    for cid in exposed:
+        assert any(s in printed for s in _said(cands[cid])), (cid, _said(cands[cid]))
+
+
+class _Images:
+    """Just what the sample-image rule reads: the sample name the files write, and one image."""
+
+    def __init__(self, sample: str, near: str):
+        self.sample, self.near = sample, near
+
+    def _cands(self, rid, *, key=None, path=None):
+        return [{"observed_literals": [self.sample]}] if path == "sample.material.name" else []
+
+    def images(self):
+        return [{"path": "extracted/abc/001_00.png", "base": "notes", "document": None, "before": None, "near": self.near}]
+
+
+@pytest.mark.parametrize(("near", "shown"), [
+    ("SYNTHETIC the first hold, air dried", False),  # 'Ir' inside 'first' and 'air' is not the sample
+    ("SYNTHETIC a gold foil for the reference", False),  # 'foil' is usually the reference foil
+    ("SYNTHETIC a filmed procedure", False),  # a sample word is a whole word
+    ("SYNTHETIC the Ir/C pellet", True),
+    ("SYN_Ir_cell.png", True),
+    ("SYNTHETIC two powders side by side", True),
+])
+def test_sample_names_and_words_match_on_token_boundaries_and_foil_is_no_sample_word(near, shown):
+    assert "foil" not in QC.SAMPLE_WORDS
+    assert bool(QC._image_items(_Images("Ir", near), ["run-001"])) is shown
+
+
+def test_with_files_gives_a_file_to_open_only_inside_the_bundle_or_its_notes_folder(bdir, tmp_path):
+    (tmp_path / "x.png").write_bytes(png_bytes())
+    good = {"kind": "plot", "path": _plot_path(bdir), "base": "bundle"}
+    items = [good, {"kind": "plot", "path": "../../outside.png", "base": "bundle"},
+             {"kind": "plot", "path": str(tmp_path / "x.png"), "base": "bundle"},
+             {"kind": "image", "path": "../syn/" + _plot_path(bdir), "base": "notes"},
+             {"kind": "image", "path": "photos/x.png", "base": "source"},
+             {"kind": "quote", "quote": "SYNTHETIC"}]
+    out = QC.with_files(items, bdir)
+    assert [i.get("path") for i in out] == [good["path"], "photos/x.png", None]
+    assert Path(out[0]["open_with_read"]) == (bdir / good["path"]).resolve()
+    assert all("open_with_read" not in i for i in out[1:])
+
+
+def test_bundle_show_question_records_its_exposures_in_one_write(bdir, monkeypatch):
+    env = _env(Q.consolidate(M.load(bdir))["questions"])
+    writes = []
+    real = M.save_bundle
+    monkeypatch.setattr(M, "save_bundle", lambda *a, **k: writes.append(1) or real(*a, **k))
+    code, shown = _cli(["bundle", "show", bdir, "question", env["question_id"]])
+    assert code == 0 and shown["context"]
+    assert len(writes) == 1
+    commands = {e["command"] for e in M.load(bdir)["exposures"]}
+    assert QC.EXPOSURE_COMMAND in commands
+
+
+def test_images_skip_a_symlinked_notes_folder_and_each_document_text_is_read_once(bdir, tmp_path, monkeypatch):
+    reads = []
+    real = QC._read_capped
+    monkeypatch.setattr(QC, "_read_capped", lambda p: reads.append(p) or real(p))
+    QC._DOC_CACHE.clear()
+    b = M.load(bdir)
+    notes = QC.notes_dir_of(bdir)
+    (notes / "extracted" / "aaaaaaaaaaaa").mkdir()
+    (notes / "extracted" / "aaaaaaaaaaaa" / "text.md").write_text("SYNTHETIC no images here\n", encoding="utf-8")
+    assert [i["base"] for i in QC.Index(b, bdir).images()].count("notes") == 2
+    QC.Index(b, bdir).images()
+    assert len(reads) == 1  # only the text beside images, and once across two pages
+    moved = tmp_path / "elsewhere"
+    shutil.move(str(notes), moved)
+    notes.symlink_to(moved)
+    assert not [i for i in QC.Index(b, bdir).images() if i["base"] == "notes"]
+
+
+def test_the_group_and_organization_questions_quote_who_the_files_name(bdir):
+    b = M.load(bdir)
+    notes = _notes_source(b)
+    text = _extracted(bdir, b) / "text.md"
+    text.write_text(text.read_text(encoding="utf-8") + "SYNTHETIC catalyst prepared by Zorblat\n\n"
+                    "Quillon\u2019s Availability:\n\nThe cell was cleaned by the end\n\n[table 1]\nTime | Friday\n",
+                    encoding="utf-8")
+    gid = _group_of(b, "run-001")
+    b["ai_interpretations"].append({
+        "interpretation_id": "ai-syn-0002", "target": {"kind": "record_group", "id": gid}, "proposed_value": "Vexley",
+        "rationale": "SYNTHETIC", "source_refs": [{"source_id": notes["source_id"], "locator": "line 3"}],
+        "method": "ai_interpretation", "model": {"model_id": "synthetic"}, "created_utc": "2099-01-01T00:00:00Z",
+        "max_state": "needs_review", "excerpt_locator": "line 3", "source_path": notes["relative_path"],
+        "quote": "SYNTHETIC the Vexley group ran the cell", "strength": "stated",
+        "field_path": "attribution.produced_by.group"})
+    QC._DOC_CACHE.clear()
+    qs, _ = QC.annotate(Q.consolidate(b)["questions"], b, bdir)
+    for path in ("attribution.produced_by.group", "attribution.produced_by.organization"):
+        q = _q({"questions": qs}, lambda q: q.get("target_field_path") == path)
+        items = q["context"]
+        assert items and all(i["kind"] == "quote" and i["label"] == "Who is named in the files" for i in items)
+        said = [i["quote"] for i in items]
+        assert "SYNTHETIC catalyst prepared by Zorblat" in said and "Quillon\u2019s Availability:" in said, said
+        assert "The cell was cleaned by the end" not in said
+        doc = next(i for i in items if i["origin"] == "document")
+        assert doc["path"] == notes["relative_path"] and doc["locator"].startswith("line ") and doc["source"]
+        assert any(i["origin"] == "ai_reading" and "Vexley" in i["quote"] and "not file evidence" in i["source"]
+                   for i in items)
+        assert q.get("suggested_value") is None and "Vexley" not in q["text"]
 
 
 # --- the skill docs -----------------------------------------------------------------------------------------------
