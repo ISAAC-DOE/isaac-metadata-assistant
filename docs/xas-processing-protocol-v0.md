@@ -145,12 +145,15 @@ scientist still approves each curve before it goes into a record.
   the first sample scan only the last, the earlier ones may precede the mono calibration). Every scan of every kept foil
   is anchored by the route's method (`shape`: the whole foil edge shifted onto the first foil scan, free scale and
   offset; anchor = that template's inflection - the shift), a scan's anchor is linear in time between the foil anchors,
-  and the reference is the median anchor of the foil `reference_foil` names (an index into the foil list). A survey
+  and the reference is the median anchor of the foil `reference_foil` names (an index into the foil list). A scan
+  before the first or after the last foil scan gets the nearest foil's anchor and says so (`outside_foil_timeline`: "outside
+  the foil timeline: nearest foil used; drift beyond it unknown", a QC warning). A survey
   foil of another element never decides the samples' edge (PROVENANCE.md M8).
-- *Normalisation:* fluorescence at a tender edge (under 4 keV), or a post-edge IF/I0 that rises with E (+10 % of the
-  step over the post-edge window), uses the engine's documented tender options (normalization.md: `response_power 3`,
-  `step_slope 1`, `pre_tail`, the pre-edge window ending 24 eV below the edge, before the resonant-Raman foot), said in
-  `normalization.tender`. The beamtime's I0 glitch (+- max(1.5 FWHM, 1 eV); a doublet's whole fit window) and every
+- *Normalisation:* fluorescence at a tender edge (under 4 keV) uses the engine's documented tender options
+  (normalization.md: `response_power 3`, `step_slope 1`, `pre_tail`, the pre-edge window ending 24 eV below the edge,
+  before the resonant-Raman foot), said in `normalization.tender`. Above 4 keV a post-edge IF/I0 that rises with E (+20 %
+  of the step over the post-edge window) changes no option: a QC warning `post_edge_rises` recommends review (a dilute
+  sample on a large background, or a distorted scan, reads like that). The beamtime's I0 glitch (+- max(1.5 FWHM, 1 eV); a doublet's whole fit window) and every
   other dip most scans share are kept out of the fit windows (`normalization.exclude_eV`), never removed from the data.
 - *Decisions:* "before the stable window" drops only when the evolving normalised-shape metric moved beyond the shape
   guard's noise threshold (the stability rule's floor, 3 x the scans' own sd), else it is kept and said
@@ -158,17 +161,28 @@ scientist still approves each curve before it goes into a record.
   end of the pre-edge window to 50 eV into the post-edge window is complete (`shorter_but_complete`). The engine's
   `ratio_shape` (E_edge + 6 eV to the grid end, 5 %) and `post_drift` (E_edge + 60..95 eV vs the last 40 eV, 15 %)
   screens run, glitch windows excluded; a flag drops only when, after a free scale and offset fitted over the pre-edge
-  and post-edge, the smoothed residual still departs 5 % of the edge step and 3 x its noise (a within-scan step collapse
-  is shape; a uniformly weaker scan, or one on a background, is not: `intensity_not_shape`). WITHIN-SPOT DOSE DAMAGE
-  (`isaac.xas.dose_damage.v1`): when at two or more spots (and more than half of the spots measured more than once) every
-  later scan differs from the first scan there in one normalised-shape metric, the same way, beyond the noise, the
-  first scan per spot is kept and the others dropped with "beam damage at each spot: later scans at the same spot change
-  shape"; never on intensity, never on one spot, and overridable.
+  and post-edge, the smoothed residual still departs 5 % of the edge step and 5 x its noise (a within-scan step collapse
+  is shape; a uniformly weaker scan, or one on a background, is not: `intensity_not_shape`). A WITHIN-SPOT
+  CHANGE (`isaac.xas.dose_damage.v2`; scans compared in normalised shape over the white-line window, after a free scale
+  and offset): BEAM DAMAGE only when, at most spots measured three or more times (at least two), the change GROWS with
+  dose (scan 3 differs from scan 1 more than scan 2 does), goes the way the edge expects (the white line falls at Ir and
+  Pt L3; elsewhere the one direction every spot shares, said) and a fresh spot recovers: the later scans are dropped,
+  "beam damage at each spot: later scans at the same spot change shape". A FIRST SCAN STILL SETTLING when the later
+  scans at most such spots agree with each other and the first does not: the first scan per spot is dropped. A change
+  that carries on across spots is the sample's evolution (not this rule). Otherwise (only two scans per spot, mixed
+  patterns, the wrong direction for the edge, a logbook note on CV, equilibration or discarding the first scans) a
+  QUESTION with both readings: nothing decided, review flag `dose_reading_question`, a bulk approval refused. A logbook
+  exclude / start_from / keep_only note on the group always wins; a shape-screen drop is never cleared; the
+  scientist's `set_dose_reading` (`beam_damage`, `first_scan_settling`, `not_beam_damage`) on the group, else on
+  `--target experiment` for the whole beamtime, decides the reading.
 - *Spots* of SPEC split files (`<run>_dir/*.txt`: `#P` positions, no `#O` names) pair with the `#O` motor names of the
   run's acquisition SPEC file (hash-checked; v0 and v1).
-- *Single-point I0 dropouts* (I0 under 1 % of the median of its 5 neighbours each side): that POINT is excluded from its
-  scan's contribution to the average (the grid points it would feed are left to the other scans), said as "point
-  excluded: I0 dropout (n counts at E eV)" on the scan and in `point_exclusions`; never interpolated, never the scan.
+- *I0 dropouts and beam losses* (a point or a contiguous run of points whose I0 falls under 1 % of the scan's own level
+  just before it and comes back to at least 20 % of it; a filter change, which does not come back, is never masked):
+  those POINTS are excluded from the scan's contribution to the average (the grid points they would feed are left to
+  the other scans), said per run as "point excluded: I0 dropout (n counts at E eV)" or "points excluded: I0 dropout
+  from E1 to E2 (n points)" on the scan and in `point_exclusions` (for the foil and alignment scans the survey reads:
+  `engine_beamtime.survey.point_exclusions` and the foil timeline rows); never interpolated, never the scan.
 - *Plain failures:* a group whose scans end below the edge fails `scan_never_reaches_edge` ("this scan never reaches
   the absorption edge"), never `measurement_mode_unknown`; one whose merged scans do not cover the pre-edge window
   through the post-edge window (an aborted one-scan group, a short spot check) fails `scan_range_incomplete` in plain

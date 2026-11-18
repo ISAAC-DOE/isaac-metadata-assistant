@@ -1110,6 +1110,18 @@ def test_tender_fluorescence_uses_the_documented_options_and_says_so():
     assert hard["tender"] is False
 
 
+def test_a_rising_post_edge_above_4_kev_changes_no_option_and_asks_for_review():
+    """A dilute Ir L3 sample on a large background reads a post-edge that rises (+36 % of the step): no tender options
+    (they are automatic only under 4 keV), a disclosed note recommends review."""
+    E = np.arange(11160.0, 11500.0, 1.0)
+    mu, e0 = _mcmaster("Ir", "L3", E)
+    raw = 5.0 + 0.1 * mu * (1 + 0.004 * (E - 11215))          # the post-edge climbs ~ +36 % of the step
+    nm = EX.normalize_once(E, raw, np.ones(E.size), {"element": "Ir", "edge": "L3", "E_edge_eV": e0, "basis": "SYN"},
+                           {"windows": {}}, np)
+    assert nm["tender"]["tender"] is False and not {"response_power", "step_slope", "pre_tail"} & set(nm["options"])
+    assert nm["tender"]["post_rise"] > 0.2 and "review the normalisation" in nm["tender"]["review_note"]
+
+
 def test_the_glitch_window_is_kept_out_of_the_normalisation():
     E = np.arange(11540.0, 11806.0, 1.0)
     mu, e0 = _mcmaster("Pt", "L3", E)
@@ -1157,58 +1169,129 @@ def test_spots_of_split_files_take_the_motor_names_from_the_acquisition_file(tmp
     assert [x["name"] for x in r["spots"]["spots"]] == ["spot Sz -7.45", "spot Sz -7.15"]
 
 
-def _dose_run(wl_of, scale_of=None, noise_of=None):
-    """4 spots x 2 scans (A1 A2 B1 B2 ...); ``wl_of(k)``: the white-line height of scan k (0-based)."""
-    sz = [-7.45, -7.45, -7.15, -7.15, -6.85, -6.85, -6.55, -6.55]
-    cols = [scan_cols(110 + k, wl=wl_of(k), scale=(scale_of or (lambda k: 1.0))(k),
-                      noise=(noise_of or (lambda k: 2e-3))(k)) for k in range(8)]
+SPOT_SZ = (-7.45, -7.15, -6.85, -6.55)
+
+
+def _dose_run(wl_of, per_spot=3, scale_of=None, noise_of=None):
+    """4 spots x ``per_spot`` scans, spot after spot (A1 A2 A3 B1 ...); ``wl_of(j)``: the white-line height of the j-th
+    scan AT ITS SPOT (0-based); ``wl_of(j, k)`` too, with k the scan's place in the run."""
+    sz, cols = [], []
+    for s_ in range(4):
+        for j in range(per_spot):
+            k = s_ * per_spot + j
+            try:
+                wl = wl_of(j, k)
+            except TypeError:
+                wl = wl_of(j)
+            sz.append(SPOT_SZ[s_])
+            cols.append(scan_cols(110 + k, wl=wl, scale=(scale_of or (lambda j, k: 1.0))(j, k),
+                                  noise=(noise_of or (lambda j, k: 2e-3))(j, k)))
     return _spot_run(sz, cols)
 
 
-def test_later_scans_at_each_spot_that_change_shape_are_beam_damage(tmp_path, capsys):
-    from isaac_api.local_import import cli
+def _dose(r):
+    return r.get("dose_damage") or {}
 
-    bdir, _ = imported(tmp_path, _dose_run(lambda k: 3.0 if k % 2 == 0 else 2.55))
+
+def test_a_change_that_grows_with_dose_and_resets_at_a_fresh_spot_is_beam_damage(tmp_path):
+    """(a) the white line falls scan after scan at a spot (3.0, 2.7, 2.4: Ir L3, a reduction) and a fresh spot starts
+    at 3.0 again: beam damage; the first scan per spot is kept."""
+    bdir, _ = imported(tmp_path, _dose_run(lambda j: 3.0 - 0.3 * j))
     r = by_run(v1_results(bdir), "02_SYN_ZZ2")
     rows = {x["scan"]: x for x in r[EX.DECISIONS_KEY]["rows"]}
-    for k in (1, 3, 5, 7):
+    assert _dose(r)["outcome"] == "beam_damage", _dose(r)
+    for k in (1, 4, 7, 10):
         assert rows[k]["decision"] == "keep", (k, rows[k]["reasons"])
-    for k in (2, 4, 6, 8):
-        assert rows[k]["decision"] == "drop" and [y["code"] for y in rows[k]["reasons"]] == [EX.DOSE_CODE], \
+    for k in (2, 3, 5, 6, 8, 9, 11, 12):
+        assert rows[k]["decision"] == "drop" and EX.DOSE_CODE in [y["code"] for y in rows[k]["reasons"]], \
             (k, rows[k]["reasons"])
-        assert "beam damage at each spot: later scans at the same spot change shape" in rows[k]["reasons"][0]["said"]
-    assert r["dose_damage"]["rule_id"] == EX.DOSE_RULE_ID and len(r["dose_damage"]["spots"]) >= 2
+        assert "beam damage at each spot: later scans at the same spot change shape" in rows[k]["reasons"][-1]["said"]
     assert "dose_damage" in r["qc"]["statements"]
-    # overridable: a scientist keeps scan 2
-    assert cli.main(["bundle", "decide", str(bdir), "--target", r["group_id"], "--decision", "set_scan_decision",
-                     "--value", "keep", "--scans", "02_SYN_ZZ2_060mV#2", "--note", "SYN: keep it", "--by", "SYN"]) == 0
+
+
+def test_a_first_scan_that_settles_is_dropped_never_kept_over_consistent_later_scans(tmp_path):
+    """(b) the first scan at each spot is the transient (2.5, 3.0, 3.0): the later scans agree; the first is dropped."""
+    bdir, _ = imported(tmp_path, _dose_run(lambda j: 2.5 if j == 0 else 3.0))
+    r = by_run(v1_results(bdir), "02_SYN_ZZ2")
+    rows = {x["scan"]: x for x in r[EX.DECISIONS_KEY]["rows"]}
+    assert _dose(r)["outcome"] == "first_scan_settling", _dose(r)
+    for k in (1, 4, 7, 10):
+        assert rows[k]["decision"] == "drop" and EX.SETTLING_CODE in [y["code"] for y in rows[k]["reasons"]], rows[k]
+    for k in (2, 3, 5, 6, 8, 9, 11, 12):
+        assert rows[k]["decision"] == "keep", (k, rows[k]["reasons"])
+    assert "beam damage" not in json.dumps(r[EX.DECISIONS_KEY]["rows"])
+
+
+@pytest.mark.parametrize("case", ["rises_with_dose", "two_scans_per_spot"])
+def test_a_reading_the_rule_cannot_tell_is_a_question_and_blocks_bulk_approval(tmp_path, case):
+    """(d) a white line that RISES with dose at Ir L3 is not the expected reduction; two scans per spot cannot tell
+    damage from a settling first scan: a question with both readings, nothing decided."""
     from isaac_api.local_import import mutations as M
 
-    M.process(bdir, source=str(tmp_path / "SYN_beamtime"))
-    r = by_run(v1_results(bdir), "02_SYN_ZZ2")
-    row = next(x for x in r[EX.DECISIONS_KEY]["rows"] if x["scan"] == 2)
-    assert row["decision"] == "keep" and row["decided_by"] == "scientist" and row["rule_decision"] == "drop"
-
-
-@pytest.mark.parametrize("case", ["one_noisy_spot", "intensity_only", "still_changing"])
-def test_dose_damage_never_fires_on_one_spot_on_intensity_or_on_an_evolution(tmp_path, case):
-    if case == "one_noisy_spot":
-        runs = _dose_run(lambda k: 2.55 if k == 7 else 3.0, noise_of=lambda k: 1.2e-2 if k == 7 else 2e-3)
-    elif case == "intensity_only":
-        runs = _dose_run(lambda k: 3.0, scale_of=lambda k: 1.0 if k % 2 == 0 else 0.6)
-    else:                       # the white line falls scan after scan, across spots: the sample, not the dose
-        runs = _dose_run(lambda k: 3.0 - 0.15 * k)
+    runs = (_dose_run(lambda j: 3.0 + 0.3 * j) if case == "rises_with_dose" else
+            _dose_run(lambda j: 3.0 if j == 0 else 2.55, per_spot=2))
     bdir, _ = imported(tmp_path, runs)
     r = by_run(v1_results(bdir), "02_SYN_ZZ2")
-    assert "dose_damage" not in r
-    said = json.dumps(r[EX.DECISIONS_KEY]["rows"])
-    assert "beam damage" not in said
-    if case == "still_changing":
-        return
+    assert _dose(r)["outcome"] == "question", _dose(r)
+    said = _dose(r)["statement"]
+    assert "beam damage" in said and "still settling" in said and "set_dose_reading" in said
+    assert EX.DOSE_QUESTION_FLAG in r["review_flags"] and EX.DOSE_QUESTION_FLAG in r["qc"]["reasons"]
+    assert "beam damage at each spot" in M.bulk_approve_problem(r)
+    codes = {y["code"] for x in r[EX.DECISIONS_KEY]["rows"] for y in x["reasons"]}
+    assert not codes & {EX.DOSE_CODE, EX.SETTLING_CODE}
+
+
+@pytest.mark.parametrize("target", ["group", "experiment"])
+def test_the_scientists_reading_decides_the_question(tmp_path, target):
+    from isaac_api.local_import import cli
+    from isaac_api.local_import import mutations as M
+
+    bdir, root = imported(tmp_path, _dose_run(lambda j: 3.0 if j == 0 else 2.55, per_spot=2))
+    r = by_run(v1_results(bdir), "02_SYN_ZZ2")
+    tid = r["group_id"] if target == "group" else "experiment"
+    assert cli.main(["bundle", "decide", str(bdir), "--target", tid, "--decision", "set_dose_reading", "--value",
+                     "beam_damage", "--note", "SYN: photoreduction", "--by", "SYN Scientist"]) == 0
+    M.process(bdir, source=str(root))
+    r = by_run(v1_results(bdir), "02_SYN_ZZ2")
+    assert _dose(r)["outcome"] == "beam_damage" and _dose(r)["reading"]["scope"] == ("group" if target == "group"
+                                                                                     else "beamtime")
     rows = {x["scan"]: x for x in r[EX.DECISIONS_KEY]["rows"]}
-    assert all(rows[k]["decision"] == "keep" for k in range(1, 7)), {k: x["reasons"] for k, x in rows.items()}
-    if case == "intensity_only":
-        assert all(x["decision"] == "keep" for x in rows.values())
+    assert [rows[k]["decision"] for k in range(1, 9)] == ["keep", "drop"] * 4
+    assert EX.DOSE_QUESTION_FLAG not in r["review_flags"]
+    assert cli.main(["bundle", "decide", str(bdir), "--target", tid, "--decision", "set_dose_reading", "--value",
+                     "neither", "--by", "SYN Scientist"]) != 0                      # refused, nothing recorded
+
+
+@pytest.mark.parametrize("case", ["one_noisy_spot", "intensity_only", "global_trend"])
+def test_dose_rules_never_fire_on_one_spot_on_intensity_or_on_a_global_trend(tmp_path, case):
+    if case == "one_noisy_spot":
+        runs = _dose_run(lambda j, k: 2.55 if k == 11 else 3.0, noise_of=lambda j, k: 1.2e-2 if k == 11 else 2e-3)
+    elif case == "intensity_only":
+        runs = _dose_run(lambda j: 3.0, scale_of=lambda j, k: 1.0 if j == 0 else 0.6)
+    else:                       # (c) the white line falls scan after scan, across spots: the sample, not the dose
+        runs = _dose_run(lambda j, k: 3.0 - 0.1 * k)
+    bdir, _ = imported(tmp_path, runs)
+    r = by_run(v1_results(bdir), "02_SYN_ZZ2")
+    assert _dose(r).get("outcome") in (None,), _dose(r)
+    codes = {y["code"] for x in r[EX.DECISIONS_KEY]["rows"] for y in x["reasons"]}
+    assert not codes & {EX.DOSE_CODE, EX.SETTLING_CODE}
+    if case != "global_trend":
+        assert all(x["decision"] == "keep" for x in r[EX.DECISIONS_KEY]["rows"] if x["scan"] != 12)
+
+
+def test_a_logbook_discard_first_note_wins_over_the_dose_rule(tmp_path, monkeypatch):
+    runs = _dose_run(lambda j: 3.0 - 0.3 * j)
+    bdir, root = imported(tmp_path, runs, process=False)
+    note = {"source": {"path": "SYN_logbook.txt", "locator": "line 2"},
+            "quote": "SYN: take 3 scans per spot for CV time, discard first 2"}
+    M = _notes_module(monkeypatch, {"02_SYN_ZZ2_060mV": [
+        {**note, "action": "exclude", "scans": [1, 2, 4, 5, 7, 8, 10, 11], "reason": "CV time", "strength": "stated"}]})
+    M.process(bdir, source=str(root))
+    r = by_run(v1_results(bdir), "02_SYN_ZZ2")
+    rows = {x["scan"]: x for x in r[EX.DECISIONS_KEY]["rows"]}
+    assert [k for k, x in sorted(rows.items()) if x["decision"] == "keep"] == [3, 6, 9, 12]
+    codes = {y["code"] for x in rows.values() for y in x["reasons"]}
+    assert not codes & {EX.DOSE_CODE, EX.SETTLING_CODE} and EX.DOSE_QUESTION_FLAG not in r["review_flags"]
 
 
 # --- single-point I0 dropouts: the POINT is excluded, said, never interpolated; the scan is kept ----------------------
@@ -1234,6 +1317,51 @@ def test_a_single_point_i0_dropout_is_excluded_from_that_scans_contribution(tmp_
     assert m["n_scans"][k] == 4.0                             # the other scans cover that energy
     nb = np.median(m["mu_mean"][k - 3:k + 4])
     assert abs(m["mu_mean"][k] - nb) < 0.02 * nb              # no spike in the merge
+
+
+def test_a_beam_loss_run_is_masked_whole_and_a_filter_change_never(tmp_path):
+    E = np.arange(0.0, 200.0)
+    I0 = np.full(E.size, 3.4e4)
+    I0[80:95] = 1.0                                            # a beam loss: 15 points at 1 count, then back
+    fin = np.ones(E.size, bool)
+    m = EX.i0_dropouts(E, I0, fin, np)
+    assert m.sum() == 15 and m[80:95].all()
+    for factor in (10.0, 100.0, 1000.0):                       # a filter change: a step that never comes back
+        J = np.full(E.size, 3.4e4)
+        J[120:] /= factor
+        assert not EX.i0_dropouts(E, J, fin, np).any(), factor
+    scans = [scan_cols(160 + k) for k in range(5)]
+    j0 = int(np.flatnonzero(GRID >= 11300.0)[0])
+    scans[1]["I0"] = scans[1]["I0"].copy()
+    scans[1]["I0"][j0:j0 + 12] = 1.0
+    runs = [("01_SYN_ZZ1_060mV", 9, [scan_cols(10 + k, d=d) for k, d in enumerate(REF_D)]),
+            ("02_SYN_ZZ2_060mV", 11, scans)]
+    bdir, _ = imported(tmp_path, runs)
+    r = by_run(v1_results(bdir), "02_SYN_ZZ2")
+    row = next(x for x in r[EX.DECISIONS_KEY]["rows"] if x["scan"] == 2)
+    note = next(n for n in row["notes"] if n["code"] == EX.I0_DROPOUT_CODE)
+    assert note["said"] == f"points excluded: I0 dropout from {GRID[j0]:.2f} to {GRID[j0 + 11]:.2f} eV (12 points)"
+    assert row["decision"] == "keep"
+
+
+def test_foil_scans_disclose_their_masking_and_a_scan_outside_the_timeline_is_flagged(tmp_path):
+    runs = _foil_beamtime() + [("07_SYN_ZZ7_060mV", 17, [scan_cols(70 + k, glitch=False, d=_drift(15)) for k in range(3)])]
+    foil = runs[6][2][0]
+    foil["I0"] = foil["I0"].copy()
+    foil["I0"][150] = 1.0                                      # a dropout in the last foil scan
+    bdir, _ = imported(tmp_path, runs)
+    payload = json.loads((bdir / "processing" / "processing_results.json").read_text())
+    bt = payload[EX.BEAMTIME_KEY]
+    assert any(x["scan_id"].startswith("06_SYN_Irfoil_I1") for x in bt["survey"]["point_exclusions"])
+    last = bt["routes"][0]["timeline"][-1]
+    assert last["foil"] == "06_SYN_Irfoil_I1" and last["point_exclusions"][0].startswith("point excluded: I0 dropout")
+    r = by_run(v1_results(bdir), "07_SYN_ZZ7")
+    for x in r[EX.DECISIONS_KEY]["rows"]:
+        assert any(n["said"].startswith("outside the foil timeline: nearest foil used; drift beyond it unknown")
+                   for n in x["notes"]), x["notes"]
+    assert EX.OUTSIDE_TIMELINE_FLAG in r["qc"]["reasons"]
+    inside = by_run(v1_results(bdir), "03_SYN_ZZ3")
+    assert EX.OUTSIDE_TIMELINE_FLAG not in inside["qc"]["reasons"]
 
 
 # --- the ratio screens drop only a NORMALISED-shape distortion ---------------------------------------------------------

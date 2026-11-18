@@ -1060,10 +1060,11 @@ DECISIONS_BY_KIND: Mapping[str, frozenset[str]] = {
     "conflict": frozenset({"confirm", "correct", "reject", "defer"}),
     # set_scan_decision (isaac.xas.v1): a scientist's keep / drop of named scans, overriding the scan-decision rule
     "record_group": frozenset({"confirm", "split", "merge", "reject", "defer", "approve_calibration", "set_absorber",
-                               "set_scan_decision"}),
+                               "set_scan_decision", "set_dose_reading"}),
     "processing_result": frozenset({"approve", "reject", "needs_changes", "defer", "select_athena_version"}),
     # `defer` (1.9.x polish): "I don't know" to the counter question — recorded, changes no grouping
-    "experiment": frozenset({"set_counter_positions", "set_clock_time_zone", "set_not_counter_positions", "defer"}),
+    "experiment": frozenset({"set_counter_positions", "set_clock_time_zone", "set_not_counter_positions", "defer",
+                             "set_dose_reading"}),
     # 1.6.0: a merge candidate is decided only to say its groups are DISTINCT; merging stays a
     # record-group decision (``merge --merge-with``)
     "merge_candidate": frozenset({"keep_apart"}),
@@ -1076,6 +1077,17 @@ ATHENA_SELECT_DECISION = "select_athena_version"
 #: isaac.xas.v1 (processing/engine_xas.py): the scientist's keep / drop of named scans of a record group; value
 #: ``{"decision": "keep"|"drop", "scans": [scan id, ...]}``. It moves no group status; the group is re-processed.
 SCAN_DECISION = "set_scan_decision"
+#: isaac.xas.v1 (processing/engine_xas.py, isaac.xas.dose_damage.v2): the scientist's reading of a within-spot change,
+#: for one record group or (target ``experiment``) the whole beamtime; a group's own reading wins
+DOSE_READING_DECISION = "set_dose_reading"
+DOSE_READINGS = ("beam_damage", "not_beam_damage", "first_scan_settling")
+
+
+def dose_reading_problem(value: Any) -> str | None:
+    """Why a set_dose_reading value is not one of :data:`DOSE_READINGS` (None when it is)."""
+    if value not in DOSE_READINGS:
+        return f"set_dose_reading needs --value {', '.join(DOSE_READINGS[:-1])} or {DOSE_READINGS[-1]}"
+    return None
 
 
 def scan_decision_problem(value: Any) -> str | None:
@@ -5807,6 +5819,10 @@ def validate_bundle(bundle: Any, *, max_errors: int = 50, encoded: bytes | None 
             problem = scan_decision_problem(d.get("value"))
             if problem is not None or (d.get("target") or {}).get("kind") != "record_group":
                 errors.append(f"decision: {d['decision_id']} {problem or 'set_scan_decision is for a record group'}")
+        if d.get("decision") == DOSE_READING_DECISION:
+            problem = dose_reading_problem(d.get("value"))
+            if problem is not None or (d.get("target") or {}).get("kind") not in ("record_group", "experiment"):
+                errors.append(f"decision: {d['decision_id']} {problem or 'set_dose_reading is for a record group or the experiment'}")
         if d.get("decision") == CLOCK_ZONE_DECISION:
             problem = clock_zone_problem(d.get("value"))
             if problem is not None:

@@ -874,6 +874,9 @@ BULK_APPROVE_REVIEW = (("glitch_points_from_one_scan", "one scan's glitch on the
                        ("no_energy_reference", "no energy reference (no scan of the beamtime was aligned)"),
                        # processing.engine_xas.SPOTS_DISAGREE_FLAG: the group's spots split evenly, none dropped
                        ("spots_disagree", "spots that disagree with no majority (every spot kept)"),
+                       # processing.engine_xas.DOSE_QUESTION_FLAG: beam damage or a first scan still settling, undecided
+                       ("dose_reading_question", "an open question: beam damage at each spot, or the first scan still "
+                                                 "settling (set_dose_reading decides)"),
                        ("outlier_scans", "an outlier scan"),
                        ("only_scan_with_edge", "the group's only scan with an edge"),
                        # r6 review M1: a curve tied to its group by the params file, not by its name
@@ -2773,6 +2776,10 @@ def _decide_arguments(*, target_ids, decision, by, orcid, qc_status, element, ed
         problem = B.scan_decision_problem(value)
         if problem is not None:
             raise MutationRefused(f"{problem}. Nothing was recorded.")
+    if decision == B.DOSE_READING_DECISION:
+        problem = B.dose_reading_problem(value)
+        if problem is not None:
+            raise MutationRefused(f"{problem}. Nothing was recorded.")
     if decision == B.ATHENA_SELECT_DECISION and (value is None or not isinstance(value, str)):
         raise MutationRefused("select_athena_version needs --value <version id>, one of the processing result's athena_versions.")
     if decision == B.CLOCK_ZONE_DECISION:
@@ -2810,7 +2817,7 @@ CAPTURE_STATEMENTS: Mapping[str, str] = {
 
 #: Record-group decisions that are not about the group's own state: each is compared with the latest of its own
 #: kind when a repeat is judged (a set_absorber restated after the group was confirmed records nothing).
-_GROUP_SIDE_DECISIONS = ("set_absorber", "approve_calibration", B.SCAN_DECISION)
+_GROUP_SIDE_DECISIONS = ("set_absorber", "approve_calibration", B.SCAN_DECISION, B.DOSE_READING_DECISION)
 
 
 def _shown_value(value: Any) -> str:

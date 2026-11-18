@@ -92,10 +92,9 @@ WINDOW_SPREAD_WARN = 0.20
 #: about 3-4 keV a gas I0 counts ~ E^-3, so IF/I0 rises as (E/E_edge)^p over the WHOLE signal, the pre-edge carries a
 #: falling scatter tail and a resonant-Raman foot about 25 eV before the edge. The documented options are used, with
 #: the documented window (the pre-edge window ends before the foot). They apply to a fluorescence edge under
-#: ``max_edge_eV``, or to any edge whose post-edge IF/I0 RISES with E (a linear fit over the post-edge window climbs
-#: by at least ``rise_min`` of the edge step) while the cross-section falls. Measured on five real beamtimes: tender
-#: S K post-edges climb about +17-20 % of the step; hard-edge HERFD post-edges stay under +14 % (their EXAFS), and the
-#: few above +20 % are distorted spectra.
+#: ``max_edge_eV`` only. Above it, a post-edge IF/I0 that RISES with E (a linear fit over the post-edge window climbs
+#: by at least ``rise_min`` of the edge step) changes no option: a disclosed note recommends review (a dilute sample
+#: on a large background reads +36 %; distorted spectra do too).
 TENDER = {"max_edge_eV": 4000.0, "rise_min": 0.20, "pre_hi_below_edge_eV": 24.0,
           "options": {"response_power": 3.0, "step_slope": 1, "pre_tail": True}}
 TENDER_RULE_ID = "isaac.xas.tender_fluorescence.v1"
@@ -140,11 +139,14 @@ DECISION_RULE = {
         "6 robust sigmas and 1.5 times the median, and more than twice its own counting noise), a ratio-shape or "
         "post-edge-drift flag whose NORMALISED shape is distorted (after a free scale and offset it still departs 5 % "
         "of the edge step; a within-scan step collapse is shape, a uniformly weaker scan is not), or a dead channel "
-        "that shows no edge at all; or (d) beam damage at each spot (isaac.xas.dose_damage.v1: at two or more spots "
-        "the later scans change normalised shape from the first one there, the same way, beyond the noise: the first "
-        "scan per spot is kept). Otherwise it is KEPT. An intensity drop alone never drops a scan: a weaker or noisier "
-        "scan is kept and said. A single-point I0 dropout (under 1 % of its neighbours) excludes that POINT from the "
-        "scan's contribution, said, never interpolated, never the scan. "
+        "that shows no edge at all; or (d) a within-spot change at two or more spots (isaac.xas.dose_damage.v2): beam "
+        "damage when it GROWS with dose (scan 3 further from scan 1 than scan 2), the way the edge expects (the white "
+        "line falls at Ir and Pt L3) and a fresh spot recovers: the later scans are dropped, the first kept; a first "
+        "scan still settling when the later scans agree with each other: the first is dropped; otherwise (two scans per "
+        "spot, mixed patterns, a logbook note on CV or equilibration) a question to the scientist, nothing decided "
+        "(set_dose_reading decides; a logbook exclude / start_from note always wins). Otherwise it is KEPT. An intensity drop alone never drops a scan: a weaker or noisier "
+        "scan is kept and said. An I0 dropout or beam loss (a point or a run under 1 % of the scan's own level that comes "
+        "back) excludes those POINTS from the scan's contribution, said, never interpolated, never the scan. "
         "Scans that differ are judged by SPOT first (isaac.xas.spot_decision.v1): when they all sit at spots no kept "
         "scan shares, the spot is what differs, not the sample's evolution; the majority of consistent spots is kept, a "
         "differing spot whose shape differs is dropped with a spot reason, and an even split keeps every spot and flags "
@@ -154,7 +156,7 @@ DECISION_RULE = {
                 "screening": "xas-analysis screen_report (report-only) + this rule's intensity guard",
                 "input": "the scan could not be read or formed (its skip reason)",
                 "params_file": "the params file's exclude_scans",
-                "dose": "isaac.xas.dose_damage.v1 (later scans at a spot change shape)",
+                "dose": "isaac.xas.dose_damage.v2 (beam damage, or a first scan still settling, at each spot)",
                 "merge": "a point excluded from the scan's contribution (an I0 dropout), said, never a drop",
                 "scientist": "a set_scan_decision decision"},
 }
@@ -398,7 +400,20 @@ def _arrays(table, choice, np, *, signal: bool = True) -> dict | None:
     ok = fin & (I0 > 0) & ~drop
     if ok.sum() < C.MIN_SCAN_POINTS:
         return None
-    dropouts = [{"E_eV": float(e), "I0": float(c)} for e, c in sorted(zip(E[drop], I0[drop]))]
+    # contiguous runs in energy order among the finite points
+    fin_idx = np.flatnonzero(fin)
+    rank = np.empty(E.size, int)
+    rank[fin_idx[np.argsort(E[fin_idx], kind="stable")]] = np.arange(fin_idx.size)
+    dropouts: list[dict] = []
+    if drop.any():
+        prev = None
+        for k in sorted(np.flatnonzero(drop), key=lambda i: rank[i]):
+            if dropouts and prev is not None and rank[k] == rank[prev] + 1:
+                dropouts[-1].update(E_end_eV=float(E[k]), points=dropouts[-1]["points"] + 1,
+                                    I0=min(dropouts[-1]["I0"], float(I0[k])))
+            else:
+                dropouts.append({"E_eV": float(E[k]), "E_end_eV": float(E[k]), "points": 1, "I0": float(I0[k])})
+            prev = k
     order = np.argsort(E[ok], kind="stable")
     E = E[ok][order]
     arr = {"IF": IF[ok][order], "I0": I0[ok][order]}
@@ -416,10 +431,13 @@ def _arrays(table, choice, np, *, signal: bool = True) -> dict | None:
     return {"E": E, **arr, "i0_dropouts": dropouts}
 
 
-#: SINGLE-POINT I0 DROPOUTS: a point whose I0 is under this fraction of the median of its ``half`` neighbours on each
-#: side is non-physical (I0 = 1 count among ~34 000). That POINT is excluded from the scan's contribution to the
-#: average (the other scans cover that energy), disclosed, never interpolated, and never drops the scan
-I0_DROPOUT = {"frac": 0.01, "half": 5}
+#: I0 DROPOUTS AND BEAM LOSSES: a point, or a contiguous run of points, whose I0 falls under ``frac`` of the scan's own
+#: level just before it (the median of the ``half`` good points before) and comes BACK (the median of the ``half``
+#: points after it is at least ``return_frac`` of that level) is non-physical (I0 = 1 count among ~34 000; a beam loss
+#: of 11-20 points). Those POINTS are excluded from the scan's contribution to the average (the other scans cover
+#: them), disclosed per run, never interpolated, and never drop the scan. A filter change (x10, x100) is a step that
+#: does not come back, so it is never masked; a run longer than ``max_run`` points is not a dropout either.
+I0_DROPOUT = {"frac": 0.01, "half": 5, "return_frac": 0.2, "max_run": 100}
 I0_DROPOUT_CODE = "i0_dropout_point_excluded"
 
 
@@ -427,19 +445,33 @@ def i0_dropouts(E, I0, fin, np):
     """Boolean mask of the :data:`I0_DROPOUT` points of one scan (``fin``: the finite points, in file order)."""
     mask = np.zeros(E.size, bool)
     idx = np.flatnonzero(fin)
-    if idx.size < 2 * I0_DROPOUT["half"] + 1:
+    h = I0_DROPOUT["half"]
+    if idx.size < 2 * h + 1:
         return mask
     order = idx[np.argsort(E[idx], kind="stable")]
     v = I0[order].astype(float)
-    h = I0_DROPOUT["half"]
-    pad = np.r_[np.full(h, np.nan), np.where(v > 0, v, np.nan), np.full(h, np.nan)]
-    win = np.lib.stride_tricks.sliding_window_view(pad, 2 * h + 1).copy()
-    win[:, h] = np.nan                                  # the point itself is not its own neighbour
-    n = np.isfinite(win).sum(axis=1)
-    with warnings.catch_warnings():
-        warnings.simplefilter("ignore", RuntimeWarning)
-        med = np.nanmedian(win, axis=1)
-    hit = (n >= h) & np.isfinite(med) & (v < I0_DROPOUT["frac"] * med)
+    hit = np.zeros(v.size, bool)
+    n = v.size
+    j = 1
+    while j < n:
+        before = v[max(0, j - h):j][~hit[max(0, j - h):j]]
+        before = before[before > 0]
+        if before.size < 3:
+            j += 1
+            continue
+        ref = float(np.median(before))
+        if not v[j] < I0_DROPOUT["frac"] * ref:
+            j += 1
+            continue
+        k = j
+        while k < n and v[k] < I0_DROPOUT["frac"] * ref:
+            k += 1
+        after = v[k:k + h]
+        after = after[after > 0]
+        if (k < n and after.size >= 3 and float(np.median(after)) >= I0_DROPOUT["return_frac"] * ref
+                and k - j <= I0_DROPOUT["max_run"]):
+            hit[j:k] = True
+        j = k
     mask[order[hit]] = True
     return mask
 
@@ -601,6 +633,11 @@ def _survey(reads: Mapping, groups: Sequence[Mapping], ctx, *, exclude: frozense
     summary = _jsonable({k: rep.get(k) for k in keep if k in rep})
     summary["files"] = _jsonable([{k: f.get(k) for k in ("name", "role_guess", "n_xas", "first", "foil_edges")}
                                   for f in rep.get("files") or ()][:300])
+    # the foil / alignment scans the survey read carry their I0-dropout masking too: said, never silent
+    masked = [{"scan_id": r["scan_id"], "said": dropout_said(d)} for gr in reads.values() if gr.get("scope") is not None
+              for r in gr.get("recs") or () for d in r.get("i0_dropouts") or ()]
+    if masked:
+        summary["point_exclusions"] = masked[:100]
     cal = dict((rep.get("recommendation") or {}).get("calibration") or {"mode": "none"})
     return {"calibration": _jsonable(cal), "survey": summary, "edge": _jsonable(edge), "logs": logs,
             "file_groups": {f.name: f._group_id for f in files}, "glitch": _jsonable(rep.get("glitch"))}
@@ -1020,7 +1057,8 @@ def _foil_timeline(route: Mapping, bt: Mapping, reads: Mapping) -> dict:
                                      (info.get("reason") or "the anchor fit was not ok")})
                     continue
                 rows.append({"t": r["time"].timestamp(), "anchor_eV": a, "scan": r["scan_id"], "foil": f.get("spec"),
-                             "foil_index": k})
+                             "foil_index": k, **({"point_exclusions": [dropout_said(d) for d in r["i0_dropouts"]]}
+                                                 if r.get("i0_dropouts") else {})})
     rows.sort(key=lambda x: x["t"])
     if not rows:
         return {"anchor_eV": None, "timeline": [], "scans": [], "rejected": rejected,
@@ -1036,7 +1074,8 @@ def _foil_timeline(route: Mapping, bt: Mapping, reads: Mapping) -> dict:
     ref_foil = foils[ref_rows[0]["foil_index"]].get("spec")
     anchor = float(np.median([x["anchor_eV"] for x in ref_rows]))
     tl = [{"time": datetime.fromtimestamp(x["t"]).isoformat(), "anchor_eV": x["anchor_eV"], "scan": x["scan"],
-           "foil": x["foil"]} for x in rows]
+           "foil": x["foil"], **({"point_exclusions": x["point_exclusions"]} if x.get("point_exclusions") else {})}
+          for x in rows]
     span = max(x["anchor_eV"] for x in rows) - min(x["anchor_eV"] for x in rows)
     out = {"anchor_eV": anchor, "timeline": tl, "scans": [x["scan"] for x in ref_rows],
            "anchors": [x["anchor_eV"] for x in ref_rows], "statistic": "median",
@@ -1052,6 +1091,10 @@ def _foil_timeline(route: Mapping, bt: Mapping, reads: Mapping) -> dict:
     if moved:
         out["reference_moved"] = moved
     return out
+
+
+OUTSIDE_TIMELINE_FLAG = "outside_foil_timeline"
+OUTSIDE_TIMELINE_SAID = "outside the foil timeline: nearest foil used; drift beyond it unknown"
 
 
 def _anchor_one(fn, rec: Mapping, route: Mapping) -> tuple[float | None, bool, dict]:
@@ -1122,9 +1165,14 @@ def _align_rec(r: Mapping, routes: Sequence[Mapping], fns: Mapping, fits: Mappin
                 tried.append({"route": mode, "code": NO_REFERENCE[0], "reason": "no foil timeline or no scan time"})
                 continue
             ts = [datetime.fromisoformat(x["time"]).timestamp() for x in tl]
-            a = float(np.interp(r["time"].timestamp(), ts, [x["anchor_eV"] for x in tl]))
-            return {"route": mode, "anchor_eV": a, "reference_anchor_eV": info["anchor_eV"],
-                    "shift_eV": info["anchor_eV"] - a, "ok": True, "tried": tried}
+            t = r["time"].timestamp()
+            a = float(np.interp(t, ts, [x["anchor_eV"] for x in tl]))
+            out = {"route": mode, "anchor_eV": a, "reference_anchor_eV": info["anchor_eV"],
+                   "shift_eV": info["anchor_eV"] - a, "ok": True, "tried": tried}
+            if t < min(ts) or t > max(ts):
+                out["outside_foil_timeline"] = (f"{OUTSIDE_TIMELINE_SAID} (the scan is "
+                                                f"{'before the first' if t < min(ts) else 'after the last'} foil scan)")
+            return out
         fn = fns.get(k)
         if fn is None or info.get("anchor_eV") is None:
             tried.append({"route": mode, "code": FIT_FAILED[0], "reason": "no reference anchor for this route"})
@@ -1322,9 +1370,12 @@ def process_group_v1(group: Mapping, ctx) -> list[dict]:
     table = decide_scans(recs, by_scan, stability, notes, scientist_scan_decisions(ctx.bundle, group["group_id"]),
                          inputs, target, win, np, complete_eV=complete, E_edge=E_edge,
                          ratio_win=rs.get("window_eV"), ratio_exclude=rs.get("exclude_eV") or ())
-    dose = apply_dose_damage(table, recs, stability, np, E_edge)
+    dose = apply_dose_damage(table, recs, stability, np, E_edge, absorber=absorber, notes_said=notes_said,
+                             reading=dose_reading_of(ctx.bundle, group["group_id"]))
     if dose:
         res["dose_damage"] = dose
+        if dose.get("outcome") == "question":
+            res["review_flags"].append(DOSE_QUESTION_FLAG)       # the scientist decides: a bulk approval refuses it
     spots = apply_spots(table, recs, stability, np)
     if spots:
         res["spots"] = spots
@@ -1473,6 +1524,8 @@ def process_group_v1(group: Mapping, ctx) -> list[dict]:
 
 
 def dropout_said(d: Mapping) -> str:
+    if int(d.get("points") or 1) > 1:
+        return f"points excluded: I0 dropout from {d['E_eV']:.2f} to {d['E_end_eV']:.2f} eV ({d['points']} points)"
     return f"point excluded: I0 dropout ({d['I0']:.0f} counts at {d['E_eV']:.2f} eV)"
 
 
@@ -1482,9 +1535,10 @@ def _exclude_dropout_points(Y, r: Mapping, shift: float, target, np) -> None:
     Es = np.asarray(r["E"], float) + shift
     for d in r.get("i0_dropouts") or ():
         e = float(d["E_eV"]) + shift
-        below, above = Es[Es < e], Es[Es > e]
+        e2 = float(d.get("E_end_eV", d["E_eV"])) + shift
+        below, above = Es[Es < e], Es[Es > e2]
         lo = float(below.max()) if below.size else e - 1e-9
-        hi = float(above.min()) if above.size else e + 1e-9
+        hi = float(above.min()) if above.size else e2 + 1e-9
         m = (target > lo) & (target < hi)
         Y[m, :] = np.nan
         d["grid_points_excluded"] = int(m.sum())
@@ -1692,6 +1746,9 @@ def decide_scans(recs, screen_flags, stability, notes, overrides, inputs, target
             noted.append({"source": "merge", "code": I0_DROPOUT_CODE, "decides": False, "said": dropout_said(d),
                           "evidence": {"E_eV": d["E_eV"], "I0": d["I0"], "rule": I0_DROPOUT}})
         al = r.get("alignment") or {}
+        if al.get("outside_foil_timeline"):
+            noted.append({"source": "alignment", "code": OUTSIDE_TIMELINE_FLAG, "decides": False,
+                          "said": al["outside_foil_timeline"]})
         if not al.get("ok"):
             code = al.get("code") or FIT_FAILED[0]
             plain = NO_REFERENCE[1] if code == NO_REFERENCE[0] else FIT_FAILED[1]
@@ -2042,21 +2099,56 @@ def apply_spots(table: dict, recs: Sequence[Mapping], stability: Mapping, np) ->
     return block
 
 
-#: WITHIN-SPOT DOSE DAMAGE (isaac.xas.dose_damage.v1). The measure: a later scan at a spot against the FIRST scan there,
-#: in NORMALISED shape: the later scan is put on the first one's scale by a free scale and offset fitted over the
-#: pre-edge and the post-edge (an intensity change or a background is never shape), and the mean difference over the
-#: white-line window (the group's white-line energy +- ``wl_half_eV``) is said in edge-step units, with its noise (the
-#: point-to-point scatter of the difference over the window, / sqrt(n)). A spot is DAMAGED when every later scan there
-#: differs that way beyond max(``floor``, ``noise_mult`` x its noise), in one direction. The rule fires when at two or
-#: more spots, and more than half of the spots measured more than once, the damage goes the same way (none the other
-#: way), AND the change does not simply go on across spots: of the moves from one spot's last scan to the next spot's
-#: first scan (in time), fewer than half continue it beyond the noise (a fresh spot starts afresh; a sample still
-#: changing would carry on). Then the first scan per spot is kept and the later ones are dropped. Never triggered by
-#: intensity; one noisy spot never triggers it; a scientist's set_scan_decision overrides.
-DOSE = {"wl_half_eV": 4.0, "floor": 0.01, "noise_mult": 3.0, "pre_eV": -10.0, "post_eV": 30.0}
-DOSE_RULE_ID = "isaac.xas.dose_damage.v1"
+#: WITHIN-SPOT CHANGE: BEAM DAMAGE, OR A FIRST SCAN STILL SETTLING (isaac.xas.dose_damage.v2; review of 271efe4a).
+#: The measure: one scan at a spot against another there, in NORMALISED shape: put on the other's scale by a free scale
+#: and offset fitted over the pre-edge and the post-edge (an intensity change or a background is never shape), the
+#: mean difference over the white-line window (the group's white-line energy +- ``wl_half_eV``) in edge-step units,
+#: with its noise (the point-to-point scatter of the difference over the window, / sqrt(n)); "beyond the noise" is
+#: max(``floor``, ``noise_mult`` x that noise). Per spot with three or more scans (in time):
+#:   GROWS (beam damage): scan 3 differs from scan 1 more than scan 2 does, the same way, and scan 3 differs from
+#:     scan 2 beyond the noise: the change grows with dose;
+#:   PLATEAU (a first scan still settling): scans 2 and 3 both differ from scan 1 the same way and agree with each
+#:     other: the first scan is the outlier (an equilibration transient).
+#: The group: BEAM DAMAGE (the first scan per spot kept, the later ones dropped) only when most spots measured three
+#: or more times grow (at least two), the same way at every changed spot, the way the edge's physics expects (the
+#: white line FALLS, a reduction, at Ir and Pt L3; elsewhere the one direction every spot shares, said), and a fresh
+#: spot recovers (the move from a spot's last scan to the next spot's first undoes at least half of the damage, at most
+#: moves). FIRST SCAN SETTLING (the first scan per spot dropped) when most such spots plateau (at least two), the same
+#: way. A change that carries on across spots (no recovery, most moves continue it) is the sample's evolution, not
+#: this rule's. Otherwise a consistent within-spot change at two or more spots is a QUESTION to the scientist, with
+#: both readings, nothing decided and a bulk approval refused: only two scans per spot (growth cannot be told from a
+#: settling first scan), mixed patterns, a damage-like pattern the wrong way for the edge, or a logbook note speaking
+#: of CV, equilibration or discarding the first scans. A logbook exclude / start_from / keep_only note on the group
+#: always wins (this rule then decides nothing); an existing shape-screen drop is never cleared; a scientist's
+#: set_dose_reading (the group's, else the beamtime's) decides the reading; set_scan_decision still wins per scan.
+DOSE = {"wl_half_eV": 4.0, "floor": 0.01, "noise_mult": 3.0, "pre_eV": -10.0, "post_eV": 30.0, "recovery_frac": 0.5}
+DOSE_RULE_ID = "isaac.xas.dose_damage.v2"
 DOSE_CODE = "beam_damage_at_spot"
+SETTLING_CODE = "first_scan_settling"
 DOSE_SAID = "beam damage at each spot: later scans at the same spot change shape"
+SETTLING_SAID = "first scan at each spot still settling: the later scans there agree with each other, the first does not"
+DOSE_QUESTION_FLAG = "dose_reading_question"
+DOSE_READING = "set_dose_reading"
+#: the edges whose beam damage is a REDUCTION (the white line falls): Ir and Pt L3 under the beam
+REDUCING_EDGES = {("Ir", "L3"): -1, ("Pt", "L3"): -1}
+_DOSE_NOTE = re.compile(r"\bCVs?\b|cyclic voltam|equilibrat|discard(ing)?\s+(the\s+)?first|first\s+\d*\s*scans?",
+                        re.I)
+
+
+def dose_reading_of(bundle: Mapping, group_id: str) -> dict | None:
+    """The scientist's set_dose_reading for this group (latest), else for the beamtime (``experiment``), or None."""
+    group = beamtime = None
+    for d in bundle.get("scientist_decisions") or ():
+        if d.get("decision") != DOSE_READING:
+            continue
+        t = d.get("target") or {}
+        x = {"reading": d.get("value"), "decision_id": d.get("decision_id"),
+             "decided_by": (d.get("decided_by") or {}).get("name"), "note": d.get("note")}
+        if t.get("kind") == "record_group" and t.get("id") == group_id:
+            group = {**x, "scope": "group"}
+        elif t.get("kind") == "experiment":
+            beamtime = {**x, "scope": "beamtime"}
+    return group or beamtime
 
 
 def _norm_difference(f: Mapping, s: Mapping, E_edge: float, win: Sequence[float], np) -> tuple[float, float] | None:
@@ -2081,15 +2173,15 @@ def _norm_difference(f: Mapping, s: Mapping, E_edge: float, win: Sequence[float]
         return float(np.mean(d)), float(np.std(np.diff(d)) / np.sqrt(2.0) / np.sqrt(w.sum()))
 
 
-def apply_dose_damage(table: dict, recs: Sequence[Mapping], stability: Mapping, np, E_edge: float | None = None) -> dict | None:
+def apply_dose_damage(table: dict, recs: Sequence[Mapping], stability: Mapping, np, E_edge: float | None = None, *,
+                      absorber: Mapping | None = None, notes_said: Mapping | None = None,
+                      reading: Mapping | None = None) -> dict | None:
     """:data:`DOSE_RULE_ID` on the decision table (changed in place); the block said on the result, or None."""
     if E_edge is None:
         return None
     spot = _spots_of(recs)
     rows = table["by_id"]
     stab = (stability or {}).get("rows") or {}
-    # the scans the rule judges: at a stated spot, aligned, and not dropped for a reason of their own (aborted, no
-    # energy reference, a logbook note), in time order
     judged = [r for r in recs if spot.get(r["scan_id"]) and r.get("aligned") is not None
               and not any(y["code"] not in DIFFERS_CODES for y in rows[r["scan_id"]]["reasons"])]
     judged.sort(key=lambda r: (r.get("time") or datetime.max, r["num"]))
@@ -2104,75 +2196,166 @@ def apply_dose_damage(table: dict, recs: Sequence[Mapping], stability: Mapping, 
     centre = float(np.median(wle)) if wle else float(E_edge) + 3.0
     win = [centre - DOSE["wl_half_eV"], centre + DOSE["wl_half_eV"]]
 
+    def diff(f, s_):
+        return _norm_difference(f, s_, float(E_edge), win, np)
+
     def beyond(x):
         return x is not None and abs(x[0]) > max(DOSE["floor"], DOSE["noise_mult"] * x[1])
 
-    damage: dict[str, dict] = {}
+    def sgn(x):
+        return int(np.sign(x[0])) if beyond(x) else 0
+
+    per: dict[str, dict] = {}
     for lab, rs in repeat.items():
-        ds = [_norm_difference(rs[0], r, float(E_edge), win, np) for r in rs[1:]]
-        signs = {int(np.sign(x[0])) for x in ds if beyond(x)}
-        if ds and all(beyond(x) for x in ds) and len(signs) == 1:
-            damage[lab] = {"direction": signs.pop(), "differences": [x[0] for x in ds], "noise": [x[1] for x in ds]}
-    hit = None
-    for sign in (-1, 1):
-        same = [lab for lab, d in damage.items() if d["direction"] == sign]
-        against = [lab for lab, d in damage.items() if d["direction"] == -sign]
-        if len(same) >= 2 and 2 * len(same) > len(repeat) and not against:
-            hit = (sign, same)
-            break
-    if hit is None:
+        d12 = diff(rs[0], rs[1])
+        x = {"scans": [r["scan_id"] for r in rs], "d12": d12 and d12[0], "noise12": d12 and d12[1]}
+        if len(rs) == 2:
+            x.update(kind="two_scans" if beyond(d12) else "none", direction=sgn(d12))
+        else:
+            d13, d23 = diff(rs[0], rs[2]), diff(rs[1], rs[2])
+            x.update(d13=d13 and d13[0], d23=d23 and d23[0])
+            s12, s13, s23 = sgn(d12), sgn(d13), sgn(d23)
+            if s13 and s23 == s13 and s12 in (0, s13) and abs(d13[0]) > abs(d12[0]):
+                x.update(kind="grows", direction=s13)
+            elif s12 and s13 == s12 and not s23:
+                x.update(kind="plateau", direction=s12)
+            elif not s12 and not s13:
+                x.update(kind="none", direction=0)
+            else:
+                x.update(kind="mixed", direction=s13 or s12)
+        per[lab] = x
+    changed = {lab: x for lab, x in per.items() if x["kind"] != "none"}
+    block: dict = {"rule_id": DOSE_RULE_ID, "rule": DOSE, "window_eV": win, "per_spot": per,
+                   "spots_measured_more_than_once": len(repeat)}
+    # a logbook exclude / start_from / keep_only note on the group ALWAYS wins
+    applied = [n for n in (notes_said or {}).get("notes") or () if n.get("applied") and n.get("drops")]
+    if applied:
+        if len(changed) >= 2:
+            block.update(outcome="logbook_decides", statement=(
+                "A within-spot change was seen, but a logbook note on this run decides which scans are left out ("
+                + "; ".join(f"{n.get('action')} {n.get('scans')}: {n.get('reason')}" for n in applied[:3])
+                + "); the beam-damage rule decides nothing here."))
+            return block
         return None
-    sign, spots_k = hit
-    # a sample still changing carries the change on to the next spot; a fresh spot starts afresh
+    if len(changed) < 2 or 2 * len(changed) <= len(repeat):
+        return None
+    three = {lab: x for lab, x in changed.items() if len(x["scans"]) >= 3}
+    directions = {x["direction"] for x in changed.values() if x["direction"]}
+    el, ed = (absorber or {}).get("element"), (absorber or {}).get("edge")
+    expected = REDUCING_EDGES.get((el, ed))
+    grows = [lab for lab, x in three.items() if x["kind"] == "grows"]
+    plateau = [lab for lab, x in three.items() if x["kind"] == "plateau"]
+    n3 = sum(1 for x in per.values() if len(x["scans"]) >= 3)
+    note_text = " ".join(str(n.get("reason") or "") + " " + str(n.get("quote") or "")
+                         for n in (notes_said or {}).get("notes") or ())
     order = list(dict.fromkeys(spot[r["scan_id"]]["label"] for r in judged))
-    moves = []
-    for la, lb in zip(order, order[1:]):
-        x = _norm_difference(by_spot[la][-1], by_spot[lb][0], float(E_edge), win, np)
-        if x is not None:
-            moves.append({"from": by_spot[la][-1]["scan_id"], "to": by_spot[lb][0]["scan_id"], "difference": x[0],
-                          "noise": x[1], "continues": beyond(x) and int(np.sign(x[0])) == sign})
-    if moves and 2 * sum(m["continues"] for m in moves) >= len(moves):
-        return None
-    parts = []
-    for lab in sorted(spots_k, key=lambda x: int(x.split()[-1])):
-        d = damage[lab]
-        parts.append(f"{lab} " + ", ".join(f"{100 * v:+.1f} % (noise {100 * n:.1f} %)"
-                                            for v, n in zip(d["differences"], d["noise"])))
-    what = (f"{DOSE_SAID} (the white line {'falls' if sign < 0 else 'rises'} after the first scan at {len(spots_k)} of "
-            f"{len(repeat)} spots measured more than once, in normalised shape over {win[0]:.1f}-{win[1]:.1f} eV, in "
-            f"edge-step units: {'; '.join(parts)}; a fresh spot starts afresh); the first scan per spot is kept")
-    dropped, cleared = [], []
-    for lab in spots_k:
-        rs = repeat[lab]
-        x0 = rows[rs[0]["scan_id"]]
-        old = [y for y in x0["reasons"] if y["code"] in DIFFERS_CODES]
-        if old:
-            # the first scan at a damaged spot is the undamaged one: what made it "differ" is the dose on the others
-            x0["reasons"] = [y for y in x0["reasons"] if y["code"] not in DIFFERS_CODES]
-            x0["notes"] = list(x0["notes"]) + [{"source": "dose", "code": "first_scan_at_spot_kept", "decides": False,
-                                                "said": f"the first scan at {lab}: kept ({DOSE_SAID})",
-                                                "was_said": "; ".join(y["said"] for y in old)}]
-            x0["rule_decision"] = "drop" if x0["reasons"] else "keep"
-            if x0["decided_by"] == "rule":
-                x0["decision"] = x0["rule_decision"]
-                x0["merged"] = x0["decision"] == "keep" and x0.get("shift_eV") is not None
-            cleared.append(x0["scan_id"])
-        for r in rs[1:]:
+
+    def moves(sign):
+        out = []
+        for la, lb in zip(order, order[1:]):
+            if la not in repeat:
+                continue
+            x = diff(by_spot[la][-1], by_spot[lb][0])
+            if x is None:
+                continue
+            dmg = diff(by_spot[la][0], by_spot[la][-1])
+            out.append({"from": by_spot[la][-1]["scan_id"], "to": by_spot[lb][0]["scan_id"], "difference": x[0],
+                        "noise": x[1], "continues": beyond(x) and int(np.sign(x[0])) == sign,
+                        "recovers": (dmg is not None and int(np.sign(x[0])) == -sign
+                                     and abs(x[0]) >= DOSE["recovery_frac"] * abs(dmg[0]))})
+        return out
+
+    reading_of = (reading or {}).get("reading")
+    outcome, why = None, None
+    if reading_of == "not_beam_damage":
+        block.update(outcome="not_beam_damage", reading=reading, statement=(
+            f"The scientist's reading ({reading.get('decided_by')}, {reading.get('scope')}): not beam damage. Every scan "
+            "is judged by the other rules."))
+        return block
+    if reading_of in ("beam_damage", "first_scan_settling"):
+        outcome = reading_of
+    elif len(directions) > 1:
+        why = "the spots change in opposite directions"
+    elif grows and len(grows) >= 2 and 2 * len(grows) > n3:
+        sign = directions.pop()
+        mv = moves(sign)
+        block["moves_between_spots"] = mv
+        if mv and 2 * sum(m["continues"] for m in mv) > len(mv) and not any(m["recovers"] for m in mv):
+            return None                    # the change carries on across spots: the sample's evolution, not dose
+        if expected is not None and sign != expected:
+            why = (f"the white line {'rises' if sign > 0 else 'falls'} with dose at {len(grows)} spots, the opposite of "
+                   f"the reduction expected at {el} {ed}")
+        elif not mv or 2 * sum(m["recovers"] for m in mv) <= len(mv):
+            why = "a fresh spot does not recover to the first-scan level"
+        elif _DOSE_NOTE.search(note_text):
+            why = "a logbook note speaks of CV time, equilibration or discarding the first scans"
+        else:
+            outcome = "beam_damage"
+    elif plateau and len(plateau) >= 2 and 2 * len(plateau) > n3:
+        outcome = "first_scan_settling"
+    elif not three:
+        why = "only two scans per spot: a change that grows with dose cannot be told from a first scan still settling"
+    else:
+        why = "the spots measured three or more times show mixed patterns (" + ", ".join(
+            f"{lab}: {x['kind']}" for lab, x in sorted(three.items(), key=lambda kv: int(kv[0].split()[-1]))) + ")"
+    sign = next(iter({x["direction"] for x in changed.values() if x["direction"]}), -1)
+    word = "falls" if sign < 0 else "rises"
+    spots_said = "; ".join(f"{lab} ({x['kind']}: scan 2 {100 * (x['d12'] or 0):+.1f} %"
+                           + (f", scan 3 {100 * (x.get('d13') or 0):+.1f} %" if x.get("d13") is not None else "") + ")"
+                           for lab, x in sorted(changed.items(), key=lambda kv: int(kv[0].split()[-1])))
+    if outcome is None:
+        what = (f"QUESTION: at {len(changed)} of {len(repeat)} spots measured more than once the white line {word} "
+                f"after the first scan ({spots_said}, normalised shape, edge-step units, window {win[0]:.1f}-"
+                f"{win[1]:.1f} eV), and the rule cannot tell why: {why}. Either it is beam damage (keep the first scan "
+                "per spot) or the first scan is still settling (drop the first scan per spot). Nothing is decided: "
+                f"`isaac bundle decide <bundle_dir> --target <group id> --decision {DOSE_READING} --value "
+                "beam_damage|first_scan_settling|not_beam_damage --by \"<name>\"` (or --target experiment for the "
+                "whole beamtime); a bulk approval refuses this result.")
+        for lab in changed:
+            for r in repeat[lab]:
+                x = rows[r["scan_id"]]
+                x["notes"] = list(x["notes"]) + [{"source": "dose", "code": DOSE_QUESTION_FLAG, "decides": False,
+                                                  "said": "open question: beam damage or a first scan still settling"}]
+        block.update(outcome="question", why=why, statement=what)
+        return block
+    by = f"the scientist's reading ({reading.get('decided_by')}, {reading.get('scope')})" if reading_of else "the rule"
+    dropped = []
+    if outcome == "beam_damage":
+        what = (f"{DOSE_SAID} (the white line {word} with dose at {len(changed)} of {len(repeat)} spots measured more "
+                f"than once and recovers at a fresh spot: {spots_said}; normalised shape, edge-step units, window "
+                f"{win[0]:.1f}-{win[1]:.1f} eV"
+                + ("" if expected is not None or reading_of else f"; at {el} {ed} the direction the spots share, "
+                                                                   f"the white line {word}, is taken as the damage")
+                + f"; decided by {by}); the first scan per spot is kept")
+        for lab in changed:
+            for r in repeat[lab][1:]:
+                x = rows[r["scan_id"]]
+                old = [y for y in x["reasons"] if y["code"] in DIFFERS_CODES]
+                x["reasons"] = [y for y in x["reasons"] if y["code"] not in DIFFERS_CODES] + [
+                    {"source": "dose", "code": DOSE_CODE, "rule": DOSE_RULE_ID, "said": what,
+                     "evidence": {"spot": spot[r["scan_id"]], "first_scan_at_spot": repeat[lab][0]["scan_id"],
+                                  "window_eV": win, "replaces": [y["code"] for y in old]}}]
+                dropped.append(x["scan_id"])
+    else:
+        what = (f"{SETTLING_SAID} ({spots_said}; normalised shape, edge-step units, window {win[0]:.1f}-{win[1]:.1f} "
+                f"eV; decided by {by}); the first scan per spot is dropped")
+        for lab in changed:
+            r = repeat[lab][0]
             x = rows[r["scan_id"]]
-            old = [y for y in x["reasons"] if y["code"] in DIFFERS_CODES]
-            x["reasons"] = [y for y in x["reasons"] if y["code"] not in DIFFERS_CODES] + [
-                {"source": "dose", "code": DOSE_CODE, "rule": DOSE_RULE_ID, "said": what,
-                 "evidence": {"spot": spot[r["scan_id"]], "first_scan_at_spot": rs[0]["scan_id"],
-                              "window_eV": win, "replaces": [y["code"] for y in old]}}]
-            x["rule_decision"] = "drop"
-            if x["decided_by"] == "rule":
-                x["decision"], x["merged"] = "drop", False
+            x["reasons"] = list(x["reasons"]) + [
+                {"source": "dose", "code": SETTLING_CODE, "rule": DOSE_RULE_ID, "said": what,
+                 "evidence": {"spot": spot[r["scan_id"]], "later_scans_at_spot": [y["scan_id"] for y in repeat[lab][1:]],
+                              "window_eV": win}}]
             dropped.append(x["scan_id"])
+    for sid in dropped:
+        x = rows[sid]
+        x["rule_decision"] = "drop"
+        if x["decided_by"] == "rule":
+            x["decision"], x["merged"] = "drop", False
     _recount(table)
-    return {"rule_id": DOSE_RULE_ID, "rule": DOSE, "window_eV": win,
-            "spots": sorted(spots_k, key=lambda x: int(x.split()[-1])), "spots_measured_more_than_once": len(repeat),
-            "per_spot": damage, "moves_between_spots": moves, "dropped": dropped, "first_scans_cleared": cleared,
-            "statement": what[:1].upper() + what[1:] + "."}
+    block.update(outcome=outcome, dropped=dropped, spots=sorted(changed, key=lambda v: int(v.split()[-1])),
+                 statement=what[:1].upper() + what[1:] + ".", **({"reading": reading} if reading_of else {}))
+    return block
 
 
 def _earliest(flagged: Sequence[str], recs: Sequence[Mapping], rows: Mapping) -> bool:
@@ -2430,8 +2613,12 @@ def tender_choice(E, y, E_edge: float | None, rng: Sequence[float], np) -> dict:
         out.update(tender=True, why=(f"fluorescence at a tender edge ({E_edge:.0f} eV, under about "
                                      f"{TENDER['max_edge_eV'] / 1000:g} keV)"))
     elif out["post_rise"] is not None and out["post_rise"] >= TENDER["rise_min"]:
-        out.update(tender=True, why=(f"the post-edge IF/I0 rises with E (+{100 * out['post_rise']:.0f} % of the edge "
-                                     "step over the post-edge window) while the cross-section falls"))
+        # above 4 keV a rising post-edge is NOT taken as the gas-I0 response: no option changes, a note for review
+        out["why"] = f"a hard-X-ray edge ({E_edge:.0f} eV): the tender options apply only under 4 keV"
+        out["review_note"] = (f"The post-edge IF/I0 rises with E (+{100 * out['post_rise']:.0f} % of the edge step over "
+                              f"the post-edge window) at a hard-X-ray edge ({E_edge:.0f} eV): normalised with the "
+                              "standard options (the tender ones apply only under 4 keV); a large background, a "
+                              "dilute sample or a distorted scan can do this; review the normalisation.")
     else:
         out["why"] = (f"a hard-X-ray edge ({E_edge:.0f} eV) whose post-edge does not rise"
                       + (f" ({100 * out['post_rise']:+.0f} % of the step)" if out["post_rise"] is not None else ""))
@@ -2608,8 +2795,19 @@ def _qc(res, recs, kept, table, nm, E, y, e0, absorber, bt, np):
         st["override_not_applied"] = "; ".join(x["said"] for x in table["overrides_not_applied"])
     if res.get("point_exclusions"):
         st["point_exclusions"] = res["point_exclusions"]["statement"]
+    outside = [r["scan_id"] for r in kept if (r.get("alignment") or {}).get("outside_foil_timeline")]
+    if outside:
+        reasons_warn.append(OUTSIDE_TIMELINE_FLAG)
+        st[OUTSIDE_TIMELINE_FLAG] = (f"{len(outside)} merged scan(s) {OUTSIDE_TIMELINE_SAID}: "
+                                     + ", ".join(outside[:10]) + (" ..." if len(outside) > 10 else ""))
+    if (nm.get("tender") or {}).get("review_note"):
+        reasons_warn.append("post_edge_rises")
+        st["post_edge_rises"] = nm["tender"]["review_note"]
     if res.get("dose_damage"):
         st["dose_damage"] = res["dose_damage"]["statement"]
+        if res["dose_damage"].get("outcome") == "question":
+            reasons_warn.append(DOSE_QUESTION_FLAG)
+            st[DOSE_QUESTION_FLAG] = res["dose_damage"]["statement"]
     if (nm.get("tender") or {}).get("statement"):
         st["normalization_options"] = nm["tender"]["statement"]
     if nm.get("exclude_statement"):
