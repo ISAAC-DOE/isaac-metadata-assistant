@@ -34,7 +34,7 @@ def _engine_on(monkeypatch):
 
 
 def scan_cols(seed, *, d=0.0, chem=0.0, scale=1.0, noise=2e-3, foil=False, glitch=True, fluo=True, trans_step=0.0,
-              n_points=None):
+              n_points=None, wl=3.0):
     """One SYN scan. ``d``: the mono offset (the recorded absev reads ``d`` above the true energy, so every feature
     sits at its true energy + d); ``chem``: a true shift of the sample's own edge; ``scale``: the signal's intensity."""
     rng = np.random.default_rng(seed)
@@ -43,7 +43,7 @@ def scan_cols(seed, *, d=0.0, chem=0.0, scale=1.0, noise=2e-3, foil=False, glitc
     I0 = 1e5 * (1 - 0.0004 * (E - 11165))
     if glitch:
         I0 = I0 * (1 - 0.06 * np.exp(-((t - GLITCH) / 0.22) ** 2))
-    mu = 0.05 + 1.0 / (1 + np.exp(-(t - E_EDGE - chem) / 1.2)) + 3 * np.exp(-((t - 11218 - chem) / 1.5) ** 2)
+    mu = 0.05 + 1.0 / (1 + np.exp(-(t - E_EDGE - chem) / 1.2)) + wl * np.exp(-((t - 11218 - chem) / 1.5) ** 2)
     IF = scale * mu * I0 * 1e-3 * (1 + noise * rng.standard_normal(E.size))
     if foil:
         muf = 0.3 + 0.8 / (1 + np.exp(-(t - E_EDGE) / 0.9))
@@ -58,11 +58,11 @@ def scan_cols(seed, *, d=0.0, chem=0.0, scale=1.0, noise=2e-3, foil=False, glitc
     return cols
 
 
-def _spec(cols, n, hour):
+def _spec(cols, n, hour, sz=3.0):
     names = list(cols)
     lines = ["#C SYNTHETIC FIXTURE -- NOT INSTRUMENT OUTPUT. Every value is invented.",
              f"#S {n}  gscan energy 11165 11205 5 11240 0.25 11500 4 0.5",
-             f"#D Sat Apr 12 {hour:02d}:{n:02d}:00 2025", "#P0 dummy0=4 emiss=9175.4 filter=10 Sx=1 Sy=2 Sz=3 Sr=0",
+             f"#D Sat Apr 12 {hour:02d}:{n:02d}:00 2025", f"#P0 dummy0=4 emiss=9175.4 filter=10 Sx=1 Sy=2 Sz={sz:g} Sr=0",
              "#L " + "  ".join(names)]
     for row in zip(*(cols[k] for k in names)):
         lines.append(" ".join(f"{v:.6f}" for v in row))
@@ -70,13 +70,15 @@ def _spec(cols, n, hour):
 
 
 def write_beamtime(root, runs):
-    """``runs``: [(stem, hour, [cols, ...])]: each run an acquisition file of #S blocks beside its per-scan files."""
-    for stem, hour, scans in runs:
+    """``runs``: [(stem, hour, [cols, ...]) or (stem, hour, [cols, ...], [Sz per scan])]: each run an acquisition file
+    of #S blocks beside its per-scan files (a 4th item: each scan's stage Sz, its spot)."""
+    for stem, hour, scans, *spot in runs:
         d = root / f"{stem}_dir"
         d.mkdir(parents=True)
         blocks = []
+        sz = spot[0] if spot else [3.0] * len(scans)
         for j, c in enumerate(scans, start=1):
-            text = _spec(c, j, hour)
+            text = _spec(c, j, hour, sz[j - 1])
             (d / f"{stem}_{j:03d}.dat").write_text(text)
             blocks.append(text)
         (root / stem).write_text(f"#F {stem}\n#E 1\n\n" + "\n".join(blocks))
@@ -793,3 +795,85 @@ def test_without_the_processing_extra_the_default_path_says_unavailable(tmp_path
     out = process_bundle(tmp_path, bundle=bundle, created_utc="2026-11-17T00:00:00Z")
     assert out["status"] == "processing_unavailable" and out["processing_results"] == []
     assert json.loads((tmp_path / "processing" / STATUS_FILE).read_text())["status"] == "processing_unavailable"
+
+
+# --- spots: a spot difference is not an evolution (isaac.xas.spot_decision.v1) ---------------------------------------
+
+
+def _spot_run(spot_of_scan, cols):
+    return [("01_SYN_ZZ1_060mV", 9, [scan_cols(10 + k, d=d) for k, d in enumerate(REF_D)]),
+            ("02_SYN_ZZ2_060mV", 11, cols, spot_of_scan)]
+
+
+def test_three_spots_one_off_shape_the_odd_spot_is_dropped_with_a_spot_reason(tmp_path, capsys):
+    from isaac_api.local_import import cli
+
+    # the odd spot is the MIDDLE one in time: not the first scans, so a spot difference alone
+    sz = [-7.45] * 3 + [-7.15] * 3 + [-6.0] * 3
+    cols = [scan_cols(40 + k, wl=2.2 if 3 <= k < 6 else 3.0) for k in range(9)]
+    bdir, _ = imported(tmp_path, _spot_run(sz, cols))
+    r = by_run(v1_results(bdir), "02_SYN_ZZ2")
+    rows = {x["scan"]: x for x in r[EX.DECISIONS_KEY]["rows"]}
+    for k in (4, 5, 6):
+        codes = [y["code"] for y in rows[k]["reasons"]]
+        assert rows[k]["decision"] == "drop" and codes == ["spot_differs"], (k, rows[k]["reasons"])
+        said = rows[k]["reasons"][0]["said"]
+        assert said.startswith("spot Sz -7.15 (scans 4, 5, 6) differs from the other 2 spots (scans 1, 2, 3, 7, 8, 9)")
+        assert "white line" in said and "shape differs" in said and "still changing" not in said
+    assert all(rows[k]["decision"] == "keep" for k in (1, 2, 3, 7, 8, 9))
+    sp = r["spots"]
+    assert sp["outcome"] == "differing_spot_dropped" and len(sp["spots"]) == 3
+    assert EX.SPOTS_DISAGREE_FLAG not in r["review_flags"]
+    capsys.readouterr()
+    assert cli.main(["bundle", "show", str(bdir), "processing-result", r["result_id"]]) == 0
+    view = json.loads(capsys.readouterr().out)
+    assert len(view["spots"]["rows"]) == 3 and view["spots"]["rows"][1].startswith("spot Sz -7.15 (spot 2): 3 scans, 0 kept")
+
+
+def test_the_first_scans_at_another_spot_say_both_causes(tmp_path):
+    """Spot and time order confounded: the first scans of the run sit at another spot AND evolve."""
+    sz = [-6.7, -6.7, -5.5, -5.5] + [-7.15] * 3 + [-7.45] * 3 + [-6.0] * 3
+    cols = [scan_cols(60 + k, chem=0.8 if k < 4 else 0.0) for k in range(13)]
+    bdir, _ = imported(tmp_path, _spot_run(sz, cols))
+    r = by_run(v1_results(bdir), "02_SYN_ZZ2")
+    rows = {x["scan"]: x for x in r[EX.DECISIONS_KEY]["rows"]}
+    for k in (1, 2, 3, 4):
+        assert rows[k]["decision"] == "drop" and [y["code"] for y in rows[k]["reasons"]] == ["early_and_spot_differs"], \
+            (k, rows[k]["reasons"])
+    said = rows[1]["reasons"][0]["said"]
+    assert said.startswith("scans 1, 2, 3, 4 differ from the rest (scans 5, 6, 7, 8, 9, 10, 11, 12, 13): they are the "
+                           "first scans")
+    assert "AND at other spots (Sz -6.7, Sz -5.5)" in said and "either the sample was still changing or the spot differs" in said
+    assert all(rows[k]["decision"] == "keep" for k in range(5, 14))
+    assert r["spots"]["outcome"] == "early_and_spot_differs"
+
+
+def test_two_spots_split_evenly_every_spot_is_kept_flagged_and_bulk_approval_refused(tmp_path):
+    from isaac_api.local_import import mutations as M
+
+    # an even split: no majority, so neither spot (nor the time order) decides; the note says both causes
+    sz = [-7.15] * 3 + [-7.45] * 3
+    cols = [scan_cols(40 + k, wl=2.2 if k < 3 else 3.0) for k in range(6)]
+    bdir, _ = imported(tmp_path, _spot_run(sz, cols))
+    r = by_run(v1_results(bdir), "02_SYN_ZZ2")
+    rows = {x["scan"]: x for x in r[EX.DECISIONS_KEY]["rows"]}
+    assert all(rows[k]["decision"] == "keep" for k in range(1, 7)), {k: x["reasons"] for k, x in rows.items()}
+    note = next(n for n in rows[1]["notes"] if n["code"] == "spot_differs")
+    assert "also the first scans of the run" in note["said"] and "no majority" in note["said"]
+    assert r["spots"]["outcome"] == EX.SPOTS_DISAGREE_FLAG and r["spots"]["statement"].startswith("SPOTS DISAGREE")
+    assert EX.SPOTS_DISAGREE_FLAG in r["review_flags"] and EX.SPOTS_DISAGREE_FLAG in r["qc"]["reasons"]
+    assert "spots that disagree" in M.bulk_approve_problem(r)
+    assert next(s for s in r["steps"] if s["step"] == "merge")["outcome"]["n_scans"] == 6
+
+
+def test_a_trend_within_one_spot_is_still_changing(tmp_path):
+    sz = [-7.15] * 5 + [-7.45] * 4
+    cols = [scan_cols(50 + k, chem=0.8 if k < 2 else 0.0) for k in range(9)]
+    bdir, _ = imported(tmp_path, _spot_run(sz, cols))
+    r = by_run(v1_results(bdir), "02_SYN_ZZ2")
+    rows = {x["scan"]: x for x in r[EX.DECISIONS_KEY]["rows"]}
+    for k in (1, 2):
+        assert rows[k]["decision"] == "drop" and "before_stable_window" in {y["code"] for y in rows[k]["reasons"]}
+        assert "still changing" in rows[k]["reasons"][0]["said"]
+    assert all(rows[k]["decision"] == "keep" for k in range(3, 10))
+    assert r["spots"]["outcome"] == "evolution_within_a_spot"

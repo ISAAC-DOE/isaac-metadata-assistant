@@ -120,7 +120,10 @@ DECISION_RULE = {
         "meV), an off-shape scan (its IF/I0, scaled to the group's median, departs more than 6 robust sigmas and 1.5 "
         "times the median, and more than twice its own counting noise), or a dead channel that shows no edge at "
         "all. Otherwise it is KEPT. An intensity drop alone never drops a scan: a weaker or noisier scan is kept "
-        "and said. A scientist's set_scan_decision on a scan overrides all of this, and is shown as theirs."),
+        "and said. Scans that differ are judged by SPOT first (isaac.xas.spot_decision.v1): when they all sit at spots no kept "
+        "scan shares, the spot is what differs, not the sample's evolution; the majority of consistent spots is kept, a "
+        "differing spot whose shape differs is dropped with a spot reason, and an even split keeps every spot and flags "
+        "'spots disagree'. A scientist's set_scan_decision on a scan overrides all of this, and is shown as theirs."),
     "sources": {"logbook": "a logbook scan note (bundle scan_notes)",
                 "stability": "isaac.xas.scan_selection_proposal.v0 (before the stable window)",
                 "screening": "xas-analysis screen_report (report-only) + this rule's intensity guard",
@@ -289,6 +292,7 @@ def read_group(g: Mapping, ctx) -> dict:
         rec.update(entry=entry, sa=sa, num=n if isinstance(n, int) else k + 1, stem=stem,
                    scan_id=f"{stem}#{n}" if isinstance(n, int) else f"{stem}#pos{k + 1}",
                    run_key=entry.get("run_key"), header=table.header_lines, time=_scan_time(table.header_lines),
+                   motor_lines=tuple(getattr(table, "motor_lines", ()) or ()),
                    template=R._scan_template(table.header_lines))
         if not R._is_energy_scan(rec["template"]):
             entry["skip_reason"] = "not_an_energy_scan"
@@ -1132,6 +1136,11 @@ def process_group_v1(group: Mapping, ctx) -> list[dict]:
     # --- the rule
     table = decide_scans(recs, by_scan, stability, notes, scientist_scan_decisions(ctx.bundle, group["group_id"]),
                          inputs, target, win, np)
+    spots = apply_spots(table, recs, stability, np)
+    if spots:
+        res["spots"] = spots
+        if spots["outcome"] == SPOTS_DISAGREE_FLAG:
+            res["review_flags"].append(SPOTS_DISAGREE_FLAG)      # the scientist looks: a bulk approval refuses it
     kept = [r for r in recs if table["by_id"][r["scan_id"]]["decision"] == "keep" and r.get("aligned") is not None]
     for e in inputs:
         e["used"] = False
@@ -1497,6 +1506,216 @@ def decide_scans(recs, screen_flags, stability, notes, overrides, inputs, target
                                  '--value keep|drop --scans "<scan id>[,<scan id>...]" --note "<why>" --by "<name>"')}
 
 
+# --- spots (review of group 02: a spot difference is not an evolution) ---------------------------------------------
+
+#: the reasons that say a scan DIFFERS from the others (the stability analysis, the engine's shape screen)
+DIFFERS_CODES = ("before_stable_window", "shape")
+#: stability metrics that are shape (normalised), not intensity (core.SEL_SHAPE_METRICS)
+SHAPE_METRICS = ("delta_eV", "wl_e_eV", "wl_h")
+SPOT_RULE_ID = "isaac.xas.spot_decision.v1"
+SPOTS_DISAGREE_FLAG = "spots_disagree"
+SPOT_RULE = (
+    "Scans are grouped by spot (the stage motors Sx Sy Sz Sr their headers state). When the scans the rule finds "
+    "DIFFERENT (before the stable window, or off-shape) all sit at spots where no kept scan sits, the difference is the "
+    "SPOT's, not an evolution: the majority of consistent spots is kept and each differing spot is dropped with a spot "
+    "reason, when its shape differs (a difference in intensity alone drops nothing). When the spots split evenly (no "
+    "majority), every spot is kept, the group is flagged 'spots disagree' and a bulk approval refuses it, so the "
+    "scientist looks. When the differing scans are ALSO the first scans of their run (and the other spots are the "
+    "majority), spot and time order are confounded: the reason says both (early_and_spot_differs) and they are "
+    "dropped. 'Still changing' alone stays only "
+    "for a trend across scans at the SAME spot.")
+
+
+def _spots_of(recs: Sequence[Mapping]) -> dict[str, dict | None]:
+    """``{scan id: spot}`` (``{"label": "spot 1", "Sz": -7.15, ...}``) from each scan's SPEC header (v0's reader)."""
+    from . import run as R
+
+    labels = R._spot_labels([(r.get("header"), r.get("motor_lines") or ()) for r in recs])
+    return {r["scan_id"]: sp for r, (sp, _why) in zip(recs, labels)}
+
+
+def _spot_name(sp: Mapping, varying: Sequence[str]) -> str:
+    pos = " ".join(f"{m} {sp[m]:g}" for m in varying if m in sp)
+    return f"spot {pos}" if pos else str(sp.get("label"))
+
+
+def _scan_list(rows: Sequence[Mapping]) -> str:
+    runs = {x.get("run") for x in rows}
+    nums = [str(x["scan"]) if len(runs) == 1 else x["scan_id"] for x in rows]
+    return ("scan " if len(nums) == 1 else "scans ") + ", ".join(nums)
+
+
+def _pct(v, ref) -> str | None:
+    if v is None or ref in (None, 0):
+        return None
+    return f"{100 * (v - ref) / abs(ref):+.0f} %"
+
+
+def apply_spots(table: dict, recs: Sequence[Mapping], stability: Mapping, np) -> dict | None:
+    """:data:`SPOT_RULE` on the decision table (changed in place); returns the per-spot block (None: one spot or none
+    stated)."""
+    spot = _spots_of(recs)
+    rows = table["by_id"]
+    for sid, row in rows.items():
+        sp = spot.get(sid)
+        if sp:
+            row["spot"] = sp["label"]
+    labels = sorted({sp["label"] for sp in spot.values() if sp}, key=lambda s: int(s.split()[-1]))
+    if len(labels) < 2:
+        return None
+    first = {}
+    for sp in spot.values():
+        if sp:
+            first.setdefault(sp["label"], sp)
+    motors = sorted({m for sp in first.values() for m in sp if m != "label"})
+    varying = [m for m in motors if len({round(sp.get(m, float("nan")), 4) for sp in first.values()}) > 1]
+    names = {lab: _spot_name(first[lab], varying) for lab in labels}
+    stab = (stability or {}).get("rows") or {}
+
+    def metric(sid, k):
+        v = ((stab.get(sid) or {}).get("metrics") or {}).get(k)
+        return float(v) if isinstance(v, (int, float)) and v == v else None
+
+    flagged = [sid for sid, row in rows.items() if sid in spot and any(y["code"] in DIFFERS_CODES for y in row["reasons"])]
+    kept = [sid for sid, row in rows.items() if sid in spot and row["rule_decision"] == "keep"]
+    sp_f = {spot[s]["label"] for s in flagged if spot.get(s)}
+    sp_k = {spot[s]["label"] for s in kept if spot.get(s)}
+    by_spot = {lab: [rows[s] for s in rows if spot.get(s) and spot[s]["label"] == lab] for lab in labels}
+
+    def med(lab, k, only=None):
+        vs = [metric(x["scan_id"], k) for x in by_spot[lab] if only is None or x["scan_id"] in only]
+        vs = [v for v in vs if v is not None]
+        return float(np.median(vs)) if vs else None
+
+    ref_ids = set(kept)
+    ref_wl = [metric(s, "wl_h") for s in ref_ids]
+    ref_wl = float(np.median([v for v in ref_wl if v is not None])) if any(v is not None for v in ref_wl) else None
+    ref_st = [metric(s, "edge_step") for s in ref_ids]
+    ref_st = float(np.median([v for v in ref_st if v is not None])) if any(v is not None for v in ref_st) else None
+    outcome, statement = "consistent", None
+    confined = bool(flagged) and all(spot.get(s) for s in flagged) and not (sp_f & sp_k)
+    if flagged and not confined:
+        outcome = "evolution_within_a_spot" if sp_f & sp_k else "spot_not_read"
+    elif confined and _earliest(flagged, recs, rows) and len(sp_k) > len(sp_f):
+        # spot and time order are CONFOUNDED: the differing scans are the first of their run AND at other spots;
+        # neither label alone is honest, and both point to leaving them out
+        mine = [rows[s] for s in sorted(flagged, key=lambda s: [r["scan_id"] for r in recs].index(s))]
+        sps = sorted({spot[s]["label"] for s in flagged}, key=lambda x: int(x.split()[-1]))
+        pos = ", ".join(names[lab].removeprefix("spot ") for lab in sps)
+        other_rows = [x for o in sorted(sp_k, key=lambda x: int(x.split()[-1])) for x in by_spot[o] if x["scan_id"] in ref_ids]
+        what = (f"{_scan_list(mine)} differ{'s' if len(mine) == 1 else ''} from the rest ({_scan_list(other_rows)}): "
+                f"{'it is the first scan' if len(mine) == 1 else 'they are the first scans'} of the run (after the "
+                f"condition was set) AND at {'another spot' if len(sps) == 1 else 'other spots'} ({pos}), so either "
+                "the sample was still changing or the spot differs; both point to leaving "
+                f"{'it' if len(mine) == 1 else 'them'} out")
+        for x in mine:
+            old = [y for y in x["reasons"] if y["code"] in DIFFERS_CODES]
+            x["reasons"] = [y for y in x["reasons"] if y["code"] not in DIFFERS_CODES] + [
+                {"source": "spots", "code": "early_and_spot_differs", "rule": SPOT_RULE_ID, "said": what,
+                 "evidence": {"spot": spot[x["scan_id"]], "replaces": [y["code"] for y in old],
+                              "was_said": "; ".join(y["said"] for y in old)}}]
+            x["rule_decision"] = "drop"
+            if x["decided_by"] == "rule":
+                x["decision"], x["merged"] = "drop", False
+        outcome, statement = "early_and_spot_differs", what
+    elif confined:
+        evo = set((stability or {}).get("evolving_metrics") or ())
+        shape = any(y["code"] == "shape" for s in flagged for y in rows[s]["reasons"]) or bool(evo & set(SHAPE_METRICS))
+        others = sorted(sp_k, key=lambda s: int(s.split()[-1]))
+        majority = len(sp_k) > len(sp_f)
+        early = _earliest(flagged, recs, rows)
+        said_spots: list[str] = []
+        for lab in sorted(sp_f, key=lambda s: int(s.split()[-1])):
+            mine = [x for x in by_spot[lab] if x["scan_id"] in flagged]
+            wl, st = med(lab, "wl_h", {x["scan_id"] for x in mine}), med(lab, "edge_step", {x["scan_id"] for x in mine})
+            parts = []
+            if _pct(wl, ref_wl):
+                parts.append(f"its white line is {_pct(wl, ref_wl)} from the others'")
+            if _pct(st, ref_st):
+                parts.append(f"its edge step {_pct(st, ref_st)}")
+            other_rows = [x for o in others for x in by_spot[o] if x["scan_id"] in ref_ids]
+            what = (f"{names[lab]} ({_scan_list(mine)}) differs from the other "
+                    f"{'spot' if len(others) == 1 else f'{len(others)} spots'} ({_scan_list(other_rows)})"
+                    + (": " + ", ".join(parts) if parts else "")
+                    + ("; its shape differs" if shape else "; only its intensity differs")
+                    + ("; these are also the first scans of the run, so the sample may still have been changing"
+                       if early else "")
+                    + "; possibly an uneven or thinner area of the sample")
+            for x in mine:
+                old = [y for y in x["reasons"] if y["code"] in DIFFERS_CODES]
+                rest = [y for y in x["reasons"] if y["code"] not in DIFFERS_CODES]
+                said_before = "; ".join(y["said"] for y in old)
+                if majority and shape:
+                    x["reasons"] = rest + [{"source": "spots", "code": "spot_differs", "rule": SPOT_RULE_ID,
+                                            "said": what + " (the majority of consistent spots is kept)",
+                                            "evidence": {"spot": spot[x["scan_id"]], "replaces": [y["code"] for y in old],
+                                                         "was_said": said_before}}]
+                else:
+                    x["reasons"] = rest
+                    x["notes"] = list(x["notes"]) + [{"source": "spots", "code": "spot_differs", "decides": False,
+                                                      "said": what + ("; kept: the spots split evenly, no majority, the "
+                                                                      "scientist decides" if shape else
+                                                                      "; kept: an intensity difference alone never "
+                                                                      "drops a scan"),
+                                                      "was_said": said_before}]
+                x["rule_decision"] = "drop" if x["reasons"] else "keep"
+                if x["decided_by"] == "rule":
+                    x["decision"] = x["rule_decision"]
+                    x["merged"] = x["decision"] == "keep" and x.get("shift_eV") is not None
+            said_spots.append(what)
+        statement = "; ".join(said_spots)
+        outcome = ("differing_spot_dropped" if majority and shape else
+                   ("spots_disagree" if shape else "intensity_only_kept"))
+    summary = []
+    for lab in labels:
+        xs = by_spot[lab]
+        summary.append({"spot": lab, "name": names[lab], "position": {m: first[lab].get(m) for m in motors},
+                        "scans": [x["scan_id"] for x in xs], "kept": [x["scan_id"] for x in xs if x["decision"] == "keep"],
+                        "white_line_height": med(lab, "wl_h"), "edge_step": med(lab, "edge_step")})
+    block = {"rule_id": SPOT_RULE_ID, "rule": SPOT_RULE, "outcome": outcome, "spots": summary,
+             "statement": statement or (f"{len(labels)} spots; the rule found no spot that differs from the others."
+                                        if outcome == "consistent" else
+                                        "The scans that differ share a spot with kept scans: a change within a spot "
+                                        "(the stability analysis), not a spot difference."
+                                        if outcome == "evolution_within_a_spot" else
+                                        "Some differing scans have no stated spot: the spot rule was not applied.")}
+    if outcome == SPOTS_DISAGREE_FLAG:
+        block["statement"] = ("SPOTS DISAGREE: " + statement + ". The spots split evenly (no majority): every spot is "
+                              "kept; look at the spots and decide (set_scan_decision); a bulk approval refuses this "
+                              "result.")
+    _recount(table)
+    return block
+
+
+def _earliest(flagged: Sequence[str], recs: Sequence[Mapping], rows: Mapping) -> bool:
+    """Are the differing scans the FIRST scans of their run (a contiguous run from the start, in time order by #D,
+    then scan number)? Scans dropped for another reason only (aborted, no energy reference, a logbook note) are
+    skipped in that order: they are judged by nothing here."""
+    fl = set(flagged)
+    by_run: dict = {}
+    for r in recs:
+        by_run.setdefault(r.get("run_key"), []).append(r)
+    for rs in by_run.values():
+        mine = [r for r in rs if r["scan_id"] in fl]
+        if not mine:
+            continue
+        judged = [r for r in rs if r["scan_id"] in fl or not rows[r["scan_id"]]["reasons"]]
+        judged.sort(key=lambda r: (r.get("time") or datetime.max, r["num"]))
+        if {r["scan_id"] for r in judged[:len(mine)]} != {r["scan_id"] for r in mine}:
+            return False
+    return True
+
+
+def _recount(table: dict) -> None:
+    rows = table["rows"]
+    kept = [x for x in rows if x["decision"] == "keep"]
+    merged = [x for x in rows if x.get("merged")]
+    table["counts"] = {"scans": len(rows), "kept": len(kept), "dropped": len(rows) - len(kept),
+                       "overridden_by_scientist": len([x for x in rows if x["decided_by"] == "scientist"]),
+                       "merged": len(merged), "kept_not_merged": len(kept) - len(merged)}
+    table["statement"] = decisions_statement(rows, table.get("overrides_not_applied") or ())
+
+
 def decisions_statement(rows: Sequence[Mapping], stale: Sequence[Mapping] = ()) -> str:
     kept = [x for x in rows if x["decision"] == "keep"]
     dropped = [x for x in rows if x["decision"] == "drop"]
@@ -1689,6 +1908,9 @@ def _qc(res, recs, kept, table, nm, E, y, e0, absorber, bt, np):
         reasons_warn.append("kept_scan_not_merged")
         st["kept_scan_not_merged"] = "; ".join(f"{x['scan_id']}: {x['cannot_merge']}" for x in table["rows"]
                                                if x.get("cannot_merge"))
+    if (res.get("spots") or {}).get("outcome") == SPOTS_DISAGREE_FLAG:
+        reasons_warn.append(SPOTS_DISAGREE_FLAG)
+        st[SPOTS_DISAGREE_FLAG] = res["spots"]["statement"]
     if table.get("overrides_not_applied"):
         reasons_warn.append("override_not_applied")
         st["override_not_applied"] = "; ".join(x["said"] for x in table["overrides_not_applied"])
@@ -1805,6 +2027,9 @@ def plot(path: Path, group, recs, table, E, y, nm, e0, absorber, np) -> bool:
     fig, (ax1, ax2) = plt.subplots(2, 1, figsize=(9, 8.4), sharex=False)
     lo, hi = (absorber["E_edge_eV"] - 20, absorber["E_edge_eV"] + 60) if absorber.get("E_edge_eV") else (E[0], E[-1])
     shown = 0
+    palette = ["tab:blue", "tab:orange", "tab:green", "tab:purple", "tab:brown", "tab:pink", "tab:olive", "tab:cyan"]
+    labs = sorted({row["spot"] for row in table["by_id"].values() if row.get("spot")}, key=lambda x: int(x.split()[-1]))
+    spot_colors = {lab: palette[k % len(palette)] for k, lab in enumerate(labs)}
     for r in recs:
         a = r.get("aligned")
         row = table["by_id"][r["scan_id"]]
@@ -1812,13 +2037,18 @@ def plot(path: Path, group, recs, table, E, y, nm, e0, absorber, np) -> bool:
             continue
         with np.errstate(all="ignore"):
             yy = a.IF / a.I0
+        # scans coloured by spot (the spot named in the legend) when the group has several
+        sp = row.get("spot")
+        color = spot_colors.get(sp) if sp else None
+        tag = f" [{sp}]" if sp and len(spot_colors) > 1 else ""
         if row["decision"] == "keep":
-            ax1.plot(a.E, yy, lw=0.8, alpha=0.75, label=f"{r['stem'][:18]} #{r['num']} kept ({1000 * (row['shift_eV'] or 0):+.0f} meV)"
+            ax1.plot(a.E, yy, lw=0.8, alpha=0.75, color=color,
+                     label=f"{r['stem'][:18]} #{r['num']}{tag} kept ({1000 * (row['shift_eV'] or 0):+.0f} meV)"
                      if shown < 14 else None)
         else:
             why = ", ".join(sorted({x["code"] for x in row["reasons"]})) or "scientist"
-            ax1.plot(a.E, yy, lw=0.9, ls="--", alpha=0.8, label=f"{r['stem'][:18]} #{r['num']} DROPPED: {why}"[:70]
-                     if shown < 14 else None)
+            ax1.plot(a.E, yy, lw=0.9, ls="--", alpha=0.8, color=color,
+                     label=f"{r['stem'][:18]} #{r['num']}{tag} DROPPED: {why}"[:80] if shown < 14 else None)
         shown += 1
     ax1.plot(E, y, color="k", lw=1.8, label=f"average of {table['counts']['kept']} kept (raw IF/I0)")
     unaligned = [f"#{r['num']}" for r in recs if r.get("aligned") is None]
@@ -1869,6 +2099,8 @@ def show_blocks(r: Mapping, *, full: bool = False) -> dict:
     """``bundle show processing-result``'s v1 blocks, in plain words: the engine, the energy reference and its
     evidence, the shift table, the decision table and the normalisation convention."""
     out: dict = {}
+    if SPOTS_DISAGREE_FLAG in (r.get("review_flags") or ()):
+        out["spots_warning"] = (r.get("spots") or {}).get("statement")
     if NO_REFERENCE_FLAG in (r.get("review_flags") or ()):
         out["warning"] = ("NO ENERGY REFERENCE for this beamtime: no scan was aligned (every shift is 0). Look at this "
                           "result and approve it on its own; a bulk approval refuses it.")
@@ -1910,6 +2142,14 @@ def show_blocks(r: Mapping, *, full: bool = False) -> dict:
                                  **({"overrides_not_applied": [x["said"] for x in t["overrides_not_applied"]]}
                                     if t.get("overrides_not_applied") else {}),
                                  "override": t.get("override_command")}
+    sp = r.get("spots")
+    if isinstance(sp, Mapping):
+        def fmt(v):
+            return "n/a" if v is None else f"{v:.3g}"
+        out["spots"] = {"statement": sp.get("statement"), "outcome": sp.get("outcome"),
+                        "rows": [f"{x['name']} ({x['spot']}): {len(x['scans'])} scans, {len(x['kept'])} kept; white-line "
+                                 f"height {fmt(x.get('white_line_height'))}, edge step {fmt(x.get('edge_step'))}"
+                                 for x in sp.get("spots") or ()]}
     mm = r.get("measurement_mode")
     if isinstance(mm, Mapping):
         out["measurement_mode"] = mm.get("statement")

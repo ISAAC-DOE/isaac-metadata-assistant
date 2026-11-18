@@ -872,6 +872,8 @@ BULK_APPROVE_REVIEW = (("glitch_points_from_one_scan", "one scan's glitch on the
                        # processing.engine_xas.NO_REFERENCE_FLAG: the beamtime has no energy reference, no scan was
                        # aligned (isaac.xas.v1; review of 2ddb27e7)
                        ("no_energy_reference", "no energy reference (no scan of the beamtime was aligned)"),
+                       # processing.engine_xas.SPOTS_DISAGREE_FLAG: the group's spots split evenly, none dropped
+                       ("spots_disagree", "spots that disagree with no majority (every spot kept)"),
                        ("outlier_scans", "an outlier scan"),
                        ("only_scan_with_edge", "the group's only scan with an edge"),
                        # r6 review M1: a curve tied to its group by the params file, not by its name
