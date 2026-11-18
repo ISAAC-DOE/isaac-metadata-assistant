@@ -24,7 +24,7 @@ sources disagree), or absent — and every statement key falls in ONE of three c
   runs differing ONLY here form ONE proposed group, with a question listing the differing
   bookkeeping literals ("these N runs look like repeats — merge?").
 * ``unknown`` (:data:`UNKNOWN_KEYS`, plus every key this module has never seen) — not
-  decided by this build (``new_spot``, ``step_number``, unrecognised name tokens). A
+  decided by this build (unrecognised name tokens). A
   difference SPLITS, and the groups are linked by a ``merge_candidate`` naming the key,
   so a scientist merges with one decision. Nothing unknown is merged silently.
 
@@ -56,6 +56,10 @@ GROUPING_RULE_ID = "isaac.grouping.record_groups.v1"
 ROLE_RULE_ID = "isaac.grouping.run_role.v0"
 UNREAD_RULE_ID = "isaac.grouping.unread_numbered_scans.v0"
 ENGINE_RULE_ID = "isaac.grouping.engine_misreading.v0"
+#: pq-002 (beamline scientist answers relayed by Krish, 17 Nov 2026): a new spot is NOT a new result, never a condition
+SPOT_RULE_ID = "isaac.grouping.spot_not_a_condition.v0"
+#: pq-003 (the same answers): stepNN is a sequence position, a condition; different steps never merge
+STEP_RULE_ID = "isaac.grouping.step_is_sequence_position.v0"
 
 ROLE_SAMPLE = "sample"
 ROLE_REFERENCE = "reference"
@@ -98,6 +102,9 @@ CONDITION_KEYS: Mapping[str, str] = {
     "scan_header_ph": "condition: pH changes the state",
     "scan_header_potential": "condition: the applied potential sets the electrochemical state",
     "scan_header_potential_scale": "condition: a potential means nothing without its reference scale",
+    # pq-003 (beamline scientist answers relayed by Krish, 17 Nov 2026; STEP_RULE_ID)
+    "step_number": ("condition: stepNN is the order of potential steps in one sequence; different steps are NEVER "
+                    "merged, even at the same potential (step05 and step08 at 850 mV: after the 1st and the 2nd cycling)"),
 }
 
 #: How the acquisition was filed, not what was measured. key -> reason.
@@ -117,7 +124,11 @@ BOOKKEEPING_KEYS: Mapping[str, str] = {
     "spec_user_string": "free SPEC comment; kept as evidence, not compared",
     "acquisition_target": "file relationship, not a condition",
     "motor_position": "every motor in the header; drifts between runs",
-    "sample_position": "stage coordinates drift between repeats (a NEW SPOT is `new_spot`, unknown)",
+    "sample_position": "stage coordinates: a new spot of the same sample at the same condition is no new result (pq-002)",
+    # pq-002 (beamline scientist answers relayed by Krish, 17 Nov 2026; SPOT_RULE_ID)
+    "new_spot": ("a NEW SPOT is not a new result: each sample is measured at several spots under the same condition to "
+                 "improve statistics, so spots of one condition merge (as raw mu); the spot is recorded per scan from "
+                 "the stage motors Sx Sy Sz Sr"),
     "trigger": "acquisition trigger setting",
     "internal_declaration_vs_filename": "a run-level naming conflict; reported by the engine",
     "acquired_never_declared": "a run-level macro relationship; reported by the engine",
@@ -139,8 +150,6 @@ NOT_A_CONDITION = BOOKKEEPING_KEYS
 
 #: Not decided by this build — a scientist (Angel/Oscar) decides. key -> the question.
 UNKNOWN_KEYS: Mapping[str, str] = {
-    "new_spot": "Is a measurement on a new spot of the same sample a REPEAT (merge) or a different result?",
-    "step_number": "Is a numbered step (e.g. `stepNN`) a repeat at the same condition, or a different point in a protocol?",
     "unknown_token": "The acquisition file name carries tokens no naming profile recognises; do they mark a different condition?",
 }
 
@@ -319,6 +328,11 @@ PLAIN_MISREADING = {
 }
 
 _REPEAT_TOKEN = re.compile(r"^(again|repeat|rep\d*|redo)$", re.IGNORECASE)
+#: SPOT_RULE_ID: a new-spot marker in a name (``newSpots``, ``newSpot``, the BL15-2 profile's ``new_spot`` aliases) is no
+#: part of what a run measured: left out of the name key as a repeat marker is, so spots of one condition group together
+_SPOT_TOKEN = re.compile(r"^new_?spots?$", re.IGNORECASE)
+#: STEP_RULE_ID: a ``stepNN`` name token; compared by its number (``step05`` is ``step5``)
+_STEP_TOKEN = re.compile(r"^(step)0*(\d+)$", re.IGNORECASE)
 #: The counter position meaning "the LAST token of the name, whatever its length" (bundle 1.9.0;
 #: ``decide --positions last``). Measured on a real beamtime: the counter was always the last token,
 #: at positions 3..10, and a fixed position list also named a non-counter token of the longer names.
@@ -393,8 +407,12 @@ _NUMBER_WITH_UNIT_TOKEN = re.compile(r"^([-+]?)(\d+)([A-Za-z]+)$")
 
 
 def _unit_token(t: str) -> str:
-    """``000mV`` → ``0mV`` (seen on real data beside ``0mV``); every other token unchanged.
+    """``000mV`` → ``0mV`` (seen on real data beside ``0mV``); ``step05`` → ``step5`` (STEP_RULE_ID: one sequence
+    position, two spellings); every other token unchanged.
     Measured hazard this avoids: stripping zeros from any number merged `0.05V` with `0.5V`."""
+    step = _STEP_TOKEN.match(t)
+    if step is not None:
+        return f"{step.group(1)}{int(step.group(2))}"
     m = _NUMBER_WITH_UNIT_TOKEN.match(t)
     if m is None or m.group(3).casefold() not in _ZERO_UNITS or m.group(2).strip("0"):
         return t
@@ -411,7 +429,7 @@ def name_stem_key(stem: str, *, loose: bool = False, counter_positions: Iterable
     known = {int(x) for x in known_counters if x is not None}
     out = []
     for i, t in enumerate(toks):
-        if _REPEAT_TOKEN.match(t):
+        if _REPEAT_TOKEN.match(t) or _SPOT_TOKEN.match(t):
             continue
         if t.isdigit() and (loose or _is_counter_token(toks, i, positions, known)):
             continue
@@ -461,7 +479,8 @@ def sample_name_tokens(stem: str, *, read_as_condition: Container[str] = ()) -> 
     never a group key."""
     out = []
     for t in _stem_tokens(stem):
-        if (not any(ch.isalpha() for ch in t) or _REPEAT_TOKEN.match(t) or t.casefold() in read_as_condition
+        if (not any(ch.isalpha() for ch in t) or _REPEAT_TOKEN.match(t) or _SPOT_TOKEN.match(t)
+                or t.casefold() in read_as_condition
                 or _condition_shaped(t)):
             continue
         out.append(t)
@@ -515,7 +534,8 @@ def base_name_key(stem: str, data_file: str | None = None) -> str:
         data_file = None
     toks = _stem_tokens(data_file if data_file else stem or "")
     toks = [t for i, t in enumerate(toks)
-            if not _REPEAT_TOKEN.match(t) and not (i and t.isdigit() and _REPEAT_TOKEN.match(toks[i - 1]))]
+            if not _REPEAT_TOKEN.match(t) and not _SPOT_TOKEN.match(t)
+            and not (i and t.isdigit() and _REPEAT_TOKEN.match(toks[i - 1]))]
     if not data_file and len(toks) > 1 and toks[-1].isdigit():
         toks = toks[:-1]
     return "_".join(_unit_token(t) for t in toks).casefold()
@@ -736,9 +756,15 @@ def _run_readings(run: Mapping, cands: Mapping[str, Mapping], issues: Sequence[M
     return out, books
 
 
-def _comparable(reading: Mapping | None) -> str | None:
+def _comparable(reading: Mapping | None, key: str | None = None) -> str | None:
+    """What a reading is compared as. STEP_RULE_ID: a ``step_number`` is compared by its sequence position
+    (``step5`` and ``step05`` are step 5), never by its spelling."""
     if reading is None:
         return None
+    if key == "step_number" and reading.get("kind") != "conflicting":
+        pos = _sequence_position(reading)
+        if pos is not None:
+            return _canon({"kind": "step_position", "value": pos})
     return _canon({"kind": reading["kind"], "value": reading.get("value"), "readings": reading.get("readings")})
 
 
@@ -892,8 +918,21 @@ def _basis(readings_list: Sequence[Mapping[str, dict]], classes: Mapping[str, st
         if first.get("sample_key_basis"):
             entry["sample_key_basis"] = first["sample_key_basis"]
             entry["value"] = first.get("value")
+        if key == "step_number" and classes[key] == CLASS_CONDITION:
+            # STEP_RULE_ID: the step number is the group's place in the potential sequence
+            entry["sequence_position"] = _sequence_position(first)
+            entry["rule_id"] = STEP_RULE_ID
         basis[_category(key, classes[key])][key] = entry
     return basis
+
+
+def _sequence_position(reading: Mapping) -> int | None:
+    """The step number a ``step_number`` reading states (``step05`` -> 5), or ``None`` when none is read."""
+    for v in [reading.get("value"), *list(reading.get("readings") or ())]:
+        m = re.search(r"(\d+)", str(v if not isinstance(v, Mapping) else v.get("value")))
+        if m:
+            return int(m.group(1))
+    return None
 
 
 def _shown(r: Mapping | None):
@@ -905,7 +944,7 @@ def _shown(r: Mapping | None):
 def _diff(a: Mapping[str, dict], b: Mapping[str, dict], classes: Mapping[str, str]) -> list[dict]:
     out = []
     for key in sorted(set(a) | set(b)):
-        ca, cb = _comparable(a.get(key)), _comparable(b.get(key))
+        ca, cb = _comparable(a.get(key), key), _comparable(b.get(key), key)
         if ca == cb:
             continue
         if ca is None or cb is None:
@@ -1014,10 +1053,10 @@ def _propose(bundle: Mapping, *, max_split_reasons: int = 20, _force_alone: froz
             blockers.append("condition_check_failed")
         name_key = name_stem_key(run.get("stem") or "", counter_positions=cpos_of(run), known_counters=_known_counters(run))
         data_file = data_files.get(str(run.get("run_id")))
-        cond_sig = _canon({k: _comparable(r) for k, r in sorted(readings.items()) if classes[k] == CLASS_CONDITION})
+        cond_sig = _canon({k: _comparable(r, k) for k, r in sorted(readings.items()) if classes[k] == CLASS_CONDITION})
         # For merge CANDIDATES only: the name-stem key with every digit token dropped.
         cond_sig_loose = _canon(
-            {k: (_canon(["loose", r["_loose"]]) if k == "sample_name_stem" else _comparable(r)) for k, r in sorted(readings.items()) if classes[k] == CLASS_CONDITION}
+            {k: (_canon(["loose", r["_loose"]]) if k == "sample_name_stem" else _comparable(r, k)) for k, r in sorted(readings.items()) if classes[k] == CLASS_CONDITION}
         )
         unk_sig = _canon({k: _comparable(r) for k, r in sorted(readings.items()) if classes[k] == CLASS_UNKNOWN})
         infos.append(
@@ -1107,7 +1146,7 @@ def _propose(bundle: Mapping, *, max_split_reasons: int = 20, _force_alone: froz
             continue
         ref = target["_members"][0]
         agree = all(
-            k in ref["readings"] and _comparable(ref["readings"][k]) == _comparable(r)
+            k in ref["readings"] and _comparable(ref["readings"][k], k) == _comparable(r, k)
             for k, r in info["readings"].items()
             if info["classes"][k] == CLASS_CONDITION
         )
@@ -1498,7 +1537,7 @@ def condition_violations(bundle: Mapping, proposal: Mapping) -> list[dict]:
         reads = {k: _run_readings(runs[k], cands, per_run.get(k, []))[0] for k in g["member_run_keys"] if k in runs}
         keys = sorted({k for rk, r in reads.items() if rk not in context for k in r if classify_key(k, overrides=overrides) == CLASS_CONDITION})
         for key in keys:
-            vals = {rk: _comparable(r.get(key)) for rk, r in reads.items() if rk not in context or key in r}
+            vals = {rk: _comparable(r.get(key), key) for rk, r in reads.items() if rk not in context or key in r}
             if len(set(vals.values())) > 1:
                 out.append({"group_id": g["group_id"], "key": key, "values": vals})
         names = {

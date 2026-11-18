@@ -31,6 +31,11 @@ REPO = Path(__file__).resolve().parents[3]
 SKILL = REPO / ".claude" / "skills" / "isaac-historical-import"
 
 
+#: pq-005/pq-007 (beamline scientist answers relayed by Krish, 17 Nov 2026): Athena is never used, so the Athena
+#: behaviour these tests checked no longer runs (processing reads no Athena project; no Athena result composes a record)
+ATHENA_RETIRED = pytest.mark.skip(reason="Athena is never used (pq-005/pq-007, 17 Nov 2026): retired behaviour")
+
+
 def _pair(names, chosen, *, flagged=True, skipped=()):
     """An ISAAC result of one run whose inputs are the files ``names`` (no stated index) and its Athena sibling."""
     inputs = [{"source_id": f"s{k}", "scan": None, "relative_path": f"SYN_dir/{n}"} for k, n in enumerate(names)]
@@ -165,6 +170,7 @@ def _process(bdir, root):
     return run(bdir, root)
 
 
+@ATHENA_RETIRED
 def test_processing_reads_the_numbers_from_the_file_names(tmp_path):
     _processing()
     bdir, root = _named_case(tmp_path / "gap", ["01_SYN_ZZ1_001.dat", "01_SYN_ZZ1_002.dat", "01_SYN_ZZ1_004.dat"],
@@ -184,6 +190,7 @@ def test_processing_reads_the_numbers_from_the_file_names(tmp_path):
     assert isa["comparison"]["metrics"].get("rms_norm_same_scans_same_params") is not None
 
 
+@ATHENA_RETIRED
 def test_mixed_stated_and_missing_indexes_never_say_not_merged(tmp_path):
     _processing()
     names = [f"01_SYN_ZZ1_{n:03d}.dat" for n in (1, 2, 3)]

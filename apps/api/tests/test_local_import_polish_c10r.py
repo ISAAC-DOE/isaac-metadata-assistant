@@ -36,6 +36,12 @@ from tests_support_records import pristine_bundle  # noqa: F401  (fixture)
 ORDERS = [([1, 2], [1, 2]), ([1, 2, 3], [1, 2]), ([1, 2], [2]), ([1, 2], [1, 2, 3])]
 
 
+#: pq-005/pq-007 (beamline scientist answers relayed by Krish, 17 Nov 2026): Athena is never used, so the Athena
+#: behaviour these tests checked no longer runs (processing reads no Athena project; no Athena result composes a record)
+ATHENA_RETIRED = pytest.mark.skip(reason="Athena is never used (pq-005/pq-007, 17 Nov 2026): retired behaviour")
+
+
+@ATHENA_RETIRED
 @pytest.mark.parametrize("swap", [False, True], ids=["a-first", "b-first"])
 @pytest.mark.parametrize("first, second", ORDERS, ids=["A12+B12", "A123+B12", "A12+B2", "A12+B123"])
 def test_a_second_projects_normalisation_is_its_own_version_in_every_order(tmp_path, first, second, swap):
@@ -60,6 +66,7 @@ def test_a_second_projects_normalisation_is_its_own_version_in_every_order(tmp_p
     assert not [n for n in out["athena"]["notes"] if n["code"] == "identical_athena_set_in_several_projects"]
 
 
+@ATHENA_RETIRED
 def test_an_identical_set_in_another_project_is_one_set_and_is_named(tmp_path):
     _processing()
     bdir, root = _case(tmp_path, {"a/SYN_day1.prj": ([1, 2], 60.0), "b/SYN_copy.prj": ([1, 2], 60.0)})
@@ -74,6 +81,7 @@ def test_an_identical_set_in_another_project_is_one_set_and_is_named(tmp_path):
         "normalisation parameters as those in a/SYN_day1.prj, so they are one set (read from a/SYN_day1.prj).")
 
 
+@ATHENA_RETIRED
 def test_an_identical_set_among_different_ones_is_collapsed_and_named_on_its_version(tmp_path):
     _processing()
     bdir, root = _case(tmp_path, {"a/SYN_day1.prj": ([1, 2], 60.0), "b/SYN_copy.prj": ([1, 2], 60.0),
@@ -90,6 +98,7 @@ def test_an_identical_set_among_different_ones_is_collapsed_and_named_on_its_ver
 # --- H2: a set's identity names its members ----------------------------------------------------------------------
 
 
+@ATHENA_RETIRED
 def test_a_sets_identity_names_its_members_not_only_its_first_curve(tmp_path):
     _processing()
     bdir, root = _case(tmp_path, {"a/SYN_one.prj": ([1, 2], 60.0), "b/SYN_two.prj": ([1, 2], 90.0)})
@@ -168,6 +177,7 @@ def old_and_new_versions(tmp_path_factory):
     return _versions_as_g1(old), _versions_as_g1(new)
 
 
+@ATHENA_RETIRED
 @pytest.mark.parametrize("chosen", ["g1-v01", "g1-v03", "g1-v05"])
 def test_an_old_single_curve_selection_is_not_carried_over_to_a_set_and_is_asked_again(
         athena, monkeypatch, old_and_new_versions, chosen):

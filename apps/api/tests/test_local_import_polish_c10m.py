@@ -37,6 +37,11 @@ SUBSET = "scientist_selected_subset_of_scans"
 # --- MED-1: per-scan Athena groups in two projects ---------------------------------------------------------------
 
 
+#: pq-005/pq-007 (beamline scientist answers relayed by Krish, 17 Nov 2026): Athena is never used, so the Athena
+#: behaviour these tests checked no longer runs (processing reads no Athena project; no Athena result composes a record)
+ATHENA_RETIRED = pytest.mark.skip(reason="Athena is never used (pq-005/pq-007, 17 Nov 2026): retired behaviour")
+
+
 def _processing():
     pytest.importorskip("numpy", reason="XAS processing tests need the optional `processing` extra (numpy)")
     pytest.importorskip("larch", reason="XAS processing tests need the optional `processing` extra (xraylarch)")
@@ -80,6 +85,7 @@ def _process(bdir, root):
     return out, isa, ath
 
 
+@ATHENA_RETIRED
 def test_per_scan_groups_in_two_projects_are_two_sets_not_a_version_per_scan(tmp_path):
     _processing()
     bdir, root = _case(tmp_path, {"a/SYN_day1.prj": ([1, 2], 60.0), "b/SYN_merge.prj": ([1, 2, 3], 90.0)})
@@ -99,6 +105,7 @@ def test_per_scan_groups_in_two_projects_are_two_sets_not_a_version_per_scan(tmp
     assert out["athena"]["record_groups_with_unselected_versions"] == 1
 
 
+@ATHENA_RETIRED
 def test_the_same_per_scan_groups_in_two_projects_are_one_set(tmp_path):
     _processing()
     bdir, root = _case(tmp_path, {"a/SYN_day1.prj": ([1, 2], 60.0), "b/SYN_copy.prj": ([1, 2], 60.0)})
@@ -108,6 +115,7 @@ def test_the_same_per_scan_groups_in_two_projects_are_one_set(tmp_path):
     assert out["athena"]["record_groups_with_unselected_versions"] == 0
 
 
+@ATHENA_RETIRED
 def test_per_scan_groups_of_some_of_the_runs_scans_are_flagged_a_subset(tmp_path):
     _processing()
     bdir, root = _case(tmp_path, {"SYN.prj": ([1, 2], 60.0)})
@@ -123,6 +131,7 @@ def test_per_scan_groups_of_some_of_the_runs_scans_are_flagged_a_subset(tmp_path
     assert note and "scans 1, 2 of the 4 scan(s) ISAAC merged" in note
 
 
+@ATHENA_RETIRED
 def test_per_scan_groups_of_every_scan_are_not_a_subset(tmp_path):
     _processing()
     bdir, root = _case(tmp_path, {"SYN.prj": ([1, 2], 60.0)}, scans=2)

@@ -17,6 +17,11 @@ import json
 import pytest
 
 
+#: pq-005/pq-007 (beamline scientist answers relayed by Krish, 17 Nov 2026): Athena is never used, so the Athena
+#: behaviour these tests checked no longer runs (processing reads no Athena project; no Athena result composes a record)
+ATHENA_RETIRED = pytest.mark.skip(reason="Athena is never used (pq-005/pq-007, 17 Nov 2026): retired behaviour")
+
+
 def _proc():
     pytest.importorskip("numpy", reason="needs the optional `processing` extra (numpy)")
     pytest.importorskip("larch", reason="needs the optional `processing` extra (xraylarch)")
@@ -120,6 +125,7 @@ def test_the_line_names_a_merge_with_no_near_name_and_the_groups_beside_it():
     assert M.unmatched_merges_reply({}) is None
 
 
+@ATHENA_RETIRED
 def test_process_replies_with_the_merges_and_bundle_list_pages_them(tmp_path, capsys):
     _proc()
     from isaac_api.local_import import cli
@@ -191,6 +197,7 @@ def test_a_merge_set_aside_and_its_copies_are_no_longer_listed():
     assert got == set() and rows[0]["status"] == "tied" and "the tie stands" in rows[0]["statement"]
 
 
+@ATHENA_RETIRED
 def test_process_with_athena_ignore_lists_nothing_and_moves_no_id(tmp_path, capsys):
     _proc()
     from isaac_api.local_import import mutations as M
@@ -366,6 +373,7 @@ def test_other_rule_versions_are_the_builds_reason_beside_the_params_file():
 # --- K4: the chosen version's own plot ----------------------------------------------------------------------------------
 
 
+@ATHENA_RETIRED
 def test_a_chosen_athena_version_has_its_own_plot_with_its_curve(tmp_path, capsys):
     _proc()
     from isaac_api.local_import import mutations as M

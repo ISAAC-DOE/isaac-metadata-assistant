@@ -34,6 +34,11 @@ SYN = "SYNTHETIC TEST"
 # --- C1: the approved curve is not the version chosen last ------------------------------------------------------
 
 
+#: pq-005/pq-007 (beamline scientist answers relayed by Krish, 17 Nov 2026): Athena is never used, so the Athena
+#: behaviour these tests checked no longer runs (processing reads no Athena project; no Athena result composes a record)
+ATHENA_RETIRED = pytest.mark.skip(reason="Athena is never used (pq-005/pq-007, 17 Nov 2026): retired behaviour")
+
+
 def _with_versions(bdir_):
     """The approved ISAAC result p1 lists two invented Athena versions."""
     b = M.load(bdir_)
@@ -107,6 +112,7 @@ def test_an_approved_version_that_is_no_longer_the_choice_names_both_steps():
     assert R.athena_choice_mismatch(same, "g1", v02) is None
 
 
+@ATHENA_RETIRED
 def test_reselecting_after_an_approval_is_said_by_the_select_reply_itself(tmp_path, capsys):
     from test_local_import_polish_r1a import _processing, _results, _versions_case
 

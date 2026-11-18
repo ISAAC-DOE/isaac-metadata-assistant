@@ -16,6 +16,11 @@ import pytest
 from isaac_api.local_import import mutations as M
 
 
+#: pq-005/pq-007 (beamline scientist answers relayed by Krish, 17 Nov 2026): Athena is never used, so the Athena
+#: behaviour these tests checked no longer runs (processing reads no Athena project; no Athena result composes a record)
+ATHENA_RETIRED = pytest.mark.skip(reason="Athena is never used (pq-005/pq-007, 17 Nov 2026): retired behaviour")
+
+
 def _proc():
     pytest.importorskip("numpy", reason="needs the optional `processing` extra (numpy)")
     pytest.importorskip("larch", reason="needs the optional `processing` extra (xraylarch)")
@@ -114,6 +119,7 @@ def test_the_post_edge_level_check_judges_an_athena_curve():
     assert R.athena_post_edge_level({**bad, "energy_frame_known": False}, T.np) is None
 
 
+@ATHENA_RETIRED
 def test_an_athena_curve_whose_post_edge_level_is_far_from_1_fails_qc_and_is_not_preferred(tmp_path, monkeypatch):
     T = _proc()
     from isaac_api.local_import.processing import athena as A
@@ -137,6 +143,7 @@ def test_an_athena_curve_whose_post_edge_level_is_far_from_1_fails_qc_and_is_not
     assert M.unusable_curve_reasons(sci) == ["post_edge_not_at_1"]  # decide refuses to approve it
 
 
+@ATHENA_RETIRED
 def test_a_plain_athena_curve_still_passes(tmp_path):
     T = _proc()
     bdir, root = T._athena_case(tmp_path, {"SYN.prj": [("01_SYN_ZZ1_1-2", T.GRID, T.mu_edge(T.GRID) * 1e-2)]})
@@ -383,6 +390,7 @@ def test_stale_stored_values_are_refitted_as_athena_does_never_mixed():
     assert A.athena_normalisation(e, mu, mu * 0, 0.0003, bkg, short, np, refits=True)["basis"] == "athena_refit"
 
 
+@ATHENA_RETIRED
 def test_the_curve_as_athena_makes_it_reaches_the_result_and_says_which_way(tmp_path):
     T = _proc()
     import numpy as np
@@ -426,6 +434,7 @@ def test_a_per_scan_set_says_its_members_were_rebuilt():
 # --- review M1 / M2: decided results kept as they were are said --------------------------------------------------------
 
 
+@ATHENA_RETIRED
 def test_a_decided_athena_result_that_now_fails_the_post_edge_check_gets_a_kept_note(tmp_path, monkeypatch):
     T = _proc()
     from isaac_api.local_import.processing import athena as A
@@ -510,6 +519,7 @@ def test_glitch_points_unjudged_is_present_whenever_the_few_scan_sentence_is(tmp
     assert "glitch_check_few_scans" in said and m["glitch_points_unjudged"] == m["glitch_points"] >= 1
 
 
+@ATHENA_RETIRED
 def test_a_degenerate_project_is_refitted_as_athena_does_and_still_fails(tmp_path):
     _proc()
     import test_local_import_polish_c2a as C2

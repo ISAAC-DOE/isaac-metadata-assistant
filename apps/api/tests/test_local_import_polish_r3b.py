@@ -34,6 +34,11 @@ from isaac_api.local_import import bundle as B
 from isaac_api.local_import import records as R
 
 
+#: pq-005/pq-007 (beamline scientist answers relayed by Krish, 17 Nov 2026): Athena is never used, so the Athena
+#: behaviour these tests checked no longer runs (processing reads no Athena project; no Athena result composes a record)
+ATHENA_RETIRED = pytest.mark.skip(reason="Athena is never used (pq-005/pq-007, 17 Nov 2026): retired behaviour")
+
+
 def _processing():
     pytest.importorskip("numpy", reason="XAS processing tests need the optional `processing` extra (numpy)")
     pytest.importorskip("larch", reason="XAS processing tests need the optional `processing` extra (xraylarch)")
@@ -85,6 +90,7 @@ ONE_RUN = "01_SYN_TiON_dry_016"
 PER_SCAN = [(f"{ONE_RUN}_A.001", 1.0e-2), (f"{ONE_RUN}_A.002", 1.01e-2), (f"{ONE_RUN}_A.003", 1.02e-2)]
 
 
+@ATHENA_RETIRED
 @pytest.mark.parametrize("merge_label", ["merge3_01_SYN_TiON_dry", "merge_01_SYN_TiON_dry", f"merge_{ONE_RUN}"])
 def test_a_merge_named_before_the_base_name_is_the_scientists_merge_and_is_preferred(tmp_path, merge_label):
     bdir, root = _case(tmp_path, [ONE_RUN], PER_SCAN + [(merge_label, 1.005e-2)], scans=3)
@@ -103,6 +109,7 @@ def test_a_merge_named_before_the_base_name_is_the_scientists_merge_and_is_prefe
     assert ath["preferred_for_record"] is True and "athena_versions" not in isa
 
 
+@ATHENA_RETIRED
 def test_without_a_merge_the_per_scan_set_is_averaged_and_its_steps_say_so(tmp_path):
     bdir, root = _case(tmp_path, [ONE_RUN], PER_SCAN, scans=3)
     _, [isa], [ath] = _process(bdir, root)
@@ -112,6 +119,7 @@ def test_without_a_merge_the_per_scan_set_is_averaged_and_its_steps_say_so(tmp_p
     assert _record_steps(ath) == ["normalization", "spectrum_merging"]
 
 
+@ATHENA_RETIRED
 def test_a_merge_label_naming_another_sample_is_not_matched(tmp_path):
     bdir, root = _case(tmp_path, [ONE_RUN], PER_SCAN + [("merge_01_SYN_TiON_wet", 1.005e-2)], scans=3)
     _, _, [ath] = _process(bdir, root)
@@ -122,6 +130,7 @@ TWO_RUNS = ("11_SYN_ZZ1_dry_091", "11_SYN_ZZ1_dry_092")
 BOTH_RUNS = [(f"{s}_A.{n:03d}", 1e-2 + 1e-4 * (2 * i + n)) for i, s in enumerate(TWO_RUNS) for n in (1, 2)]
 
 
+@ATHENA_RETIRED
 def test_a_two_run_groups_merge_named_after_its_base_name_covers_both_runs(tmp_path):
     bdir, root = _case(tmp_path, TWO_RUNS, BOTH_RUNS + [("merge_11_SYN_ZZ1_dry", 1.003e-2)])
     _, [isa], [ath] = _process(bdir, root)
@@ -132,6 +141,7 @@ def test_a_two_run_groups_merge_named_after_its_base_name_covers_both_runs(tmp_p
     assert ath["preferred_for_record"] is True and "athena_versions" not in isa
 
 
+@ATHENA_RETIRED
 def test_a_two_run_merge_named_after_one_run_covers_only_that_run(tmp_path):
     bdir, root = _case(tmp_path, TWO_RUNS, BOTH_RUNS + [(f"merge_{TWO_RUNS[0]}", 1.003e-2)])
     _, _, [ath] = _process(bdir, root)
@@ -139,6 +149,7 @@ def test_a_two_run_merge_named_after_one_run_covers_only_that_run(tmp_path):
     assert ath["preferred_for_record"] is False  # a curve of one of the two runs does not describe the group
 
 
+@ATHENA_RETIRED
 def test_per_scan_groups_of_every_run_of_a_two_run_group_form_one_set(tmp_path):
     bdir, root = _case(tmp_path, TWO_RUNS, BOTH_RUNS)
     _, [isa], [ath] = _process(bdir, root)
@@ -387,6 +398,7 @@ def _fixed_prj(path, groups, *, e0):
     prj.save(str(path))
 
 
+@ATHENA_RETIRED
 def test_an_athena_e0_shared_with_rejected_groups_is_flagged_end_to_end(tmp_path):
     _processing()
     from test_local_import_processing import GRID, _athena_prj, fluo_scan, make_case, mu_edge, spec_file
@@ -413,6 +425,7 @@ def test_an_athena_e0_shared_with_rejected_groups_is_flagged_end_to_end(tmp_path
     assert [f["athena_label"] for f in found] == stems[1:] and all(f["isaac_e0_eV"] is None for f in found)
 
 
+@ATHENA_RETIRED
 def test_one_projects_measured_e0s_of_several_samples_are_not_flagged_end_to_end(tmp_path):
     # NEGATIVE CONTROL: the same samples, each normalised at its own edge (all at 4966 eV, so one E0 for all)
     _processing()
@@ -460,6 +473,7 @@ def _two_groups(tmp_path):
     return out, root, stems
 
 
+@ATHENA_RETIRED
 def test_process_group_scopes_the_athena_statement_to_the_groups_processed_now(tmp_path):
     from isaac_api.local_import import mutations as M
 
