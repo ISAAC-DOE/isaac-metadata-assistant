@@ -193,6 +193,14 @@ def _no_ambient_database():
 
 
 @pytest.fixture(autouse=True)
+def _pin_processing_engine_v0(monkeypatch):
+    """`isaac process` runs isaac.xas.v1 (the vendored xas-analysis engine) by default. The processing tests written
+    for isaac.xas.v0 pin v0 (ISAAC_PROCESSING_ENGINE=v0), which stays the protocol for what the engine does not
+    cover; the v1 tests (test_local_import_engine_xas.py) set the engine on explicitly."""
+    monkeypatch.setenv("ISAAC_PROCESSING_ENGINE", "v0")
+
+
+@pytest.fixture(autouse=True)
 def _neutralize_packaged_snapshot(monkeypatch, tmp_path):
     monkeypatch.setattr(memory, "_PACKAGED_SNAPSHOT", tmp_path / "nonexistent-packaged-snapshot.json")
     monkeypatch.setattr(memory, "_default_reader", None)

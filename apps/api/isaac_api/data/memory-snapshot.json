@@ -10647,7 +10647,7 @@
       },
       {
         "path": "pyproject.toml",
-        "sha256": "5c4329be5fbc3630b5b8b5aef460eed8f8cc8473deaf01ba880b8fd959c2e89d"
+        "sha256": "5d64fca323328a7ac4006db7b9671f52373fd0cc726874cca78992ad64b812d1"
       },
       {
         "path": "schema/PROVENANCE.md",
@@ -10883,7 +10883,7 @@
       }
     ],
     "served_file_count": 198,
-    "served_manifest_fingerprint": "30981ee8682c04b6cbcb07d343fbb1a576070c0963f3d472f8fd54de7a79f387"
+    "served_manifest_fingerprint": "13cf079b18ba3bbf4502b54f090e32092cd438f18e0c17cbca6addbeaad3b46c"
   },
   "overview": {
     "built_at_commit": "caab1d0a69c1733524bda5dde495623bc4b7bad1",

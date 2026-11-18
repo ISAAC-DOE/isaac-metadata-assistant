@@ -54,8 +54,9 @@ with its answer). What this build does with them:
 * **Energy calibration and alignment (pq-004, closed; implementation pending).** The monochromator is foil-calibrated
   by the beamline staff at the start of the beamtime, so the energy axis is already calibrated. Every scan is to be
   aligned to its in-scan reference: a foil in transmission (on I1/I2) or, without a usable foil edge, a glitch in I0.
-  The reference foil is the element under study. The per-scan alignment will be done by the xas-analysis reduction
-  engine (integration pending); this build does not align scans yet, and its calibration step (§3) is unchanged.
+  The reference foil is the element under study. The per-scan alignment is done by the xas-analysis reduction
+  engine: `isaac.xas.v1` (next section). This v0 protocol, which keeps the groups the engine does not cover, still
+  does not align scans, and its calibration step (§3) is unchanged.
 * **Never use Athena (pq-005, pq-007, closed).** Athena projects are never read (`isaac.processing.athena_never_used.v0`):
   never the result of record, never a source of processing parameters, never an input to a QC verdict or an agreement
   check. They are still counted as present files (`athena.projects_found`); `athena.never_used` is true and the summary
@@ -70,6 +71,153 @@ with its answer). What this build does with them:
 * **Dead time (pq-006, closed): not ISAAC's job.** The flag `dead_time_correction_not_applied` and the parameter
   `channels.dead_time_rate_prefix` are removed; no warning replaces them.
 * **Over-absorption: not ISAAC's job.** No flag, question or caveat.
+
+## isaac.xas.v1: the vendored xas-analysis engine (17 Nov 2026)
+
+Oscar's validated reduction package `xas-analysis` 0.1.0.dev0 is vendored at `src/xas_analysis/` (provenance, the
+permission statement and every local modification: `src/xas_analysis/PROVENANCE.md`). `isaac process` runs it, through
+the adapter `apps/api/isaac_api/local_import/processing/engine_xas.py` (protocol `isaac.xas.v1`, status
+`draft_unreviewed`: the engine is Oscar's, the adapter is ISAAC's and is reviewed by Oscar and Angel), on every group
+the engine's own scope (`src/xas_analysis/skill/scope.md`) covers: SSRL hard-XAS fluorescence / HERFD read from SPEC
+or SSRL EXAFS Data Collector files. Everything else stays on v0 (this document) and its result says why
+(`engine.reason`): transmission samples (the channel choice is ln(I0/I1), or the engine's `measurement_mode` reads the
+data as transmission), alignment groups, other formats. `ISAAC_PROCESSING_ENGINE=v0` keeps every group on v0.
+
+**Once per beamtime** (`engine_beamtime` in `processing_results.json`): every group is read with v0's own reader,
+channel choice and BL15-2 absev rule (hash-checked); the engine's survey (`survey_files`, one entry per record group,
+spots and repeats pooled) picks the energy reference, its anchor method and window, and reads the `mono reset` lines;
+the I0 glitch is then located by a robust consensus of every scan's own dips (`isaac.xas.glitch_consensus.v1`, below);
+the reference is the EARLIEST group with good anchors, the robust MEDIAN of its validated scans' anchors; the
+normalisation window is the engine's
+default rule (`recipe_init.norm_range`) on the beamtime's modal grid, one per edge. With `--group`, the stored block is
+reused when its fingerprint (sources, groups, channel parameters, engine version) still holds.
+
+**Per group, in the engine's order:** anchor every scan (a foil in transmission when the survey finds one in the
+sample scans, its I0 glitch as the fallback route for a scan whose foil is not usable; else the I0 glitch, Gaussian-dip
+model fit; else the foil timeline; else none, said loudly), each anchor validated against the consensus (below),
+shift = reference anchor - scan anchor (a shift beyond 1 eV for a glitch, 2 eV for a foil, is a failed anchor), ONE
+interpolation onto the group's modal grid; screen
+(`screen_report`, report-only); decide (below); average the kept scans' raw IF/I0 (`average_scans`, points no kept
+scan covers dropped); normalise the average ONCE (`mback_xrs`, Victoreen + McMaster, constrained background, the step
+locked at the tabulated edge; element and edge from the scientist's `set_absorber`, else the files' agreeing absorber
+evidence, else the edge the survey identified from the scan range, said as unconfirmed); E0 = larch `find_e0` on the
+average. Uncertainty note: the edge step over 12 windows around the one used (max - min over the median; warn above
+20 %). QC: `no_edge`, `edge_step_implausible`, `post_edge_not_at_1` fail (never offered for approval, as v0); warns
+`normalization_window_sensitive`, `most_scans_dropped`, `logbook_inferred_note_applied`, `anchor_fallback_route_used`,
+`normalization_window_group_own`, `single_scan`, `no_energy_reference` (also a review flag: a bulk approval refuses
+it), `kept_scan_not_merged`, `override_not_applied`, `measurement_mode_unknown` (the engine's `measurement_mode` read
+neither fluorescence nor transmission, or could not run: v1 reduced the group as fluorescence anyway; the result's
+`measurement_mode` says it). Outputs (content-addressed run folder, as v0):
+`merged.csv` (raw average, its standard error, scans per point), `normalized.csv` (`energy_eV, norm, mcmaster_mu,
+background`), `scan_decisions.json` (the decision and shift tables; the run id hashes their CONTENT, each scan's keep /
+drop and who decided it, never an override's decision id or time: a changed decision is a new result id, the same
+override stated again is the same one),
+`qc.json`, `params.json`, `plot.png`. The MERGE quick-merge comparison is kept (normalised the same way).
+
+**The scan-decision rule `isaac.xas.scan_decision.v1`** (Angel and Krish, 17 Nov 2026: the skill decides, by a
+documented rule; every decision recorded with its reason and evidence, shown, and overridable). Every scan gets keep or
+drop. DROP when (a) a logbook scan note says so: `exclude`, `start_from`, `keep_only` (a note the reading marked
+`inferred` applies too, and is said so; `flag` changes nothing and is shown), read through
+`isaac_api.local_import.scan_notes.scan_notes_for_run` (absent in this build: no note applies, and the result says so);
+(b) the stability analysis `isaac.xas.scan_selection_proposal.v0` on the ALIGNED scans puts it before the stable window
+(its other reasons are said beside a kept scan, never a drop); (c) the engine's screening flags: coverage under 90 % of
+the group's grid (aborted), a failed anchor (no fit, beyond the shift limit, or more than 5 robust sigmas, floor 30 meV,
+from the group's median), an off-shape scan (6 robust sigmas and 1.5 times the median shape rms) whose departure is
+more than twice its own counting noise, a dead channel with no edge at all (edge under 2 times its noise). Otherwise
+KEEP. An intensity drop alone never drops a scan: a dead-channel flag on a scan that still shows its edge, and an
+off-shape flag within twice the scan's own noise (fewer counts), keep the scan and say why. Over-absorption and dead
+time are not judged (no flag). A scientist's `set_scan_decision` (`decide --target <group> --decision
+set_scan_decision --value keep|drop --scans <ids> --by <name>`) overrides the rule for those scans, is shown as theirs
+beside what the rule said, moves no group status, and takes effect when the group is re-processed. A KEEP on a scan
+with no energy anchor is shown as "kept by the scientist but cannot be merged" and counted apart (`counts.merged`,
+`counts.kept_not_merged`); it is never merged with a wrong or no shift. An override naming no scan of the group as it
+now is (after a regroup or a split) is listed as "override not applied: ..." in the result and in `bundle show`. The
+scientist still approves each curve before it goes into a record.
+
+**What an end-to-end run on five real beamtimes changed (18 Nov 2026; each item has a synthetic test).**
+- *Energy scans:* a `gscan` of `mono` (BL6-2c 2018, BL15-2 2019: no `energy` or `absev` column, time in `Seconds`), or
+  a scan of the motor that IS the chosen energy column, is an energy scan; an `ascan mono` beside an `absev` axis is
+  still a motor scan.
+- *Scope:* a standard that v0 reduces as SCA/I0 fluorescence because its transmission cannot be formed (v0's own
+  `channel_fallback_transmission_not_positive`) is on v1 too, flagged and warned.
+- *The foil timeline is reachable:* the survey now sees the energy scans of alignment groups and of foil groups, which
+  never become records. Its rules apply (one detector position: the ratio most foil files share; of the foils before
+  the first sample scan only the last, the earlier ones may precede the mono calibration). Every scan of every kept foil
+  is anchored by the route's method (`shape`: the whole foil edge shifted onto the first foil scan, free scale and
+  offset; anchor = that template's inflection - the shift), a scan's anchor is linear in time between the foil anchors,
+  and the reference is the median anchor of the foil `reference_foil` names (an index into the foil list). A scan
+  before the first or after the last foil scan gets the nearest foil's anchor and says so (`outside_foil_timeline`: "outside
+  the foil timeline: nearest foil used; drift beyond it unknown", a QC warning). A survey
+  foil of another element never decides the samples' edge (PROVENANCE.md M8).
+- *Normalisation:* fluorescence at a tender edge (under 4 keV) uses the engine's documented tender options
+  (normalization.md: `response_power 3`, `step_slope 1`, `pre_tail`, the pre-edge window ending 24 eV below the edge,
+  before the resonant-Raman foot), said in `normalization.tender`. Above 4 keV a post-edge IF/I0 that rises with E (+20 %
+  of the step over the post-edge window) changes no option: a QC warning `post_edge_rises` recommends review (a dilute
+  sample on a large background, or a distorted scan, reads like that). The beamtime's I0 glitch (+- max(1.5 FWHM, 1 eV); a doublet's whole fit window) and every
+  other dip most scans share are kept out of the fit windows (`normalization.exclude_eV`), never removed from the data.
+- *Decisions:* "before the stable window" drops only when the evolving normalised-shape metric moved beyond the shape
+  guard's noise threshold (the stability rule's floor, 3 x the scans' own sd), else it is kept and said
+  (`change_within_noise`). Coverage is edge-relative: a scan under 90 % of the group's grid that covers 10 eV before the
+  end of the pre-edge window to 50 eV into the post-edge window is complete (`shorter_but_complete`). The engine's
+  `ratio_shape` (E_edge + 6 eV to the grid end, 5 %) and `post_drift` (E_edge + 60..95 eV vs the last 40 eV, 15 %)
+  screens run, glitch windows excluded; a flag drops only when, after a free scale and offset fitted over the pre-edge
+  and post-edge, the smoothed residual still departs 5 % of the edge step and 5 x its noise (a within-scan step collapse
+  is shape; a uniformly weaker scan, or one on a background, is not: `intensity_not_shape`). A WITHIN-SPOT
+  CHANGE (`isaac.xas.dose_damage.v2`; scans compared in normalised shape over the white-line window, after a free scale
+  and offset): BEAM DAMAGE only when, at most spots measured three or more times (at least two), the change GROWS with
+  dose (scan 3 differs from scan 1 more than scan 2 does), goes the way the edge expects (the white line falls at Ir and
+  Pt L3; elsewhere the one direction every spot shares, said) and a fresh spot recovers: the later scans are dropped,
+  "beam damage at each spot: later scans at the same spot change shape". A FIRST SCAN STILL SETTLING when the later
+  scans at most such spots agree with each other and the first does not: the first scan per spot is dropped. A change
+  that carries on across spots is the sample's evolution (not this rule). Otherwise (only two scans per spot, mixed
+  patterns, the wrong direction for the edge, a logbook note on CV, equilibration or discarding the first scans) a
+  QUESTION with both readings: nothing decided, review flag `dose_reading_question`, a bulk approval refused. A logbook
+  exclude / start_from / keep_only note on the group always wins; a shape-screen drop is never cleared; the
+  scientist's `set_dose_reading` (`beam_damage`, `first_scan_settling`, `not_beam_damage`) on the group, else on
+  `--target experiment` for the whole beamtime, decides the reading.
+- *Spots* of SPEC split files (`<run>_dir/*.txt`: `#P` positions, no `#O` names) pair with the `#O` motor names of the
+  run's acquisition SPEC file (hash-checked; v0 and v1).
+- *I0 dropouts and beam losses* (a point or a contiguous run of points whose I0 falls under 1 % of the scan's own level
+  just before it and comes back to at least 20 % of it; a filter change, which does not come back, is never masked):
+  those POINTS are excluded from the scan's contribution to the average (the grid points they would feed are left to
+  the other scans), said per run as "point excluded: I0 dropout (n counts at E eV)" or "points excluded: I0 dropout
+  from E1 to E2 (n points)" on the scan and in `point_exclusions` (for the foil and alignment scans the survey reads:
+  `engine_beamtime.survey.point_exclusions` and the foil timeline rows); never interpolated, never the scan.
+- *Plain failures:* a group whose scans end below the edge fails `scan_never_reaches_edge` ("this scan never reaches
+  the absorption edge"), never `measurement_mode_unknown`; one whose merged scans do not cover the pre-edge window
+  through the post-edge window (an aborted one-scan group, a short spot check) fails `scan_range_incomplete` in plain
+  words, never a raw fitting error.
+
+**The glitch consensus `isaac.xas.glitch_consensus.v1`** (review of the first v1 build: one scan without the glitch
+made the survey place it 2.4 eV off and drop every scan; two of nine made the beamtime "no reference"; one scan
+shifted 1.6 eV gave wrong shifts to the others). The survey samples a few scans per file and their median, so a
+minority of bad scans could move it. Now every in-scope scan's own I0 dips are found (ln I0 minus a robust quadratic
+Savitzky-Golay trend: a dip's points are bridged before the trend is fitted again, so a deep glitch leaves no side-lobe
+dips ~1.6 eV away; a dip is at least 0.3 % deep and 6 robust sigmas of the scan's residual, on a step of at most 1 eV,
+3 eV clear of the edge). The glitch is where most scans have a dip (within 1 eV), then the median of each scan's nearest
+dip; it is used when more than half the scans carry it. When some scans have no dip there, the survey runs AGAIN without
+them, so its own method choice (model or shape) and window rules see only scans with the glitch; if the survey's glitch
+is more than 0.5 eV from the consensus, the fit window is re-made around the consensus, clear of other dips most scans
+share; a survey that found no reference while most scans carry the glitch is overruled (model fit). The shape-fit
+template is a scan with the glitch (the one nearest its group's median dip). Every scan's anchor is then VALIDATED: its
+own dip within the shift limit of the consensus (else "no energy reference found in this scan"), an ok fit inside the
+fit window, and the fitted anchor at the beamtime's usual offset from its own dip within max(0.25 eV, 1.5 grid steps)
+(else "reference feature fit failed": the fit took another feature). A scan that fails is not aligned and not merged,
+says why, and changes no other scan's shift. The reference anchor is the median over the validated scans of the
+earliest group that has any (else the next earliest, said). With no reference at all (no foil, no glitch in most
+scans, no foil scans) every result says NO ENERGY REFERENCE, carries the review flag `no_energy_reference`, and a bulk
+approval refuses it.
+
+**Energy-reference lessons** (general, from the engine author's per-beamtime notes, which are not vendored): read the
+encoder energy (`absev`), not the SPEC `energy` column, which can wander from it by a few eV; a sharp, symmetric I0
+glitch is the best in-scan anchor, and the Gaussian-dip model beats a shape fit when the glitch is narrower than about
+two grid steps (a shape fit then carries the template's grid phase, tens of meV); a second dip inside the fit window
+pulls a one-dip fit, so the window stays clear of it; a DOUBLET glitch (two dips ~1.5 eV apart) makes a one-dip fit
+jump between the dips in some files while looking fine per file, so the two-dip fit decides (ok on >= 70 % of scans,
+stable separation), and its midpoint is a convention worth ~half the separation change between files; a dark
+transmission chamber (a flat offset) shows noise "edges" in ln(I0/I1) and is skipped; a dip from an absorber in the I0
+path sits on an edge step, so its anchor depends on the window (say the window); and when the glitch "moves" between
+files while a foil does not, the mono moved, not the glitch: align per scan.
 
 ## 0. Why
 
