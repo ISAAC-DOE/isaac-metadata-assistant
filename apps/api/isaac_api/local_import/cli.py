@@ -1353,6 +1353,14 @@ def _calibration_view(bundle: Mapping, r: Mapping) -> dict | None:
     cal = steps.get("calibration")
     if r.get("source") != "isaac_protocol" or cal is None:
         return None
+    from .processing import engine_xas as EX
+
+    if r.get("protocol_id") == EX.PROTOCOL_ID:
+        # isaac.xas.v1 aligns every scan to ONE beamtime reference and applies no absolute calibration (the mono is
+        # staff-calibrated): v0's in-scan-reference reading would say "no energy reference" beside that alignment
+        story = EX.energy_story(r)
+        return {"absolute_calibration": story["absolute_calibration"], "alignment": story["alignment"],
+                "applied_shift_eV": 0.0}
     said = REF.reading(cal)
     warn = ((steps.get("qc") or {}).get("params") or {}).get("warn_energy_shift_eV") or PP.DEFAULT_PARAMS["qc"]["warn_energy_shift_eV"]
     from .mutations import calibration_approvals
