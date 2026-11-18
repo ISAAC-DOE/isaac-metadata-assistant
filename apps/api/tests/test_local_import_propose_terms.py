@@ -273,7 +273,7 @@ def test_it_is_in_the_isaac_help():
         env=_subprocess_env(),
     )
     assert "propose-terms" in out.stdout
-    assert top.LOCAL_IMPORT_COMMANDS == ("import", "bundle", "process")
+    assert top.LOCAL_IMPORT_COMMANDS == ("import", "bundle", "process", "answer-memory")
 
 
 def test_propose_terms_imports_no_web_framework(clean_bundle, tmp_path):

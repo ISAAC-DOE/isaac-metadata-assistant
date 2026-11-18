@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
-import type { LocalQuestion } from '../lib/localImports';
+import type { LocalEarlierAnswer, LocalQuestion } from '../lib/localImports';
 import {
   cannotExportLines,
   cardTitle,
@@ -11,6 +11,7 @@ import {
   confirmShape,
   counterExample,
   countLine,
+  earlierAnswerLines,
   fieldAsk,
   groupName,
   plainQuestion,
@@ -283,5 +284,35 @@ describe('a start time asked again after the clock’s time zone changed (re-rev
     expect(questionWarnings(valued)).toEqual([
       'The instrument clock’s time zone was changed after this was confirmed, so that confirmation no longer counts. Confirm it again, or correct it.',
     ]);
+  });
+});
+
+describe('earlierAnswerLines', () => {
+  const said = 'Earlier answer: pellet — SYN Angel, 17 Nov 2099, beamtime SYN_A (same sample syn1)';
+  const base: LocalEarlierAnswer = { field: 'sample.sample_form', value: 'pellet', said, entry_id: 'am-syn1', by: 'SYN Angel', date: '17 Nov 2099',
+    beamtime: 'SYN_A', matched_on: 'same sample syn1', disagrees: false };
+  function withEarlier(earlier: LocalEarlierAnswer[], over: Partial<LocalQuestion> = {}): LocalQuestion {
+    const x = q(over);
+    return { ...x, display: { ...x.display, earlier_answers: earlier } };
+  }
+
+  it('says each earlier answer as the server does, with the text "Use this" fills in', () => {
+    const { lines, disagree } = earlierAnswerLines(withEarlier([base]));
+    expect(lines).toEqual([{ text: said, answer: 'pellet', entryId: 'am-syn1', field: 'sample.sample_form' }]);
+    expect(disagree).toBeNull();
+  });
+
+  it('names the field on an optional-values card, and says plainly when earlier answers disagree', () => {
+    const other = { ...base, value: 2.5, said: 'Earlier answer: 2.5 — SYN Bob, 1 Oct 2099, beamtime SYN_C (same sample syn1)',
+      entry_id: 'am-syn2', disagrees: true };
+    const { lines, disagree } = earlierAnswerLines(withEarlier([{ ...base, disagrees: true }, other], { kind: 'optional_values' }));
+    expect(lines[0].text).toBe(`Sample form: ${said}`);
+    expect(lines[1].answer).toBe('2.5');
+    expect(disagree).toContain('different answers for the sample form');
+    expect(disagree).toContain('none is picked for you');
+  });
+
+  it('is empty without earlier answers', () => {
+    expect(earlierAnswerLines(q({}))).toEqual({ lines: [], disagree: null });
   });
 });

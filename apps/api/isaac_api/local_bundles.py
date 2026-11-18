@@ -1020,6 +1020,14 @@ def describe_question(bundle: Mapping, q: Mapping, *, folder: str,
         "text": page_words(q.get("text")),
         "why": page_words(q.get("why")),
         **({"conflict": cf_said} if (cf_said := _conflict_said(q, conflicts)) else {}),
+        # EARLIER ANSWERS (answer_memory, opt-in): what a scientist confirmed on an earlier beamtime for the same scope,
+        # in plain words, each with its value for "Use this" (which fills the answer box and never submits). Additive.
+        **({"earlier_answers": [{"field": h["field"], "value": h["value"], "said": h["said"], "entry_id": h["entry_id"],
+                                 "by": h.get("by"), "date": h.get("date"), "beamtime": h.get("beamtime"),
+                                 "matched_on": h.get("matched_on"), "disagrees": bool(h.get("disagrees"))}
+                                for h in q["earlier_answers"]],
+            "earlier_answers_statement": q.get("earlier_answers_statement")}
+           if q.get("earlier_answers") and not answered else {}),
         # 2026-11-17 re-review: how many of a confirm question's targets carry NO value, counted here for every confirm
         # question (the start times asked again after a clock-zone change carry no `targets_without_a_value` of their
         # own), so the page never asks to confirm a value that is not there. Additive; the question is unchanged.
@@ -1368,6 +1376,10 @@ class LocalAnswerRequest(BaseModel):
     positions: list[int] | None = Field(default=None, max_length=8)
     expected_version: str | None = Field(default=None, max_length=80, description="The `bundle_version` the answer was given against.")
     dry_run: bool = Field(default=False, description="Resolve and check exactly as a write would, and write nothing.")
+    from_earlier_answer: str | None = Field(default=None, max_length=64, description=(
+        "The `entry_id` of an earlier beamtime's answer (a question's `earlier_answers`) the person answering now "
+        "confirms: with `correct` (or `set_clock_time_zone`) and exactly its value. Recorded as their own decision; "
+        "its note says where the value came from (`isaac bundle decide --from-earlier-answer`)."))
 
 
 class LocalDecisionRequest(BaseModel):
@@ -1612,6 +1624,7 @@ def get_local_bundle_questions(
         False, description="Also list the questions whose answer reaches no live record group (counted, not listed, "
                            "by default, as `isaac bundle questions` does; a `run:` scope lists them)."),
 ):
+    from .local_import import answer_memory as AM
     from .local_import import mutations as M
     from .local_import import questions as Q
 
@@ -1636,6 +1649,8 @@ def get_local_bundle_questions(
         # r3c LOW-3: hidden by default, counted, as `isaac bundle questions` hides them
         rows, outside = Q.hide_outside_live_groups(rows, scope=scope, include=include_outside_live_groups)
         page = rows[offset: offset + limit]
+        # EARLIER ANSWERS (answer_memory, opt-in): an additive hint, after the counts and the paging (nothing when off)
+        page = AM.annotate(page, data)
         # THE EXPOSURES `bundle questions` RECORDS (hint candidates, conflicts), plus every candidate
         # whose extracted value this page shows beside a confirm question
         shown = [("candidate", h["candidate_id"]) for q in page for h in q["hints"] if h.get("candidate_id")]
@@ -1668,6 +1683,9 @@ def get_local_bundle_questions(
         shown += Q.minimum_exposures(minimum)
         capture = capture_items(data)
         added = _record_shown(data, shown, "bundle questions")
+        # an earlier answer (answer_memory) this page shows beside an open question is a value shown too
+        added += _record_shown(data, AM.exposures([q for q in out_questions if q["display"].get("earlier_answers")]),
+                               AM.EXPOSURE_COMMAND)
         if added:
             try:
                 M.save_bundle(bdir, data)
@@ -1930,6 +1948,7 @@ def post_local_bundle_answer(
     question_id: str = PathParam(..., max_length=64, description="The consolidated question's id."),
     body: LocalAnswerRequest = Body(...),
 ):
+    from .local_import import answer_memory as AM
     from .local_import import mutations as M
     from .local_import import questions as Q
 
@@ -1955,10 +1974,21 @@ def post_local_bundle_answer(
     value, why = _typed_value(asked, body)
     if why:
         return _refuse(422, "value_refused", why)
+    note = body.note
+    if body.from_earlier_answer:
+        # the person answering now confirms an earlier beamtime's answer: their own decision, its origin in the note
+        try:
+            note = AM.provenance_note(body.from_earlier_answer, decision=body.decision, value=value,
+                                      field=AM.field_of_question(asked, body.field), note=body.note)
+        except AM.MemoryRefused as exc:
+            return _refuse(422, "earlier_answer_refused", _scrub(str(exc)))
+    # the decisions THIS answer adds are what the answer memory may remember (never the bundle's earlier ones; nothing
+    # for a dry run): the bundle's decision ids before it, or None when the memory is off
+    before = None if body.dry_run else AM.snapshot(bdir)
     try:
         result = M.decide_question(
             bdir, question_id=question_id, only=body.only, only_scopes=body.only_scopes, field=body.field, decision=body.decision, value=value,
-            by=body.by, orcid=body.orcid, note=body.note, element=body.element, edge=body.edge,
+            by=body.by, orcid=body.orcid, note=note, element=body.element, edge=body.edge,
             positions=body.positions, expected_version=body.expected_version, dry_run=body.dry_run,
             with_version=not body.dry_run,
         )
@@ -2000,12 +2030,14 @@ def post_local_bundle_answer(
             "statement": "Nothing was written. The write re-checks all of this, and re-validates the whole bundle.",
         }
     result, version = result
+    learned = AM.after_write(bdir, before)  # remembered for later beamtimes only when the scientist turned it on
     return {
         "dry_run": False,
         "question_id": question_id,
         "result": result,
         "value": value,
         "bundle_version": version,
+        **({"answer_memory": learned} if learned is not None else {}),
         "identity": "local_unverified",
         "statement": (f"Recorded in this bundle as a local, unverified statement by {body.by.strip()!r}. "
                       "Nothing was uploaded."),

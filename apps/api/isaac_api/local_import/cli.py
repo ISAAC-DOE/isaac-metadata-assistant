@@ -1958,6 +1958,7 @@ def _targets_from(args) -> list[str]:
 
 
 def cmd_bundle_questions(args) -> int:
+    from . import answer_memory as AM
     from . import mutations as M
     from . import questions as Q
 
@@ -1979,11 +1980,19 @@ def cmd_bundle_questions(args) -> int:
         page = kept[args.offset : args.offset + args.limit]
         minimum = Q.minimum_answers_for_one_group(payload, bundle, scope=args.scope, bundle_dir=Path(args.bundle_dir),
                                                   reports=reports)
+        # EARLIER ANSWERS (answer_memory, opt-in): an additive hint on the page's questions, after the counts and the
+        # paging, so no id, count, blocking status or text changes; nothing when the memory is off
+        page = AM.annotate(page, bundle)
+        earlier = AM.exposures(page)
+        minimum = AM.annotate_minimum(minimum, payload, bundle, exposed=earlier)
         # HINTS SHOW PARSER LITERALS: that is an exposure, recorded before printing — and so do the values the
         # nearest record's warnings state (c7-r MED-4)
         shown = list(_question_exposures(page, bundle)) + Q.minimum_exposures(minimum)
         if shown:
             M.expose_and_load(Path(args.bundle_dir), shown, "bundle questions")
+        # ...and so does every earlier answer shown (answer_memory), under its own command
+        if earlier:
+            M.expose_and_load(Path(args.bundle_dir), list(dict.fromkeys(earlier)), AM.EXPOSURE_COMMAND)
         return {
             "format": payload["format"], "format_version": payload["format_version"],
             "blocking_basis": payload["blocking_basis"],
@@ -2050,6 +2059,8 @@ def _compact_page(page: Sequence[Mapping]) -> dict:
             c["hints"] = lean(c["hints"])
         if c.get("field_hints"):
             c["field_hints"] = {f: lean(hs) for f, hs in c["field_hints"].items()}
+        if c.get("earlier_answers"):
+            c["earlier_answers"] = lean(c["earlier_answers"])
         out.append(c)
     return {"targets": ("counted: each question's targets_count, scopes_count and groups_count (--with-targets lists "
                         "them; `decide --question` resolves them itself); allowed values are listed once per field "
@@ -2104,10 +2115,49 @@ def _positions(raw: str | None):
                                 "separated by commas, e.g. 2,3 or last.") from exc
 
 
+def _earlier_answer_note(args) -> str | None:
+    """``--from-earlier-answer``: the note saying the value was confirmed from an earlier beamtime's answer, checked
+    against the question it answers (its field) and the value given (answer_memory.provenance_note)."""
+    from . import answer_memory as AM
+    from . import mutations as M
+    from . import questions as Q
+
+    if not args.from_earlier_answer:
+        return args.note
+    value = M.parse_value(args.value, args.json)
+    field = None
+    if args.question:
+        payload = Q.consolidate(M.load(Path(args.bundle_dir)), include_answered=True, explain_counter=False)
+        asked = Q.question(payload, args.question)
+        if asked is None:
+            raise M.MutationRefused(f"No question {args.question!r} in this bundle. Nothing was recorded.")
+        field = AM.field_of_question(asked, args.field)
+    elif args.decision == "set_clock_time_zone":
+        field = AM.CLOCK_ZONE_FIELD
+    else:
+        raise M.MutationRefused("--from-earlier-answer goes with --question <id> (or --target experiment --decision "
+                                "set_clock_time_zone). Nothing was recorded.")
+    try:
+        return AM.provenance_note(args.from_earlier_answer, decision=args.decision, value=value, field=field,
+                                  note=args.note)
+    except AM.MemoryRefused as exc:
+        raise M.MutationRefused(str(exc), code=exc.code) from None
+
+
 def cmd_bundle_decide(args) -> int:
+    from . import answer_memory as AM
     from . import mutations as M
 
     def run():
+        # an answer a person gives NOW is remembered for later beamtimes when they turned the memory on
+        # (answer_memory): only the decisions this write adds, never the bundle's earlier ones
+        before = AM.snapshot(Path(args.bundle_dir))
+        result = decide()
+        learned = AM.after_write(Path(args.bundle_dir), before) if isinstance(result, dict) else None
+        return {**result, "answer_memory": learned} if learned is not None else result
+
+    def decide():
+        note = _earlier_answer_note(args)
         try:
             split = json.loads(args.split_into) if args.split_into else None
         except ValueError as exc:
@@ -2143,7 +2193,7 @@ def cmd_bundle_decide(args) -> int:
                 value=M.parse_value(args.value, args.json),
                 by=args.by,
                 orcid=args.orcid,
-                note=args.note,
+                note=note,
                 split_into=split,
                 merge_with=args.merge_with,
                 qc_status=args.qc_status,
@@ -2161,7 +2211,7 @@ def cmd_bundle_decide(args) -> int:
             value=M.parse_value(args.value, args.json),
             by=args.by,
             orcid=args.orcid,
-            note=args.note,
+            note=note,
             split_into=split,
             merge_with=args.merge_with,
             qc_status=args.qc_status,
@@ -2584,6 +2634,7 @@ def cmd_bundle_template_import(args) -> int:
     from . import mutations as M
     from . import template as T
 
+    before = _memory_snapshot(args)
     try:
         report = T.import_template(Path(args.bundle_dir), Path(args.xlsx), by=args.by, orcid=args.orcid,
                                    apply=args.apply, supersede=args.supersede)
@@ -2593,11 +2644,29 @@ def cmd_bundle_template_import(args) -> int:
     except M.MutationRefused as exc:
         _err(str(exc))
         return exc.code
+    learned = _learned_after_import(args, before)
     if args.json:
-        _print(report)
+        _print({**report, "answer_memory": learned} if learned is not None else report)
     else:
         print(T.render_report(report, full=args.full))
+        if learned is not None:
+            print(learned["statement"])
     return EXIT_OK
+
+
+def _memory_snapshot(args):
+    """Before an APPLIED import: the bundle's decision ids (answer_memory.snapshot); ``None`` for a preview."""
+    from . import answer_memory as AM
+
+    return AM.snapshot(Path(args.bundle_dir)) if getattr(args, "apply", False) else None
+
+
+def _learned_after_import(args, before) -> dict | None:
+    """After an APPLIED import (the scientist's own sheet, recorded under --by), the answer memory remembers the
+    decisions THIS import added (answer_memory; nothing when it is off, for a preview or a replay)."""
+    from . import answer_memory as AM
+
+    return AM.after_write(Path(args.bundle_dir), before) if getattr(args, "apply", False) else None
 
 
 def cmd_bundle_answers_import(args) -> int:
@@ -2607,6 +2676,7 @@ def cmd_bundle_answers_import(args) -> int:
     from . import template as T
     from . import workbook_answers as W
 
+    before = _memory_snapshot(args)
     try:
         report = W.import_answers(Path(args.bundle_dir), Path(args.xlsx), by=args.by, orcid=args.orcid,
                                   apply=args.apply, folder=args.folder, bundle_arg=args.bundle_dir,
@@ -2617,10 +2687,13 @@ def cmd_bundle_answers_import(args) -> int:
     except M.MutationRefused as exc:
         _err(str(exc))
         return exc.code
+    learned = _learned_after_import(args, before)
     if args.json:
-        _print(report)
+        _print({**report, "answer_memory": learned} if learned is not None else report)
     else:
         print(W.render_report(report))
+        if learned is not None:
+            print(learned["statement"])
     return EXIT_OK
 
 
@@ -2742,6 +2815,10 @@ def build_parser(prog: str = "isaac") -> argparse.ArgumentParser:
     q.add_argument("--by", required=True)
     q.add_argument("--orcid")
     q.add_argument("--note")
+    q.add_argument("--from-earlier-answer", metavar="ENTRY_ID",
+                   help="with --question and --decision correct --value <that value> (or set_clock_time_zone): the "
+                        "person answering now confirms an earlier beamtime's answer (an earlier_answers hint's "
+                        "entry_id); recorded as their own decision, its note says where the value came from")
     q.add_argument("--split-into", help="record groups: JSON list of lists of run keys, one list per group to make, "
                    "naming every run of the group once")
     q.add_argument("--merge-with", nargs="*", help="record groups: group ids to merge with")
@@ -2898,7 +2975,85 @@ def build_parser(prog: str = "isaac") -> argparse.ArgumentParser:
                         "default that row is refused and the existing decision is named)")
     a.add_argument("--json", action="store_true", help="print the full report as JSON")
     a.set_defaults(func=cmd_bundle_answers_import)
+
+    p = sub.add_parser("answer-memory", help="OPT-IN: remember answers confirmed on earlier beamtimes, on this computer "
+                                             "only, and show them as hints (never values) on later ones")
+    msub = p.add_subparsers(dest="memory_command", required=True)
+    m = msub.add_parser("on", help="turn it on: your answers (--by) are remembered on this computer only")
+    m.add_argument("--by", required=True, help="your name: you agree to keep your answers on this computer")
+    m.set_defaults(func=cmd_answer_memory)
+    m = msub.add_parser("off", help="turn it off: nothing is remembered or shown (kept entries stay until forgotten)")
+    m.set_defaults(func=cmd_answer_memory)
+    m = msub.add_parser("status", help="on or off, where the file is, how many answers it keeps")
+    m.set_defaults(func=cmd_answer_memory)
+    m = msub.add_parser("list", help="the remembered answers, newest first")
+    m.add_argument("--field", help="only this field (or clock_time_zone)")
+    m.add_argument("--beamtime", help="only answers from this beamtime folder name")
+    m.add_argument("--limit", type=int, default=50)
+    m.add_argument("--offset", type=int, default=0)
+    m.set_defaults(func=cmd_answer_memory)
+    m = msub.add_parser("forget", help="remove remembered answers: by id, by beamtime folder name, or all")
+    m.add_argument("--entry", action="append", default=[], help="an entry id (am-...); give it once per entry")
+    m.add_argument("--beamtime", help="every answer remembered from this beamtime folder name")
+    m.add_argument("--all", action="store_true", dest="all_entries", help="every remembered answer")
+    m.set_defaults(func=cmd_answer_memory)
+    m = msub.add_parser("learn", help="ONLY on the scientist's explicit yes: also remember the answers a person already "
+                                      "recorded in a bundle (before the memory was on, or forgotten since); when it is on")
+    m.add_argument("bundle_dir")
+    m.add_argument("--by", required=True, help="the scientist's name: their yes to remember this bundle's recorded "
+                                               "answers")
+    m.set_defaults(func=cmd_answer_memory)
     return parser
+
+
+def cmd_answer_memory(args) -> int:
+    """``isaac answer-memory on|off|status|list|forget|learn`` (answer_memory). Opt-in; on this computer only."""
+    from . import answer_memory as AM
+    from . import bundle as B
+    from . import mutations as M
+
+    try:
+        cmd = args.memory_command
+        if cmd == "on":
+            out = AM.set_enabled(True, by=args.by)
+        elif cmd == "off":
+            out = AM.set_enabled(False)
+        elif cmd == "status":
+            out = AM.status()
+        elif cmd == "list":
+            if args.limit < 1 or args.limit > MAX_LIMIT or args.offset < 0:
+                _err(f"--limit must be 1..{MAX_LIMIT} and --offset must be >= 0.")
+                return EXIT_USAGE
+            out = AM.list_entries(field=args.field, beamtime=args.beamtime, limit=args.limit, offset=args.offset)
+        elif cmd == "forget":
+            out = AM.forget(entry_ids=args.entry, beamtime=args.beamtime, all_entries=args.all_entries)
+        else:
+            if not AM.is_enabled():
+                _err("The answer memory is off: nothing was remembered. Turn it on first (`isaac answer-memory on "
+                     "--by \"<your name>\"`), only with the scientist's agreement.")
+                return EXIT_USAGE
+            if B.decider_name_problem(args.by) is not None:
+                _err("`answer-memory learn` needs --by \"<the scientist's name>\": it is their yes to remember this "
+                     "bundle's recorded answers. Nothing was remembered.")
+                return EXIT_USAGE
+            if not _bundle_exists(args.bundle_dir):
+                _err(f"No bundle.json in {Path(args.bundle_dir).name!r}.")
+                return 6
+            out = AM.learn_from_bundle(Path(args.bundle_dir))
+    except AM.MemoryRefused as exc:
+        _err(str(exc))
+        return exc.code
+    except M.MutationRefused as exc:
+        _err(str(exc))
+        return exc.code
+    _print(out)
+    return EXIT_OK
+
+
+def _bundle_exists(bundle_dir: str) -> bool:
+    from . import bundle as B
+
+    return B.bundle_path(Path(bundle_dir)).is_file()
 
 
 def main(argv: Sequence[str] | None = None) -> int:

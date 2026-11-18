@@ -208,6 +208,7 @@ is in the reference; in short:
   Say which terms come only from my readings (`by_origin.ai_reading`); draft one only if they want it.
 - **Absorber.** Say the element and edge back; record it only on a clear yes to that pair.
 - **AI readings are not file evidence**: say "my reading of the files suggests…", never "the files say".
+- **Earlier answers** (`earlier_answers`): ask once whether to remember answers for future beamtimes, on this computer only; a hint is last time's answer, recorded only on their yes (reference: "Earlier answers").
 
 **The template.** For who produced the data, domain, environment, cell type, reaction with its drive
 and catalysis, sample form and formula, facility: "I can give you one spreadsheet to fill in one

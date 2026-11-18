@@ -292,6 +292,25 @@ export interface LocalQuestionDisplay {
   /** The question and its reason as the page says them: the command line's sentences, less its own instructions. */
   text?: string | null;
   why?: string | null;
+  /** OPT-IN answer memory: what a scientist confirmed on an EARLIER beamtime for the same sample, beamline or group
+   *  (`answer_memory`). A hint, never an answer: "Use this" fills the answer box and never submits. */
+  earlier_answers?: LocalEarlierAnswer[];
+  earlier_answers_statement?: string | null;
+}
+
+/** One earlier beamtime's answer to this question's field, for the same scope. Never confirmed for this beamtime. */
+export interface LocalEarlierAnswer {
+  field: string;
+  value: unknown;
+  /** "Earlier answer: pellet — Angel, 17 Nov 2026, beamtime … (same sample JK3)" */
+  said: string;
+  entry_id: string;
+  by: string | null;
+  date: string | null;
+  beamtime: string | null;
+  matched_on: string | null;
+  /** Earlier answers for this field differ: every one is shown and none is preferred. */
+  disagrees: boolean;
 }
 
 /** "I don't know" (`defer`): who said it and when; the question is still asked and still counted. */
@@ -446,6 +465,8 @@ export interface LocalAnswerInput {
   note?: string;
   expected_version: string;
   dry_run?: boolean;
+  /** The earlier answer ("Use this") the person confirms, sent only while the box still holds exactly its value. */
+  from_earlier_answer?: string;
 }
 
 export interface LocalPreviewScope {
@@ -754,6 +775,10 @@ export const LOCAL_IMPORTS_COPY = {
   settlesManyTitle: 'Answer Once for the Whole Beamtime',
   settlesManyLead: 'One answer here settles many records. Each is previewed group by group before it is written.',
   suggestedNotConfirmed: 'Suggested — not confirmed',
+  earlierHeading: 'From an earlier beamtime',
+  earlierUse: 'Use this',
+  earlierFilled: 'Filled in the answer box. Nothing is recorded until you answer.',
+  earlierNote: 'Remembered on this computer from an answer given before. It is not confirmed for this beamtime: check it applies, then answer.',
   noSuggestion: 'No suggestion. No file in this import states it.',
   otherReadings: 'Other readings and hints',
   allowedAnswers: 'Allowed answers',
