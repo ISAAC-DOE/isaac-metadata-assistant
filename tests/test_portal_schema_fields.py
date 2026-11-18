@@ -291,3 +291,135 @@ def test_a_needs_confirmation_value_is_never_exported(draft):
     result = export_draft(draft, ROOT, record_id=RID, now=NOW)
     assert not result.ok and result.record is None and result.sidecar is None
     assert any(where == "fields.sample.material.formula" for where, _ in result.draft_report.errors)
+
+
+# --- a `rejected` field never reaches the record -------------------------------------------------
+#
+# Found by the review of #323: `transform` wrote every non-null value whatever its status, so a
+# `rejected` envelope that still carried the value a person had turned down went into the official
+# record (and its evidence into the sidecar). `rejected` is a DECIDED state, not an open question:
+# it says "nothing goes in this field". So the value is DROPPED — the field is absent, exactly as
+# a `missing` one is — and a field the schema requires then refuses the export for the missing
+# property, never satisfied by the reject. SYNTHETIC values only.
+
+
+def _reject(draft: dict, path: str, value) -> None:
+    draft["fields"][path] = {"value": value, "status": "rejected", "evidence": copy.deepcopy(EVIDENCE)}
+
+
+def test_a_rejected_value_is_left_out_of_the_record_and_the_sidecar(draft):
+    _reject(draft, "system.facility.endstation", "SYNTHETIC-rejected-endstation")
+    assert validate_draft(draft).ok  # a legitimate DRAFT state, as before
+    assert "endstation" not in transform(draft, record_id=RID, now=NOW)["system"]["facility"]
+    result = export_draft(draft, ROOT, record_id=RID, now=NOW)
+    assert result.ok, result.official_report and result.official_report.render()
+    assert "endstation" not in result.record["system"]["facility"]
+    assert "SYNTHETIC-rejected-endstation" not in json.dumps(result.record)
+    assert "system.facility.endstation" not in result.sidecar["evidence"]
+    # disclosed, not silent: the export says which field it left out and why
+    assert any(where == "fields.system.facility.endstation" for where, _ in result.draft_report.warnings)
+
+
+def test_a_rejected_required_field_blocks_the_export(draft):
+    """A reject must never satisfy a required field: the field is absent, so the schema refuses."""
+    _reject(draft, "sample.sample_form", "pellet")
+    result = export_draft(draft, ROOT, record_id=RID, now=NOW)
+    assert not result.ok and result.sidecar is None
+    assert "sample_form" not in result.record["sample"]
+    assert any("sample_form" in e.message for e in result.official_report.errors)
+
+
+def test_a_rejected_value_never_reaches_the_sidecar_via_build_sidecar(draft):
+    _reject(draft, "sample.material.formula", "SYNTHETIC-Cu9")
+    record = transform(draft, record_id=RID, now=NOW)
+    assert "formula" not in record["sample"]["material"]
+    assert "sample.material.formula" not in build_sidecar(draft, record)["evidence"]
+
+
+def test_a_rejected_temperature_is_not_closed_by_the_basis(draft):
+    """A rejected temperature is a turned-down value, not the source's statement that it is not
+    reported: the `not_reported` null is still written only for an absent or `missing` envelope."""
+    _reject(draft, "context.temperature_K", 298)
+    draft["fields"]["context.temperature_basis"] = _envelope("not_reported")
+    assert "temperature_K" not in transform(draft, record_id=RID, now=NOW)["context"]
+    assert not export_draft(draft, ROOT, record_id=RID, now=NOW).ok
+
+
+# --- a rejected PATH never reaches the record, however its value got there ------------------------
+#
+# Review of the reject fix (MEDIUM): the `fields` loop skipped the rejected envelope, but a
+# non-rejected PARENT envelope (`system.facility` holding the whole object) still wrote the same
+# value, and the export then warned that it had been "left out". The rule is on the PATH: nothing
+# is exported at or under a rejected path, and the warning says "left out" only when it is.
+
+
+def _facility_as_one_envelope(draft: dict) -> dict:
+    """Replace the `system.facility.*` leaves with one verified envelope holding the object."""
+    facility = {}
+    for path in [p for p in draft["fields"] if p.startswith("system.facility.")]:
+        facility[path.rsplit(".", 1)[1]] = draft["fields"].pop(path)["value"]
+    draft["fields"]["system.facility"] = _envelope(facility)
+    return facility
+
+
+def test_a_rejected_leaf_under_a_verified_parent_envelope_is_left_out(draft):
+    facility = _facility_as_one_envelope(draft)
+    facility["endstation"] = "SYNTHETIC-rejected-endstation"
+    _reject(draft, "system.facility.endstation", "SYNTHETIC-rejected-endstation")
+    before = copy.deepcopy(draft)
+    result = export_draft(draft, ROOT, record_id=RID, now=NOW)
+    assert result.ok, result.official_report and result.official_report.render()
+    assert draft == before  # removing the path never edits the caller's draft
+    assert "endstation" not in result.record["system"]["facility"]
+    assert "SYNTHETIC-rejected-endstation" not in json.dumps(result.record)
+    assert result.record["system"]["facility"]["beamline"] == "15-2"  # the rest of the parent stays
+    assert "system.facility.endstation" not in result.sidecar["evidence"]
+    warned = [m for where, m in result.draft_report.warnings if where == "fields.system.facility.endstation"]
+    assert warned and "left out" in warned[0]
+
+
+def test_a_verified_child_under_a_rejected_parent_is_left_out_and_said(draft):
+    for path in [p for p in draft["fields"] if p.startswith("system.facility.") and p != "system.facility.beamline"]:
+        del draft["fields"][path]
+    _reject(draft, "system.facility", {"beamline": "15-2"})
+    result = export_draft(draft, ROOT, record_id=RID, now=NOW)
+    assert result.ok, result.official_report and result.official_report.render()
+    assert "facility" not in result.record["system"]
+    assert "system.facility.beamline" not in result.sidecar["evidence"]
+    warned = [m for where, m in result.draft_report.warnings if where == "fields.system.facility.beamline"]
+    assert warned and "system.facility" in warned[0] and "left out" in warned[0]
+
+
+def test_an_implicit_entry_about_a_rejected_path_is_marked_rejected_in_the_sidecar(draft):
+    _reject(draft, "system.facility.endstation", "SYNTHETIC-rejected-endstation")
+    draft["implicit"].append({"about": "system.facility.endstation", "value": "SYNTHETIC-rejected-endstation",
+                              "evidence": copy.deepcopy(EVIDENCE)})
+    result = export_draft(draft, ROOT, record_id=RID, now=NOW)
+    assert result.ok
+    entry = result.sidecar["evidence"]["implicit:system.facility.endstation"]
+    assert entry["status"] == "rejected"
+    assert result.sidecar["evidence"]["implicit:edge"].get("status") is None  # others are unmarked
+
+
+def test_a_block_evidence_key_spelled_as_a_rejected_path_is_not_cited(draft):
+    _reject(draft, "system.facility.endstation", "SYNTHETIC-rejected-endstation")
+    draft["block_evidence"]["system.facility.endstation"] = copy.deepcopy(EVIDENCE)
+    result = export_draft(draft, ROOT, record_id=RID, now=NOW)
+    assert result.ok
+    assert "system.facility.endstation" not in result.sidecar["evidence"]
+    assert "qc:status" in result.sidecar["evidence"]  # natural keys still pass through
+    assert any(where == "block_evidence.system.facility.endstation" for where, _ in result.draft_report.warnings)
+
+
+def test_a_reject_leaves_every_non_overlapping_field_exactly_as_before(draft):
+    """Negative control: a reject touches its own path only."""
+    baseline = export_draft(copy.deepcopy(draft), ROOT, record_id=RID, now=NOW)
+    _reject(draft, "system.facility.endstation", "SYNTHETIC-rejected-endstation")
+    result = export_draft(draft, ROOT, record_id=RID, now=NOW)
+    assert baseline.ok and result.ok
+    expected = copy.deepcopy(baseline.record)
+    del expected["system"]["facility"]["endstation"]
+    assert result.record == expected
+    expected_ev = dict(baseline.sidecar["evidence"])
+    del expected_ev["system.facility.endstation"]
+    assert result.sidecar["evidence"] == expected_ev
