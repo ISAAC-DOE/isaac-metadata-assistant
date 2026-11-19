@@ -2112,6 +2112,8 @@ def cmd_bundle_questions(args) -> int:
         payload = Q.consolidate(bundle, compositions_out=reports)
         rows = Q.filter_questions(payload, scope=args.scope, blocking_only=args.blocking_only, reports=reports)
         kept = [q for q in rows if not (args.skip_deferred and q.get("deferred"))]
+        if getattr(args, "distinguishing_only", False):
+            kept = [q for q in kept if q.get("completeness")]  # the local completeness tier (completeness.py)
         # r3a L5: a question about runs no live record group holds builds no record: counted, listed on request (or
         # when a run's own scope is asked for); the local questions screen hides them the same way (r3c LOW-3)
         kept, outside = Q.hide_outside_live_groups(kept, scope=args.scope, include=args.include_outside_live_groups)
@@ -2150,6 +2152,9 @@ def cmd_bundle_questions(args) -> int:
             # whole bundle's under their own name
             "counts": Q.scope_counts(payload, args.scope, reports),
             **({"counts_whole_bundle": payload["counts"]} if args.scope else {}),
+            # finding 1: the LOCAL completeness gate, said beside the counts (its questions are listed right after the
+            # blocking ones, each with `completeness`)
+            **({"record_completeness": payload["record_completeness"]} if payload.get("record_completeness") else {}),
             "total": len(kept), "offset": args.offset, "limit": args.limit, "returned": len(page),
             "omitted_before": min(args.offset, len(kept)),
             "omitted_after": max(0, len(kept) - args.offset - len(page)),
@@ -2272,6 +2277,8 @@ def _compact_question(q: Mapping) -> dict:
     if isinstance(out.get("applies_to"), Mapping) and not out["applies_to"].get("runs_outside_live_groups"):
         out["applies_to"] = {k: v for k, v in out["applies_to"].items() if k != "runs_outside_live_groups"}
     pst = q.get("per_scope_targets") or {}
+    if isinstance(out.get("completeness"), Mapping):  # its group ids are counted (`groups`), like every target list
+        out["completeness"] = {k: v for k, v in out["completeness"].items() if k != "group_ids"}
     out["targets_count"] = len(q.get("targets") or ())
     out["scopes_count"] = len(pst)
     # the groups it REACHES (applies_to.groups: a beamtime-wide question reaches every live group, c10-m), less those
@@ -2645,7 +2652,8 @@ def cmd_bundle_export(args) -> int:
     holder: dict = {}
 
     def run():
-        holder["r"] = R.export_records(Path(args.bundle_dir), Path(args.out))
+        holder["r"] = R.export_records(Path(args.bundle_dir), Path(args.out),
+                                       allow_indistinguishable=getattr(args, "allow_indistinguishable", False))
         return holder["r"] if args.full else compact_export(holder["r"])
 
     code = _mutation(run)
@@ -3064,6 +3072,9 @@ def build_parser(prog: str = "isaac") -> argparse.ArgumentParser:
     q.add_argument("--each-group", action="store_true",
                    help="also list each per-group question a beamtime-wide question answers at once (e.g. the start "
                         "time); by default they are counted, not listed")
+    q.add_argument("--distinguishing-only", action="store_true",
+                   help="only the questions that put a condition into a record that keeps it apart from another record "
+                        "of its sample (the local completeness tier: after the blocking ones, before the optional ones)")
     q.add_argument("--no-context", action="store_true",
                    help="leave out each question's context (the quotes, values, plots and images beside it; "
                         "`bundle show <dir> question <id>` prints it in full)")
@@ -3121,6 +3132,10 @@ def build_parser(prog: str = "isaac") -> argparse.ArgumentParser:
     q.add_argument("--out", required=True)
     q.add_argument("--full", action="store_true", help="print every exported row in full (default: every refused, withdrawn, "
                    "replaced row and every row with a warning of its own; of the repeated ones the first few)")
+    q.add_argument("--allow-indistinguishable", action="store_true",
+                   help="write the records the local completeness gate holds anyway (a record without a condition that "
+                        "keeps it apart from another record of its sample, or one that says exactly what another says); "
+                        "each row then says so")
     q.set_defaults(func=cmd_bundle_export)
 
     q = bsub.add_parser("upload", help="DRY RUN ONLY: what would be sent to the portal")

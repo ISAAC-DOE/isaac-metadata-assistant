@@ -3142,7 +3142,11 @@ def record_decision(
                     # without, or a newer result of its group) is never approved in a bulk call
                     from . import approved_curve as AC
 
-                    if (why := AC.approval_problem(bundle, obj, bulk=bulk)) is not None:
+                    # (two results of ONE group named in one call are refused by the rule above, for whichever comes
+                    # second: "is not the newest" would only hide that sentence)
+                    twin = any(k == "processing_result" and o is not obj and o.get("group_id") == obj.get("group_id")
+                               for _, k, o in resolved)
+                    if (why := AC.approval_problem(bundle, obj, bulk=bulk and not twin)) is not None:
                         raise MutationRefused(why)
                     if "athena_e0_possibly_fixed" in (obj.get("review_flags") or ()) and not e0_measured:
                         # r1 M5: an Athena E0 shared by groups whose own edges differ may be a fixed setting, not a measure

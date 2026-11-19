@@ -39,6 +39,18 @@ Open `validation/<group id>.json` only for a group those leave unexplained.
 | `portal_reject` | "The portal would reject this: …" | fix the stated value or leave it unexported |
 | `exportable` | "Passes every check." | export |
 
+**Record completeness** (`record_completeness`, gate `isaac.local.record_completeness.v1`) is a local gate beside the
+verdicts and never changes one. A condition grouping used to keep two records of one sample apart (the potential,
+the cycling history, the filter, which electrode) must be in the record or declined (`reject`) before `export` writes
+it; two records that would say the same thing are held too.
+- `validate` gives `ready_to_export`, what is open and `answer_first`. `bundle questions` lists those questions right
+  after the blocking ones (each has `completeness`).
+- `export` lists a held record under `refused` with `verdict: held_by_record_completeness` and
+  `official_validation: passed`. Say "it passes validation but would be written without its potential" (or "these N
+  records would be indistinguishable") and ask the question it names.
+- Only when the scientist says to export anyway: `export --allow-indistinguishable --by "<name>"`. That is recorded
+  in the bundle, so later exports keep those records.
+
 Exit 1 from `validate` means at least one draft is not exportable. That is information, not an error.
 After a fix, run `build-records` then `validate` again. Never hand-edit a draft or an evidence file. Never relax a check.
 
