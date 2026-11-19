@@ -1,16 +1,21 @@
 # Troubleshooting
 
+Look here when a command exits non-zero or says something unexpected. Find the row, say the middle column, do the last.
+
 | What happened | Say | Do |
 |---|---|---|
 | `isaac` not found / "need the ISAAC local import package" | "ISAAC isn't set up on this computer yet." | ask where their ISAAC folder is if `checkout-path.txt` is missing; give: `scripts/setup_isaac_local.sh` from that folder, then `--install-skill` and restart Claude Code (a skill installed for the first time needs a start to appear); `scripts/setup_isaac_local.sh --check` shows what is there without changing anything |
 | import exit 3 | "I can't read that folder (not found, a shortcut, or no permission)." | ask for the real folder path; never follow shortcuts |
-| import exit 4 | "The output folder isn't empty or is inside your data." | choose a new, empty folder outside the data; `--force` only if they ask |
-| import exit 5 | "ISAAC read the files but could not make a valid summary of them." | run `<isaac> import` again for the message; report the exact message to the ISAAC team; do not retry blindly |
+| import exit 4 ("--out is not empty") | "That working folder is already in use." | if it holds an earlier import of this beamtime, do not import: continue it (Step 2). Otherwise choose a new, empty folder outside the data. Never suggest `--force`: it overwrites the working folder and every answer in it is lost |
+| import exit 5 | "ISAAC read the files but could not make a valid summary of them." | read the message (it may name a size limit: more runs or values than one working folder holds); report the exact message to the ISAAC team; do not retry blindly |
+| a command prints a notice that says "re-import" (an older working folder) | "This working folder was made by an older ISAAC. To get <what the notice names>, the data must be read again into a NEW working folder, which starts with no answers." | ask before doing it; import into a new `--out`, never `--force`; if the folder already holds many answers, say what would have to be answered again |
 | a beamtime with 0 runs | "No reader for these file types yet; N files were left unread." | go to Step 4 for what can be read; generic readers run automatically where present |
 | `bundle show` (any kind, including a `question` id from `bundle questions`) / `excerpt` exit 6 | "That item doesn't exist in this bundle." | list again; ids change only when you re-import |
 | a mutation exit 5 | "That change would leave the summary invalid, so nothing was saved." | read the message; fix the cause (usually a missing value with a decision) |
 | `excerpt` exits 0 but its reply has `"refused"` (file changed, no longer in the folder, or inside a nested ZIP) | "I can't show that file's text: <the reason in its words>." | for a changed file, re-import into a new folder; otherwise read it another way (Step 4) |
-| `decide` exit 2 | "That decision isn't allowed for this item." | read the allowed list in the message; for conflicts/missing values give `--value` |
+| `decide` exit 2 | "That decision isn't allowed for this item." | read the allowed list in the message; for conflicts/missing values give `--value`. With `--only`: the question reaches none of the scopes you named |
+| `decide --question <Q> --field <path>` exit 6: "No open question", though the question is listed | nothing to the scientist: it is my mistake | that question does not ask that field. `<isaac> bundle show <bundle> question <Q>` lists its `fields`; use the question whose fields include it (for the potential scale: the group's own optional-values question) |
+| an approval is refused: "it is the scientist's Athena curve" (a working folder from an older ISAAC) | "Athena curves are never used for a record." | approve the ISAAC result the message names; if an Athena approval is in the way, reject it first, as the message says |
 | `decide` exit 2: "not one of the schema's allowed values" | "That answer isn't one the record can hold." | show the allowed values it lists, map their words to one, say it back, and ask; nothing was recorded, and nothing was kept unless the reply says "kept as a vocabulary request" (only with `--as-said`, for their own exact word). A kept word exits 0 and the reply says so first (`vocabulary_request_kept`); no decision and no value was recorded for it. Without `--as-said` the exit is 2 and nothing is kept |
 | `decide` exit 2: merge "needs --merge-with" or "names no record group" | "I need to know which group to merge it with." | list the groups again and name a live one |
 | `process` exit 2: "Pass --source" | "ISAAC needs the original folder to read the scans." | run it again with `--source <the imported folder>`; nothing was written |

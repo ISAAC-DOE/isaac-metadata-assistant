@@ -213,7 +213,7 @@ def test_every_scan_all_zero_has_no_curve_and_cannot_be_approved(tmp_path):
 
 
 def test_the_processing_reference_says_signal_all_zero():
-    text = (SKILL / "reference" / "grouping-and-processing.md").read_text()
+    text = (SKILL / "reference" / "legacy-processing.md").read_text()
     assert "`signal_all_zero`" in text and "the curve uses the other scans" in text
 
 

@@ -225,4 +225,5 @@ def test_the_calibration_decision_is_in_the_skill_with_real_flags():
     for flag in ("--element", "--edge"):
         assert flag in help_text
     assert "approve_calibration" in (SKILL / "reference" / "commands.md").read_text(encoding="utf-8")
-    assert "approve_calibration" in (SKILL / "reference" / "grouping-and-processing.md").read_text(encoding="utf-8")
+    # the calibration rules live in the legacy-processing reference (opened only when a result proposes a shift)
+    assert "approve_calibration" in (SKILL / "reference" / "legacy-processing.md").read_text(encoding="utf-8")

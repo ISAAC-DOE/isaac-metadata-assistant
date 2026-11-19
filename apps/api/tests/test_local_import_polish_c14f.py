@@ -233,12 +233,14 @@ def test_validate_passes_its_verdicts_to_pending_vocabulary(grouped, capsys, mon
 
 
 def test_the_skill_reference_has_words_for_each_new_output():
-    qd = (SKILL / "reference/questions-and-decisions.md").read_text(encoding="utf-8")
-    rv = (SKILL / "reference/records-and-validation.md").read_text(encoding="utf-8")
+    # the vocabulary-request and own-sheet text moved out of questions-and-decisions.md into files of their own
+    qd = "\n".join((SKILL / "reference" / name).read_text(encoding="utf-8")
+                   for name in ("vocabulary-requests.md", "template-and-own-sheet.md"))
+    rv = " ".join((SKILL / "reference/records-and-validation.md").read_text(encoding="utf-8").split())
     assert "the record keeps `surface_oxidation` meanwhile" in qd and "the field stays missing (`bundle validate`" in qd
     assert "earlier_requests_answered_note" in qd and "This answers your request for" in qd
     assert "already recorded: 'in_situ'" in qd and "nothing to do unless you want your own word kept" in qd
     assert "name only runs in no live record group" in qd and "need a one-word form (ask)" in qd
     assert "not to be filed" in qd and re.search(r"decision\(s\) \(from M cell\(s\)\) already\s+recorded", qd)
-    assert "this does not block export; the record is\nwritten without it" in rv and "`pending_vocabulary`" in rv
+    assert "this does not block export; the record is written without it" in rv and "`pending_vocabulary`" in rv
     assert len((SKILL / "SKILL.md").read_text(encoding="utf-8").splitlines()) <= 250

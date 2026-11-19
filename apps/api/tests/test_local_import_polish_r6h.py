@@ -411,8 +411,8 @@ def test_keeping_isaacs_approved_curve_after_choosing_a_version_is_reject_then_a
     M.decide(bdir, target_ids=["p1"], decision="reject", value=None, **BY)
     M.decide(bdir, target_ids=["p1"], decision="approve", value=None, qc_status="valid", **BY)
     assert warned() == []
+    # the skill text no longer describes Athena versions (Athena is never used); it must not bring the old advice back
     doc = (SKILL / "reference" / "records-and-validation.md").read_text()
-    assert "reject it\nand then approve it again" in doc and "approving it again alone records nothing new" in doc
     assert "approve it again, or choose its version again" not in doc
 
 
