@@ -1,5 +1,7 @@
 # Blind cross-check (Step 3)
 
+Read this at Step 3, only when the scientist wants the spot check.
+
 Purpose: get an independent reading of high-value facts BEFORE you see what the code extracted, so a
 code error can be caught instead of echoed. It is a spot check, never a verification.
 
@@ -47,7 +49,7 @@ code error can be caught instead of echoed. It is a spot check, never a verifica
 - `--blind` counts only if no command had printed that target's value. If `annotate` stores
   `blind: false`, say so; do not call it blind.
 - Never open `bundle.json`, `runs.json`, `reading.full.json`, `record_groups.json` or
-  `processing_results.json` (SKILL.md Rule 8); the tool cannot see that, and a blind claim is only as
+  `processing_results.json` (SKILL.md Rule 10); the tool cannot see that, and a blind claim is only as
   good as your discipline.
 - `summary.md` shows no parser value except in conflicts. Conflicts are therefore never blind.
 - Report: "checked N of M high-value items (K blind); the rest were not examined." M is `high_value_total`;

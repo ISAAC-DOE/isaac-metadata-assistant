@@ -1,5 +1,7 @@
 # A filled question workbook (`bundle answers import`)
 
+Read this only when a filled question workbook came back from a scientist.
+
 The question workbook is the spreadsheet of ISAAC questions a scientist is sent: one tab per kind of
 question, a header row, an `ISAAC question ID` column and a yellow **YOUR ANSWER** column. When it comes
 back filled in, read it back with:
