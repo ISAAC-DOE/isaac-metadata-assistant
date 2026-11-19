@@ -255,7 +255,8 @@ A reading audit's (what a quote-checked reading of the whole folder writes):
   "alternatives": ["…"],
   "confidence": "high",                        // high | medium | low
   "evidence": [{"quote": "…", "file": "…", "locator": "line 8"}],   // -> suggestion.evidence (the first three)
-  "reasoning": "…",                            // -> suggestion.reason (its first two sentences, at most 320 characters)
+  "reasoning": "…",                            // -> suggestion.reason: its first two sentences (or the first alone) when
+                                               //    they fit in 320 characters; never cut inside a sentence
   "general_knowledge_note": null               // not shown
 }
 ```
@@ -294,7 +295,10 @@ What a match becomes:
 - `high` is kept only when one of the quotes holds the value itself (as written, in words, as the option's
   label, or as one of the entry's optional `synonyms`); otherwise the card says `medium` at most.
 
-A value the files give, which a card confirms as it stands (`basis: "files"`), is never replaced by an entry.
+A value the files give, which a card confirms as it stands (`basis: "files"`), is never replaced by an entry. It is
+`high` only when the files write the value itself; a value ISAAC read from a token (a potential from `060mV`) is
+`medium`, "likely, please check". A suggestions file cannot claim `basis: "files"`, and an entry's `label` is shown
+only when it names the value.
 
 AI readings loaded into the bundle (`isaac bundle annotate --from-readings`) become suggestions too, with no
 file: `basis: "reading"`, the reading's quote as evidence, `confidence: "medium"` when the reading says the
