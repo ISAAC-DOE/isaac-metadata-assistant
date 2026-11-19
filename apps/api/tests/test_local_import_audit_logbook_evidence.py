@@ -332,3 +332,46 @@ def test_a_bulk_approval_refuses_the_older_of_two_results(bdir):
     assert AC.approval_problem(b, b["processing_results"][1], bulk=True) is None
     assert AC.approval_problem(b, b["processing_results"][0], bulk=False) is None  # on its own, the person decides
     assert other["group_id"] == "g1"
+
+
+# --- review of PR 342, finding 1: only the runs whose scans the result processed --------------------------------
+
+
+def _hand_built(note_run: str, *, inputs=("run-001",)):
+    """A group of run-001 (scans processed) and run-002 (a context run, or a member that gave no scan), one approved
+    result whose inputs are only run-001's scans, and one scan note on ``note_run`` recorded after the approval."""
+    runs = [{"run_id": "run-001", "run_key": "k1", "stem": "SYN_a"}, {"run_id": "run-002", "run_key": "k2", "stem": "SYN_b"}]
+    group = {"group_id": "g", "member_run_keys": ["k1", "k2"], "context_run_keys": ["k2"], "status": "scientist_confirmed"}
+    stem = {r["run_id"]: r["stem"] for r in runs}
+    result = {"result_id": "p", "group_id": "g", "source": "isaac_protocol",
+              "inputs": [{"scan_id": f"{stem[r]}#1", "source_id": f"src-{r}"} for r in inputs],
+              "outputs": {"files": [{"role": "normalized"}]},
+              "logbook_notes": {"available": True, "notes": [], "state": "read_no_note_for_these_runs"},
+              "scan_notes_at_approval": {"decision_id": "d-1", "scan_note_ids": []}}
+    approve = {"decision_id": "d-1", "target": {"kind": "processing_result", "id": "p"}, "decision": "approve",
+               "decided_utc": "2026-01-02T00:00:00Z"}
+    note = {"scan_note_id": "sn-1", "run_ids": [note_run], "action": "exclude", "scans": [1], "reason": "SYN",
+            "source_path": "SYN_logbook.txt", "locator": "line 1", "quote": "SYN", "recorded_utc": "2026-01-03T00:00:00Z"}
+    return {"record_groups": [group], "processing_results": [result], "scientist_decisions": [approve],
+            "scan_notes": [note], "runs": runs}, result
+
+
+@pytest.mark.parametrize("why", ["context_run", "member_with_no_scan"])
+def test_a_note_on_a_run_whose_scans_were_not_processed_never_holds_an_approval(why):
+    b, result = _hand_built("run-002")
+    if why == "member_with_no_scan":
+        b["record_groups"][0]["context_run_keys"] = []
+    assert AC.unlisted_notes(b, result) == []
+    assert AC.approval_problem(b, result, bulk=False) is None and AC.approval_problem(b, result, bulk=True) is None
+    assert AC.older_than_evidence(b, "g") is None
+    # the same note on the run whose scans WERE processed is evidence the curve lacks
+    b, result = _hand_built("run-001")
+    assert [e["scan_note_id"] for e in AC.unlisted_notes(b, result)] == ["sn-1"]
+    assert AC.older_than_evidence(b, "g")["evidence"][0]["why"] == AC.NOT_IN_CURVE
+
+
+def test_a_result_with_no_readable_inputs_falls_back_to_the_members_that_are_not_context():
+    b, result = _hand_built("run-002", inputs=())
+    assert AC.unlisted_notes(b, result) == []          # run-002 is a context run
+    b, result = _hand_built("run-001", inputs=())
+    assert [e["scan_note_id"] for e in AC.unlisted_notes(b, result)] == ["sn-1"]

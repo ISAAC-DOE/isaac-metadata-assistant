@@ -49,6 +49,40 @@ def _run_ids(bundle: Mapping, group: Mapping | None) -> list[str]:
     return ids
 
 
+def processed_run_ids(bundle: Mapping, result: Mapping) -> list[str]:
+    """The runs whose scans ``result`` processed: read from its own ``inputs`` (each scan's ``scan_id``,
+    ``<run stem>#<n>``, else its ``source_id``). A context run (an exported file of a run, never read by processing)
+    and a member run that gave no scan are not among them, so no curve can ever list a note on one (review of PR 342,
+    finding 1). A result whose inputs name no run (an older or a failed result) falls back to the group's members
+    that are not context runs."""
+    by_stem: dict[str, list[str]] = {}
+    by_source: dict[str, str] = {}
+    for r in bundle.get("runs") or ():
+        if not isinstance(r, Mapping) or not r.get("run_id"):
+            continue
+        by_stem.setdefault(str(r.get("stem") or ""), []).append(r["run_id"])
+        for s in r.get("scans") or ():
+            if isinstance(s, Mapping) and s.get("source_id"):
+                by_source.setdefault(str(s["source_id"]), r["run_id"])
+        if r.get("acquisition_source_id"):
+            by_source.setdefault(str(r["acquisition_source_id"]), r["run_id"])
+    out: list[str] = []
+    for e in result.get("inputs") or ():
+        if not isinstance(e, Mapping):
+            continue
+        sid = str(e.get("scan_id") or "")
+        found = by_stem.get(sid.rsplit("#", 1)[0], []) if "#" in sid else []
+        if not found and e.get("source_id") in by_source:
+            found = [by_source[e["source_id"]]]
+        out += [x for x in found if x not in out]
+    if out:
+        return out
+    group = _group(bundle, result.get("group_id")) or {}
+    by_key = {r.get("run_key"): r.get("run_id") for r in bundle.get("runs") or ()}
+    context = {by_key.get(k) for k in group.get("context_run_keys") or ()}
+    return [rid for rid in _run_ids(bundle, group) if rid not in context]
+
+
 def _notes(bundle: Mapping, run_ids: Sequence[str]) -> list[tuple[Mapping, str]]:
     """``[(note, run id)]``: every scan note naming one of ``run_ids``, once per run it names."""
     wanted = set(run_ids)
@@ -82,7 +116,7 @@ SNAPSHOT_KEY = "scan_notes_at_approval"
 
 def approval_snapshot(bundle: Mapping, result: Mapping, decision_id: Any) -> dict:
     """What ``decide --decision approve`` keeps on ``result``: the ids of the scan notes on its group's runs now."""
-    notes = _notes(bundle, _run_ids(bundle, _group(bundle, result.get("group_id"))))
+    notes = _notes(bundle, processed_run_ids(bundle, result))
     return {"decision_id": decision_id, "scan_note_ids": sorted({str(n.get("scan_note_id")) for n, _ in notes})}
 
 
@@ -99,7 +133,7 @@ def _after_approval(result: Mapping, decision: Mapping, note: Mapping) -> bool:
 def approval_predates_a_note(bundle: Mapping, result: Mapping, approval: Mapping) -> bool:
     """True when a scan note on the runs of ``result``'s group was not there when ``approval`` was recorded."""
     return any(_after_approval(result, approval, note)
-               for note, _ in _notes(bundle, _run_ids(bundle, _group(bundle, result.get("group_id")))))
+               for note, _ in _notes(bundle, processed_run_ids(bundle, result)))
 
 
 def unlisted_notes(bundle: Mapping, result: Mapping) -> list[dict]:
@@ -110,7 +144,7 @@ def unlisted_notes(bundle: Mapping, result: Mapping) -> list[dict]:
         return []
     stems = {r.get("run_id"): r.get("stem") for r in bundle.get("runs") or ()}
     out, seen = [], set()
-    for note, rid in _notes(bundle, _run_ids(bundle, _group(bundle, result.get("group_id")))):
+    for note, rid in _notes(bundle, processed_run_ids(bundle, result)):
         if note.get("scan_note_id") in seen or _listed(block, note, stems.get(rid)):
             continue
         seen.add(note.get("scan_note_id"))
@@ -182,7 +216,7 @@ def older_than_evidence(bundle: Mapping, group_id: str, state_of: Mapping | None
     block = _block(result)
     stems = {r.get("run_id"): r.get("stem") for r in bundle.get("runs") or ()}
     evidence, seen = [], set()
-    for note, rid in _notes(bundle, _run_ids(bundle, _group(bundle, group_id))):
+    for note, rid in _notes(bundle, processed_run_ids(bundle, result)):
         nid = note.get("scan_note_id")
         if nid in seen:
             continue
