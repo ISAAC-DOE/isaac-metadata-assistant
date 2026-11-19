@@ -4779,6 +4779,10 @@ def build_bundle(
     # a late run's missing values (and a record-scope one only it lacks) are numbered after every other, so the value
     # ids an import by the earlier build gave the same files stand.
     record_asked: set[str] = set()
+    # suggestions.MENTION_GATE_RULE_ID: a field of one beamtime's standard (a diluted pellet) is asked of a run only
+    # where one of that run's own sources mentions it
+    run_texts = _suggest.run_source_texts(runs, out_candidates, generic_statements)
+    numbered = 0  # value ids are numbered by POSITION, counting a value that is not asked: every other id stands
     for late in (False, True):
         phase_runs = [r for r in runs if (r["run_key"] in late_keys) is late]
         for path in sorted(writable, key=_value_id_order):
@@ -4791,13 +4795,16 @@ def build_bundle(
                 if (lacking and path not in record_asked
                         and (path not in any_target or targets_by_run.get(None, set()).isdisjoint({path}))):
                     record_asked.add(path)
-                    missing.append(_missing(len(missing), None, path, "record", reason, beamtime_targets, writable))
+                    missing.append(_missing(numbered, None, path, "record", reason, beamtime_targets, writable))
+                    numbered += 1
                 continue
             for run in phase_runs:
                 if not run["run_candidate"]:
                     continue
                 if path not in targets_by_run.get(run["run_id"], set()):
-                    missing.append(_missing(len(missing), run["run_id"], path, "run", reason, beamtime_targets, writable))
+                    if _suggest.asks_field(path, run_texts.get(run["run_id"])):
+                        missing.append(_missing(numbered, run["run_id"], path, "run", reason, beamtime_targets, writable))
+                    numbered += 1
 
     unmapped = [
         {

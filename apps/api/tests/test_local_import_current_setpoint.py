@@ -102,7 +102,8 @@ def test_current_setpoint_value_ids_come_after_every_older_fields_ids(grouped):
     for m in ms:
         nums[m["target_field_path"]].append(int(m["value_id"].split("-")[1]))
     older = sorted(n for p, ns in nums.items() if p not in (CM, CURRENT) for n in ns)
-    assert older == list(range(1, len(older) + 1))
+    # each once, from 1 (a value that is not asked keeps its number, so there may be gaps: MENTION_GATE_RULE_ID)
+    assert older == sorted(set(older)) and older[0] == 1
     assert max(older) < min(nums[CM]) and max(nums[CM]) < min(nums[CURRENT])  # 1.5.0's, then 1.7.0's
 
 

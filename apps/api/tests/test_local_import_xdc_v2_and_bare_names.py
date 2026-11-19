@@ -453,9 +453,20 @@ BASE_PINS: dict = {'a_only': {'candidates': [14, '6a15bdaf6d059333'],
 
 
 @pytest.mark.parametrize("name", sorted(SCENARIOS))
-def test_every_id_the_build_before_gave_stands_and_new_ones_only_follow(name, tmp_path):
+def test_every_id_the_build_before_gave_stands_and_new_ones_only_follow(name, tmp_path, monkeypatch):
+    from isaac_api.local_import import suggestions as S
+
     pin = BASE_PINS[name]
+    # 18 Nov 2026 (suggestions.MENTION_GATE_RULE_ID): three fields of a pellet standard are asked of a run only where
+    # its sources mention them. A value that is not asked KEEPS ITS NUMBER, so the import as it is now gives exactly
+    # the values the pinned build gave minus those, every other id unchanged; and with the gate off, the pinned list.
+    gated = id_summary(name, tmp_path / "gated")
+    monkeypatch.setattr(S, "MENTION_GATED_FIELDS", {})
     now = id_summary(name, tmp_path)
+    assert gated["missing"] == [m for m in now["missing"] if m in gated["missing"]]  # the same ids, the same order
+    assert {m[2] for m in now["missing"] if m not in gated["missing"]} <= set(S.MENTION_GATED_FIELDS_DEFAULT)
+    assert all(gated[part] == now[part] for part in ("runs", "candidates", "groups"))
+    assert set(pin["questions"]) <= set(gated["questions"])
     for part in ("runs", "candidates", "missing"):
         n, digest = pin[part]
         assert len(now[part]) >= n and _digest(now[part][:n]) == digest, part

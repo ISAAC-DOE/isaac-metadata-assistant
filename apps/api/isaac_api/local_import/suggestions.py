@@ -927,3 +927,38 @@ def technique_candidate(runs: Sequence[Mapping], readings: Mapping[str, Mapping]
     return suggested_candidate(
         engine_id=f"shared::{TECHNIQUE_RULE_ID}", bundle_cid=bundle_cid, run_id=None, key=TECHNIQUE_KEY, path=TECHNIQUE_PATH,
         value=value, rule_id=TECHNIQUE_RULE_ID, rule=TECHNIQUE_RULE, reason=reason, witnesses=witnesses, writable=writable)
+
+# --- a field of one beamtime's standard is asked only where a source mentions it (audit item 9) -----------------------
+
+#: Optional fields that describe ONE kind of sample (a diluted pellet standard): asked of a run only when a source of
+#: that run mentions it: ``path -> the words that mention it`` (matched without case, anywhere in the run's name, its
+#: scan-header comment lines and what its candidates read). Asking them of every sample of every beamtime put three
+#: questions about a pellet on each electrode, film and foil.
+MENTION_GATED_FIELDS: Mapping[str, re.Pattern] = {
+    "sample.composition.CuO2_mass_fraction": re.compile(r"cuo2", re.IGNORECASE),
+    "sample.composition.sucrose_mass_fraction": re.compile(r"sucrose|sugar", re.IGNORECASE),
+    "sample.geometry.pellet_diameter_mm": re.compile(r"pellet", re.IGNORECASE),
+}
+#: the gate as shipped (a test turns :data:`MENTION_GATED_FIELDS` off to show every other value id is unchanged)
+MENTION_GATED_FIELDS_DEFAULT = tuple(MENTION_GATED_FIELDS)
+MENTION_GATE_RULE_ID = "isaac.import.optional_field_asked_where_mentioned.v1"
+
+
+def run_source_texts(runs: Sequence[Mapping], candidates: Sequence[Mapping], statements: Sequence[Mapping]) -> dict[str, str]:
+    """``{run_id: text}``: what each run's own sources say, for :func:`asks_field` — its name, every literal its
+    candidates observed, and its scan-header comment lines (``statements``: the generic readers' kept statements)."""
+    parts: dict[str, list[str]] = {r["run_id"]: [str(r.get("stem") or ""), str(r.get("label") or "")] for r in runs}
+    for c in candidates:
+        if c.get("run_id") in parts:
+            parts[c["run_id"]] += [str(x) for x in c.get("observed_literals") or ()]
+    for st in statements:
+        if st.get("run_id") in parts and st.get("concept") == B.XDC_COMMENT_STATEMENT_KEY and isinstance(st.get("raw_literal"), str):
+            parts[st["run_id"]].append(st["raw_literal"])
+    return {rid: "\n".join(p) for rid, p in parts.items()}
+
+
+def asks_field(path: str, text: str | None) -> bool:
+    """Whether ``path`` is asked of a run whose sources say ``text``: always, except a :data:`MENTION_GATED_FIELDS`
+    field, which is asked only where the text mentions it."""
+    words = MENTION_GATED_FIELDS.get(path)
+    return words is None or bool(words.search(text or ""))
