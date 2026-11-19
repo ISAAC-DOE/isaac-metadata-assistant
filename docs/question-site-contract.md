@@ -7,8 +7,8 @@ files:
    (and copies the site's source beside them, so `<dir>` deploys as it is).
 2. The site (`apps/question-site/`) shows the cards behind a password and a name, and stores each answer as it is
    clicked. Anyone signed in can download `answers.json`.
-3. `isaac bundle site import <bundle_dir> <answers.json> --site-data <dir>/data/site-data.json` turns the answers
-   into `bundle decide` calls. Preview is the default; `--apply` records them.
+3. `isaac bundle site import <bundle_dir> <answers.json> --site-data <dir>/data/site-data.json [--apply] [--remember]`
+   turns the answers into `bundle decide` calls. Preview is the default; `--apply` records them.
 
 Nothing here changes a question ID, the truth plane, or what a decision means.
 
@@ -38,7 +38,7 @@ Nothing here changes a question ID, the truth plane, or what a decision means.
 
 ```jsonc
 {
-  "card_id": "C-1a2b3c4d5e",           // stable: sha256 of the field path + the sorted covered question ids, 10 hex
+  "card_id": "C-1a2b3c4d5e",           // stable: sha256 of the field path + the sorted covered ids, 10 hex (see "Additions")
   "section": "beamtime",
   "blocking": true,                    // true if any covered question is blocking
   "audience": "scientist",             // or "processing" (a question for whoever owns the reduction)
@@ -140,3 +140,145 @@ Rules for the import:
 - `--apply` refuses a bundle inside a folder whose name starts with `_runs`, as the workbook import does.
 - A second run records nothing new.
 - With `--remember`, applied answers are also written to answer memory when the scientist has opted in to it.
+
+## Additions (all additive; no shape above changed)
+
+These were added while the export and the import were built
+(`apps/api/isaac_api/local_import/question_site.py`, `question_site_import.py`, `question_site_hints.py`). A site
+written against the shapes above keeps working; it may ignore every key it does not know.
+
+### What a card can carry beyond the example
+
+- `applies_to.more` is present only when there are more than 40 items.
+- `answer.common` is present only when there is a short list to show first. It lists option **values**.
+- A context item may carry `source` (a sentence saying where it came from: ISAAC's parser, ISAAC's processing, or
+  "an AI reading of the files (not file evidence…)"). A `values` item may carry `more` (rows not shown).
+  File names are shown as a `values` item with the one column `File`.
+- `detail` may be an empty string.
+- `covers` is a list. Most cards have one entry. A card about a PART of a same-reading group (one file-name token
+  that names two materials, told apart by the grouping's own sample identity) has one entry per question; the
+  import records the same answer through each.
+- A cover may carry:
+  - `field`: the one field of an optional-values question the call answers (`decide --field`);
+  - `questions`: every question id the call answers (for a same-reading call, the whole group);
+  - `on_yes` / `on_no`, on a `yes_no` card (below);
+  - `on_accept: null` when the card has no suggestion, and `on_dont_know: null` when "I don't know" records
+    nothing on that card (the dose card, a `yes_no` card, a question that takes no `defer`).
+  - in `on_accept`, `from_earlier_answer`: the answer-memory entry the suggestion came from (the import adds
+    where the value came from to the decision's note).
+- `card_id` covers ids that are not question ids: `Q-…@group:<id>` for a card that covers one group of a
+  question (`only_scopes`), `experiment:set_dose_reading` for the dose card, `<group id>:confirm` and
+  `<result id>:approve` for the two approval cards.
+
+### `yes_no` cards
+
+The contract lists the kind and not what the site sends. The import reads, for a `yes_no` card,
+**`action: "value"` with `value: "yes"` or `"no"`** (it also takes `true` / `false`, `"y"` / `"n"`, any case).
+`yes` records the cover's `on_yes`. `no` records nothing: its note says what a person should do, and it is
+reported under "Nothing to record". `accept` is refused on a `yes_no` card (it has no suggestion) and
+`dont_know` records nothing.
+
+`yes_no` cards are: a condition label ISAAC proposes from the file names (`--include optional`: yes confirms each
+proposal), confirming a record group, and approving a merged curve (`--include approvals`).
+
+### The processing card and the approval cards
+
+- The dose card (`section: "processing"`, `audience: "processing"`, `field: null`, `blocking: false`) is in the
+  default export while any merged curve carries the open question "beam damage, or a first scan still
+  settling" and the beamtime holds no answer. Its options are the three values `set_dose_reading` takes. Its
+  cover has `question_id: null` and `target: {"target": "experiment", "decision": "set_dose_reading"}`.
+- `--include approvals` adds one `yes_no` card per record group still to confirm (`target: {"target":
+  "<group id>", "decision": "confirm"}`) and per merged curve still to approve (`target: {"target": "<result id>",
+  "decision": "approve"}`, `on_yes: {"decision": "approve", "qc_status": "valid"}`, with the curve's picture).
+  Left out and counted: every group while the question about counters in the file names is open, a curve with an
+  open processing question, a curve whose quality check did not pass, a curve with no picture.
+
+### What the export leaves out, and says so
+
+The report counts every open question that is on no card, by reason: not needed to export (without
+`--include optional`); answered "I don't know" earlier (without `--include deferred`); a kind with no plain
+wording; for information only; about something no record field holds; about how the data files are laid out;
+answered at once by a beamtime-wide question the site does not ask; an optional field asked once per
+measurement; a card whose calls a dry run refuses; and a per-group question that a beamtime-wide card settles
+(found by recording a probe answer on a throwaway copy of `bundle.json`), so the same thing is not asked twice.
+
+The export also writes to the bundle's `exposures` log, under `bundle site export`: the parser values the cards
+show, as `bundle questions` records the ones it prints. Nothing else in the bundle changes.
+
+### `--suggestions <file>`: two shapes
+
+A file may be a list of entries, `{"suggestions": [...]}`, or a map from question id to suggestion. An entry
+is in one of two shapes.
+
+The contract's own:
+
+```jsonc
+{"question_id": "Q-5a4bd3a297", "suggestion": { /* value, label?, confidence, basis, reason, evidence */ }}
+{"field": "sample.sample_form", "applies_to": "ZZ1", "suggestion": { /* … */ }}
+// applies_to: "all" (or absent): every card of that field; a sample name as the files write it; one file
+// name; or a list of file names that names every file the card is about
+```
+
+A reading audit's (what a quote-checked reading of the whole folder writes):
+
+```jsonc
+{
+  "field": "sample.material.name",            // "a / b" names two fields; "processing: …" or "grouping: …" is no record field
+  "applies_to": {"sample_token": "ZZ1", "electrodes": ["01"], "group_ids": ["rg-…"], "files": ["…"]},   // or "beamtime…"
+  "question_ids": ["Q-…"],
+  "suggested_value": "…",                      // -> suggestion.value
+  "alternatives": ["…"],
+  "confidence": "high",                        // high | medium | low
+  "evidence": [{"quote": "…", "file": "…", "locator": "line 8"}],   // -> suggestion.evidence (the first three)
+  "reasoning": "…",                            // -> suggestion.reason (its first two sentences, at most 320 characters)
+  "general_knowledge_note": null               // not shown
+}
+```
+
+Its basis is `reading`. An entry is matched to a card most specific first, and a card takes only the entries
+of its best match: (1) one of `question_ids` is a question the card covers; (2) the field is the card's and
+every group the card is about is in `applies_to.group_ids`; (3) the field is the card's and the entry is
+beamtime-wide.
+
+What a match becomes:
+
+- a **suggestion**, when its value can be recorded with one click: a single value, on the field's list where
+  the field has one (a word followed by a remark in brackets is read as the word). The accept call is dry-run
+  like every other; a value the decide path refuses is not offered.
+- **context** (a `quotes` item, labelled with what the reading suggests), when it cannot: a value off the
+  field's list, a value with several parts, entries of one card that give different values, a value the decide
+  path refuses, or a card whose files already give another value.
+- An entry about no record field is context on the processing card it matches (the dose card when it speaks of
+  beam damage or settling, or names `experiment:set_dose_reading` in `question_ids`; an approval card of a
+  group it names): quotes only, never a suggestion.
+- `alternatives` are the card's `answer.common` for a choice field (only values on the list), or are named in
+  `detail` for a text field.
+- A value with one part per record field (`{"name": …, "concentration_M": …}` on `…electrolyte`) is read for
+  the card of each part; a value keyed by file name is read for the card of that one file.
+- A suggestion that comes from a reading replaces "None of your files say." in the card's detail.
+- An entry with `basis: "general_knowledge"` and `confidence: "high"`, a confidence or basis off the lists, or
+  (the contract's shape) a reason that is missing or holds a field path, a flag or an id is not used; the
+  report says which and why.
+
+A value the files give, which a card confirms as it stands (`basis: "files"`), is never replaced by an entry.
+
+AI readings loaded into the bundle (`isaac bundle annotate --from-readings`) become suggestions too, with no
+file: `basis: "reading"`, the reading's quote as evidence, `confidence: "medium"` when the reading says the
+quoted line states the value and `"low"` when it infers it. Only when every question of the card carries the
+same reading; a reading of some of a card's measurements is not offered for all of them.
+
+### The import's outcomes
+
+Each answer ends as one of: `recorded` (preview: `would_record`), `vocabulary_request_kept` (preview:
+`would_keep_vocabulary_request`), `already_recorded`, `refused` (with the decide path's own reason),
+`no_longer_asked`, `nothing_to_record` (a "no", or an "I don't know" on a card that takes none), `superseded`
+(an earlier answer to a card answered again in the same file). Two answers to one card: the later `at` wins.
+The decision's note is `question site card <card_id> "<title>", answered <at>`; an answer already recorded is
+recognised by that note and the name, so a second run writes nothing.
+
+### The site template copy
+
+`--site-template` (default: the repository's `apps/question-site/`) is copied into `--out` so the folder
+deploys as it is. Never copied: a top-level `data/`, `test/`, `dev-server.js`, `.env.example`, `README.md`, and
+any `.vercel/`, `node_modules/` or `.git/`. When the template does not exist only `data/` is written, and the
+report says so.

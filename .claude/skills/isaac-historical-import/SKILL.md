@@ -211,6 +211,7 @@ never the answer) and an `answer_command` template.
 - **A word that is not on the list**, and they keep it: `reference/vocabulary-requests.md`.
 - **An earlier beamtime's answer** shown on a question: `reference/earlier-answers.md`.
 - **A filled sheet or workbook:** `reference/template-and-own-sheet.md`, `reference/workbook-answers.md`.
+- **They would rather click through a few at a time, on a phone:** `reference/question-site.md` (`bundle site export`, later `bundle site import`).
 - Not asked: `informational` and `covered_by` questions, and conflicts with `affects_record: false`. Give their count once.
 - They may also answer on the local *Local Imports* page. Run `bundle questions` again after.
 
