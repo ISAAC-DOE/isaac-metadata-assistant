@@ -711,7 +711,7 @@ def test_a_suggestions_file_in_a_reading_audits_shape(base, exported, tmp_path):
          "evidence": quote, "reasoning": "First SYN sentence. Second SYN sentence. Third SYN sentence.", "general_knowledge_note": None},
         {"field": FORM, "applies_to": {"group_ids": groups[form2["covers"][0]["question_id"]] + ["rg-more"]}, "question_ids": [],
          "suggested_value": "pressed disc", "alternatives": [], "confidence": "medium", "evidence": quote, "reasoning": "SYN."},
-        {"field": MATERIAL, "applies_to": {"group_ids": []}, "question_ids": material["covers"][0]["questions"][:1],
+        {"field": MATERIAL, "applies_to": {"group_ids": []}, "question_ids": material["covers"][0]["questions"],
          "suggested_value": "SYN oxide (ZZ3)", "alternatives": ["SYN oxide, 5 wt.% on SYN carbon"], "confidence": "high",
          "evidence": quote, "reasoning": "It fills sample.material.name for these runs. More."},
         {"field": "system.domain", "applies_to": "beamtime (all groups)", "question_ids": [], "suggested_value": "experimental",
@@ -744,6 +744,41 @@ def test_a_suggestions_file_in_a_reading_audits_shape(base, exported, tmp_path):
     assert rows[4]["problem"] == "no card of this export matches it"  # no processing card in this export
     for c in data["cards"]:
         assert P.not_plain(c["title"]) is None and P.not_plain(S._without_quotes(c["detail"])) is None
+
+
+def test_an_entry_for_some_of_a_cards_questions_is_never_the_whole_cards_suggestion():
+    """Review I1: a card answers two questions (two electrodes). An entry naming one of them is context only; two
+    entries naming both, with the same value, are the suggestion at the LOWER of their confidences."""
+    def card():
+        return {"field": {"path": MATERIAL}, "_questions": [{"question_id": "Q-syn0000001"}, {"question_id": "Q-syn0000002"}],
+                "_groups": ["rg-a", "rg-b"], "applies_to": {"count": 2, "summary": "SYN", "items": ["a", "b"]},
+                "answer": {"kind": "text", "options": []}, "suggestion": None, "detail": "", "_lead": "",
+                "covers": [{"on_value": {"decision": "correct"}, "on_accept": None},
+                           {"on_value": {"decision": "correct"}, "on_accept": None}]}
+
+    quote = [{"quote": "SYN oxide film", "file": "syn.txt", "locator": "line 1"}]
+
+    def entry(n, qids, confidence):
+        return H.normalise({"field": MATERIAL, "applies_to": {"group_ids": []}, "question_ids": qids,
+                            "suggested_value": "SYN oxide film", "alternatives": [], "confidence": confidence,
+                            "evidence": quote, "reasoning": f"SYN reason {n}."}, n)
+
+    def keep(answer, path, sug):
+        return answer
+
+    part = card()
+    rows = H.apply([part], [entry(0, ["Q-syn0000001"], "high")], keep)
+    assert part["suggestion"] is None and all(c["on_accept"] is None for c in part["covers"])
+    assert part["_extra_context"][0]["label"].endswith("(read for only some of these measurements)")
+    assert rows == [{"entry": 0, "suggested_on": 0, "context_on": 1}]
+    both = card()
+    rows = H.apply([both], [entry(0, ["Q-syn0000001"], "high"), entry(1, ["Q-syn0000002"], "low")], keep)
+    assert both["suggestion"]["confidence"] == "low" and both["suggestion"]["reason"] == "SYN reason 1."
+    assert all(c["on_accept"] == {"decision": "correct", "value": "SYN oxide film"} for c in both["covers"])
+    assert [r["suggested_on"] for r in rows] == [1, 1]
+    one = card()
+    H.apply([one], [entry(0, ["Q-syn0000001", "Q-syn0000002", "Q-syn0000009"], "medium")], keep)
+    assert one["suggestion"]["confidence"] == "medium"
 
 
 def test_a_file_suggestion_the_decide_path_refuses_is_shown_as_context(base, exported, tmp_path):

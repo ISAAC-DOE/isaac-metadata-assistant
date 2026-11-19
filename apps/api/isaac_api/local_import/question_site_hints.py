@@ -292,6 +292,7 @@ def apply(cards: Sequence[dict], entries: Sequence[Mapping], with_common) -> lis
         distinct = {json.dumps(v, sort_keys=True, default=str) for _, v in values if v is not None}
         confirms = ((card.get("suggestion") or {}).get("basis") == "files"
                     and (cover.get("on_accept") or {}).get("decision") == "confirm")
+        offered: list[tuple[Mapping, Any]] = []
         for e, v in values:
             why = None
             if v is None:
@@ -317,6 +318,22 @@ def apply(cards: Sequence[dict], entries: Sequence[Mapping], with_common) -> lis
                 if as_context(card, e, v, why if v is not None else None):
                     rows[e["n"]]["context_on"] += 1
                 continue
+            offered.append((e, v))
+        if not offered:
+            continue
+        # review I1: entries named by question id must, between them, name EVERY question the card answers: a reading
+        # of electrode 07 is not a reading of electrode 09, though one card asks both
+        asked = _card_ids(card) - ({card["_target_id"]} if card.get("_target_id") else set())
+        named = {q for e, _ in offered for q in e["question_ids"]}
+        if best == 1 and not asked <= named:
+            for e, v in offered:
+                if as_context(card, e, v, "read for only some of these measurements"):
+                    rows[e["n"]]["context_on"] += 1
+            continue
+        # every entry that offers the value stands behind it: the card says the least sure of them
+        low = max((CONFIDENCES.index(e["suggestion"]["confidence"]) for e, _ in offered), default=0)
+        offered.sort(key=lambda ev: -CONFIDENCES.index(ev[0]["suggestion"]["confidence"]))
+        for e, v in offered:
             if card.get("_suggestion_entry") is not None:  # a second entry with the same value: its quotes too
                 more = [x for x in e["suggestion"].get("evidence") or () if isinstance(x, Mapping)]
                 card["suggestion"]["evidence"] = (card["suggestion"]["evidence"] + more)[:MAX_EVIDENCE]
@@ -329,7 +346,7 @@ def apply(cards: Sequence[dict], entries: Sequence[Mapping], with_common) -> lis
                 reason = GENERIC_REASON
             label = s.get("label") or next((o["label"] for o in card["answer"].get("options") or () if o["value"] == value),
                                            P.value_label(value, card["answer"].get("unit")))
-            card["suggestion"] = {"value": value, "label": str(label), "confidence": s["confidence"], "basis": s["basis"],
+            card["suggestion"] = {"value": value, "label": str(label), "confidence": CONFIDENCES[low], "basis": s["basis"],
                                   "reason": reason,
                                   "evidence": [dict(x) for x in s.get("evidence") or () if isinstance(x, Mapping)][:MAX_EVIDENCE]}
             for c in card["covers"]:
