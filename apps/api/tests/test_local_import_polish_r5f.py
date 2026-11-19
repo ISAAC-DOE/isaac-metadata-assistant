@@ -433,9 +433,8 @@ def test_the_dry_run_leads_with_the_count_and_says_each_note_and_portal_warning_
     assert cli.main(["bundle", "upload", str(d), "--dry-run", "--portal-url", "https://portal.example/"]) == 0
     out = json.loads(capsys.readouterr().out)
     assert out["statement"].startswith("3 records, 2 requests each, to https://portal.example. Nothing was sent.")
-    # by kind, with its record count and the question to answer (audit of 18 Nov 2026, finding 16: grouped by code)
-    assert out["statement"].count("start time left out") == 1 and "3 record(s) start time left out" in out["statement"]
-    assert "answer question Q-0000000001 and 2 more" in out["statement"] and out["notes_by_code"][0]["records"] == 3
+    assert out["statement"].count("start time left out") == 1 and "(3 record(s), e.g. question Q-0000000001)" in out["statement"]
+    assert out["notes_by_code"][0]["records"] == 3  # by kind too (audit of 18 Nov 2026, finding 16)
     assert out["statement"].count("NO_DATA_OWNER") == 1 and "(3 record(s))" in out["statement"]
     assert out["network_calls"] == 0 and len(out["records"]) == 3 and out["portal_warnings"][0]["records"] == 3
     assert all(r["notes"] for r in out["records"])  # a record's own notes stay in its row

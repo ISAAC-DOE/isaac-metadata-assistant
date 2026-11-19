@@ -9,7 +9,9 @@ WHAT THIS IS. A gate of this tool, beside official validation and never part of 
 
 * **A distinguishing condition** of a record group is a condition its grouping basis states and a
   ``conditions_differ`` split reason names against another live group of the same sample: exactly what kept the two
-  records apart. It must be IN THE RECORD (the composer filled the field that carries it) or DECLINED by the
+  records apart. So is the electrode or specimen number when another group reads the same material name with another
+  one, and a condition the group's own files read two ways (:func:`distinguishing_conditions`). It must be IN THE
+  RECORD (the composer filled the field that carries it) or DECLINED by the
   scientist (a ``reject`` on that value or label: "leave it out"), or the group is not :data:`READY`.
   A condition no record field can carry (the emission energy, a step number) is said and never holds a record.
 * **Indistinguishable records**: two records that would be written with the same ``sample``, ``system`` and
@@ -55,7 +57,8 @@ WORDS = {"potential_magnitude": "the potential", "scan_header_potential": "the p
          "electrolyte_or_medium": "the electrolyte or medium", "ph": "the pH", "gas_condition": "the gas",
          "temperature_statement": "the temperature", "step_number": "the step number",
          "emission_energy": "the emission energy", "dry_state": "the dry state", "flow_rate": "the flow rate",
-         "acquisition_method": "the technique", "loading_or_thickness": "the loading"}
+         "acquisition_method": "the technique", "loading_or_thickness": "the loading",
+         "sample_or_electrode_number": "which electrode or specimen it is"}
 NAMED = 5
 
 
@@ -76,18 +79,38 @@ def _run_ids(bundle: Mapping, group: Mapping) -> list[str]:
     return [by_key[k] for k in group.get("member_run_keys") or () if k in by_key and k not in context]
 
 
-def _basis_entries(group: Mapping) -> list[tuple[str, Mapping]]:
-    """``[(condition, its basis entry)]`` of a group's conditions, technique and environment; a basis part that is
-    not a mapping (a hand-written or older group) holds none."""
+def _basis_entries(group: Mapping, cats: Sequence[str] = ("conditions", "technique", "environment")) -> list[tuple[str, Mapping]]:
+    """``[(condition, its basis entry)]`` of a group's conditions, technique and environment (``cats``); a basis part
+    that is not a mapping (a hand-written or older group) holds none."""
     basis = group.get("basis") if isinstance(group.get("basis"), Mapping) else {}
-    return [(k, v) for cat in ("conditions", "technique", "environment") if isinstance(basis.get(cat), Mapping)
+    return [(k, v) for cat in cats if isinstance(basis.get(cat), Mapping)
             for k, v in basis[cat].items() if isinstance(v, Mapping)]
 
 
-def distinguishing_conditions(group: Mapping, live_ids: Iterable[str]) -> dict[str, dict]:
-    """``{condition: {"condition", "value", "other_group_ids"}}``: each condition THIS group states that a
-    ``conditions_differ`` split reason names against another LIVE group of its sample. A condition only the other
-    group states (``this`` is None) is not one of this group's: there is nothing of it to put in this record."""
+#: The sample readings that tell two specimens of ONE material apart (grouping never joins them, and compares
+#: conditions only within one of them): the record says which through its sample id.
+SAMPLE_INSTANCE_KEYS = ("sample_or_electrode_number", "loading_or_thickness")
+_ALL = ("sample", "conditions", "technique", "environment")
+
+
+def _sample_name(group: Mapping) -> Any:
+    return next((v.get("value") for k, v in _basis_entries(group, ("sample",)) if k in ("sample_name", "sample_name_stem")
+                 and v.get("value") is not None), None)
+
+
+def distinguishing_conditions(group: Mapping, live_ids: Iterable[str], peers: Sequence[Mapping] = ()) -> dict[str, dict]:
+    """``{condition: {"condition", "value", "other_group_ids"}}``: what keeps THIS group's record apart from another
+    live group's record of the same material.
+
+    * each condition this group states that a ``conditions_differ`` split reason names against another LIVE group of
+      its sample. A condition only the other group states (``this`` is None) is not one of this group's: there is
+      nothing of it to put in this record;
+    * with ``peers`` (the live groups): the electrode / specimen number or loading (:data:`SAMPLE_INSTANCE_KEYS`) when
+      another group reads the same material name with another one: grouping keeps those apart as different samples
+      and never compares their conditions, so only the sample id tells their records apart;
+    * with ``peers``: a condition this group's own files read two ways (its care flag, ``conflicting_condition``)
+      while another group reads the same material name: the record has to say which reading it is, or leave it out
+      on purpose."""
     live = set(live_ids)
     stated = dict(_basis_entries(group))
     out: dict[str, dict] = {}
@@ -101,6 +124,24 @@ def distinguishing_conditions(group: Mapping, live_ids: Iterable[str]) -> dict[s
             row = out.setdefault(key, {"condition": key, "value": d.get("this"), "other_group_ids": []})
             if sr["other_group_id"] not in row["other_group_ids"]:
                 row["other_group_ids"].append(sr["other_group_id"])
+    name = _sample_name(group)
+    same_material = [p for p in peers if p.get("group_id") != group.get("group_id") and p.get("group_id") in live
+                     and name is not None and _sample_name(p) == name]
+    if not same_material:
+        return out
+    mine = dict(_basis_entries(group, _ALL))
+    for key in SAMPLE_INSTANCE_KEYS:
+        value = (mine.get(key) or {}).get("value")
+        others = [p["group_id"] for p in same_material
+                  if (theirs := (dict(_basis_entries(p, ("sample",))).get(key) or {}).get("value")) is not None
+                  and theirs != value]
+        if value is not None and others and key not in out:
+            out[key] = {"condition": key, "value": value, "other_group_ids": others}
+    for sr in group.get("split_reasons") or ():
+        key = sr.get("condition")
+        if sr.get("code") == "conflicting_condition" and key in mine and key not in out:
+            out[key] = {"condition": key, "value": {"its files read": list(sr.get("readings") or ())},
+                        "other_group_ids": [p["group_id"] for p in same_material], "own_files_disagree": True}
     return out
 
 
@@ -125,7 +166,7 @@ class _Index:
     def paths(self, group: Mapping, condition: str) -> list[str]:
         """The record field(s) that carry ``condition`` for ``group``: what its basis candidates target, else the
         condition label ISAAC proposes for it. ``[]``: no record field carries it."""
-        entry = next((v for k, v in _basis_entries(group) if k == condition), None) or {}
+        entry = next((v for k, v in _basis_entries(group, _ALL) if k == condition), None) or {}
         found = [p for i in entry.get("candidate_ids") or () if (p := (self.cand.get(i) or {}).get("target_field_path"))]
         if not found and condition in self.label_paths:
             found = [self.label_paths[condition]]
@@ -139,14 +180,15 @@ class _Index:
         return "reject" in said and not any(s in ("confirm", "correct", "provide_value", "choose_reading") for s in said)
 
 
-def group_gate(index: _Index, group: Mapping, report: Mapping, live_ids: Iterable[str]) -> dict:
+def group_gate(index: _Index, group: Mapping, report: Mapping, live_ids: Iterable[str],
+               peers: Sequence[Mapping] = ()) -> dict:
     """The gate for one group: ``{"gate", "ready", "conditions": [...], "held_by": [...], "needs": [paths]}``.
     ``report``: the composer's report for the group (``records.compose_group``): what it FILLED is what is in the
     record."""
     filled = {f["path"] for f in report.get("filled") or ()}
     run_ids = _run_ids(index.bundle, group)
     rows, needs = [], []
-    for key, d in sorted(distinguishing_conditions(group, live_ids).items()):
+    for key, d in sorted(distinguishing_conditions(group, live_ids, peers).items()):
         paths = index.paths(group, key)
         carried = [REMAP.get(p, p) for p in paths]
         if not paths:
@@ -186,7 +228,8 @@ def gates(bundle: Mapping, reports: Mapping[str, Mapping], decisions: Mapping | 
     live = list(live_ids) if live_ids is not None else live_record_group_ids(bundle)
     index = _Index(bundle, decisions)
     by_id = {g["group_id"]: g for g in bundle.get("record_groups") or ()}
-    return {gid: group_gate(index, by_id[gid], reports[gid], live) for gid in live if gid in reports and gid in by_id}
+    peers = [by_id[g] for g in live if g in by_id]
+    return {gid: group_gate(index, by_id[gid], reports[gid], live, peers) for gid in live if gid in reports and gid in by_id}
 
 
 # --- the questions' tier --------------------------------------------------------------------------------------------
@@ -349,7 +392,7 @@ def hold_text(gate: Mapping, questions_of: Mapping[str, Sequence[str]] | None = 
     """Why one group is held for an open condition, with the question(s) that answer it."""
     open_rows = [r for r in gate["conditions"] if r["state"] == OPEN]
     said = "; ".join(f"{r['words']} ({_shown(r['value'])}, which keeps it apart from {r['keeps_apart_from']} other "
-                     f"record(s) of its sample)" for r in open_rows)
+                     f"record(s) of its material)" for r in open_rows)
     qs = list(dict.fromkeys(q for p in gate.get("needs") or () for q in (questions_of or {}).get(p, ())))
     how = (f" Answer question {', '.join(qs[:3])}" + (f" (and {len(qs) - 3} more)" if len(qs) > 3 else "")
            if qs else f" Answer the question that asks {', '.join(gate.get('needs') or ())}")
