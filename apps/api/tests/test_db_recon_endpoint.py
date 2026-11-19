@@ -737,6 +737,10 @@ def test_a_held_lock_answers_immediately_without_waiting(client, monkeypatch):
     monkeypatch.setattr(db_recon, "connect_psycopg2", lambda env: pytest.fail("no"))
     lock = RecordingLock(held=True)
     monkeypatch.setattr(routes, "_DB_RECON_SCAN_LOCK", lock)
+    # "Without waiting" is pinned by what the endpoint DOES, not by a stopwatch: it asks for the lock exactly once,
+    # non-blocking, and never sleeps to try again. A wall-clock bound of 0.5 s measured the test client and the
+    # runner as much as the endpoint, and failed at 0.505-0.552 s on slow CI runners with nothing wrong.
+    monkeypatch.setattr(time, "sleep", lambda seconds: pytest.fail(f"the endpoint slept {seconds}s on a held scan lock"))
 
     started = time.monotonic()
     r = client.get(RECON_PATH)
@@ -744,7 +748,8 @@ def test_a_held_lock_answers_immediately_without_waiting(client, monkeypatch):
 
     assert r.status_code == 409
     assert lock.calls == [{"blocking": False, "timeout": -1}]
-    assert elapsed < 0.5, f"the endpoint waited {elapsed:.3f}s on the scan lock"
+    # a backstop only, as generous as the sibling test's 5 s thread join: a real wait on the lock would hang, not dawdle
+    assert elapsed < 5, f"the endpoint took {elapsed:.3f}s on a held scan lock"
 
 
 def test_a_real_held_lock_does_not_hang_a_request_thread(client, monkeypatch):
