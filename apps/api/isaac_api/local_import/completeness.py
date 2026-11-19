@@ -203,11 +203,26 @@ class _Index:
             if m.get("target_field_path"):
                 self.targets.setdefault((m.get("run_id"), m["target_field_path"]), []).append(("missing_value", m["value_id"]))
         self.label_paths = _label_paths()
+        self.conflicts_of: dict[str, list[str]] = {}
+        for cf in bundle.get("conflicts") or ():
+            if isinstance(cf, Mapping) and cf.get("candidate_id") and cf.get("conflict_id"):
+                self.conflicts_of.setdefault(cf["candidate_id"], []).append(cf["conflict_id"])
+
+    def entry(self, group: Mapping, condition: str) -> Mapping:
+        return next((v for k, v in _basis_entries(group, _ALL) if k == condition), None) or {}
+
+    def conflicts(self, group: Mapping, condition: str) -> tuple[list[str], bool]:
+        """``(open conflict ids, declined)`` of the disagreement on ``condition``'s reading for ``group`` (its basis
+        candidates' conflicts): ``declined`` when the scientist's latest word on one is ``reject`` (neither reading:
+        leave it out on purpose); open ones have no answer yet (or a ``defer``)."""
+        ids = [c for i in self.entry(group, condition).get("candidate_ids") or () for c in self.conflicts_of.get(i, ())]
+        said = {c: (self.decisions.get(("conflict", c)) or {}).get("decision") for c in ids}
+        return [c for c, d in said.items() if d in (None, "defer")], any(d == "reject" for d in said.values())
 
     def paths(self, group: Mapping, condition: str) -> list[str]:
         """The record field(s) that carry ``condition`` for ``group``: what its basis candidates target, else the
         condition label ISAAC proposes for it. ``[]``: no record field carries it."""
-        entry = next((v for k, v in _basis_entries(group, _ALL) if k == condition), None) or {}
+        entry = self.entry(group, condition)
         found = [p for i in entry.get("candidate_ids") or () if (p := (self.cand.get(i) or {}).get("target_field_path"))]
         if not found and condition in self.label_paths:
             found = [self.label_paths[condition]]
@@ -232,24 +247,34 @@ def group_gate(index: _Index, group: Mapping, report: Mapping, live_ids: Iterabl
     for key, d in sorted(distinguishing_conditions(group, live_ids, peers).items()):
         paths = index.paths(group, key)
         carried = [REMAP.get(p, p) for p in paths]
+        open_conflicts, conflict_declined = index.conflicts(group, key)
         if not paths:
             state = NO_RECORD_FIELD
         elif any(p in filled for p in carried):
             state = IN_RECORD
-        elif any(index.declined(run_ids, p) or any(index.declined(run_ids, c) for c in COMPANIONS.get(p, ()))
-                 for p in paths):
+        elif conflict_declined or any(index.declined(run_ids, p) or any(index.declined(run_ids, c) for c in COMPANIONS.get(p, ()))
+                                      for p in paths):
             state = DECLINED
         else:
             state = OPEN
+            if open_conflicts:
+                # review of PR 342, finding 3: the files read it two ways: the disagreement is answered first
+                needs.append(conflict_field(key))
             for p in paths:
                 for x in (p, *COMPANIONS.get(p, ())):
                     if x not in filled and x not in needs:
                         needs.append(x)
         rows.append({"condition": key, "words": words(key), "value": d["value"], "paths": paths, "state": state,
-                     "keeps_apart_from": d.get("others", len(d["other_group_ids"]))})
+                     "keeps_apart_from": d.get("others", len(d["other_group_ids"])),
+                     **({"conflict_ids": open_conflicts} if state == OPEN and open_conflicts else {})})
     open_rows = [r for r in rows if r["state"] == OPEN]
     return {"gate": GATE_ID, "group_id": group["group_id"], "ready": not open_rows, "conditions": rows,
             "held_by": [HELD_CONDITION] if open_rows else [], "needs": needs}
+
+
+def conflict_field(condition: str) -> str:
+    """The ``needs`` / ``fields`` key of the disagreement on a condition's reading (no record field: a conflict)."""
+    return f"conflict:{condition}"
 
 
 def live_record_group_ids(bundle: Mapping) -> list[str]:
@@ -291,13 +316,37 @@ def mark_questions(questions: list[dict], bundle: Mapping, gate_of: Mapping[str,
                 for x in (p, *COMPANIONS.get(p, ())):
                     if x in gate["needs"]:
                         needed.setdefault(x, {}).setdefault(gid, []).append(row["condition"])
+    # review of PR 342, finding 3: the disagreement a held group's condition waits on (a resolve_conflict question,
+    # no record field of its own) is marked too, for exactly the groups whose condition it holds
+    by_conflict: dict[str, list[tuple[str, str]]] = {}
+    for gid, gate in gate_of.items():
+        for row in gate["conditions"]:
+            for cid in row.get("conflict_ids") or ():
+                by_conflict.setdefault(cid, []).append((gid, row["condition"]))
+    for q in questions:
+        if q.get("kind") != "resolve_conflict" or q.get("informational") or not by_conflict:
+            continue
+        hit = [x for t in q.get("targets") or () if t.get("kind") == "conflict" for x in by_conflict.get(t.get("id"), ())]
+        if not hit:
+            continue
+        gids = sorted({g for g, _ in hit})
+        conds = sorted({c for _, c in hit})
+        said = ", ".join(dict.fromkeys(words(c) for c in conds))
+        q["completeness"] = {
+            "gate": GATE_ID, "tier": TIER, "groups": len(gids), "group_ids": gids, "conditions": conds,
+            "fields": [conflict_field(c) for c in conds],
+            "why": (f"Needed before export: the files read {said} two ways, and it is what keeps {len(gids)} record(s) "
+                    "apart from another record of the same material. Say which reading is right, or reject both to "
+                    "leave it out on purpose."),
+        }
     if not needed:
         return
     run_of: dict[str, Any] = {c["candidate_id"]: c.get("run_id") for c in bundle.get("candidates") or ()}
     run_of.update({m["value_id"]: m.get("run_id") for m in bundle.get("missing_values") or ()})
     found: list[tuple[dict, dict[str, tuple[set[str], set[str]]]]] = []  # (question, {path: (groups, target ids)})
     for q in questions:
-        if q.get("informational") or q.get("outside_live_groups") or not q.get("allowed_decisions", True):
+        if (q.get("informational") or q.get("outside_live_groups") or not q.get("allowed_decisions", True)
+                or q.get("completeness")):
             continue
         if q.get("kind") == "optional_values":
             asked = [(f, list(ids)) for f, ids in (q.get("fields") or {}).items()]
@@ -431,15 +480,37 @@ def questions_for(payload: Mapping) -> dict[str, dict[str, list[str]]]:
 
 
 def hold_text(gate: Mapping, questions_of: Mapping[str, Sequence[str]] | None = None) -> str:
-    """Why one group is held for an open condition, with the question(s) that answer it."""
+    """Why one group is held for an open condition, and the route that frees it, naming only questions that reach this
+    group (``questions_of``: :func:`questions_for`'s entry for it). A condition its files read two ways: first which
+    reading is right (its disagreement question), then the label for this group (``--only group:<id>``); a condition
+    no question reaches yet says so, never a question that would not reach it."""
+    gid = gate.get("group_id")
+    qof = questions_of or {}
     open_rows = [r for r in gate["conditions"] if r["state"] == OPEN]
     said = "; ".join(f"{r['words']} ({_shown(r['value'])}, which keeps it apart from {r['keeps_apart_from']} other "
                      f"record(s) of its material)" for r in open_rows)
-    qs = list(dict.fromkeys(q for p in gate.get("needs") or () for q in (questions_of or {}).get(p, ())))
-    how = (f" Answer question {', '.join(qs[:3])}" + (f" (and {len(qs) - 3} more)" if len(qs) > 3 else "")
-           if qs else f" Answer the question that asks {', '.join(gate.get('needs') or ())}")
-    return (f"Held ({GATE_ID}): the record would be written without {said}." + how
-            + f", or decline it (reject) to leave it out on purpose; `export {ALLOW_FLAG}` writes it anyway.")
+    steps = []
+    for r in open_rows:
+        conflict = list(qof.get(conflict_field(r["condition"])) or ())
+        fills = list(dict.fromkeys(q for p in r["paths"] for x in (p, *COMPANIONS.get(p, ())) for q in qof.get(x, ())))
+        only = f" --only group:{gid}" if gid else ""
+        if conflict:
+            step = (f"for {r['words']}, say which reading is right (question {conflict[0]}; reject it to leave "
+                    f"{r['words']} out on purpose)")
+            step += (f", then confirm the label for this record: question {fills[0]}{only}" if fills else
+                     ", then ISAAC proposes the label for this record from that answer (`isaac bundle questions` lists it)")
+        elif fills:
+            # a condition label is one beamtime question with a row per group: this record's row is `--only`
+            label = any(p in set(_label_paths().values()) for p in r["paths"])
+            step = (f"for {r['words']}, answer question {', '.join(fills[:3])}" + (only if label else "")
+                    + (f" (and {len(fills) - 3} more)" if len(fills) > 3 else "")
+                    + ", or decline it (reject) to leave it out on purpose")
+        else:
+            step = (f"for {r['words']}, no open question reaches this record yet: `isaac bundle show <bundle_dir> group "
+                    f"{gid}` gives its readings")
+        steps.append(step)
+    return (f"Held ({GATE_ID}): the record would be written without {said}. To free it: " + "; ".join(steps)
+            + f". Or export it anyway: `export {ALLOW_FLAG}`.")
 
 
 def _shown(value: Any) -> str:

@@ -15,6 +15,7 @@ The local completeness gate (``completeness.py``, ``isaac.local.record_completen
 from __future__ import annotations
 
 import json
+import re
 import shutil
 
 import pytest
@@ -314,3 +315,73 @@ def test_the_flag_writes_held_records_anyway_and_every_row_says_so(bdir, tmp_pat
     # without the flag the next export holds them again and withdraws what was written
     again = R.export_records(bdir, tmp_path / "records", run_portal=_portal())
     assert again["exported"] == [] and len(again["withdrawn"]) == 3
+
+
+# --- review of PR 342, finding 3: a group held for a condition is told the question that frees it ---------------
+
+
+@pytest.fixture()
+def filter_disagreement(tmp_path):
+    """Two SYN groups of one sample at one potential. The second run's NAME says filter20, its scan headers say 10:
+    its group carries the care flag, and the filter is what keeps the two records apart."""
+    runs = [("01_SYN_ZZ1_filter10_060mV", 9, [T.scan_cols(10 + k) for k in range(2)]),
+            ("02_SYN_ZZ1_filter20_060mV", 11, [T.scan_cols(60 + k) for k in range(2)])]
+    bdir, _ = T.imported(tmp_path, runs, process=False)
+    b = M.load(bdir)
+    M.decide(bdir, target_ids=[g["group_id"] for g in b["record_groups"]], decision="confirm", value=None, **BY)
+    held = next(g["group_id"] for g in M.load(bdir)["record_groups"]
+                if g["member_run_keys"][0].startswith("02_SYN_ZZ1_filter20"))
+    return bdir, held
+
+
+def _reaches(q, gid):
+    return f"group:{gid}" in (q.get("per_scope_targets") or {})
+
+
+def _hold(bdir, gid):
+    b = M.load(bdir)
+    payload = Q.consolidate(b)
+    fresh = R.fresh_compositions(bdir, b)
+    holds, _, gate_of = R.completeness_holds(b, fresh, payload, [g for g, _, _ in fresh])
+    return payload, holds.get(gid), gate_of[gid]
+
+
+def test_the_disagreement_that_holds_a_group_is_marked_and_named_and_nothing_that_misses_it_is(filter_disagreement):
+    bdir, gid = filter_disagreement
+    payload, hold, gate = _hold(bdir, gid)
+    [row] = [r for r in gate["conditions"] if r["condition"] == "filter"]
+    assert row["state"] == "open" and row["conflict_ids"]
+    conflict = next(q for q in payload["questions"] if q["kind"] == "resolve_conflict" and q.get("completeness")
+                    and _reaches(q, gid))
+    assert conflict["completeness"]["group_ids"] == [gid] and "filter" in conflict["completeness"]["conditions"]
+    assert conflict["question_id"] in hold["questions"] and conflict["question_id"] in hold["text"]
+    assert "which reading is right" in hold["text"]
+    # every question the text names reaches this group
+    named = set(re.findall(r"Q-[0-9a-f]{10}", hold["text"]))
+    by_id = {q["question_id"]: q for q in payload["questions"]}
+    assert named and all(_reaches(by_id[q], gid) for q in named), named
+    assert "the question that asks" not in hold["text"]
+
+
+def test_rejecting_the_disagreement_declines_the_filter_and_frees_the_group(filter_disagreement):
+    bdir, gid = filter_disagreement
+    payload, _, _ = _hold(bdir, gid)
+    conflict = next(q for q in payload["questions"] if q["kind"] == "resolve_conflict" and q.get("completeness"))
+    M.decide_question(bdir, question_id=conflict["question_id"], decision="reject", value=None, **BY)
+    _, hold, gate = _hold(bdir, gid)
+    assert [r["state"] for r in gate["conditions"] if r["condition"] == "filter"] == ["declined"]
+    assert hold is None or CP.HELD_CONDITION not in hold["held_by"]
+
+
+def test_settling_the_disagreement_leads_to_the_label_question_for_this_group(filter_disagreement):
+    bdir, gid = filter_disagreement
+    payload, _, _ = _hold(bdir, gid)
+    conflict = next(q for q in payload["questions"] if q["kind"] == "resolve_conflict" and q.get("completeness"))
+    M.decide_question(bdir, question_id=conflict["question_id"], decision="correct", value="filter20", **BY)
+    payload, hold, _ = _hold(bdir, gid)
+    label = next(q for q in payload["questions"] if q["kind"] == "condition_label" and q.get("label") == "filter")
+    assert _reaches(label, gid) and label.get("completeness") and gid in label["completeness"]["group_ids"]
+    assert label["question_id"] in hold["text"] and f"--only group:{gid}" in hold["text"]
+    M.decide_question(bdir, question_id=label["question_id"], only=f"group:{gid}", decision="confirm", value=None, **BY)
+    _, hold, gate = _hold(bdir, gid)
+    assert [r["state"] for r in gate["conditions"] if r["condition"] == "filter"] == ["in_record"]
