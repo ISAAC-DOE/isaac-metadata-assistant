@@ -229,6 +229,29 @@ def _value_for(entry: Mapping, card: Mapping) -> Any:
     return None
 
 
+def _for_card(entry: Mapping, card: Mapping) -> Mapping:
+    """The entry as one card reads it. A value keyed by file name is read for one file's card (review I5): only the
+    quotes from that file are its evidence, and the entry's reasoning (about all of its files) is not its reason."""
+    value = entry["suggestion"].get("value")
+    items = card["applies_to"].get("items") or ()
+    if not isinstance(value, Mapping) or card["applies_to"].get("count") != 1 or not items:
+        return entry
+    key = next((str(k) for k in value if str(k) == items[0] or PurePosixPath(str(k)).stem == items[0]), None)
+    if key is None:
+        return entry
+    names = {key, PurePosixPath(key).name, PurePosixPath(key).stem, items[0]}
+    mine = [x for x in entry["suggestion"].get("evidence") or () if isinstance(x, Mapping)
+            and (str(x.get("file") or "") in names or PurePosixPath(str(x.get("file") or "")).stem in names)]
+    return {**entry, "suggestion": {**entry["suggestion"], "evidence": mine, "reason": ""}, "alternatives": []}
+
+
+def _quoted_values(entry: Mapping) -> list[Any]:
+    """The entry's alternatives that are values its quotes hold (reader prose such as "drop the question" is not)."""
+    quotes = [str(x.get("quote") or "").casefold() for x in entry["suggestion"].get("evidence") or () if isinstance(x, Mapping)]
+    return [a for a in entry["alternatives"] if isinstance(a, (str, int, float)) and str(a).strip()
+            and any(str(a).casefold() in q for q in quotes)]
+
+
 def _option_value(card: Mapping, value: Any) -> Any:
     """``value`` as one of the card's options (exactly, or its words before a remark in brackets), else ``None``."""
     options = [o["value"] for o in card["answer"].get("options") or ()]
@@ -300,6 +323,7 @@ def apply(cards: Sequence[dict], entries: Sequence[Mapping], with_common) -> lis
             continue
         cover = card["covers"][0]
         kind = card["answer"]["kind"]
+        hints = [_for_card(e, card) for e in hints]
         values = [(e, _value_for(e, card)) for e in hints]
         distinct = {json.dumps(v, sort_keys=True, default=str) for _, v in values if v is not None}
         confirms = ((card.get("suggestion") or {}).get("basis") == "files"
@@ -326,6 +350,8 @@ def apply(cards: Sequence[dict], entries: Sequence[Mapping], with_common) -> lis
                 why = "your files already give another value here"
             elif card["answer"].get("options") and _option_value(card, v) is None:
                 why = "not on this field's list"
+            if not why and not any(isinstance(x, Mapping) and x.get("quote") for x in e["suggestion"].get("evidence") or ()):
+                why = "no quote from this file"
             if why:
                 if as_context(card, e, v, why if v is not None else None):
                     rows[e["n"]]["context_on"] += 1
@@ -376,15 +402,17 @@ def apply(cards: Sequence[dict], entries: Sequence[Mapping], with_common) -> lis
             card["detail"] = str(card.get("detail") or "").replace(P.NONE_SAY, "", 1).strip()
             alts = [a for a in e["alternatives"] if isinstance(a, (str, int, float))]
             base = {k: x for k, x in card["answer"].items() if k != "common"}
+            if not card["answer"].get("options"):
+                alts = _quoted_values(e)  # review I5: only a value a quote holds is named as one the files hold
             if card["answer"].get("options"):
                 picks = [value, *[o for a in alts if (o := _option_value(card, a)) is not None]]
                 common = list(dict.fromkeys([*picks, *(with_common(base, _field_of(card) or "", card["suggestion"]).get("common") or ())]))
                 card["answer"] = {**base, "common": common}
             else:
                 card["answer"] = base
-                said = [f"“{_said(a)}”" for a in alts[:MAX_ALTERNATIVES]]
+                said = [f"“{_said(a)}”" for a in alts[:MAX_ALTERNATIVES] if str(a) != str(value)]
                 if said:
-                    card["_alt"] = f"A reading of your files also names: {P.or_list(said)}."
+                    card["_alt"] = f"Your files also write {P.or_list(said)}."
     for e in usable:
         row = rows[e["n"]]
         if not row["suggested_on"] and not row["context_on"] and not row.get("agrees_on"):

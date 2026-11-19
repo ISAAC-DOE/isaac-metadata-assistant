@@ -277,7 +277,11 @@ What a match becomes:
   beam damage or settling, or names `experiment:set_dose_reading` in `question_ids`; an approval card of a
   group it names): quotes only, never a suggestion.
 - `alternatives` are the card's `answer.common` for a choice field (only values on the list), or are named in
-  `detail` for a text field.
+  `detail` for a text field only when one of the entry's quotes holds them ("Your files also write …"): reader
+  prose ("drop the question …") is never shown as something the files hold.
+- A value keyed by file name is read for that one file's card with only the quotes from that file as its
+  evidence, and without the entry's reasoning (it is about all of its files); with no quote from that file it is
+  not offered.
 - A value with one part per record field (`{"name": …, "concentration_M": …}` on `…electrolyte`) is read for
   the card of each part; a value keyed by file name is read for the card of that one file.
 - A suggestion that comes from a reading replaces "None of your files say." in the card's detail.
