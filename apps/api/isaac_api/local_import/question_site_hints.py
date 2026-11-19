@@ -84,16 +84,15 @@ MAX_REASON_CHARS = 320
 
 def two_sentences(text: Any) -> str:
     """The first two sentences of ``text`` (a reason on a card is at most two), at most :data:`MAX_REASON_CHARS`
-    characters: the first sentence alone when two are longer, cut at a word when one is."""
+    characters: the first sentence alone when two are longer, and nothing when even that one is."""
     s = re.sub(r"\s+", " ", str(text or "")).strip()
     parts = re.split(r"(?<=[.!?])\s+(?=[A-Z(\"'“])", s)
     two = " ".join(parts[:2]).strip()
     if len(two) <= MAX_REASON_CHARS:
         return two
     one = parts[0].strip()
-    if len(one) <= MAX_REASON_CHARS:
-        return one
-    return one[:MAX_REASON_CHARS].rsplit(" ", 1)[0].rstrip(" ,;:(") + " …"
+    # never cut inside a sentence: a first sentence too long to show is no reason (the card says the generic one)
+    return one if len(one) <= MAX_REASON_CHARS else ""
 
 
 def normalise(e: Mapping, n: int) -> dict:
@@ -140,6 +139,8 @@ def entry_problem(entry: Mapping) -> str | None:
         return f"its confidence is not one of {', '.join(CONFIDENCES)}"
     if s.get("basis") not in BASES:
         return f"its basis is not one of {', '.join(BASES)}"
+    if s["basis"] == "files":
+        return "a suggestions file cannot say the files give the value (basis files is ISAAC's own reading); say logbook or reading"
     if s["basis"] == "general_knowledge" and s["confidence"] == "high":
         return "general knowledge is never a high-confidence suggestion (say low or medium)"
     if entry["shape"] == "contract":
@@ -386,8 +387,12 @@ def apply(cards: Sequence[dict], entries: Sequence[Mapping], with_common) -> lis
             reason = str(s.get("reason") or "").strip()
             if not reason or P.not_plain(_unquoted(reason)):
                 reason = GENERIC_REASON
-            label = s.get("label") or next((o["label"] for o in card["answer"].get("options") or () if o["value"] == value),
-                                           P.value_label(value, card["answer"].get("unit")))
+            own = next((o["label"] for o in card["answer"].get("options") or () if o["value"] == value),
+                       P.value_label(value, card["answer"].get("unit")))
+            # a label the entry gives is shown only when it says the value (its own words for it), never another one
+            given = s.get("label")
+            label = given if isinstance(given, str) and given.strip() and (
+                given.casefold() in (str(value).casefold(), str(own).casefold())) else own
             card["suggestion"] = {"value": value, "label": str(label), "confidence": CONFIDENCES[low], "basis": s["basis"],
                                   "reason": reason,
                                   "evidence": [dict(x) for x in s.get("evidence") or () if isinstance(x, Mapping)][:MAX_EVIDENCE]}
