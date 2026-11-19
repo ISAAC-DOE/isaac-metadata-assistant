@@ -7,7 +7,7 @@ back filled in, read it back with:
 `<isaac> bundle answers import <bundle> <workbook.xlsx> --by "<name>" [--orcid <id>] [--folder <name> [--folder-differs-ok]] [--supersede] [--apply] [--json]`
 
 It works on ONE bundle: a row is this bundle's when its `Folder` is the folder the bundle records.
-Rows of other beamtimes are counted, never read; run it once per bundle. An id row (or Athena row) whose
+Rows of other beamtimes are counted, never read; run it once per bundle. An id row whose
 Folder cell is blank is no bundle's: it is listed (`blank_folder`), not read; a free-text row with no
 Folder (a rule) is every bundle's. `--folder <name>` must be a folder the workbook names (else exit 3),
 and when it is not the folder the bundle records it is refused (exit 2) unless the user confirms the rows
@@ -40,7 +40,7 @@ workbook answer on a target that already holds a DIFFERENT scientist decision, t
 | `yes` / `ok` (any case) | accepts the suggestion SHOWN on that row: `confirm` when it is the files' own value now (and the question allows confirm), else `correct` with the shown value, but only when that value is exactly one ISAAC offers for the question now (a hint literal, its suggested value, or a "sets X = …" proposal's own value). A proposal that "confirms the value the files give" is only ever a confirm, refused (`stale`) when the files now give another value. Anything else (stale, or text with commentary) is not applied: "type the value itself" |
 | a typed value | `correct` with it, parsed as `template import` parses a cell (numbers as numbers, a temperature with its unit). A field with a list: the value goes through decide with `--as-said`, so a word off the list is kept as a vocabulary request in `--by`'s name, never recorded as a value |
 | `no`, `?`, `unsure`, `don't know` | nothing; listed (`declined` / `unsure`). Never turned into a reject or a defer |
-| a placeholder: `-`, `—`, `none`, `TBD`, `n.a.`, `not applicable`, `unknown` … | nothing; listed (`placeholder`): never a value, never a vocabulary request. On the Athena tabs `none` is a listed answer |
+| a placeholder: `-`, `—`, `none`, `TBD`, `n.a.`, `not applicable`, `unknown` … | nothing; listed (`placeholder`): never a value, never a vocabulary request. |
 | a formula | nothing; listed (`invalid`) |
 | `same for all` / `same as above` / `ditto` (in the answer or the notes) | listed under `same_for_all`, never expanded. Ask which rows they mean and answer those |
 
@@ -48,8 +48,7 @@ Kinds with their own answer words: element and edge (`Pt L3`, `Co K`; an element
 clock time zone (an IANA name, `set_clock_time_zone`), file-name numbers (`counter`, only when the
 question asks about one position, then `<isaac> bundle group <bundle> --regroup`; `sequence`
 → `set_not_counter_positions`; anything else needs a person), merge or keep apart (`Keep apart` →
-`keep_apart`; `Merge` → step 1 of a merge, then regroup and confirm the combined group), Athena versions
-(`v01`, `v02` … → `select_athena_version`; `none` needs a person).
+`keep_apart`; `Merge` → step 1 of a merge, then regroup and confirm the combined group).
 
 A **collapsed row** (a `G-…` id, whose Ref a per-record row names in `Covered by collapsed row`) answers
 each per-record row it covers, citing the collapsed row's cell; `yes` accepts the value the collapsed row
@@ -67,16 +66,9 @@ note cites the cell: `workbook <file> '<tab>'!<cell>`.
 ## Never applied: translate these with the scientist
 
 - **Rules (`R…`), new questions (`N…`), rule proposals (`CR…`)**, and any answered row without an id:
-  free text. Work out with the scientist which `decide` calls (or which params-file entries) each one
+  free text. Work out with the scientist which `decide` calls each one
   means, say each back, and record it only on their yes. A rule never answers rows by itself.
-- **Athena merges**: each row names a project file, an Athena group and the answer (a group id or run
-  name, `yes` for the one near group shown, `no`, `none`). The report gives the params-file entry it
-  reads as (`params_entry`) and the three shapes to use (`params_entries_to_use`):
-  `{"athena_match": {"<group id>": [{"project": "<project file>", "athena_group": "<Athena group>"}]}}`,
-  the same under `athena_match_not` (their "no" for that group), or `{"athena_ignore": [...]}` (no group's).
-  Put the confirmed entries in one params file and run
-  `<isaac> process <bundle> --source <folder> --params-file <file>`; keep passing that file (see
-  `grouping-and-processing.md`).
+- **Athena rows** (merges, versions): reported, never applied. Athena is never used, so these rows change nothing: say so.
 
 ## Not resolving
 
@@ -89,7 +81,7 @@ applying a workbook made from a bundle: its ids are that bundle's.
 ## Tabs
 
 Tabs and columns are found from each tab's header row, never its title: `questions` (YOUR ANSWER and
-an id column), `free_text` (YOUR ANSWER and Ref), `athena_merges` (Athena project and group columns),
+an id column), `free_text` (YOUR ANSWER and Ref), `athena_merges` (Athena project and group columns: reported only),
 `no_answer` (no YOUR ANSWER: ids counted only), `info` (no header row), and `unknown` (YOUR ANSWER but no
 Ref and no id: listed in `unknown_tabs`, not read). Several-field optional questions take the field from
 the row's own field path, else its Topic (a fixed, tested list); a topic it does not know is listed.

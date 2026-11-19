@@ -117,61 +117,62 @@ folder: name a document beside it and ask before opening it. Write every finding
 findings file; load it with `annotate --from-readings --root <folder>` (preview, then `--apply`; a quote
 not found in its file is refused: fix it), naming runs by `stem` or `run_id`, never `label`. Tell the
 scientist what each file held, what fit no field (with line numbers), and which binaries nobody could read.
+**Step 6 does not start until this step is done.** Before processing, say how many scan notes you loaded, or that you read the whole logbook and it has none.
 
 ## Step 5 · Groups
 
-If `<isaac> bundle group --help` fails, say "grouping is not in this build", skip Steps 5, 6, 8 and
-9, and after Step 7 go to Step 10. Read `reference/grouping-and-processing.md` (every decision's syntax is there).
+If `<isaac> bundle group --help` fails, say "grouping is not in this build", skip Steps 5, 6, 8 and 9, and after Step 7 go to Step 10.
+Read `reference/grouping-and-processing.md` (every command is there).
 
 1. `<isaac> bundle group <bundle>` proposes groups.
 2. **The counter question comes first.** `<isaac> bundle questions <bundle> --scope experiment` shows
-   `naming_counter_positions` (which file-name positions hold a running counter) when grouping asks
-   it. Ask it before confirming any group: a regroup keeps decided groups, so a later answer can no
-   longer join them. Record `set_counter_positions` (or `set_not_counter_positions`; "I don't know"
-   is `defer`, and grouping stays as it is), say its `regroup_preview.statement` (what it would join),
-   then `<isaac> bundle group <bundle> --regroup` (replaces undecided groups only).
-3. **Apply the findings file again** (`annotate --from-readings`, preview then `--apply`) now and after
-   every later regroup: absorber findings are skipped until groups exist and do not move to new groups.
-4. Page groups with `<isaac> bundle list <bundle> groups --limit 10` and the merge candidates (paging is
-   in the reference). Present each in plain words: sample, conditions, how many scans, why runs were split
-   ("these two differ in potential"). Say a merge candidate's `caution` before asking about it, and the care
-   flags in words: `merged_despite_engine_reading` (the importer read a difference), `sample_key_basis: name_stem` (no file states the sample), `needs_care: conflicting_condition` (it merges scans read at different conditions).
-5. Ask the scientist to **confirm, split or merge** each, in batches, with progress. A group that is
-   not a result (alignment, a reference foil, a test scan) can be **left out** with `reject`; say it is
-   never exported. Several accepted as shown: list each back, then one `--targets-file` confirm; never
-   include a group with a `cannot_export_reason`: say why (`no_scans`: no scan in a `_dir` folder or its SPEC
-   file; else no ISAAC protocol covers that data yet) and offer `reject` or leaving it unconfirmed. A `--same-conditions` merge needs a yes to "same sample AND same
-   conditions? the names differ in: …"; `pristine`/`cycled` are conditions, not labels. After a
-   regroup, say any `merge_decisions_not_combined` in words and offer its `next_commands`.
+   `naming_counter_positions` when grouping asks it. Ask it before any group is confirmed: a regroup keeps decided groups.
+   Record the answer, say what it would join (`regroup_preview.statement`), then `<isaac> bundle group <bundle> --regroup`.
+3. **Load the findings file again** (`annotate --from-readings`, preview then `--apply`), now and after every later regroup.
+4. **Triage; do not walk every group.** Page the groups and the merge candidates.
+   - Needs a look: a row with `needs_care`, `role_proposed`, `exported_file` or `cannot_export_reason`; a group of several runs with a care flag; every merge candidate.
+   - All others are "as proposed".
+5. **One message:** "N groups. M are as proposed (short table: sample, what tells them apart, how many). K need a look. Confirm the M together?"
+   - On yes: one `--targets-file` confirm. Never include a group that needs a look. Offer to list any group in full.
+6. **Then the K**, a few per message, each with why it needs a look. Confirm, split, merge, or leave out (`reject`: never exported).
+   - A group with a `cannot_export_reason` can never be a record: say why; offer `reject` or leaving it unconfirmed.
+   - A merge needs a yes to "same sample AND same conditions? the names differ in: …". `pristine`/`cycled` are conditions. Spots of one sample at one condition merge; potential steps never merge.
 
 ## Step 6 · Processing (a DRAFT protocol)
 
-`<isaac> process <bundle> --source <folder>` once groups are confirmed. Always pass `--source`, the
-folder that was imported (the bundle records it only with `import --record-local-root`); without a
-readable one `process` refuses and writes nothing. After a ZIP import, ask the scientist to unzip it
-outside the bundle, confirm it is the data they approved (all in one folder: pass that folder). Read the Processing
-section of `reference/grouping-and-processing.md`. Page results with
-`<isaac> bundle list <bundle> processing-results --limit 20`. For each group show the verdict in words,
-glitch flags (with `glitch_check_few_scans` or `glitch_points_on_edge`, say its sentence instead), skipped scans,
-agreement with their own Athena output, and the plot (open the PNG with Read and describe it; on an `isaac.xas.v1` result kept scans are solid, dropped scans dashed with the reason in the legend; on a v0 result proposed scans are dotted or dash-dotted). Ask approve / reject / needs changes. `<isaac> bundle show <bundle> processing-result <id>` gives the blocks below. **`isaac.xas.v1` (Oscar's xas-analysis engine) DECIDES which scans are kept** (block `scan_decisions`, rule `isaac.xas.scan_decision.v1`; read the v1 section of the reference): say the energy reference (`energy_reference`) and the shift range (`scan_shifts`), then each dropped scan with its reason and each kept one with a remark. These are decisions, not questions; the scientist may override any, and only on their word: `decide --target <group id> --decision set_scan_decision --value keep|drop --scans "<scan id>" --note "<their words>" --by "<name>"`, then `process --source <folder> --group <id>` and show the new result. A v0 result (`engine.reason` says why, e.g. a transmission sample) keeps its **scan-selection proposal** (flag `scan_selection_proposed`): ask about each; only on their word use the `exclude_scans` snippet in `qc.statements.scan_selection`. An intensity drop alone never drops a scan; the merge is always raw mu, never normalised data. **Their quick beamtime merge** (block `scientist_quick_merges`): say its verdict and key numbers as a ROUGH reference only (the scientist said those merges "could be not robust or rigorous enough"), never as the answer key.
+Keep `reference/grouping-and-processing.md` open ("Processing"). Athena is never used; its files are only listed.
 
-- **Approval is the scientist's call.** A `warn` is theirs to accept. A `fail` for `edge_step_implausible`,
-  `no_edge` or `post_edge_not_at_1` is never offered for approval: offer reject or `needs_changes`. When
-  approving, ask for the QC status: map their words to one of the four
-  (`--qc-status valid|compromised|failed|pending`), say it back, record on yes; never derive it from the verdict.
-- **Two results for one group**: ISAAC's curve (`…-isaac`) and their own Athena curve (`…-athena`).
-  Show both, say which scans each used, ask which is the record's, approve exactly one. "A merge exists but was not matched": ask which group it is for (`bundle list <bundle> athena-merges`); never pick a near name (reference: `athena_match`, `athena_ignore`).
-- A `not_applicable` result is not a fail; never ask to approve it ("no ISAAC processing protocol
-  covers this data yet"). A result with **no curve** cannot be approved; offer: reject the result,
-  `needs_changes`, or leave the group out.
-- A calibration shift (`approve_calibration --element --edge`, in the reference): before asking the element
-  and edge, say how many scans show a reference edge and the shift it would apply; never ask when no
-  reference is proposed. No answer, no shift. Above 2 eV it needs `--accept-shift` on their yes.
+1. **Not before Step 4 is done.** Say "I loaded N scan notes" or "I read the whole logbook; it says nothing about which scans to use".
+2. `<isaac> process <bundle> --source <folder>`. Always pass `--source`, the folder that was imported.
+3. **The engine decides which scans are kept**, by its documented rule, with a reason for every drop. Decisions, not questions.
+   - Every scan is aligned on its in-scan reference. An intensity drop alone never drops a scan.
+   - The scientist may override any decision, only on their word:
+     `decide --target <group id> --decision set_scan_decision --value keep|drop --scans "<scan id>" --note "<their words>" --by "<name>"`,
+     then `process --source <folder> --group <id>` and show the new result.
+4. **The dose question, before any approval.** When results carry `dose_reading_question`: show two or three of them
+   with their plots and ask ONCE for the beamtime: beam damage, the first scan still settling, or neither. Record
+   `decide --target experiment --decision set_dose_reading --value <their pick> --by "<name>"`, then re-process.
+5. **Triage; do not walk every curve.** Page `<isaac> bundle list <bundle> processing-results --state needs_review --limit 200`.
+   - Passed: verdict `pass` and no flag that needs a look.
+   - Needs a look: `warn`, `fail`, a flag a bulk approval refuses, or a legacy result (`engine_fallback` on the row:
+     read `reference/legacy-processing.md`; with `glitch_check_few_scans`, say its sentence).
+   - Not for approval: `not_applicable` (not a fail: "no ISAAC processing protocol covers this data yet"), no curve,
+     or a `fail` for `no_edge`, `edge_step_implausible` or `post_edge_not_at_1`. Offer reject or `needs_changes`.
+6. **One message for the passed curves.** Say how many. Give a table: sample and condition, scans kept and dropped
+   (with why), edge position, edge step. Open two or three plots with Read as examples. Say "name any other and I'll open it".
+   - Ask: approve them together, and with which QC status (`--qc-status valid|compromised|failed|pending`)?
+   - Map their words to one status, say it back, record on yes. Never derive it from the verdict. Then one `--targets-file` approve.
+7. **Then each curve that needs a look, with its plot.** Say the reason in the result's own sentence, the energy
+   reference, and each dropped scan with why. Ask approve / reject / needs changes. A `warn` is theirs to accept.
+8. **Their quick beamtime merge** (`scientist_quick_merges`): a ROUGH reference only, never the answer key.
+9. **A calibration shift** (`approve_calibration --element --edge`; legacy results only): before asking the element and
+   edge, say how many scans show a reference edge and the shift it would apply; never ask when no reference is
+   proposed. No answer, no shift.
+10. **Evidence that arrives after an approval** (a scan note, an override, a dose answer) does not change the approved
+    curve. Tell the scientist, re-process the group, show the new curve, and approve it only on their yes.
 
-Always say: **the processing protocol is a draft until the ISAAC processing reviewers (Oscar and
-Angel) review it**; an approval means "I looked at this curve and accept it for this record", not
-"the method is validated". If processing is not installed, say what that costs (no curves, records
-stay incomplete) and continue.
+Always say: **the processing protocol is a draft until the ISAAC processing reviewers review it**; an approval means "I looked at this curve and accept it for this record", not "the method is validated".
+If processing is not installed, say what that costs (no curves, records stay incomplete) and continue.
 
 ## Step 7 · Questions
 
@@ -230,8 +231,7 @@ Read `reference/records-and-validation.md`; explain the verdicts from validate's
 `validation/<group_id>.json` only for a group those leave unexplained), then go back to the step that fixes it (a
 `processing_fix` means its curve needs approval in Step 6). Say each `warnings` item in words
 (only 5 warnings show by default; `validate --full` lists all; the most serious come first: a stated value left out of a record, then a portal warning, then the routine start-time note), and ask the scale question it names (and the set-point
-if `also_needs`, with `also_command`; a missing set-point lists its scale as missing too). `athena_version_no_longer_chosen`: the
-approved curve is not the version they chose last; say its steps (to keep it: reject, then approve again; approving again alone records nothing). `macro_setpoint_unanswered` and `in_situ_conditions_not_in_record`: ask the question each names. Run a command only with their answer. Never edit a draft or relax a check.
+if `also_needs`, with `also_command`; a missing set-point lists its scale as missing too). `macro_setpoint_unanswered` and `in_situ_conditions_not_in_record`: ask the question each names. Run a command only with their answer. Never edit a draft or relax a check.
 
 ## Step 9 · Export and dry run
 

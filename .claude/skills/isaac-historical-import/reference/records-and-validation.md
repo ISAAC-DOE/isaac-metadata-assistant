@@ -52,13 +52,7 @@ file name stating a condition or a potential) that carries no
 electrolyte, cell type or control mode (and names its pH when it has none), quoting what the file names state
 (`10MNaOH`): ask each field with its command (`fields`); nothing is filled from a name. It does not quote an
 open-circuit token (`OCV`) when the record's confirmed control mode is another one. It is kept in the record's
-evidence `notes`, so `upload --dry-run` says it too. `athena_version_no_longer_chosen` warns when the
-approved curve is not the Athena version the scientist chose last (a version approved before they chose
-another, or ISAAC's own curve approved before they chose a version): the record carries the approved curve.
-Its text gives the steps (`isaac process` for the chosen version if needed, reject the old result, approve the
-chosen one) and the way to keep the approved curve instead: for ISAAC's own curve or another Athena curve, reject it
-and then approve it again (approving it again alone records nothing new and leaves the warning); for an Athena
-version, choose that version again. Ask before each. None of these is read as a value. It is not a refusal: the record can still be exportable,
+evidence `notes`, so `upload --dry-run` says it too. None of these is read as a value. It is not a refusal: the record can still be exportable,
 without the condition that defines it. Say each one to the scientist in words and ask the scale question it names (and the set-point when `also_needs` is set); its command is a template: run it only with their answer. Explain the counts first ("all 78 lack the producing group; 70 wait for a curve
 approval; 5 have no protocol"), then open `validation/<group id>.json` only for a group they leave
 unexplained.

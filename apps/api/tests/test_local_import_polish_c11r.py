@@ -348,7 +348,7 @@ def test_the_docs_say_how_to_see_every_warning():
 
 
 def test_the_processing_reference_names_the_file_and_says_zero_points():
-    text = (SKILL / "reference" / "grouping-and-processing.md").read_text()
+    text = (SKILL / "reference" / "legacy-processing.md").read_text()
     assert "merged_scan_has_zero_signal_points" in text
     assert "naming the file as the statement does" in text and "scan 8's signal" not in text
     assert "it is merged unchanged" in text and "never leave it out yourself" in text

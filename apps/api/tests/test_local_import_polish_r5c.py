@@ -298,7 +298,8 @@ def test_the_docs_say_the_new_counts_and_warning():
     skill = Path(__file__).resolve().parents[3] / ".claude" / "skills" / "isaac-historical-import"
     records = (skill / "reference" / "records-and-validation.md").read_text()
     main = (skill / "SKILL.md").read_text()
-    for term in ("records_ready", R.ATHENA_NOT_CHOSEN_WARNING, "also_command"):
+    # the Athena-version warning is no longer in the skill text: Athena is never used (isaac.processing.athena_never_used.v0)
+    for term in ("records_ready", "also_command"):
         assert term in records and term in main, term
     assert json.dumps(M.MATERIAL_NAME_PLACEHOLDER) and "material-name answer" in (
         skill / "reference" / "grouping-and-processing.md").read_text()

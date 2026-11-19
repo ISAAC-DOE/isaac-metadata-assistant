@@ -193,7 +193,7 @@ def test_show_names_the_groups_absorber_as_a_possible_reference(bdir, capsys):
 
 
 def test_the_skill_says_the_counts_and_the_shift_before_asking():
-    ref = (SKILL / "reference" / "grouping-and-processing.md").read_text()
+    ref = (SKILL / "reference" / "legacy-processing.md").read_text()
     for term in ("reference_proposed", "reference_edge_in_too_few_scans", "--accept-shift", "would_apply",
                  "glitch_check_few_scans", "calibration_shift_size_not_confirmed"):
         assert term in ref, term
