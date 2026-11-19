@@ -375,3 +375,27 @@ def test_a_result_with_no_readable_inputs_falls_back_to_the_members_that_are_not
     assert AC.unlisted_notes(b, result) == []          # run-002 is a context run
     b, result = _hand_built("run-001", inputs=())
     assert [e["scan_note_id"] for e in AC.unlisted_notes(b, result)] == ["sn-1"]
+
+
+# --- review of PR 342, finding 2: "processed again" means a curve that lists the note ----------------------------
+
+
+def test_only_a_result_that_lists_the_note_lets_the_older_curve_be_kept_on_its_own():
+    b, result = _hand_built("run-001")
+    b["scientist_decisions"] = []                                 # nothing approved yet: the scientist is choosing
+    older = {**json.loads(json.dumps(result)), "result_id": "p-before", "prior_run_ids": []}
+    result["prior_run_ids"] = []
+    # a later result processed (and rejected) BEFORE the note arrived lists no note: it does not count
+    b["processing_results"].append({**json.loads(json.dumps(result)), "result_id": "p-later", "state": "rejected"})
+    assert not AC.processed_again(b, result)
+    said = AC.approval_problem(b, result, bulk=False)
+    assert said is not None and "Process the group again" in said
+    # a result whose logbook block lists the note does
+    listing = json.loads(json.dumps(result))
+    listing.update(result_id="p-with-note", logbook_notes={"available": True, "state": "notes", "notes": [
+        {"scan_note_id": "sn-1", "run": "SYN_a", "action": "exclude", "scans": [1]}]})
+    b["processing_results"].append(listing)
+    assert AC.processed_again(b, result)
+    assert AC.approval_problem(b, result, bulk=False) is None
+    assert AC.approval_problem(b, result, bulk=True) is not None   # never in a bulk call
+    assert older["result_id"] == "p-before"

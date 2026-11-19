@@ -234,7 +234,8 @@ def older_than_evidence(bundle: Mapping, group_id: str, state_of: Mapping | None
         return None
     return {"group_id": group_id, "approved_result_id": B.processing_id(result), "approved_utc": approved_utc or None,
             "evidence": evidence, "newer_result_ids": [B.processing_id(r) for r in newer],
-            "processed_again": processed_again(bundle, result)}
+            "processed_again": processed_again(bundle, result,
+                                               [e for e in evidence if e["why"] == NOT_IN_CURVE])}
 
 
 def _note_said(e: Mapping) -> str:
@@ -297,24 +298,34 @@ def warning(found: Mapping) -> dict:
             "evidence": [dict(e) for e in found["evidence"]], "command": command, "text": text(found)}
 
 
-def processed_again(bundle: Mapping, result: Mapping) -> bool:
-    """True when the group holds a result processed AFTER ``result``, whatever was decided on it."""
-    results = list(bundle.get("processing_results") or ())
-    order = {B.processing_id(r): i for i, r in enumerate(results)}
-    return any(r.get("group_id") == result.get("group_id") and B.processing_id(r) != B.processing_id(result)
-               and r.get("source") != C_ATHENA_SOURCE and _is_newer(r, result, order) for r in results)
+def processed_again(bundle: Mapping, result: Mapping, notes: Sequence[Mapping] | None = None) -> bool:
+    """True when another result of ``result``'s group (ISAAC's own) was processed WITH the scan notes ``result`` was
+    processed without (default: :func:`unlisted_notes`): its logbook block lists every one of them. A later result
+    made before the notes arrived lists none and does not count (review of PR 342, finding 2)."""
+    missing = list(unlisted_notes(bundle, result) if notes is None else notes)
+    if not missing:
+        return False
+    pid = B.processing_id(result)
+    for r in bundle.get("processing_results") or ():
+        if (not isinstance(r, Mapping) or r.get("group_id") != result.get("group_id") or B.processing_id(r) == pid
+                or r.get("source") == C_ATHENA_SOURCE or B.processing_not_applicable(r)):
+            continue
+        block = _block(r)
+        if block is not None and all(_listed(block, e, e.get("run")) for e in missing):
+            return True
+    return False
 
 
 def approval_problem(bundle: Mapping, result: Mapping, *, bulk: bool) -> str | None:
     """Why approving ``result`` is refused because its curve is older than its evidence, or ``None``.
 
     * Its group holds a scan note the result was processed without: refused in a bulk call always, and on its own
-      until the group has been processed again (then the scientist has the newer result beside it and may keep this
-      curve, on its own).
+      until a result that lists the note exists (:func:`processed_again`: then the scientist has that curve beside
+      it and may keep this one, on its own).
     * A newer result of its group exists (not rejected): refused in a bulk call; on its own it is the scientist's call."""
     pid, gid = B.processing_id(result), result.get("group_id")
     missing = unlisted_notes(bundle, result)
-    again = processed_again(bundle, result)
+    again = processed_again(bundle, result, missing)
     if missing and (bulk or not again):
         more = f"; and {len(missing) - EVIDENCE_SHOWN} more" if len(missing) > EVIDENCE_SHOWN else ""
         step = (f"Approve the result processed with them, or approve {pid} on its own if the scientist keeps this curve."
