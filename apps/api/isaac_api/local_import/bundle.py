@@ -4644,8 +4644,9 @@ def build_bundle(
                 runs_by_id[run_id]["candidate_ids"].append(cand["candidate_id"])
     comment_runs_not_read = len(not_read)
     # suggestions.TECHNIQUE_RULE_ID: the technique the INSTRUMENT configuration states, one suggestion for the beamtime
-    # (after every other candidate, so each keeps its id). Where it exists, a candidate that rests only on a macro's or
-    # a script's NAME is kept as evidence and no longer asks for the technique of each run.
+    # (after every other candidate, so each keeps its id). Where it has a VALUE, a candidate that rests only on a
+    # macro's or a script's NAME is kept as evidence and no longer asks for the technique of each run; where it has
+    # none (the runs differ, or one records something else) every run's own technique reading stays as it was.
     from . import suggestions as _suggest
 
     technique = (_suggest.technique_candidate(
@@ -4656,7 +4657,7 @@ def build_bundle(
         out_candidates.append(technique)
         shared_bundle_ids.append(technique["candidate_id"])
         for ci, c, bundle_cid, run_id, key, evidence, total in named_techniques:
-            if _suggest.is_code_named_technique(out_candidates[ci]):
+            if technique["value"] is not None and _suggest.is_code_named_technique(out_candidates[ci]):
                 out_candidates[ci] = _candidate_record(
                     dataclasses.replace(c, target_field_path=None, not_proposable_reason=_suggest.NOT_A_TECHNIQUE_REASON),
                     bundle_cid=bundle_cid, run_id=run_id, key=key, evidence=evidence, total=total, writable=writable)

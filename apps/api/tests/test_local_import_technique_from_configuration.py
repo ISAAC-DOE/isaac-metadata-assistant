@@ -10,7 +10,12 @@ What these pin (``suggestions.TECHNIQUE_RULE_ID``):
   those candidates stop asking for the technique of each run (they stay as evidence), so the technique is asked once;
 * an emission energy that is no line of the scanned element, or no emission motor at all, suggests nothing, and
   the macro names keep the place they had;
-* runs whose configurations suggest different techniques give no value: both are shown;
+* ONE suggestion never swallows a run that states something else: a run whose emission motor is held OFF the line
+  during its energy scan blocks the beamtime value, is named, and keeps its own technique question (the macro names
+  keep targeting the technique whenever the suggestion has no value); runs that record nothing about it (no emission
+  motor, no experiment file: processed or averaged files) are counted apart and named in the reason;
+* runs whose configurations suggest different techniques give no value: both are shown, and the reason points only
+  at the question it sits on;
 * nothing is confirmed, every bundle is schema-valid, and the snapshot table equals xraydb where it is installed.
 
 SYNTHETIC files only: invented names and counts; the only real numbers are tabulated X-ray line and edge energies.
@@ -110,7 +115,8 @@ def test_an_emission_motor_on_a_line_of_the_scanned_edge_suggests_herfd(herfd):
     assert B.value_problem(TECHNIQUE, c["value"]) is None  # one of the schema's own techniques
     reason = c["state_basis"]["not_proposable_reason"]
     assert f"{LINE:g} eV" in reason and "Cu Ka1" in reason and "Cu K absorption edge" in reason
-    assert "3 of the 3 measurement runs" in reason and X.source() in reason
+    assert "3 of the 3 measurement runs that record it" in reason and X.source() in reason
+    assert "other measurement run" not in reason  # every run records it: nothing to count apart
     assert "never from a macro" in reason
     first = c["evidence"][0]
     assert first["relation"] == "supports" and first["literal_value"] == f"{LINE:g}"
@@ -155,6 +161,41 @@ def test_an_emission_energy_that_is_no_line_of_the_scanned_element_suggests_noth
     assert named and all(c["target_field_path"] == TECHNIQUE for c in named)  # as before: the macro names keep their place
 
 
+def test_a_run_held_off_the_line_blocks_the_beamtime_value_and_keeps_its_question(tmp_path, capsys):
+    src = tmp_path / "src" / "SYN_BL00_2100-18_ZZ"
+    spec_run(src, STEMS[0])                          # on the line
+    spec_run(src, STEMS[1], emission=LINE + 40)      # the motor is there, 40 eV off: it states something else
+    spec_run(src, STEMS[2], emission=LINE + 40)
+    macros(src, STEMS)
+    data = _import(src, tmp_path / "out", capsys)
+    [c] = _suggested(data)
+    assert c["value"] is None and c["value_state"] == B.STATE_NEEDS_REVIEW
+    reason = c["state_basis"]["not_proposable_reason"]
+    assert "No technique is offered for the beamtime" in reason and "1 of the 3 measurement runs that record it" in reason
+    assert STEMS[1] in reason and STEMS[2] in reason and f"{LINE + 40:g} eV" in reason  # the runs it does not rest on
+    assert "of each record group" not in reason
+    # nothing is swallowed: every run's macro-name candidate still asks for the technique, as before
+    named = [c for c in data["candidates"] if c["statement_key"] == "acquisition_method" and c["run_id"]]
+    assert len(named) == 3 and all(c["target_field_path"] == TECHNIQUE for c in named)
+    groups = {q["scope"] for q in Q.consolidate(data)["questions"]
+              if q.get("target_field_path") == TECHNIQUE and q["scope"].startswith("group:")}
+    assert len(groups) == 3
+
+
+def test_runs_that_record_nothing_are_counted_apart_and_named(tmp_path, capsys):
+    src = tmp_path / "src" / "SYN_BL00_2100-19_ZZ"
+    spec_run(src, STEMS[0])
+    spec_run(src, STEMS[1])
+    spec_run(src, STEMS[2], motor="synmot")          # no emission motor at all (as an averaged or processed file)
+    data = _import(src, tmp_path / "out", capsys)
+    [c] = _suggested(data)
+    assert c["value"] == "HERFD-XAS"
+    reason = c["state_basis"]["not_proposable_reason"]
+    assert "2 of the 2 measurement runs that record it" in reason
+    assert "1 other measurement run records nothing about the technique" in reason and STEMS[2] in reason
+    assert "does not rest on" in reason
+
+
 def test_no_emission_motor_suggests_nothing(tmp_path, capsys):
     src = tmp_path / "src" / "SYN_BL00_2100-06_ZZ"
     spec_run(src, STEMS[0], motor="synmot")
@@ -164,13 +205,19 @@ def test_no_emission_motor_suggests_nothing(tmp_path, capsys):
 def test_runs_that_suggest_different_techniques_give_no_value_and_show_both(tmp_path, capsys):
     src = tmp_path / "src" / "SYN_BL43_2100-07_ZZ"
     spec_run(src, STEMS[0])
+    macros(src, STEMS[:1])
     xdc(src / "21_SYNZZ_dry_040_A.001")
     (src / "21_SYNZZ_dry_040.exp").write_text("ID:\t\tSYN_EXPT\nEXPT_TYPE:\tXAS\nDATA_FILE:\t21_SYNZZ_dry\n")
     data = _import(src, tmp_path / "out", capsys)
     [c] = _suggested(data)
     assert c["value"] is None and c["value_state"] == B.STATE_NEEDS_REVIEW
     reason = c["state_basis"]["not_proposable_reason"]
-    assert "HERFD-XAS (1 run" in reason and "XAS (1 run" in reason and "say which" in reason
+    assert "HERFD-XAS (1 run" in reason and "XAS (1 run" in reason and "No technique is offered for the beamtime" in reason
+    # the reason points at no question that does not exist: it is answered where it stands, per group where they differ
+    assert "of each record group" not in reason and "this question" in reason
+    # and with no value nothing is taken from the macro names: the run's own candidate still asks
+    named = [x for x in data["candidates"] if x["statement_key"] == "acquisition_method" and x["run_id"]]
+    assert named and all(x["target_field_path"] == TECHNIQUE for x in named)
 
 
 # --- SSRL XDC: the experiment file's EXPT_TYPE -----------------------------------------------------------------------
@@ -192,13 +239,23 @@ def test_an_experiment_file_stating_xas_suggests_xas(tmp_path, capsys):
     [c] = _suggested(data)
     assert (c["value"], c["run_id"]) == ("XAS", None) and c["value_state"] == B.STATE_NEEDS_REVIEW
     reason = c["state_basis"]["not_proposable_reason"]
-    assert "EXPT_TYPE" in reason and "2 of the 3 measurement runs" in reason
+    assert "EXPT_TYPE" in reason and "2 of the 2 measurement runs that record it" in reason
+    assert "1 other measurement run records nothing about the technique" in reason and "05_SYNZZ_wet_083" in reason
     first = c["evidence"][0]
     assert (first["literal_value"], first["locator"]) == ("XAS", "line:2") and first["relative_path"].endswith(".exp")
     assert not [m for m in data["missing_values"] if m["target_field_path"] == TECHNIQUE]
     payload = Q.consolidate(data)
     [asked] = [q for q in payload["questions"] if q.get("target_field_path") == TECHNIQUE]
     assert asked["kind"] == "confirm_value" and asked["blocking"] is True  # still required, now one confirmation
+
+
+def test_an_experiment_file_stating_another_word_blocks_the_value(tmp_path, capsys):
+    src = _xdc_beamtime(tmp_path / "src" / "SYN_BL43_2100-20_ZZ")
+    (src / "04_SYNZZ_dry_082" / "SYNtemplate_exp1.exp").write_text("EXPT_TYPE:\tSYNSCAN\nDATA_FILE:\t04_SYNZZ_dry\n")
+    data = _import(src, tmp_path / "out", capsys)
+    [c] = _suggested(data)
+    reason = c["state_basis"]["not_proposable_reason"]
+    assert c["value"] is None and "SYNSCAN" in reason and "04_SYNZZ_dry_082" in reason
 
 
 def test_an_experiment_type_that_is_no_schema_technique_suggests_nothing(tmp_path, capsys):

@@ -775,8 +775,11 @@ TECHNIQUE_RULE = (
     "emission line of an element whose absorption edge that scan crosses is high-energy-resolution "
     "fluorescence-detected absorption: HERFD-XAS. (b) An SSRL XDC run whose own experiment file states EXPT_TYPE with "
     "a word that is one of the schema's techniques (XAS) is that technique. Line and edge energies: "
-    "readers.xray_tables (a snapshot of xraydb). One suggestion for the beamtime when every run that states it "
-    "agrees; runs that differ give no value and both are shown. It needs review: a scientist confirms or corrects it."
+    "readers.xray_tables (a snapshot of xraydb). One suggestion for the beamtime, VALUED only when every run that "
+    "records anything about the technique states the same one: a run whose emission motor is held off the line, or "
+    "whose experiment file states another word, leaves no value and is named, and the runs' own technique readings "
+    "then stay as they were. Runs that record nothing are counted apart and named. It needs review: a scientist "
+    "confirms or corrects it."
 )
 TECHNIQUE_KEY = "technique_from_configuration"
 HERFD = "HERFD-XAS"
@@ -784,7 +787,8 @@ HERFD = "HERFD-XAS"
 MACRO_READER_ID = "bl15_macro_v1"
 NOT_A_TECHNIQUE_REASON = (
     "A macro's, a script's or a function's name is not a statement of the technique, and the instrument "
-    f"configuration of this beamtime states it (rule {TECHNIQUE_RULE_ID}: see the technique suggestion). The names "
+    f"configuration of this beamtime states one for every run that records it (rule {TECHNIQUE_RULE_ID}: see the "
+    "technique suggestion). The names "
     "are kept here as evidence of what was run; they no longer ask for the technique of each run."
 )
 _EMISSION_MOTORS = ("emiss", "emission")
@@ -815,8 +819,11 @@ def energy_scan_range(command: Any) -> tuple[float, float] | None:
 
 
 def _herfd_reading(emission: Mapping | None, command: Mapping | None) -> dict | None:
-    """What ONE SPEC run's header states: its emission motor's energy, the line it is and the edge the scan crosses,
-    or ``None`` (no emission motor, no energy scan, several emission energies, or no line of a scanned element)."""
+    """What ONE SPEC run's header records about the technique, or ``None`` when it records nothing (no emission
+    motor, or no energy scan of the monochromator). ``state`` ``states``: the emission motor is held on ONE emission
+    line of an element whose absorption edge the scan crosses (HERFD-XAS). ``state`` ``blocks``: the motor is there
+    during an energy scan but not so (off every such line, on several energies, on more than one line): the run
+    states something else, so no technique is offered for the beamtime."""
     from .readers import xray_tables as X
 
     if emission is None or command is None:
@@ -828,27 +835,32 @@ def _herfd_reading(emission: Mapping | None, command: Mapping | None) -> dict | 
         return None
     # the HEADER's own positions only (every scan's, as far as the evidence window holds them): a macro call's
     # argument is what was asked for, not what the instrument recorded
-    try:
-        energies = {float(e.get("literal_value")) for e in held}
-    except (TypeError, ValueError):
-        return None
-    if len(energies) != 1:
-        return None
-    energy = next(iter(energies))
     low, high = min(r[0] for _, r in scans), max(r[1] for _, r in scans)
+    base = {"held": held[0], "scan": scans[0][0], "low": low, "high": high}
+    try:
+        energies = sorted({float(e.get("literal_value")) for e in held})
+    except (TypeError, ValueError):
+        return {**base, "state": "blocks", "energies": [], "why": "its emission motor position does not read as a number"}
+    if len(energies) != 1:
+        return {**base, "state": "blocks", "energies": energies, "why": "its emission motor is held at several energies"}
+    energy = energies[0]
     hits = [h for h in X.lines_near(energy)
             if (edge := X.edge_energy(h["element"], h["edge"])) is not None and low <= edge <= high]
     if len(hits) != 1:
-        return None
+        return {**base, "state": "blocks", "energies": energies,
+                "why": ("that is no emission line of an element whose absorption edge the scan crosses" if not hits
+                        else "that is within reach of more than one emission line")}
     hit = hits[0]
-    return {"technique": HERFD, "held": held[0], "scan": scans[0][0], "energy": energy, "low": low, "high": high,
+    return {**base, "state": "states", "technique": HERFD, "energy": energy,
             "element": hit["element"], "line": hit["line"], "line_eV": hit["energy_eV"], "edge": hit["edge"],
             "edge_eV": X.edge_energy(hit["element"], hit["edge"])}
 
 
 def technique_readings(runs: Sequence[Mapping], candidates: Sequence[Mapping], xdc_runs: Sequence[tuple]) -> dict[str, dict]:
-    """``{run_id: reading}`` for every measurement run whose instrument files state the technique: a SPEC run's
-    emission motor (:func:`_herfd_reading`) or an XDC run's ``EXPT_TYPE`` (a word on the schema's technique list)."""
+    """``{run_id: reading}`` for every measurement run whose instrument files record something about the technique
+    (``state`` ``states`` with a ``technique``, or ``blocks``): a SPEC run's emission motor (:func:`_herfd_reading`),
+    an XDC run's ``EXPT_TYPE`` (``states`` when the word is on the schema's technique list, ``blocks`` when it is
+    another word). A run with neither is not listed: it records nothing."""
     by_run: dict[str, dict[str, Mapping]] = {}
     for c in candidates:
         if c.get("run_id") and c.get("statement_key") in ("emission_energy", "scan_command"):
@@ -864,33 +876,61 @@ def technique_readings(runs: Sequence[Mapping], candidates: Sequence[Mapping], x
             got = _herfd_reading(by_run.get(rid, {}).get("emission_energy"), by_run.get(rid, {}).get("scan_command"))
             if got is not None:
                 out[rid] = got
-        elif run.get("source_type") == B.XDC_RUN_SOURCE_TYPE and rid in stated and stated[rid].get("literal") in allowed:
+        elif run.get("source_type") == B.XDC_RUN_SOURCE_TYPE and rid in stated:
             st = stated[rid]
-            out[rid] = {"technique": st["literal"], "expt": st}
+            out[rid] = ({"state": "states", "technique": st["literal"], "expt": st} if st.get("literal") in allowed else
+                        {"state": "blocks", "expt": st,
+                         "why": f"its experiment file states EXPT_TYPE {st.get('literal')}, which is not one of the record's techniques"})
     return out
+
+
+def _named(runs: Sequence[Mapping], limit: int = 5) -> str:
+    names = [str(r.get("stem") or r.get("label")) for r in runs]
+    return ", ".join(names[:limit]) + (f" and {len(names) - limit} more" if len(names) > limit else "")
 
 
 def technique_candidate(runs: Sequence[Mapping], readings: Mapping[str, Mapping], sources: Mapping[str, str],
                         bundle_cid: str, writable) -> dict | None:
-    """ONE beamtime-level candidate for ``system.technique`` from :func:`technique_readings`, or ``None`` when no run's
-    instrument files state it. Valued when every run that states it agrees; no value (both shown) when they differ."""
+    """ONE beamtime-level candidate for ``system.technique`` from :func:`technique_readings`, or ``None`` when no run
+    states one. VALUED only when every run that records anything about the technique states the same one: a run that
+    states another, or records something else (``blocks``), leaves NO value, and it is named. Runs that record nothing
+    (a processed or averaged file with no emission motor, a run with no experiment file) are counted apart and named:
+    the suggestion does not rest on them."""
     from .readers import xray_tables as X
 
-    if not readings:
-        return None
     measured = [r for r in runs if r.get("run_candidate")
                 and r.get("source_type") in (B.SPEC_ACQUISITION_SOURCE_TYPE, B.XDC_RUN_SOURCE_TYPE)]
-    stating = [r for r in measured if r["run_id"] in readings]
+    stating = [r for r in measured if (readings.get(r["run_id"]) or {}).get("state") == "states"]
+    blocking = [r for r in measured if (readings.get(r["run_id"]) or {}).get("state") == "blocks"]
+    silent = [r for r in measured if r["run_id"] not in readings]
+    if not stating:
+        return None
+    recording = len(stating) + len(blocking)
     by_technique: dict[str, list[Mapping]] = {}
     for r in stating:
         by_technique.setdefault(readings[r["run_id"]]["technique"], []).append(r)
     id_of = {p: s for s, p in sources.items()}
     witnesses: list[dict] = []
     said: list[str] = []
-    value = next(iter(by_technique)) if len(by_technique) == 1 else None
+    value = next(iter(by_technique)) if len(by_technique) == 1 and not blocking else None
+
+    def witness(got: Mapping, technique: str | None) -> list[dict]:
+        if "held" in got:
+            h, sc = got["held"], got["scan"]
+            literal = str(h.get("literal_value"))
+            derive = ([{"step": "derive", "rule_id": TECHNIQUE_RULE_ID, "from": literal, "to": technique, "unit": None}]
+                      if technique else [])
+            return [{"relative_path": h.get("relative_path"), "source_id": h.get("source_id"), "locator": h.get("locator"),
+                     "literal": literal, "supports": bool(technique), "normalization": derive},
+                    {"relative_path": sc.get("relative_path"), "source_id": sc.get("source_id"), "locator": sc.get("locator"),
+                     "literal": sc.get("literal_value"), "supports": False, "normalization": []}]
+        st = got["expt"]
+        rel = st.get("source_relative_path")
+        return [{"relative_path": rel, "source_id": id_of.get(rel), "locator": st.get("locator"), "literal": st["literal"],
+                 "supports": bool(technique), "normalization": []}]
+
     for technique, members in by_technique.items():
-        n = len(members)
-        of = f"{n} of the {len(measured)} measurement runs read from instrument files"
+        of = f"{len(members)} of the {recording} measurement runs that record it"
         first = readings[members[0]["run_id"]]
         if "held" in first:
             lines = sorted({(readings[r["run_id"]]["element"], readings[r["run_id"]]["line"]) for r in members})
@@ -908,30 +948,35 @@ def technique_candidate(runs: Sequence[Mapping], readings: Mapping[str, Mapping]
             said.append(f"{technique}: the run's own experiment file states EXPT_TYPE {st['literal']} in {of} "
                         f"(e.g. {str(st.get('locator')).replace('line:', 'line ')} of {st.get('source_relative_path')}).")
         for r in members[:_MAX_TECHNIQUE_WITNESS_RUNS]:
-            got = readings[r["run_id"]]
-            if "held" in got:
-                h, sc = got["held"], got["scan"]
-                literal = str(h.get("literal_value"))
-                witnesses.append({"relative_path": h.get("relative_path"), "source_id": h.get("source_id"),
-                                  "locator": h.get("locator"), "literal": literal, "supports": True,
-                                  "normalization": [{"step": "derive", "rule_id": TECHNIQUE_RULE_ID, "from": literal,
-                                                     "to": technique, "unit": None}]})
-                witnesses.append({"relative_path": sc.get("relative_path"), "source_id": sc.get("source_id"),
-                                  "locator": sc.get("locator"), "literal": sc.get("literal_value"), "supports": False,
-                                  "normalization": []})
-            else:
-                st = got["expt"]
-                rel = st.get("source_relative_path")
-                witnesses.append({"relative_path": rel, "source_id": id_of.get(rel), "locator": st.get("locator"),
-                                  "literal": st["literal"], "supports": True, "normalization": []})
+            witnesses += witness(readings[r["run_id"]], technique if value is not None else None)
+    for r in blocking[:_MAX_TECHNIQUE_WITNESS_RUNS]:
+        witnesses += witness(readings[r["run_id"]], None)
+    apart = ""
+    if silent:
+        apart = (f" {len(silent)} other measurement run{'s record' if len(silent) != 1 else ' records'} nothing about the "
+                 f"technique (no emission motor in an energy scan, or no experiment file; a processed or averaged file is "
+                 f"one such): {_named(silent)}. The suggestion does not rest on "
+                 f"{'them' if len(silent) != 1 else 'it'}: confirm it for the beamtime only if it holds there too.")
     if value is not None:
-        reason = (f"Suggested from the instrument configuration, never from a macro or script name. {said[0]} "
+        reason = (f"Suggested from the instrument configuration, never from a macro or script name. {said[0]}{apart} "
                   f"{CONFIRM_OR_CORRECT}")
     else:
         counts = "; ".join(f"{t} ({len(m)} run{'s' if len(m) != 1 else ''})" for t, m in by_technique.items())
-        reason = (f"The instrument configurations of this beamtime's runs suggest different techniques: {counts}. "
-                  + " ".join(said) + " Neither is offered for the whole beamtime: say which technique each group of "
-                  "runs is (the technique question of each record group).")
+        other = ""
+        if blocking:
+            whys: dict[str, list[Mapping]] = {}
+            for r in blocking:
+                got = readings[r["run_id"]]
+                at = (f"its emission motor is held at {', '.join(f'{e:g}' for e in got['energies'][:4])} eV during an energy "
+                      f"scan, and {got['why']}" if got.get("energies") and "several" not in got["why"] else got["why"])
+                whys.setdefault(at, []).append(r)
+            other = (" " + " ".join(f"{len(rs)} run{'s record' if len(rs) != 1 else ' records'} something else ({why}): "
+                                    f"{_named(rs)}." for why, rs in whys.items()))
+        reason = (f"No technique is offered for the beamtime: the instrument configurations of its runs do not all state "
+                  f"one. Stated: {counts}. " + " ".join(said) + other + apart
+                  + " Tell me the technique in answer to this question; where the record groups differ, answer this "
+                  "question for each group in turn. Nothing was taken from a macro or script name, and the runs' own "
+                  "technique readings are left as they were.")
     return suggested_candidate(
         engine_id=f"shared::{TECHNIQUE_RULE_ID}", bundle_cid=bundle_cid, run_id=None, key=TECHNIQUE_KEY, path=TECHNIQUE_PATH,
         value=value, rule_id=TECHNIQUE_RULE_ID, rule=TECHNIQUE_RULE, reason=reason, witnesses=witnesses, writable=writable)
