@@ -279,9 +279,14 @@ What a match becomes:
 - A value with one part per record field (`{"name": …, "concentration_M": …}` on `…electrolyte`) is read for
   the card of each part; a value keyed by file name is read for the card of that one file.
 - A suggestion that comes from a reading replaces "None of your files say." in the card's detail.
-- An entry with `basis: "general_knowledge"` and `confidence: "high"`, a confidence or basis off the lists, or
-  (the contract's shape) a reason that is missing or holds a field path, a flag or an id is not used; the
-  report says which and why.
+- An entry with `basis: "general_knowledge"` and `confidence: "high"`, a confidence or basis off the lists, no
+  evidence quote at all, or (the contract's shape) a reason that is missing or holds a field path, a flag or an id
+  is not used; the report says which and why.
+- Entries matched by question id must between them name every question the card answers; otherwise they are
+  context ("read for only some of these measurements"). The suggestion takes the lowest confidence of the
+  entries that offer it.
+- `high` is kept only when one of the quotes holds the value itself (as written, in words, as the option's
+  label, or as one of the entry's optional `synonyms`); otherwise the card says `medium` at most.
 
 A value the files give, which a card confirms as it stands (`basis: "files"`), is never replaced by an entry.
 
