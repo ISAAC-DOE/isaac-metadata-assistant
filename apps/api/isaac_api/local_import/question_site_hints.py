@@ -302,6 +302,10 @@ def apply(cards: Sequence[dict], entries: Sequence[Mapping], with_common) -> lis
                 why = "the readings for these measurements differ"
             elif kind == "yes_no" or cover.get("on_value") is None:
                 why = "this card takes yes or no"
+            elif card.get("_lone") and not isinstance(e["suggestion"].get("value"), Mapping) and not (
+                    e["group_ids"] and set(card.get("_groups") or ()) <= set(e["group_ids"])):
+                # a file that states no sample: a reading of "the samples" was not made for it (review C1)
+                why = "read for the samples in general, not for this file"
             elif confirms and json.dumps(v, default=str) == json.dumps(card["suggestion"].get("value"), default=str):
                 rows[e["n"]]["agrees_on"] = rows[e["n"]].get("agrees_on", 0) + 1  # the files' own value says the same
                 continue
@@ -334,6 +338,8 @@ def apply(cards: Sequence[dict], entries: Sequence[Mapping], with_common) -> lis
             card["_suggestion_source"] = e
             rows[e["n"]]["suggested_on"] += 1
             # a reading found what no parser did: the card no longer says that no file states it
+            if card.get("_lead") == P.NONE_SAY:
+                card["_lead"] = ""
             card["detail"] = str(card.get("detail") or "").replace(P.NONE_SAY, "", 1).strip()
             alts = [a for a in e["alternatives"] if isinstance(a, (str, int, float))]
             base = {k: x for k, x in card["answer"].items() if k != "common"}
@@ -345,8 +351,7 @@ def apply(cards: Sequence[dict], entries: Sequence[Mapping], with_common) -> lis
                 card["answer"] = base
                 said = [f"“{_said(a)}”" for a in alts[:MAX_ALTERNATIVES]]
                 if said:
-                    first = re.split(r"(?<=[.!?])\s", str(card.get("detail") or ""), maxsplit=1)[0].strip()
-                    card["detail"] = f"{first} A reading of your files also names: {P.or_list(said)}.".strip()
+                    card["_alt"] = f"A reading of your files also names: {P.or_list(said)}."
     for e in usable:
         row = rows[e["n"]]
         if not row["suggested_on"] and not row["context_on"] and not row.get("agrees_on"):

@@ -147,9 +147,31 @@ These were added while the export and the import were built
 (`apps/api/isaac_api/local_import/question_site.py`, `question_site_import.py`, `question_site_hints.py`). A site
 written against the shapes above keeps working; it may ignore every key it does not know.
 
+### One answer never reaches groups whose honest answer could differ
+
+- A question the command line asks once for several record groups is one card **per sample the grouping
+  states** (its sample name and loading or thickness, never the electrode number), answered with
+  `only_scopes` = that sample's groups. A group whose files state no sample is a card of its own. The same holds
+  for a same-reading group that asks for a value; one that only confirms the value each file itself gives stays
+  one card ("yes" confirms each file's own value). `card_id` then hashes `Q-…@group:<id>` for each of the card's
+  groups.
+- A reading of "the samples" (`--suggestions`) is not offered as a one-click answer on a card about a file that
+  states no sample, unless the entry names that file's group; it is shown as context.
+- A card for several measurements says so in its detail: "One answer covers all N measurements; if any
+  differs, add a note and nothing is recorded until it has been read."
+- **An answer that carries a note, on a card whose `applies_to.count` is more than 1, is held by the import**:
+  outcome `held`, reason "held: the note may name exceptions …", nothing recorded for that card. Once a person
+  has read the note and it names no exception, `--note-read <card_id>` applies the answer as it was given. A
+  note on a card about one measurement is reported and the answer applied.
+- A card that reaches more than 40 measurements lists the first 40 in `applies_to.items` and **all** of them in
+  `applies_to.breakdown`: `[{"label": "sample ZZ1" | "no sample named in the files", "count": n, "example":
+  "<one file>"}]`, one row per stated sample and one per measurement that names none. The same table is the
+  card's first context item ("Everything one answer covers: N measurements").
+
 ### What a card can carry beyond the example
 
-- `applies_to.more` is present only when there are more than 40 items.
+- `applies_to.more` is present only when there are more than 40 items; `applies_to.breakdown` then lists
+  everything (above).
 - `answer.common` is present only when there is a short list to show first. It lists option **values**.
 - A context item may carry `source` (a sentence saying where it came from: ISAAC's parser, ISAAC's processing, or
   "an AI reading of the files (not file evidence…)"). A `values` item may carry `more` (rows not shown).
@@ -272,8 +294,9 @@ same reading; a reading of some of a card's measurements is not offered for all 
 
 Each answer ends as one of: `recorded` (preview: `would_record`), `vocabulary_request_kept` (preview:
 `would_keep_vocabulary_request`), `already_recorded`, `refused` (with the decide path's own reason),
-`no_longer_asked`, `nothing_to_record` (a "no", or an "I don't know" on a card that takes none), `superseded`
-(an earlier answer to a card answered again in the same file). Two answers to one card: the later `at` wins.
+`no_longer_asked`, `nothing_to_record` (a "no", or an "I don't know" on a card that takes none), `held` (a note on
+a card for several measurements, above), `superseded` (an earlier answer to a card answered again in the same
+file). Two answers to one card: the later `at` wins.
 The decision's note is `question site card <card_id> "<title>", answered <at>`; an answer already recorded is
 recognised by that note and the name, so a second run writes nothing.
 

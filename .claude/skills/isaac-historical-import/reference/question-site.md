@@ -18,7 +18,9 @@ decision is recorded under the name the scientist signed in with.
   the ones answered "I don't know" earlier, `--include approvals` one yes or no card per record group to
   confirm and per merged curve to approve.
 - One card is one real ask. Questions the bundle itself says share a reading become one card (all
-  measurements of one sample token). Different samples and different fields are never one card.
+  measurements of one sample token). Different samples and different fields are never one card: a question the
+  command line asks once for the whole beamtime is asked once per sample, and a file that names no sample gets
+  a card of its own. A card that covers more than 40 measurements shows all of them, by sample, with counts.
 - Read the report back: how many cards, in which sections, how many questions they cover, and every question
   left out with its reason. A question the site cannot word plainly is left out and counted, never shown raw.
 - The export checks every card by a dry run, so it takes about a minute for a large beamtime. It writes to the
@@ -33,7 +35,7 @@ that is not on a field's list is shown beside the card as a quote, never as a on
 
 ## Read the answers back
 
-`<isaac> bundle site import <bundle> <answers.json> --site-data <folder>/data/site-data.json [--apply] [--remember] [--json]`
+`<isaac> bundle site import <bundle> <answers.json> --site-data <folder>/data/site-data.json [--apply] [--remember] [--note-read <card id>] [--json]`
 
 `<answers.json>` is the file downloaded from the site. `--site-data` is the same `site-data.json` the site
 was showing.
@@ -57,6 +59,7 @@ What each answer becomes:
 | said yes on a yes or no card | the one decision the card stands for |
 | said no on a yes or no card | nothing. Read their note and settle it with them |
 | wrote a note | nothing. Every note is listed under "Notes to read"; none is turned into a decision |
+| wrote a note on a card for several measurements | nothing for that card: it is **held**, because the note may name exceptions ("all but the pellet"). Read the note with the scientist. If it names none, import again with `--note-read <card id>`; if it does, answer those measurements yourself with `bundle decide` |
 
 - Every decision is recorded by `<their name> (question site)`, with a note naming the card and when they
   answered it.

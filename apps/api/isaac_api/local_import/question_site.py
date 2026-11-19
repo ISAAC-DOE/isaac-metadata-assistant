@@ -271,18 +271,57 @@ def _why_not(q: Mapping, include: Sequence[str]) -> str | None:
     return None
 
 
+def _group_identity(view: _View, gid: str) -> tuple[str, str] | None:
+    """The grouping's own sample identity of one record group, ``(sample name, loading or thickness)``; ``None``
+    when its files state no sample name, or a conflicting one (the electrode number is not part of it: it names the
+    object, not the material)."""
+    sample = ((view.groups.get(gid) or {}).get("basis") or {}).get("sample") or {}
+    name, loading = sample.get("sample_name") or {}, sample.get("loading_or_thickness") or {}
+    if not name.get("value") or name.get("kind") == "conflicting" or loading.get("kind") == "conflicting":
+        return None
+    return str(name["value"]), str(loading.get("value") or "")
+
+
 def _identity(view: _View, q: Mapping) -> tuple[str, str] | None:
-    """The grouping's own sample identity of a question's groups, ``(sample name, loading or thickness)``, when they
-    all share one and none is a conflicting reading (the electrode number is not part of it: it names the object,
-    not the material)."""
-    keys = set()
-    for gid in _groups_of(view, q):
-        sample = ((view.groups.get(gid) or {}).get("basis") or {}).get("sample") or {}
-        name, loading = sample.get("sample_name") or {}, sample.get("loading_or_thickness") or {}
-        if not name.get("value") or name.get("kind") == "conflicting" or loading.get("kind") == "conflicting":
-            return None
-        keys.add((str(name["value"]), str(loading.get("value") or "")))
+    """The one sample identity every group of a question shares (:func:`_group_identity`), else ``None``."""
+    keys = {_group_identity(view, gid) for gid in _groups_of(view, q)}
     return next(iter(keys)) if len(keys) == 1 else None
+
+
+def _identity_said(view: _View, gid: str) -> str | None:
+    """A group's sample identity as its files write it ("ZZ1", "SYNfilm, 5nm"), or ``None`` when it states none."""
+    if _group_identity(view, gid) is None:
+        return None
+    sample = ((view.groups.get(gid) or {}).get("basis") or {}).get("sample") or {}
+
+    def said(part: Mapping) -> str | None:
+        for cid in part.get("candidate_ids") or ():
+            lits = (view.cands.get(cid) or {}).get("observed_literals") or ()
+            if lits:
+                return str(lits[0])
+        return str(part["value"]) if part.get("value") else None
+
+    return ", ".join(x for x in (said(sample.get("sample_name") or {}), said(sample.get("loading_or_thickness") or {})) if x)
+
+
+def _scope_parts(view: _View, q: Mapping, scopes: Sequence[str]) -> list[tuple[list[str] | None, bool]]:
+    """The groups of ONE question asked for several groups, as the parts that are one ask each:
+    ``(only_scopes, lone)``. One part per sample identity the grouping states; every group that states none is a
+    part of its own (``lone``): nothing says its answer is any other group's. ``(None, False)``: the question as it
+    is asked (one identity, or one group). A question whose files name no sample at all (``sample=unrecorded``), or
+    whose earlier answers differ, is one part per group."""
+    if len(scopes) <= 1:
+        return [(None, False)]
+    if q.get("partition") == "sample=unrecorded" or q.get("answers_differ"):
+        return [([sc], True) for sc in scopes]
+    stated: dict[Any, list[str]] = {}
+    lone: list[str] = []
+    for sc in scopes:
+        key = _group_identity(view, sc[len("group:"):])
+        (stated.setdefault(key, []) if key is not None else lone).append(sc)
+    if len(stated) + len(lone) <= 1:
+        return [(None, False)]
+    return [*((v, False) for v in stated.values()), *(([sc], True) for sc in lone)]
 
 
 def _by_identity(view: _View, members: Sequence[Mapping]) -> list[list[Mapping]]:
@@ -300,22 +339,16 @@ def _by_identity(view: _View, members: Sequence[Mapping]) -> list[list[Mapping]]
     return [*stated.values(), *([m] for m in lone)]
 
 
-def _loading_said(view: _View, q: Mapping) -> str | None:
-    """The loading or thickness of a question's first group as its files write it ("0p5nm"), or ``None``."""
-    for gid in _groups_of(view, q):
-        loading = (((view.groups.get(gid) or {}).get("basis") or {}).get("sample") or {}).get("loading_or_thickness") or {}
-        for cid in loading.get("candidate_ids") or ():
-            lits = (view.cands.get(cid) or {}).get("observed_literals") or ()
-            if lits:
-                return str(lits[0])
-        return str(loading["value"]) if loading.get("value") else None
-    return None
-
-
 def _units(view: _View, rows: Sequence[Mapping], include: Sequence[str]) -> tuple[list[dict], Counter]:
     """``(units, left_out)``: each unit is one ask, ``{"questions", "named", "same_reading", "each", "only_scopes",
-    "field"}`` (``each``: one call per question, for a part of a same-reading group); ``left_out`` counts the
-    questions not asked, by reason."""
+    "field", "identified", "lone"}`` (``each``: one call per question, for a part of a same-reading group;
+    ``identified``: a part that is one stated sample; ``lone``: a part whose group states no sample); ``left_out``
+    counts the questions not asked, by reason.
+
+    NO ONE-CLICK ANSWER REACHES GROUPS WHOSE HONEST ANSWER COULD DIFFER (review C1). A question asked for several
+    groups, and a same-reading group that asks for a value, is split by the grouping's own sample identity
+    (:func:`_scope_parts`, :func:`_by_identity`). A same-reading group that only confirms the value each file
+    itself gives stays whole: "yes" confirms each file's own value."""
     left: Counter = Counter()
     wanted = {}
     for q in rows:
@@ -342,24 +375,31 @@ def _units(view: _View, rows: Sequence[Mapping], include: Sequence[str]) -> tupl
                 if m["question_id"] not in wanted:
                     left[_why_not(m, include) or ""] -= 1
             parts = [members]
-            if str(members[0].get("target_field_path") or "").startswith("sample."):
+            gives_value = members[0]["kind"] != "confirm_value" or P.confirm_shape(members[0]) != "value"
+            if gives_value or str(members[0].get("target_field_path") or "").startswith("sample."):
                 parts = _by_identity(view, members)
             for part in parts:
                 whole = len(part) == len(members)
                 units.append({"questions": part, "named": part[0], "same_reading": whole, "each": not whole,
-                              "split_identity": not whole, "only_scopes": None, "field": None})
+                              "only_scopes": None, "field": None,
+                              "identified": not whole and _identity(view, part[0]) is not None,
+                              "lone": not whole and _identity(view, part[0]) is None})
             continue
         done.add(qid)
         scopes = _scopes(q)
-        if q["kind"] == "optional_values":
-            for field in sorted(q.get("fields") or {}):
-                units.append({"questions": [q], "named": q, "same_reading": False, "only_scopes": None, "field": field})
-        elif q["kind"] in VALUE_KINDS and len(scopes) > 1 and (q.get("partition") == "sample=unrecorded"
-                                                               or q.get("answers_differ")):
-            for sc in scopes:  # their honest answers could differ: one card per group
-                units.append({"questions": [q], "named": q, "same_reading": False, "only_scopes": [sc], "field": None})
-        else:
-            units.append({"questions": [q], "named": q, "same_reading": False, "only_scopes": None, "field": None})
+        can = getattr(view, "exportable", None)
+        fields = sorted(q.get("fields") or {}) if q["kind"] == "optional_values" else [None]
+        for field in fields:
+            mine = scopes
+            if field is not None:
+                ids = set((q.get("fields") or {}).get(field) or ())
+                mine = [sc for sc in scopes if ids.intersection(q["per_scope_targets"].get(sc) or ())]
+            for only, lone in (_scope_parts(view, q, mine) if q["kind"] != "condition_label" else [(None, False)]):
+                if only is not None and can is not None and not any(sc[len("group:"):] in can for sc in only):
+                    left["about a measurement that cannot become a record"] += 1
+                    continue
+                units.append({"questions": [q], "named": q, "same_reading": False, "each": False, "only_scopes": only,
+                              "field": field, "identified": only is not None and not lone, "lone": lone})
     return units, +left
 
 
@@ -500,6 +540,10 @@ def _subject(view: _View, unit: Mapping, groups: Sequence[str], path: str | None
     "this measurement"; ``None`` for the whole beamtime), whether that is several things, and the sample as the files
     write it ("ZZ1 (no. 01)") when the card is about one sample."""
     q = unit["named"]
+    if unit.get("identified") and groups:  # one stated sample of a question (or reading) that spans several
+        name = _identity_said(view, groups[0])
+        if name:
+            return f"sample {name}", False, name
     pairs = P.sample_pairs(q)
     # only a sample the question's own words give in the files' spelling: a partition key alone is lower-cased
     if pairs and not unit["only_scopes"] and "as the files write it" in str(q.get("text") or ""):
@@ -508,14 +552,11 @@ def _subject(view: _View, unit: Mapping, groups: Sequence[str], path: str | None
             name = ", ".join(x for x in (got["sample_name"], got.get("loading_or_thickness")) if x)
             number = f" (no. {got['sample_or_electrode_number']})" if got.get("sample_or_electrode_number") else ""
             return f"sample {name}{number}", False, f"{name}{number}"
-    if (unit["same_reading"] or unit.get("split_identity")) and isinstance(path, str) and path.startswith("sample."):
+    if unit["same_reading"] and isinstance(path, str) and path.startswith("sample."):
         tokens = q.get("shared_sample_tokens")
         literals = list(dict.fromkeys(str(h["literal"]) for h in _file_hints(unit["questions"])
                                       if h.get("kind") == "file_literal"))
         name = " ".join(str(t) for t in tokens) if tokens else literals[0] if len(literals) == 1 else None
-        loading = _loading_said(view, q) if unit.get("split_identity") else None
-        if name and loading and loading.casefold() not in name.casefold():
-            name = f"{name}, {loading}"
         if name:
             return f"sample {name}", False, name
     whole = (str(q.get("scope")) == "experiment" and not unit["only_scopes"] and not unit["same_reading"]
@@ -524,6 +565,42 @@ def _subject(view: _View, unit: Mapping, groups: Sequence[str], path: str | None
         return None, False, None
     n = len(groups)
     return ("this measurement", False, None) if n <= 1 else (f"these {n} measurements", True, None)
+
+
+def _breakdown(view: _View, groups: Sequence[str]) -> list[dict]:
+    """Everything one answer reaches, in full: one row per sample the files state (its measurements counted, one
+    file as an example) and one row per measurement whose files state no sample."""
+    rows: dict[Any, dict] = {}
+    for g in groups:
+        said = _identity_said(view, g)
+        key = ("sample", said) if said else ("file", g)
+        row = rows.setdefault(key, {"label": f"sample {said}" if said else "no sample named in the files",
+                                    "count": 0, "example": view.group_name(g)})
+        row["count"] += 1
+    return list(rows.values())
+
+
+def _show_everything(view: _View, card: dict) -> None:
+    """A card that reaches more measurements than it lists (:data:`MAX_ITEMS`) says so and shows them all in
+    groups: ``applies_to.breakdown``, and the same table first among its context (review C1)."""
+    groups = card.get("_groups") or ()
+    if len(groups) <= MAX_ITEMS:
+        return
+    rows = _breakdown(view, groups)
+    card["applies_to"]["breakdown"] = rows
+    card.setdefault("_first_context", []).append({
+        "kind": "values", "label": f"Everything one answer covers: {len(groups)} measurements",
+        "columns": ["Sample", "Measurements", "For example"],
+        "rows": [[r["label"], str(r["count"]), r["example"]] for r in rows]})
+
+
+def _assemble_detail(card: dict) -> None:
+    """A value card's detail once its hints are settled: the lead, then what one answer covers (a card for several
+    measurements), else an alternative a reading names, else what to do. Never more than two sentences."""
+    if "_lead" not in card:
+        return
+    second = card.get("_coverage") or card.get("_alt") or card.get("_then") or ""
+    card["detail"] = " ".join(x for x in (card.get("_lead") or "", second) if x)
 
 
 def _applies_to(view: _View, groups: Sequence[str], sample: str | None, whole: bool) -> dict:
@@ -563,40 +640,51 @@ def _value_card(view: _View, unit: Mapping) -> dict:
     answer = _answer(view, path, allowed, options=options)
     noun_ = P.noun(path)
     ask = P.ask_for(path, allowed, subject=subject, plural=plural, names_sample=bool(sample))
+    # the detail is at most two sentences: a lead (what the files hold) and, when there is room, what to do
+    lead, then = "", ""
     if kind == "confirm_value" and shape == "value" and suggestion is not None:
         title = P.is_it(path, suggestion["label"], subject=subject)
-        detail = suggestion["reason"]
+        lead = suggestion["reason"]
     elif kind == "confirm_value" and shape == "value":
         title = ask
-        detail = f"Your files write {written}, read differently from one file to the next." if written else ""
+        lead = f"Your files write {written}, read differently from one file to the next." if written else ""
     elif kind == "confirm_value":
         title = ask
-        detail = ("The value read from your files does not fit here." if shape == "unfit"
-                  else "Your files mention it, but not as a value a record can hold." if not written
-                  else f"Your files write {written}, a clock time with no time zone. Please give it in UTC."
-                  if path.startswith("timestamps.")
-                  else f"Your files only write {written}. Please pick the {noun_} from the list." if allowed
-                  else f"Your files only write {written}. Please give the {noun_} itself.")
+        if shape == "unfit":
+            lead = "The value read from your files does not fit here."
+        elif not written:
+            lead = "Your files mention it, but not as a value a record can hold."
+        elif path.startswith("timestamps."):
+            lead, then = f"Your files write {written}, a clock time with no time zone.", "Please give it in UTC."
+        else:
+            lead = f"Your files only write {written}."
+            then = f"Please pick the {noun_} from the list." if allowed else f"Please give the {noun_} itself."
     elif kind == "resolve_conflict" and options:
         title = P.disagree(path, subject=subject)
-        detail = ""
     elif kind == "resolve_conflict":
         title = ask
         said = f"Your files write {written}" if written else "Your files disagree about it"
-        detail = (f"{said}. Please pick the {noun_} from the list." if allowed
-                  else f"{said}, with no time zone. Please give it in UTC." if path.startswith("timestamps.")
-                  else f"{said}. Please give the right {noun_}.")
+        if allowed:
+            lead, then = f"{said}.", f"Please pick the {noun_} from the list."
+        elif path.startswith("timestamps."):
+            lead, then = f"{said}, with no time zone.", "Please give it in UTC."
+        else:
+            lead, then = f"{said}.", f"Please give the right {noun_}."
     else:
         title = ask
-        detail = "" if suggestion else P.NONE_SAY
+        lead = "" if suggestion else P.NONE_SAY
     n = len(groups)
-    if n > 1 and subject is None and len(_scopes(q)) > 1:
-        detail = f"{detail} One answer covers all {n} measurements; if some differ, say which in the note.".strip()
+    # ONE answer for several measurements: said on the card, and a note on such a card holds the answer back at the
+    # import (question_site_import), so "all but one" is never recorded as "all"
+    coverage = (f"One answer covers all {n} measurements; if any differs, add a note and nothing is recorded until "
+                "it has been read." if n > 1 else "")
+    detail = " ".join(x for x in (lead, coverage or then) if x)
     blocking = any(m.get("blocking") for m in qs)
     scoped = set(unit["only_scopes"] or ())
     blocks = {g for m in qs if m.get("blocking") for g in m.get("blocks_group_ids") or ()
               if not scoped or f"group:{g}" in scoped}
-    covered = [m["question_id"] + (f"@{unit['only_scopes'][0]}" if unit["only_scopes"] else "") for m in qs]
+    covered = ([f"{q['question_id']}@{sc}" for sc in unit["only_scopes"]] if unit["only_scopes"]
+               else [m["question_id"] for m in qs])
     whole = subject is None
     section = ("optional" if not blocking else "beamtime" if whole else "samples" if sample else "records")
     def cover(named: Mapping, answers: Sequence[Mapping]) -> dict:
@@ -616,7 +704,8 @@ def _value_card(view: _View, unit: Mapping) -> dict:
         "title": title, "detail": detail, "field": {"path": path, "label": P.field_label(path)},
         "applies_to": _applies_to(view, groups, sample, whole), "unblocks": len(blocks) if blocking else 0,
         "answer": _with_common(answer, path, suggestion), "suggestion": suggestion, "context": [], "covers": covers,
-        "_questions": qs, "_groups": groups, "_sample": sample, "_folder_hint": [h for m in qs for h in m.get("hints") or ()
+        "_questions": qs, "_groups": groups, "_sample": sample, "_lone": bool(unit.get("lone")),
+        "_lead": lead, "_then": then, "_coverage": coverage, "_folder_hint": [h for m in qs for h in m.get("hints") or ()
                                                               if h.get("kind") == "folder_name"],
     }
 
@@ -947,7 +1036,8 @@ def _site_context(items: Sequence[Mapping], view: _View, img_dir: Path, images: 
 def _card_context(card: dict, view: _View, img_dir: Path, images: list[str], shown: list) -> None:
     from . import question_context as QC
 
-    extra = list(card.get("_extra_context") or ())  # what a reading found (--suggestions): shown first
+    # first what one answer covers (a card that lists only some of it), then what a reading found (--suggestions)
+    extra = [*(card.get("_first_context") or ()), *(card.get("_extra_context") or ())]
     if card.get("_context_items") is not None:
         card["context"] = (extra + _site_context(card["_context_items"], view, img_dir, images))[:MAX_CONTEXT]
         shown += card.get("_shown") or []
@@ -1050,6 +1140,9 @@ def export_site(bundle_dir: Path, out: Path, *, suggestions: Path | None = None,
         cards += more
         left.update(held)
     suggestion_report = H.apply(cards, entries, _with_common)
+    for card in cards:
+        _assemble_detail(card)
+        _show_everything(view, card)
 
     # every card's calls, dry-run on a temporary copy of bundle.json (not even a lock file in the bundle folder)
     kept: list[dict] = []
