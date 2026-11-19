@@ -95,6 +95,8 @@ LABEL_ASKS = {
 CONFIDENCES = H.CONFIDENCES
 BASES = H.BASES
 MAX_ITEMS = 40
+#: the most different values a yes / no card over proposed labels shows (every one of them, or no card)
+MAX_LABEL_VALUES = 12
 #: the longest file literal a card's detail quotes
 MAX_QUOTED_CHARS = 40
 MAX_CONTEXT = 6
@@ -721,7 +723,16 @@ def _label_card(view: _View, unit: Mapping) -> dict:
     title = one.format(value=f"'{values[0]}'") if len(values) == 1 else many
     groups = view.reach([p["group_id"] for p in proposals if p.get("group_id")] or _groups_of(view, q))
     n = len(groups)
-    rows = [[str(p.get("first_file") or view.group_name(p.get("group_id") or "")), str(p["value"])] for p in proposals]
+    # review I4: one "yes" confirms every proposal, so the card shows every distinct value, with how many
+    # measurements it is for and one file as an example; a label with more values than a card can show is left out
+    by_value: dict[str, dict] = {}
+    for p in proposals:
+        row = by_value.setdefault(str(p["value"]), {"count": 0, "example": str(p.get("first_file") or
+                                                                              view.group_name(p.get("group_id") or ""))})
+        row["count"] += 1
+    if len(by_value) > MAX_LABEL_VALUES:
+        raise _LeftOut(f"a label with more than {MAX_LABEL_VALUES} different proposed values (too many for one yes or no)")
+    rows = [[value, str(r["count"]), r["example"]] for value, r in by_value.items()]
     cover = {"question_id": q["question_id"], "same_reading": False, "only_scopes": None, "field": None,
              "on_accept": None, "on_value": None, "on_dont_know": None, "on_yes": {"decision": "confirm"},
              "on_no": None, "target": None, "questions": [q["question_id"]]}
@@ -734,8 +745,8 @@ def _label_card(view: _View, unit: Mapping) -> dict:
         "applies_to": _applies_to(view, groups, None, n == len(view.exportable)), "unblocks": 0,
         "answer": {"kind": "yes_no", "options": [], "allow_text": False, "unit": None, "placeholder": None},
         "suggestion": None,
-        "context": [{"kind": "values", "label": "Proposed from the file names", "columns": ["File", "Proposed"],
-                     "rows": rows[:8], **({"more": len(rows) - 8} if len(rows) > 8 else {})}],
+        "context": [{"kind": "values", "label": f"Every value proposed from the file names ({len(proposals)} measurements)",
+                     "columns": ["Proposed", "Measurements", "For example"], "rows": rows}],
         "covers": [cover], "_questions": [q], "_groups": groups, "_no_context": True,
     }
 

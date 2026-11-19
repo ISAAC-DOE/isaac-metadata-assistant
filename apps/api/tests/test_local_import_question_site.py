@@ -1175,6 +1175,25 @@ def test_files_that_are_not_this_bundles_are_refused_whole(work, tmp_path):
     assert exc.value.code == S.EXIT_NOT_FOUND and _digest(bdir) == before
 
 
+def test_a_yes_no_card_shows_every_value_one_yes_confirms():
+    """Review I4: a yes over proposed labels confirms all of them, so every distinct value is shown with its count and
+    an example file; a label with more values than a card can show is left out."""
+    proposals = [{"group_id": f"rg-{n}", "value": f"SYN-{n % 3}", "first_file": f"syn_{n:02d}"} for n in range(20)]
+    q = {"question_id": "Q-syn0000001", "kind": "condition_label", "label": "sample_id", "target_field_path": "sample.sample_id",
+         "proposals": proposals, "allowed_decisions": ["confirm", "correct", "reject"]}
+    view = SimpleNamespace(exportable=[p["group_id"] for p in proposals], live=[], groups={})
+    view.reach = lambda gids: list(gids)
+    view.group_name = lambda gid: gid
+    card = S._label_card(view, {"named": q, "questions": [q]})
+    (table,) = card["context"]
+    assert table["columns"] == ["Proposed", "Measurements", "For example"] and "more" not in table
+    assert table["rows"] == [["SYN-0", "7", "syn_00"], ["SYN-1", "7", "syn_01"], ["SYN-2", "6", "syn_02"]]
+    assert table["label"] == "Every value proposed from the file names (20 measurements)"
+    many = {**q, "proposals": [{**p, "value": f"SYN-{n}"} for n, p in enumerate(proposals)]}
+    with pytest.raises(S._LeftOut, match="more than 12 different proposed values"):
+        S._label_card(view, {"named": many, "questions": [many]})
+
+
 def test_a_yes_no_card_records_yes_and_reports_no(base, tmp_path):
     bdir = tmp_path / "bundle"
     shutil.copytree(base, bdir)
