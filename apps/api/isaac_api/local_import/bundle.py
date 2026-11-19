@@ -100,7 +100,15 @@ FORMAT_ID = "isaac.local-import-bundle"
 #: legacy number, never a run; a file in a MERGE folder whose content says no such thing stays a run, with a note. A 1.12.0 validator refuses the new enum values, hence the
 #: version. Nothing becomes newly writable; a 1.12.0 bundle keeps such files as runs until re-imported, and its first
 #: save says so (:func:`average_title_runs`).
-FORMAT_VERSION = "1.13.0"
+#: 1.14.0 (import rules only; the bundle's shape is unchanged): four readings a 1.13.0 build did not make at import —
+#: a signed potential token in a file name (``bl15.filenames.signed_potential.v1``, and no set-point from a range, a
+#: pulse or a trailing OCV), the technique from the instrument configuration (``suggestions.TECHNIQUE_RULE_ID``), a
+#: pellet-standard field asked only where a source mentions it (``suggestions.MENTION_GATE_RULE_ID``), and a comment
+#: line left over from an earlier run (``suggestions.STALE_COMMENT_RULE_ID``). Only a re-import applies them, and a
+#: re-import keeps every id the earlier build gave (new candidates are numbered last; a newly filled slot keeps its
+#: number). Nothing becomes newly writable; the upgrade is disclosed (:data:`CHANGES_ADDED_IN`). The version is bumped
+#: so a bundle says which readings it was imported with.
+FORMAT_VERSION = "1.14.0"
 #: The electrochemical control mode. Its allowed values are the official schema's enum (read at
 #: runtime by :func:`value_problem`); the schema's conditional rules key the set-point a record
 #: requires on it (:func:`required_record_paths`). Never defaulted, never derived.
@@ -126,7 +134,7 @@ VALUE_IDS_APPEND_FROM = "1.5.0"
 IMPORT_RULES_ADDED_IN: Mapping[str, tuple] = {
     "1.4.0": (("generic:ssrl_xdc_v1", "ssrl_xdc_scan_start_v1"),),
 }
-_VERSION_ORDER = ("1.0.0", "1.1.0", "1.2.0", "1.3.0", "1.4.0", "1.5.0", "1.6.0", "1.7.0", "1.8.0", "1.9.0", "1.10.0", "1.11.0", "1.12.0", "1.13.0")
+_VERSION_ORDER = ("1.0.0", "1.1.0", "1.2.0", "1.3.0", "1.4.0", "1.5.0", "1.6.0", "1.7.0", "1.8.0", "1.9.0", "1.10.0", "1.11.0", "1.12.0", "1.13.0", "1.14.0")
 #: A change a format version made that moves no eligibility and adds no import rule, but that the
 #: first save by a newer build still DISCLOSES in its ``format_upgrades`` entry (never silently).
 CHANGES_ADDED_IN: Mapping[str, str] = {
@@ -144,6 +152,11 @@ CHANGES_ADDED_IN: Mapping[str, str] = {
                "scientists' averages, e.g. a .mca) as a processed output linked by legacy number, never a run; a bundle "
                "imported before holds such files as runs until re-imported; and takes the scientist's set_role decision for a record group (sample, reference or "
                "alignment)"),
+    "1.14.0": ("1.14.0 reads at import, only on a re-import: a signed potential in a file name "
+               "(bl15.filenames.signed_potential.v1; none from a range, a pulse or a trailing OCV), the technique from the "
+               "instrument (isaac.suggest.technique_from_configuration.v1), pellet fields only where mentioned "
+               "(isaac.import.optional_field_asked_where_mentioned.v1), stale comment lines "
+               "(isaac.import.comment_possibly_stale.v1); a re-import keeps every id the earlier build gave"),
 }
 #: A field composed into a draft only beside another of the SAME run (interim decision for the
 #: set-point, pending domain-owner review; ``records.compose_group`` applies it). The CURRENT
