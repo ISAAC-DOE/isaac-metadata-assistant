@@ -106,6 +106,9 @@ average normalised ONCE. Show per group, from `<isaac> bundle show <bundle> proc
   anyway"; flag `measurement_mode_unknown`) and ask the scientist how it was measured.
 - **`logbook_notes`**: the notes read for these runs (exclude, start_from, keep_only apply; a flag changes nothing and is
   said). "No logbook scan notes: this build has no logbook scan-notes reader" means none was applied: say it once.
+  Its `state` says which of three things is true, and they are never the same sentence: `no_reading_loaded` (no
+  reading pass has been loaded although notes files are present: say "the logbook has not been read yet", never "the
+  logbook has nothing"; `process` says it once in its summary), `read_no_note_for_these_runs`, or `notes`.
 - **`normalization`**: the convention in plain words (background + McMaster step; the post-edge follows McMaster and is
   NOT flattened to 1, so edge steps run a few % above a flattened one), the absorber it used and its basis (say "not
   confirmed" when it is, and offer `set_absorber`), the window and whether it is the beamtime's one window, and the
@@ -124,6 +127,12 @@ scans by the ids the rows give (`<run name>#<scan number>`, or the file name):
 `<isaac> process <bundle> --source <folder> --group <group id>`. The new result has a new id, shows the row as the
 scientist's (`decided_by: scientist`, with what the rule said), and is approved as usual; an approval of the old result
 stays on the old curve. Approving stays the scientist's call per curve, exactly as below.
+
+**An approved curve older than its evidence** (`approved_curve_older_than_evidence`): a scan note that lands on a run
+whose curve is already approved, or a newer result than the approved one, is the first warning of `build-records`,
+`validate` and `export`, and a line of `process`. Tell the scientist at once and read its "Next:"; the record keeps the
+approved curve until they decide. A bulk approval refuses such a result, and one approval of a result processed
+before its scan note waits until the group is processed again.
 
 ## Processing (draft protocol `isaac.xas.v0`)
 

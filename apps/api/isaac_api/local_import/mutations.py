@@ -1222,6 +1222,14 @@ C_ATHENA_NEVER_RULE_ID = "isaac.processing.athena_never_used.v0"
 C_ATHENA_SOURCE = "scientist_athena"
 
 
+def _approval_predates_a_note(bundle: Mapping, result: Mapping, approval: Mapping) -> bool:
+    """True when a scan note names a run of ``result``'s group that was not there when ``approval`` was recorded
+    (``approved_curve``): approving again is then a new statement, never "unchanged"."""
+    from . import approved_curve as AC
+
+    return AC.approval_predates_a_note(bundle, result, approval)
+
+
 def isaac_results_for(bundle: Mapping, group_id: str | None) -> list[str]:
     """The ISAAC-processed results of ``group_id`` a scientist can approve instead of an Athena curve: from
     ``isaac process`` (never Athena), not rejected, not "protocol does not apply", a curve first."""
@@ -3130,6 +3138,12 @@ def record_decision(
                     if bulk and (why := bulk_approve_problem(obj)) is not None:
                         raise MutationRefused(f"{why} Approve this one on its own, after its sentence is read to the "
                                               "scientist; a bulk approval does not. Nothing was recorded.")
+                    # finding 2 (audit of 18 Nov 2026): a curve older than its evidence (a scan note it was processed
+                    # without, or a newer result of its group) is never approved in a bulk call
+                    from . import approved_curve as AC
+
+                    if (why := AC.approval_problem(bundle, obj, bulk=bulk)) is not None:
+                        raise MutationRefused(why)
                     if "athena_e0_possibly_fixed" in (obj.get("review_flags") or ()) and not e0_measured:
                         # r1 M5: an Athena E0 shared by groups whose own edges differ may be a fixed setting, not a measure
                         said = next((s for s in (((obj.get("qc") or {}).get("statements") or {}).values())
@@ -3272,8 +3286,10 @@ def record_decision(
             ) == signature and not record_unchanged and not (
                     kind == "processing_result" and decision == "approve" and approval_is_stale(prior, obj)) and not (
                     restated_after_request(bundle, kind, obj, prior, request_index)) and not (
-                    _restated_for_one_run(kind, obj, prior, bulk)):
-                # an approval restated after its result's files changed binds it to them: a new statement; so is a
+                    _restated_for_one_run(kind, obj, prior, bulk)) and not (
+                    kind == "processing_result" and decision == "approve" and _approval_predates_a_note(bundle, obj, prior)):
+                # an approval restated after its result's files changed binds it to them: a new statement; so is an
+                # approval restated after a scan note landed on its group's runs (finding 2: it says "still stands"); a
                 # value restated after the scientist asked for their own word on its field (c13g M1), and a set-point
                 # restated for one run after an answer given to several at once (r3c HIGH)
                 unchanged.append(tid)
@@ -3313,6 +3329,11 @@ def record_decision(
             if kind == "processing_result" and decision == "approve":
                 # AN APPROVAL BINDS TO EXACTLY THIS RESULT'S FILES (and their hashes).
                 entry["approved_files"] = approval_files(obj)
+                # finding 2 (audit of 18 Nov 2026): the scan notes on the group's runs NOW are kept on the result, so
+                # a note that lands later reads as newer than this approval (approved_curve.older_than_evidence)
+                from . import approved_curve as AC
+
+                obj[AC.SNAPSHOT_KEY] = AC.approval_snapshot(bundle, obj, entry["decision_id"])
                 tie = tie_note(obj)
                 if tie:
                     # r6 review M1: a tie is no decision kind of its own: the approval's note records it
@@ -5244,8 +5265,15 @@ def process(
 
         apply_kept_result_notes(keep, payload.get("kept_result_notes") or ())  # r1 M3/M5: outside the hashed files
         kept = {B.processing_id(r) for r in keep}
+        kept_by_id = {B.processing_id(r): r for r in keep}
+        from . import approved_curve as AC
+
         fresh = []
         for r in produced:
+            if r.get("group_id") in known and B.processing_id(r) in kept_by_id:
+                # the SAME result again (the same curve) for a result already decided: only its logbook block is
+                # brought up to date, each note it gains stamped (approved_curve.refresh_kept_block)
+                AC.refresh_kept_block(kept_by_id[B.processing_id(r)], r)
             if r.get("group_id") not in known or B.processing_id(r) in kept:
                 continue
             if r.get("state") not in B.PROCESSING_UNDECIDED_STATES:
@@ -5264,6 +5292,29 @@ def process(
         if group_ids:
             # the groups NOT named keep their results as stored (`new` counts only the named groups')
             out["kept_other_groups"] = len(keep) - kept_decided
+        # finding 2 (audit of 18 Nov 2026): whether a logbook reading was loaded at all, said ONCE when none was
+        reading = logbook_reading(bundle)
+        if reading is not None:
+            out["logbook_reading"] = reading
+            if reading["state"] == "no_reading_loaded" and isinstance(out.get("summary"), Mapping):
+                out["summary"] = {**out["summary"], "lines": [*(out["summary"].get("lines") or ()), reading["statement"]]}
+        # ...and every live group whose approved curve is now older than its evidence (a scan note, a newer result)
+        stale = [f for g in bundle.get("record_groups") or () if g.get("status") in B.LIVE_GROUP_STATUSES
+                 and (not group_ids or g["group_id"] in set(group_ids))
+                 and (f := AC.older_than_evidence(bundle, g["group_id"])) is not None]
+        if stale:
+            line = (f"{len(stale)} group(s) keep an approved curve older than its evidence ({AC.WARNING}): "
+                    + "; ".join(f"{f['group_id']} (approved {f['approved_result_id']}"
+                                + (f", newer {f['newer_result_ids'][0]}" if f["newer_result_ids"] else "") + ")"
+                                for f in stale[:5])
+                    + (f"; and {len(stale) - 5} more" if len(stale) > 5 else "")
+                    + ". The record keeps the approved curve until a scientist decides; `isaac bundle validate` says "
+                      "what to do for each.")
+            out["approved_curves_older_than_evidence"] = {"groups": len(stale), "statement": line,
+                                                         "items": [{k: f[k] for k in ("group_id", "approved_result_id",
+                                                                                      "newer_result_ids")} for f in stale]}
+            if isinstance(out.get("summary"), Mapping):
+                out["summary"] = {**out["summary"], "lines": [*(out["summary"].get("lines") or ()), line]}
         merges = unmatched_merges_reply(payload.get("athena") or {})
         if merges:
             out["athena_unmatched_merges"] = merges
@@ -5303,6 +5354,17 @@ def process(
         return out
 
     return mutate(bundle_dir, change)
+
+
+def logbook_reading(bundle: Mapping) -> dict | None:
+    """``scan_notes.reading_state``: whether a reading pass over the files was loaded at all (``process`` says once
+    when none was). ``None`` when it cannot be derived; never a failure of the command."""
+    try:
+        from .scan_notes import reading_state
+
+        return reading_state(bundle)
+    except Exception:  # noqa: BLE001 - said when known, never a reason to fail processing
+        return None
 
 
 #: r7 K1: how many of the scientist's unmatched merges the process reply lists (the rest are paged by
