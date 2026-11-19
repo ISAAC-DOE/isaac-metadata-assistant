@@ -228,17 +228,40 @@ def _scaled(b: dict, copies: int) -> dict:
     return out
 
 
+def _consolidate_seconds(bundle: dict) -> tuple[float, dict]:
+    start = time.perf_counter()
+    payload = Q.consolidate(bundle)
+    return time.perf_counter() - start, payload
+
+
 def test_consolidation_of_thousands_of_runs_is_linear(grouped):
     """Measured before the fix (this corpus scaled up): 2,000 runs 7.9-10.7 s, 5,000 runs 276 s (a
-    target-list membership test per target). After: 2,000 runs ~3 s, 5,000 runs ~9 s on a loaded
-    machine. The bound is generous; the quadratic version needs ~45 s at 4,000 runs."""
+    target-list membership test per target): thirty times as long for two and a half times the runs.
+
+    WHAT IS ASSERTED IS THE GROWTH, NOT THE STOPWATCH. The bound used to be "under 25 s at 4,000 runs", which
+    measures the machine as much as the code: on slow CI runners the fixed version took 27.9 s, 30.1 s and
+    32.9 s and failed three pull requests with nothing wrong. So this times 1,000 runs and 4,000 runs on the same
+    machine in the same process and bounds how much longer the larger one takes.
+
+    MEASURED 2026-11-18, and the name of this test says more than the code delivers: four times the runs cost
+    7.6 times as long (1.2 s at 999 runs, 9.0 s at 3,996; twice, 7.57x and 7.67x), so growth is about n^1.5, not
+    strictly linear. That is far from the defect this guards (the membership test grew about n^3.7 over this
+    range, well over 100x for 4x the runs) and it does not matter at the size of a real beamtime (hundreds of
+    runs), so it is recorded here and not chased. The bound is 13: above what is measured with room for a noisy
+    runner, far below the old behaviour. The absolute bound stays only as a backstop."""
     b = M.load(grouped)
+    small = _scaled(b, 1000 // len(b["runs"]))
     big = _scaled(b, 4000 // len(b["runs"]))
-    assert len(big["runs"]) >= 3990
-    start = time.perf_counter()
-    p = Q.consolidate(big)
-    elapsed = time.perf_counter() - start
-    assert elapsed < 25, f"consolidate took {elapsed:.1f}s for {len(big['runs'])} runs"
+    assert len(big["runs"]) >= 3990 and len(big["runs"]) >= 3.9 * len(small["runs"])
+    # the smaller one is timed twice and the faster kept: a pause during a short run would hide growth, never invent it
+    t_small = min(_consolidate_seconds(small)[0], _consolidate_seconds(small)[0])
+    t_big, p = _consolidate_seconds(big)
+    ratio = t_big / max(t_small, 1e-6)
+    assert ratio < 13, (
+        f"consolidate took {ratio:.1f}x as long for {len(big['runs']) / len(small['runs']):.1f}x the runs "
+        f"({t_small:.2f}s at {len(small['runs'])}, {t_big:.2f}s at {len(big['runs'])})"
+    )
+    assert t_big < 180, f"consolidate took {t_big:.1f}s for {len(big['runs'])} runs"
     for q in p["questions"]:  # each target once, in first-seen order
         keys = [(t["kind"], t["id"]) for t in q["targets"]]
         assert len(keys) == len(set(keys)), q["question_id"]
