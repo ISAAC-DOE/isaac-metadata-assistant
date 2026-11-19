@@ -3393,6 +3393,13 @@ def record_decision(
         statement = CAPTURE_STATEMENTS.get(decision)
         if statement:
             result["statement"] = statement.format(value=value, positions=", ".join(map(str, positions or ())))
+        if decision == "confirm" and recorded:
+            # finding 12 (audit of 18 Nov 2026): a confirm that takes groups carrying a care flag NAMES them and says
+            # why (before: "confirmed for 91 groups." and nothing about the 15 that merge scans read differently)
+            care = confirmed_with_care(bundle, [obj for tid, (kind, obj) in zip(target_ids, planned)
+                                                if kind == "record_group" and tid in set(recorded)])
+            if care:
+                result["confirmed_with_a_care_flag"] = care
         if decision == B.ATHENA_SELECT_DECISION and recorded:
             # r5c C1: A CHOICE THAT IS NOT WHAT THE RECORD CARRIES IS SAID NOW (before: only a later `isaac process`
             # said it, and validate and export were silent): the group's approved result is another curve
@@ -3523,6 +3530,8 @@ def record_decision(
         if calibration_said:
             said = list(dict.fromkeys(calibration_said.values()))
             statement = " ".join([statement, *said[:3]] + ([f"(and {len(said) - 3} more)"] if len(said) > 3 else []))
+        if result.get("confirmed_with_a_care_flag"):
+            statement = f"{statement} {result['confirmed_with_a_care_flag']['statement']}"  # finding 12: named, with why
         return {"statement": statement, **result}
 
     return change(bundle)
@@ -5369,6 +5378,45 @@ def process(
         return out
 
     return mutate(bundle_dir, change)
+
+
+CARE_GROUPS_SHOWN = 20
+
+
+def confirmed_with_care(bundle: Mapping, groups: Sequence[Mapping]) -> dict | None:
+    """Finding 12: of the groups a confirm just took, those carrying a care flag (their files read one condition two
+    ways): ``{"groups": n, "items": [{"group_id", "file", "conditions", "why"}], "statement"}``, or ``None``. The
+    confirm stands (it is the scientist's word); this is what they are told beside it."""
+    from . import grouping as G
+
+    stem_of = {r["run_key"]: str(r.get("stem") or "") for r in bundle.get("runs") or ()}
+    items = []
+    for g in groups:
+        reasons = G.care_reasons(bundle, g)
+        if reasons:
+            items.append({"group_id": g["group_id"], "file": stem_of.get((g.get("member_run_keys") or [None])[0]),
+                          "conditions": [r["condition"] for r in reasons], "why": "; ".join(r["why"] for r in reasons),
+                          **({"from_a_merge_file_name": True} if any(r["only_a_processed_output_name"] for r in reasons)
+                             else {})})
+    if not items:
+        return None
+    shown = items[:CARE_GROUPS_SHOWN]
+    by_cond: dict[str, int] = {}
+    for it in items:
+        for c in it["conditions"]:
+            by_cond[c] = by_cond.get(c, 0) + 1
+    merge = sum(1 for it in items if it.get("from_a_merge_file_name"))
+    statement = (
+        f"{len(items)} of the groups confirmed carry a care flag: their files read one condition two ways ("
+        + ", ".join(f"{c} in {n}" for c, n in sorted(by_cond.items(), key=lambda kv: (-kv[1], kv[0]))) + "). "
+        + " ".join(f"{it['file'] or it['group_id']} ({it['group_id']}): {it['why']}." for it in shown[:G.CARE_SHOWN])
+        + (f" And {len(items) - G.CARE_SHOWN} more (confirmed_with_a_care_flag.items)." if len(items) > G.CARE_SHOWN else "")
+        + (f" In {merge} of them one reading is only the name of the scientists' own merge file (no reading of the run)."
+           if merge else "")
+        + " They are confirmed as you said; tell the scientist which, and split or correct any they did not mean "
+          "(`isaac bundle show <bundle_dir> group <id>`).")
+    return {"groups": len(items), "by_condition": by_cond, "items": shown,
+            **({"items_omitted": len(items) - len(shown)} if len(items) > len(shown) else {}), "statement": statement}
 
 
 def logbook_reading(bundle: Mapping) -> dict | None:
