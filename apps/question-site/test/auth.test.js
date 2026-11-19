@@ -63,6 +63,28 @@ test('ten wrong passwords lock an address out, and then even the right password 
   assert.equal((await right('198.51.100.2')).status, 200);
 });
 
+test('guesses sent all at once are counted one by one: only ten are ever compared', async () => {
+  setup();
+  const { useStore, MemoryStore } = await import('../lib/store.js');
+  // a store that answers after a delay, as a real one does
+  class Slow extends MemoryStore {
+    async hit(...args) {
+      const n = await super.hit(...args);
+      await new Promise((r) => setTimeout(r, 15));
+      return n;
+    }
+  }
+  useStore(new Slow());
+  const tries = Array.from({ length: 60 }, (_, i) =>
+    call(login, { method: 'POST', body: { name: 'A', password: i === 59 ? PASSWORD : `guess-number-${i}` }, ip: '198.51.100.20' }),
+  );
+  const out = await Promise.all(tries);
+  const by = (code) => out.filter((r) => r.status === code).length;
+  assert.equal(by(401), 10, 'ten tries are compared');
+  assert.equal(by(429), 50, 'the rest are refused unseen, the right password among them');
+  assert.equal(by(200), 0);
+});
+
 test('the lockout is kept in the store, so it holds on an instance that has not seen the address', async () => {
   setup();
   for (let i = 0; i < 10; i += 1) await call(login, { method: 'POST', body: { name: 'A', password: 'nope-nope-nope' }, ip: '198.51.100.9' });

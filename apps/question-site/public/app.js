@@ -132,7 +132,11 @@ function captureDraft() {
   const typed = document.getElementById('typed');
   const note = document.getElementById('note');
   if (!typed && !note) return;
-  state.drafts[id] = { typed: typed ? typed.value : '', note: note ? note.value : '' };
+  // only what the person changed is a draft: a card that was merely looked at must not later hide (or replace)
+  // a note someone else saved on it
+  const changed = (el) => Boolean(el) && el.value !== (el.dataset.prefill || '');
+  if (changed(typed) || changed(note)) state.drafts[id] = { typed: typed ? typed.value : '', note: note ? note.value : '' };
+  else delete state.drafts[id];
 }
 
 function cancelAdvance() {
@@ -589,8 +593,9 @@ function viewCard() {
   if (kind === 'text' || kind === 'number' || (kind === 'choice' && c.answer.allow_text)) {
     const isNumber = kind === 'number';
     const input = h('input', { class: 'input', id: 'typed', type: 'text', inputmode: isNumber ? 'decimal' : null, placeholder: c.answer.placeholder || null, maxlength: 500, disabled: busy });
-    if (draft && draft.typed) input.value = draft.typed;
-    else if (a && a.typed && a.action === 'value') input.value = String(a.value);
+    const prefill = a && a.typed && a.action === 'value' ? String(a.value) : '';
+    input.dataset.prefill = prefill;
+    input.value = draft ? draft.typed : prefill;
     const label = kind === 'choice' ? 'None of these? Type it in your own words' : suggestion ? 'Or type a different answer' : 'Type your answer';
     parts.push(
       h('label', { class: 'group-label', for: 'typed', text: label }),
@@ -615,6 +620,7 @@ function viewCard() {
   }
 
   const note = h('textarea', { class: 'input', id: 'note', maxlength: 2000, disabled: busy, placeholder: 'Anything we should know: who to ask, an exception, a correction…', 'aria-label': 'A note for the ISAAC team' });
+  note.dataset.prefill = a?.note || '';
   note.value = draft ? draft.note : a?.note || '';
   parts.push(
     h(

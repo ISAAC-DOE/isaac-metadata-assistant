@@ -2,8 +2,8 @@ import { handler, readJson, send, clientIp, HttpError } from '../lib/http.js';
 import { sitePassword, sameSecret, cleanName, makeSession, sessionCookie } from '../lib/auth.js';
 import { store } from '../lib/store.js';
 
-// Ten wrong passwords from one address lock that address out for 15 minutes. While it is locked out, every try
-// is refused, the right password included: otherwise the refusal itself would tell a guesser right from wrong.
+// Ten tries from one address in 15 minutes, right or wrong; after that every try is refused until the window ends,
+// the right password included: otherwise the refusal itself would tell a guesser right from wrong.
 const PER_ADDRESS = 10;
 const WINDOW = 15 * 60;
 
@@ -23,18 +23,16 @@ export default handler('POST', async (req, res) => {
   const key = `login:${ip}`;
   const now = Date.now();
 
-  if ((locked.get(ip) || 0) > now) refuse();
-  const s = store();
-  // a store that cannot be read is a 503 for everyone: a sign-in is never let through unchecked
-  if ((await s.count(key)) >= PER_ADDRESS) {
+  for (const [addr, until] of locked) if (until <= now) locked.delete(addr);
+  if (locked.has(ip)) refuse();
+  // Count the try before looking at the password, in one step in the store. Tries sent all at once each get their
+  // own number, so only the first ten in a window are ever compared; a store that cannot count signs nobody in.
+  const n = await store().hit(key, WINDOW);
+  if (n > PER_ADDRESS) {
     locked.set(ip, now + 60_000);
     refuse();
   }
-  if (!sameSecret(given, expected)) {
-    const n = await s.hit(key, WINDOW);
-    if (n >= PER_ADDRESS) locked.set(ip, now + 60_000);
-    throw new HttpError(401, 'That password is not right.');
-  }
+  if (!sameSecret(given, expected)) throw new HttpError(401, 'That password is not right.');
   return send(res, 200, { name }, { 'Set-Cookie': sessionCookie(req, makeSession(name)) });
 });
 

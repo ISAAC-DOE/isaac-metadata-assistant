@@ -23,8 +23,8 @@ The exported questions contain real beamtime details (sample names, logbook line
   `/api/image`). An image is served only by its exported name and only if its bytes are that image type.
 - Sign-in is one shared site password plus the name the person gives. The session is a signed, HttpOnly,
   Secure, SameSite=Strict cookie that lasts 30 days. Changing the password signs everyone out.
-- Ten wrong passwords from one address lock that address out for 15 minutes. While it is locked out every try is
-  refused, the right password included, so the refusal tells a guesser nothing.
+- An address gets ten sign-in tries in 15 minutes, right or wrong. After that every try is refused until the
+  window ends, the right password included, so the refusal tells a guesser nothing.
 - Every response says `noindex`, and `robots.txt` disallows everything. Images are never cached by the browser.
 - The name is not verified. The import records each answer as "`<name>` (question site)".
 - An answer is never overwritten unseen: if someone else answered a card while your page was open, the site shows
@@ -58,9 +58,13 @@ Run these from the exported folder (`<dir>` above), not from this repository.
      it makes a stolen cookie useless for guessing the password.
    - **Settings** → **Deployment Protection**: keep the default (Standard Protection). It leaves the production
      address open to the site's own sign-in and keeps old preview addresses behind Vercel's login.
-   - Optional: **Firewall** → add a rate-limit rule on `/api/login` (for example 20 requests per minute per IP).
+   - **Firewall** → add a rate-limit rule on `/api/login` (for example 20 requests per minute per IP). The site
+     limits tries per address itself; this rule stops a flood of tries from many addresses before it reaches
+     the site or uses up the answer store's free quota.
 4. Deploy again so the settings take effect: `npx vercel deploy --prod`.
-5. Check it, signed out: `/data/site-data.json` must answer 404 and `/api/state` must answer 401. Then sign in and
+5. Check it. Sign in, answer one question, open the site in a second browser to see the answer there, and use
+   "Download all answers" to see it in the file. (The store's write runs as a small script inside Redis, which the
+   tests can only imitate; this is its first real run.) Then, signed out: `/data/site-data.json` must answer 404 and `/api/state` must answer 401. Then sign in and
    check `/data/site-data.json` still answers 404 while the questions show on the page.
 
 ## Update the questions

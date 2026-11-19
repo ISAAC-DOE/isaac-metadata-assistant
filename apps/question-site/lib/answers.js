@@ -16,8 +16,9 @@ function text(raw, max, what) {
   return out;
 }
 
-const NUMBER = /^[+-]?\d+(?:[.,]\d+)?(?:[eE][+-]?\d+)?$/;
-const THOUSANDS = /^[+-]?\d{1,3}(?:,\d{3})+$/;
+const NUMBER = /^[+-]?(?:\d+(?:[.,]\d*)?|[.,]\d+)(?:[eE][+-]?\d+)?$/;
+// "1,250" and "12,345,678" could be thousands; "0,125" cannot (no number is grouped after a leading zero)
+const THOUSANDS = /^[+-]?[1-9]\d{0,2}(?:,\d{3})+$/;
 
 /**
  * A number as a person types it: digits, an optional sign, a decimal point or comma, an optional exponent. Anything

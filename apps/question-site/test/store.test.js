@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { RedisStore, FileStore, store, useStore } from '../lib/store.js';
+import { RedisStore, FileStore, MemoryStore, WRITE_SCRIPT, store, useStore } from '../lib/store.js';
 
 /** A tiny in-memory Redis that speaks the REST batch shape the store sends. */
 function fakeRedis() {
@@ -23,6 +23,26 @@ function fakeRedis() {
     if (cmd === 'HGETALL') return Object.entries(hashes.get(key) || {}).flat();
     if (cmd === 'RPUSH') return (lists.set(key, [...(lists.get(key) || []), rest[0]]), lists.get(key).length);
     if (cmd === 'LRANGE') return lists.get(key) || [];
+    if (cmd === 'EVAL') {
+      // the write script, restated in JavaScript: [script, numkeys, answers, times, log, card, check, expect, answer, at, event]
+      assert.equal(key, WRITE_SCRIPT);
+      const [, answersKey, timesKey, logKey, cardId, check, expect, answerJson, at, eventJson] = rest;
+      const times = hashes.get(timesKey) || {};
+      if (check === '1' && (times[cardId] || '') !== expect) return [0, (hashes.get(answersKey) || {})[cardId] || ''];
+      const answersHash = { ...(hashes.get(answersKey) || {}) };
+      const timesHash = { ...times };
+      if (answerJson === '') {
+        delete answersHash[cardId];
+        delete timesHash[cardId];
+      } else {
+        answersHash[cardId] = answerJson;
+        timesHash[cardId] = at;
+      }
+      hashes.set(answersKey, answersHash);
+      hashes.set(timesKey, timesHash);
+      lists.set(logKey, [...(lists.get(logKey) || []), eventJson]);
+      return [1, ''];
+    }
     if (cmd === 'GET') return strings.has(key) ? String(strings.get(key)) : null;
     if (cmd === 'EXPIRE') return rest[1] === 'NX' && expires.has(key) ? 0 : (expires.set(key, Number(rest[0])), 1);
     if (cmd === 'INCR') return (strings.set(key, (strings.get(key) || 0) + 1), strings.get(key));
@@ -48,10 +68,47 @@ test('the Redis store keeps the current answer per card and an append-only log, 
   assert.deepEqual((await s.log('b1')).map((e) => e.action), ['value', 'value', 'clear']);
   assert.deepEqual(await s.current('another-bundle'), {});
   const save = redis.calls[0];
-  assert.equal(save.url, 'https://redis.example.test/multi-exec', 'the answer and its log entry are written together');
   assert.equal(save.auth, 'Bearer token-not-real');
-  assert.deepEqual(save.commands.map((c) => c[0]), ['HSET', 'RPUSH']);
-  assert.equal(save.commands[0][1], 'qs:b1:answers');
+  assert.equal(save.commands.length, 1, 'the answer, its time and its log entry are written by one script');
+  assert.deepEqual(save.commands[0].slice(0, 6), ['EVAL', WRITE_SCRIPT, '3', 'qs:b1:answers', 'qs:b1:at', 'qs:b1:log']);
+});
+
+for (const [name, make] of [
+  ['memory', () => new MemoryStore()],
+  ['Redis', () => new RedisStore('https://redis.example.test', 't', fakeRedis().fetchImpl)],
+]) {
+  test(`a write that expects an answer that is no longer there writes nothing (${name} store)`, async () => {
+    const s = make();
+    const B = { ...A, value: 'two', at: '2099-01-01T00:00:01Z' };
+    assert.deepEqual(await s.write('b1', { card_id: 'C-1', answer: A, event: A, expect: null }), { ok: true });
+    // a second writer who also saw "no answer" is refused and sent what is there
+    assert.deepEqual(await s.write('b1', { card_id: 'C-1', answer: B, event: B, expect: null }), { ok: false, current: A });
+    assert.deepEqual(await s.current('b1'), { 'C-1': A });
+    assert.equal((await s.log('b1')).length, 1, 'a refused write leaves no log entry');
+    // having seen it, the write goes through
+    assert.deepEqual(await s.write('b1', { card_id: 'C-1', answer: B, event: B, expect: A.at }), { ok: true });
+    // a clear with a stale time is refused; with the right one it clears
+    const clear = { ...A, action: 'clear', value: null };
+    assert.equal((await s.write('b1', { card_id: 'C-1', answer: null, event: clear, expect: A.at })).ok, false);
+    assert.equal((await s.write('b1', { card_id: 'C-1', answer: null, event: clear, expect: B.at })).ok, true);
+    assert.deepEqual(await s.current('b1'), {});
+    // answering a card that was cleared under you
+    assert.deepEqual(await s.write('b1', { card_id: 'C-1', answer: A, event: A, expect: B.at }), { ok: false, current: null });
+    // a write with no expectation always goes through
+    assert.equal((await s.write('b1', { card_id: 'C-1', answer: A, event: A })).ok, true);
+  });
+}
+
+test('the write script checks, writes and logs in that order, with no step outside it', () => {
+  // the script cannot be run here (no Redis); this pins its shape so a change to it is a deliberate one
+  const lines = WRITE_SCRIPT.trim().split('\n').map((l) => l.trim());
+  assert.equal(lines[0], "local at = redis.call('HGET', KEYS[2], ARGV[1])");
+  assert.ok(lines[1].startsWith("if ARGV[2] == '1' and (at or '') ~= ARGV[3] then"));
+  assert.ok(lines[2].startsWith('return {0,'), 'a mismatch returns before any write');
+  const firstWrite = lines.findIndex((l) => /HSET|HDEL|RPUSH/.test(l));
+  assert.ok(firstWrite > 2);
+  assert.equal(lines.at(-1), "return {1, ''}");
+  assert.equal(lines.filter((l) => l.includes('RPUSH')).length, 1);
 });
 
 test('the failed sign-in counter counts in one transaction and always has an expiry', async () => {

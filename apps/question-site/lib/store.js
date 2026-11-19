@@ -8,8 +8,12 @@
 //
 // Interface (all async):
 //   current(bundleId)                 -> { [card_id]: answer }
-//   save(bundleId, answer)            -> answer            (replaces the card's current answer, appends to the log)
-//   clear(bundleId, event)            -> void              (removes the card's current answer, appends to the log)
+//   write(bundleId, { card_id, answer, event, expect })
+//                                     -> { ok: true } | { ok: false, current }
+//       Sets the card's current answer (or removes it when `answer` is null) and appends `event` to the log, in one
+//       step. With `expect` given (the time of the answer the writer saw, or null for "no answer"), nothing is
+//       written unless that is still the card's current answer; the answer that is there comes back instead.
+//   save(bundleId, answer) / clear(bundleId, event): `write` without `expect`.
 //   log(bundleId)                     -> [event]           (every save and clear, oldest first)
 //   hit(key, windowSeconds)           -> number            (count one more in a window that expires: failed sign-ins)
 //   count(key)                        -> number            (the current count, without adding to it)
@@ -26,16 +30,22 @@ export class MemoryStore {
   async current(bundleId) {
     return { ...(this.answers.get(bundleId) || {}) };
   }
+  async write(bundleId, { card_id, answer, event, expect }) {
+    const cur = { ...(this.answers.get(bundleId) || {}) };
+    const current = cur[card_id] || null;
+    if (expect !== undefined && (current ? current.at : null) !== expect) return { ok: false, current };
+    if (answer) cur[card_id] = answer;
+    else delete cur[card_id];
+    this.answers.set(bundleId, cur);
+    this.logs.set(bundleId, [...(this.logs.get(bundleId) || []), event]);
+    return { ok: true };
+  }
   async save(bundleId, answer) {
-    this.answers.set(bundleId, { ...(this.answers.get(bundleId) || {}), [answer.card_id]: answer });
-    this.logs.set(bundleId, [...(this.logs.get(bundleId) || []), answer]);
+    await this.write(bundleId, { card_id: answer.card_id, answer, event: answer });
     return answer;
   }
   async clear(bundleId, event) {
-    const cur = { ...(this.answers.get(bundleId) || {}) };
-    delete cur[event.card_id];
-    this.answers.set(bundleId, cur);
-    this.logs.set(bundleId, [...(this.logs.get(bundleId) || []), event]);
+    await this.write(bundleId, { card_id: event.card_id, answer: null, event });
   }
   async log(bundleId) {
     return [...(this.logs.get(bundleId) || [])];
@@ -90,22 +100,38 @@ export class FileStore extends MemoryStore {
     await this.#load();
     return super.current(bundleId);
   }
-  async save(bundleId, answer) {
+  async write(bundleId, change) {
     await this.#load();
-    await super.save(bundleId, answer);
-    await this.#flush();
-    return answer;
-  }
-  async clear(bundleId, event) {
-    await this.#load();
-    await super.clear(bundleId, event);
-    await this.#flush();
+    const out = await super.write(bundleId, change);
+    if (out.ok) await this.#flush();
+    return out;
   }
   async log(bundleId) {
     await this.#load();
     return super.log(bundleId);
   }
 }
+
+// One write, done inside Redis so nothing can slip in between the check and the write.
+//   KEYS: the answers hash, the hash of each card's current answer time, the log list
+//   ARGV: card id, "1" to check / "0" not to, the expected time ("" for no answer), the answer as JSON ("" to
+//         clear), the answer's time, the log event as JSON
+// Returns {1, ""} when written, or {0, <the current answer as JSON, or "">} when the expected time did not match.
+export const WRITE_SCRIPT = `
+local at = redis.call('HGET', KEYS[2], ARGV[1])
+if ARGV[2] == '1' and (at or '') ~= ARGV[3] then
+  return {0, redis.call('HGET', KEYS[1], ARGV[1]) or ''}
+end
+if ARGV[4] == '' then
+  redis.call('HDEL', KEYS[1], ARGV[1])
+  redis.call('HDEL', KEYS[2], ARGV[1])
+else
+  redis.call('HSET', KEYS[1], ARGV[1], ARGV[4])
+  redis.call('HSET', KEYS[2], ARGV[1], ARGV[5])
+end
+redis.call('RPUSH', KEYS[3], ARGV[6])
+return {1, ''}
+`;
 
 /** Upstash Redis over its REST API: no client library, one POST per command batch. */
 export class RedisStore {
@@ -121,7 +147,7 @@ export class RedisStore {
         method: 'POST',
         headers: { Authorization: `Bearer ${this.token}`, 'Content-Type': 'application/json' },
         body: JSON.stringify(commands),
-        signal: AbortSignal.timeout(5000),
+        signal: AbortSignal.timeout(3000),
       });
     } catch {
       throw new HttpError(503, 'The answer store is not reachable right now. Please try again.');
@@ -159,25 +185,39 @@ export class RedisStore {
     }
     return out;
   }
-  async save(bundleId, answer) {
-    const body = JSON.stringify(answer);
-    await this.#run(
+  async write(bundleId, { card_id, answer, event, expect }) {
+    const [reply] = await this.#run([
       [
-        ['HSET', this.#ak(bundleId), answer.card_id, body],
-        ['RPUSH', this.#lk(bundleId), body],
+        'EVAL',
+        WRITE_SCRIPT,
+        '3',
+        this.#ak(bundleId),
+        `qs:${bundleId}:at`,
+        this.#lk(bundleId),
+        card_id,
+        expect === undefined ? '0' : '1',
+        expect || '',
+        answer ? JSON.stringify(answer) : '',
+        answer ? answer.at : '',
+        JSON.stringify(event),
       ],
-      true,
-    );
+    ]);
+    if (!Array.isArray(reply)) throw new HttpError(503, 'The answer store refused that. Please try again.');
+    if (Number(reply[0]) === 1) return { ok: true };
+    let current = null;
+    try {
+      current = reply[1] ? JSON.parse(reply[1]) : null;
+    } catch {
+      /* unreadable: report "something else is there" without it */
+    }
+    return { ok: false, current };
+  }
+  async save(bundleId, answer) {
+    await this.write(bundleId, { card_id: answer.card_id, answer, event: answer });
     return answer;
   }
   async clear(bundleId, event) {
-    await this.#run(
-      [
-        ['HDEL', this.#ak(bundleId), event.card_id],
-        ['RPUSH', this.#lk(bundleId), JSON.stringify(event)],
-      ],
-      true,
-    );
+    await this.write(bundleId, { card_id: event.card_id, answer: null, event });
   }
   async log(bundleId) {
     const [items] = await this.#run([['LRANGE', this.#lk(bundleId), '0', '-1']]);

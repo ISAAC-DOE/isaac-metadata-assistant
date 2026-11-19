@@ -11,28 +11,37 @@ export default handler('POST', async (req, res) => {
   const { raw, byId } = await siteData();
   const card = byId.get(body.card_id);
   if (!card) throw new HttpError(404, 'That question is no longer on this site. Reload the page.');
-  const current = (await store().current(raw.bundle_id))[card.card_id] || null;
-  // The page says which saved answer it was looking at (`seen_at`: that answer's time, or null for none). If
-  // someone else has answered or changed this card since, nothing is overwritten: the page is sent what is there.
-  if ('seen_at' in body && (current ? current.at : null) !== (body.seen_at ?? null)) {
-    return send(res, 409, {
-      error: current
-        ? `${current.by} answered this while you had the page open. Have a look at their answer first.`
-        : 'This answer was cleared while you had the page open. Have a look and answer again.',
-      card_id: card.card_id,
-      answer: current,
-    });
-  }
+
+  // The page says which saved answer it was looking at (`seen_at`: that answer's time, or null for none). The store
+  // writes only if that is still the card's answer, in one step; otherwise nothing is overwritten and the page is
+  // sent what is there.
+  const checked = 'seen_at' in body;
+  const seen = checked && typeof body.seen_at === 'string' ? body.seen_at : null;
   // an answer's time is also what tells two versions of it apart, so it always moves forward for a card
   let now = Date.now();
-  const last = current ? Date.parse(current.at) : NaN;
+  const last = seen ? Date.parse(seen) : NaN;
   if (Number.isFinite(last) && now <= last) now = last + 1;
   const at = new Date(now).toISOString();
-  if (body.action === 'clear') {
-    await store().clear(raw.bundle_id, { card_id: card.card_id, action: 'clear', value: null, typed: false, note: '', by: session.name, at });
-    return send(res, 200, { card_id: card.card_id, answer: null });
+
+  const clearing = body.action === 'clear';
+  const answer = clearing ? null : buildAnswer(card, body, session.name, at);
+  const event = clearing
+    ? { card_id: card.card_id, action: 'clear', value: null, typed: false, note: '', by: session.name, at }
+    : answer;
+  const out = await store().write(raw.bundle_id, {
+    card_id: card.card_id,
+    answer,
+    event,
+    expect: checked ? seen : undefined,
+  });
+  if (!out.ok) {
+    return send(res, 409, {
+      error: out.current
+        ? `${out.current.by} answered this while you had the page open. Have a look at their answer first.`
+        : 'This answer was cleared while you had the page open. Have a look and answer again.',
+      card_id: card.card_id,
+      answer: out.current,
+    });
   }
-  const answer = buildAnswer(card, body, session.name, at);
-  await store().save(raw.bundle_id, answer);
   return send(res, 200, { card_id: card.card_id, answer });
 });

@@ -171,3 +171,27 @@ test('hidden direction-changing characters are dropped from answers and notes', 
   const out = await post(cookie, { card_id: 'C-0000000002', action: 'value', value: 'Gro\u202eup\u200b one', typed: true, note: 'see\u2066 note' });
   assert.deepEqual([out.json.answer.value, out.json.answer.note], ['Group one', 'see note']);
 });
+
+test('two people saving the same unanswered card at the same moment: one is saved, the other is told', async () => {
+  setup();
+  const first = await signIn(login, 'First Tester');
+  const second = await signIn(login, 'Second Tester');
+  const [a, b] = await Promise.all([
+    post(first, { card_id: 'C-0000000004', action: 'value', value: 'Material one', typed: true, seen_at: null }),
+    post(second, { card_id: 'C-0000000004', action: 'value', value: 'Material two', typed: true, seen_at: null }),
+  ]);
+  assert.deepEqual([a.status, b.status].sort(), [200, 409]);
+  const lost = a.status === 409 ? a : b;
+  const won = a.status === 200 ? a : b;
+  assert.equal(lost.json.answer.value, won.json.answer.value, 'the one who was refused is sent the answer that was saved');
+});
+
+test('numbers a person would type are read; ambiguous or odd ones are refused', async () => {
+  const { parseNumber } = await import('../lib/answers.js');
+  for (const [text, n] of [['0,125', 0.125], ['.5', 0.5], ['5.', 5], ['-0,5', -0.5], ['+1.2e3', 1200], ['100', 100], ['1000,5', 1000.5]]) {
+    assert.equal(parseNumber(text), n, text);
+  }
+  for (const bad of ['1,250', '-12,345', '.', ',', 'e5', '1 2', '1.2.3', '0x10', '']) {
+    assert.throws(() => parseNumber(bad), (err) => err.status === 400, bad);
+  }
+});
