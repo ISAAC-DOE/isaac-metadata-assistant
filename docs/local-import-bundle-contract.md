@@ -1,6 +1,6 @@
 # ISAAC Local Import Bundle — contract v1
 
-Status: **v1.13.0** (a file whose own scan title states an average beside SPEC acquisitions — the scientists' averages, such as a PyMca `.mca` — is a processed output linked by legacy number, never a run; a `MERGE` folder alone only flags a run; and a processed product's file name is no longer read as a condition or sample reading of its run, 2026-11-18, §9 "What 1.13.0 added"; v1.12.0 a reading pass's quotes are checked against the cited file when it is loaded, and its notes about a run's scans are kept as `scan_notes`, AI readings never decisions, 2026-11-17, §9 "What 1.12.0 added"; v1.11.0 a file the engine classifies `processed_spectrum` — the scientists' quick merges — is a processed output linked by legacy number, never a run, 2026-11-09, §9 "What 1.11.0 added"; v1.10.0 an answer refused only because it is not on its field's list is kept as a vocabulary request, `vocabulary_requests`, and `bundle propose-terms` drafts it, 2026-10-30, §9 "What 1.10.0 added", §29; v1.9.0 (`set_counter_positions` may name the LAST file-name token, `--positions last`, and a scientist's merge has a working path, 2026-10-30, §9 "What 1.9.0 added", §27; v1.8.0 the bounds on `scientist_decisions` and `ai_interpretations` raised to 200,000, so an append-only log can no longer lock a bundle; decide refuses a value its field refuses, 2026-10-29, §9 "What 1.8.0 added", §25; v1.7.0 `context.electrochemistry.current_setpoint_mA_cm2` answerable, so a confirmed galvanostatic record can complete, 2026-10-29, §9 "What 1.7.0 added", DEC-92; v1.6.0 capture decisions — keep apart, the Athena result of record, "no counter" — a merge decision applied as one combined group, and question ids that survive answers, 2026-10-29, §9 "What 1.6.0 added"; v1.5.0 control mode answerable the same day; v1.4.0 the SSRL XDC scan start time, the instrument clock's time zone and its binding, 2026-10-29, §9 "What 1.4.0 added"; v1.3.0 absorber readings on record groups, a larger writable set and STALE bundles, the same day; v1.2.0 processed outputs 2026-10-28; v1.1.0 LOCAL-2 and v1.0.0 LOCAL-1 the same day). Machine contract:
+Status: **v1.14.0** (four import rules of the 18 Nov 2026 audit: a signed potential token in a file name, the technique from the instrument configuration, pellet-standard fields asked only where mentioned, and a comment line left over from an earlier run flagged; every id an earlier build gave stands on a re-import, 2026-11-19, §9 "What 1.14.0 added"; v1.13.0 a file whose own scan title states an average beside SPEC acquisitions — the scientists' averages, such as a PyMca `.mca` — is a processed output linked by legacy number, never a run; a `MERGE` folder alone only flags a run; and a processed product's file name is no longer read as a condition or sample reading of its run, 2026-11-18, §9 "What 1.13.0 added"; v1.12.0 a reading pass's quotes are checked against the cited file when it is loaded, and its notes about a run's scans are kept as `scan_notes`, AI readings never decisions, 2026-11-17, §9 "What 1.12.0 added"; v1.11.0 a file the engine classifies `processed_spectrum` — the scientists' quick merges — is a processed output linked by legacy number, never a run, 2026-11-09, §9 "What 1.11.0 added"; v1.10.0 an answer refused only because it is not on its field's list is kept as a vocabulary request, `vocabulary_requests`, and `bundle propose-terms` drafts it, 2026-10-30, §9 "What 1.10.0 added", §29; v1.9.0 (`set_counter_positions` may name the LAST file-name token, `--positions last`, and a scientist's merge has a working path, 2026-10-30, §9 "What 1.9.0 added", §27; v1.8.0 the bounds on `scientist_decisions` and `ai_interpretations` raised to 200,000, so an append-only log can no longer lock a bundle; decide refuses a value its field refuses, 2026-10-29, §9 "What 1.8.0 added", §25; v1.7.0 `context.electrochemistry.current_setpoint_mA_cm2` answerable, so a confirmed galvanostatic record can complete, 2026-10-29, §9 "What 1.7.0 added", DEC-92; v1.6.0 capture decisions — keep apart, the Athena result of record, "no counter" — a merge decision applied as one combined group, and question ids that survive answers, 2026-10-29, §9 "What 1.6.0 added"; v1.5.0 control mode answerable the same day; v1.4.0 the SSRL XDC scan start time, the instrument clock's time zone and its binding, 2026-10-29, §9 "What 1.4.0 added"; v1.3.0 absorber readings on record groups, a larger writable set and STALE bundles, the same day; v1.2.0 processed outputs 2026-10-28; v1.1.0 LOCAL-2 and v1.0.0 LOCAL-1 the same day). Machine contract:
 [`apps/api/isaac_api/local_import/bundle-v1.schema.json`](../apps/api/isaac_api/local_import/bundle-v1.schema.json)
 (JSON Schema draft 2020-12) plus the checks in
 [`bundle.py`](../apps/api/isaac_api/local_import/bundle.py) `validate_bundle` that JSON
@@ -885,6 +885,47 @@ read its FILE NAME as that run's evidence, so a re-spelled merge name (`…after
 - **The upgrade is disclosed**: the first write of an older bundle appends one `format_upgrades` entry whose
   statement includes `bundle.CHANGES_ADDED_IN["1.13.0"]` and names the runs it still holds of such averages
   ("re-import to keep them as processed outputs").
+
+### What 1.14.0 added (readings the import makes itself; every id stands)
+
+Measured on five real beamtime folders (audit of 18 Nov 2026): a run held at a negative potential had no potential,
+the technique was asked of every group with macro names as its only readings, three fields of one pellet standard
+were asked of every sample, and a comment line copied from the run before was read as the run's own. The bundle's
+shape is unchanged; only what the import reads changed, so only a re-import applies it.
+
+- **A signed potential token** (`bl15.filenames.signed_potential.v1`): a leading lower-case `m` or a `-` on a
+  potential token is a minus sign (`m800mV` is -0.8 V). No set-point is read from several different potential
+  tokens (a range, a sweep window: `bl15.filenames.no_single_setpoint.v1`), from a pair marked `Pos` / `Neg`
+  (`bl15.filenames.pulsed_levels.v1`) or from a name whose last potential word is `OCV` / `OCP`; each such token is
+  kept as an unread token that says why. A value read is a candidate that needs review.
+- **The technique from the instrument configuration** (`isaac.suggest.technique_from_configuration.v1`, candidate key
+  `technique_from_configuration`, one beamtime-level candidate that needs review): an emission motor held on an
+  emission line of the element whose edge the energy scan crosses suggests `HERFD-XAS`; an SSRL XDC run's own
+  experiment file stating `EXPT_TYPE` with a schema technique suggests it. Valued only when every run that records
+  something about the technique states the same one; a run held off the line blocks the value and is named, and runs
+  that record nothing are counted apart and named. Where it has a value, a candidate that rests only on a macro's or a
+  script's name stops targeting `system.technique` (it stays as evidence). Energies:
+  `local_import/readers/xray_tables.json`, a snapshot of xraydb with its provenance.
+- **Pellet-standard fields** (`isaac.import.optional_field_asked_where_mentioned.v1`):
+  `sample.composition.CuO2_mass_fraction`, `sample.composition.sucrose_mass_fraction` and
+  `sample.geometry.pellet_diameter_mm` are asked of a run only where its name, comment line or readings mention them.
+- **A comment line left over from an earlier run** (`isaac.import.comment_possibly_stale.v1`): an SSRL XDC comment
+  line identical to the line an earlier run (in acquisition order) was acquired with, while the potential the name
+  writes changed, is flagged on the run (`other_relationships.anomalies[]`, kind `comment_possibly_stale`); the
+  set-point and scale read from it are not offered and its candidate says why; an AI reading citing it is loaded as
+  inferred, never stated.
+- **Ids stand on a re-import.** Value ids are numbered by the position the earlier build gave: a slot this build newly
+  fills (by a new candidate) or no longer asks (a pellet field) keeps its number, unused, so value ids may have gaps;
+  a slot this build newly asks (a run whose macro-name technique reading no longer targets the technique) is numbered
+  after every other. A candidate this build newly reads (a set-point from a signed token, the technique suggestion) is
+  numbered after every other candidate, and its conflict after every other conflict. Every id the earlier build gave
+  names what it named (measured on the six real beamtimes: 0 value, candidate or conflict ids moved).
+- **A 1.14.0 validator accepts 1.0.0–1.13.0 bundles;** a 1.13.0 validator refuses a 1.14.0 one (the label).
+  `format_upgrades[].statement` may be up to 3000 characters (1500 before). Nothing becomes newly writable;
+  `processed_outputs` is required at 1.14.0 as at 1.2.0–1.13.0.
+- **The upgrade is disclosed**: the first write of an older bundle appends one `format_upgrades` entry whose
+  statement includes `bundle.CHANGES_ADDED_IN["1.14.0"]`, which names the four rules and says only a re-import
+  applies them.
 
 ## 10. Exit codes (`isaac import` / `isaac bundle`)
 

@@ -642,6 +642,10 @@ def _build_run(directory: str, name: str, run_name: str, members: list[tuple[int
             consumed.append((data_file["source_relative_path"], "experiment"))
     if data_file is not None:
         statements.append(data_file)
+        # the SAME experiment file (the run's own, by its DATA_FILE) also states the experiment type
+        expt_type = _exp_expt_type(data_file["source_relative_path"], by_rel)
+        if expt_type is not None:
+            statements.append(expt_type)
     return GenericRun(
         run_key=f"{PROFILE_ID}:{prefix}{run_name}",
         label=run_name,
@@ -723,7 +727,8 @@ def _data_file_name(value: str) -> str:
 def _exp_data_file(rel: str, by_rel: dict[str, tuple[Path, int]], companions: list[dict]) -> dict | None:
     """The ``DATA_FILE`` line of the run's own ``<name>.exp`` (a sibling with the run's name), as one statement
     (key ``exp_data_file``, the base name it writes, its line) — or ``None`` when there is no such file, it is too
-    large, or no line names one. Nothing else in the file is read here (``EXPT_TYPE``, ``COMMENTS1-4`` are not); the
+    large, or no line names one. Nothing else in the file is read here (``COMMENTS1-4`` are not; ``EXPT_TYPE`` is read by
+    :func:`_exp_expt_type`, only from a file this function accepted); the
     companion is marked ``parsed`` only when the line was taken. A value of a known meaning, used ONLY to offer
     merge candidates by base name when it agrees with the run's own name (``grouping``): never a field value.
     c16-r L4: at most :data:`MAX_EXP_BYTES` + 1 bytes are read (more is too large, whatever the size said); lines end
@@ -746,6 +751,32 @@ def _exp_data_file(rel: str, by_rel: dict[str, tuple[Path, int]], companions: li
                 continue
             companion["parsed"] = True
             return {"key": "exp_data_file", "literal": value, "tokens": None, "locator": f"line:{number}",
+                    "source_relative_path": rel, "scan_index": None}
+    return None
+
+
+#: ``EXPT_TYPE`` and its value, one word (``XAS``): what kind of experiment the data collector ran
+_EXP_EXPT_TYPE = re.compile(r"^\s*EXPT_TYPE(?:\s*[:=]\s*|\s+)(?P<value>[A-Za-z][A-Za-z0-9_\-]{0,39})\s*$")
+
+
+def _exp_expt_type(rel: str, by_rel: dict[str, tuple[Path, int]]) -> dict | None:
+    """The ``EXPT_TYPE`` line of an experiment file ALREADY accepted as the run's own (its ``DATA_FILE`` is the run's
+    name: :func:`_exp_data_file`, :func:`_folder_exp_data_file`), as one statement (key ``exp_expt_type``, the word it
+    writes, its line), or ``None``. Read with the same bounds as the ``DATA_FILE`` line. The literal is what the data
+    collector wrote; what it implies for the record is a SUGGESTION made elsewhere (``suggestions``), never here."""
+    if rel not in by_rel or by_rel[rel][1] > MAX_EXP_BYTES:
+        return None
+    try:
+        with by_rel[rel][0].open("rb") as fh:
+            raw = fh.read(MAX_EXP_BYTES + 1)
+    except OSError:
+        return None
+    if len(raw) > MAX_EXP_BYTES:
+        return None
+    for number, line in enumerate(re.split(r"\r\n|\r|\n", raw.decode("latin-1")), 1):
+        m = _EXP_EXPT_TYPE.match(line)
+        if m:
+            return {"key": "exp_expt_type", "literal": m.group("value"), "tokens": None, "locator": f"line:{number}",
                     "source_relative_path": rel, "scan_index": None}
     return None
 

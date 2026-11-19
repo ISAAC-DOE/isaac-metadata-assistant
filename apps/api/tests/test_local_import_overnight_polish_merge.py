@@ -83,7 +83,7 @@ def _po(b: dict, label: str) -> dict:
 
 
 def test_an_mca_whose_title_states_an_average_is_a_processed_output_never_a_run(b):
-    assert B.FORMAT_VERSION == "1.13.0" and b["format_version"] == "1.13.0"
+    assert B._VERSION_ORDER.index(B.FORMAT_VERSION) >= B._VERSION_ORDER.index("1.13.0") and b["format_version"] == B.FORMAT_VERSION
     for label, rel in (("ave_ZZ1_filter10", "MERGE/ave_ZZ1_filter10.mca"),
                        ("07_01_ZZ1_filter10_ave", "MERGE/07_01_ZZ1_filter10_ave.mca"),
                        ("ZZ1_elsewhere_ave", "averages/ZZ1_elsewhere_ave.mca")):
@@ -178,7 +178,7 @@ def test_a_1_12_0_bundle_holding_average_runs_validates_and_its_first_save_says_
     (out / "bundle.json").write_bytes(B.encode(old))
     M.group(out)
     saved = M.load(out)
-    assert saved["format_version"] == "1.13.0"
+    assert saved["format_version"] == B.FORMAT_VERSION
     [u] = saved["format_upgrades"]
     assert u["from_format_version"] == "1.12.0" and B.CHANGES_ADDED_IN["1.13.0"] in u["statement"]
     assert "3 of its runs" in u["statement"] and "re-import to keep them as processed outputs" in u["statement"]
@@ -191,7 +191,7 @@ def test_the_schema_adds_only_the_new_origin_rule_and_basis():
     assert f["rule_id"]["enum"] == ["isaac.processed_output.origin.v0", "isaac.processed_output.origin.engine_classification.v0",
                                     TITLE_RULE]
     assert f["basis"]["enum"] == ["line_1", "fields", "engine_classification", "average_title"]
-    assert s["properties"]["format_version"]["enum"][-1] == "1.13.0"
+    assert "1.13.0" in s["properties"]["format_version"]["enum"] and s["properties"]["format_version"]["enum"][-1] == B.FORMAT_VERSION
 
 
 # --- 4. a quick merge's file name is not condition or sample evidence -----------------------------------------------
