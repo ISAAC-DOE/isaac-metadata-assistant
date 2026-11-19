@@ -381,6 +381,10 @@ def _units(view: _View, rows: Sequence[Mapping], include: Sequence[str]) -> tupl
             if gives_value or str(members[0].get("target_field_path") or "").startswith("sample."):
                 parts = _by_identity(view, members)
             for part in parts:
+                if not any(m["question_id"] in wanted for m in part):
+                    for m in part:  # a part none of whose questions is asked here (not blocking): not a card
+                        left[_why_not(m, include) or ""] += 1
+                    continue
                 whole = len(part) == len(members)
                 units.append({"questions": part, "named": part[0], "same_reading": whole, "each": not whole,
                               "only_scopes": None, "field": None,
@@ -691,7 +695,8 @@ def _value_card(view: _View, unit: Mapping) -> dict:
     n = len(groups)
     # ONE answer for several measurements: said on the card, and a note on such a card holds the answer back at the
     # import (question_site_import), so "all but one" is never recorded as "all"
-    coverage = (f"One answer covers all {n} measurements; if any differs, add a note and nothing is recorded until "
+    every = "both measurements" if n == 2 else f"all {n} measurements"
+    coverage = (f"One answer covers {every}; if any differs, add a note and nothing is recorded until "
                 "it has been read." if n > 1 else "")
     detail = " ".join(x for x in (lead, coverage or then) if x)
     blocking = any(m.get("blocking") for m in qs)
