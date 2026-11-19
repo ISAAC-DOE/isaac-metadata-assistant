@@ -2725,6 +2725,65 @@ def group_by_text(per_record: Iterable[Iterable[str]]) -> list[dict]:
     return sorted(seen.values(), key=lambda r: -r["records"])
 
 
+#: finding 16: codes of export's lines that are not a composer warning
+FOLLOWS_LEFT_OUT_CODE = "follows_link_left_out"
+COMPLETENESS_CODE = "record_completeness"
+CODE_EXAMPLE_CHARS = 240
+
+
+def _lead(text: Any) -> str:
+    """What a "Written without …: <sentence>" line says in a few words: its part before the first colon."""
+    return str(text).split(": ", 1)[0].strip()
+
+
+def group_by_code(per_record: Iterable[Iterable[tuple[str, str]]]) -> list[dict]:
+    """Finding 16: the warnings of many records grouped BY CODE: ``[{code, what, records, variants, example,
+    questions, questions_total}]`` over each record's ``(code, text)`` lines. ``what`` is the line's lead ("Written
+    without the potential set-point"); ``records`` how many records carry the code; ``variants`` how many distinct
+    sentences it has (they differ in a value, a file name or a question id); ``example`` one of them, clipped;
+    ``questions`` up to three question ids the sentences name. Most records first."""
+    seen: dict[tuple[str, str], dict] = {}
+    for lines in per_record:
+        mine: set[tuple[str, str]] = set()
+        for code, text in lines:
+            key = (str(code), _lead(text))
+            row = seen.setdefault(key, {"code": key[0], "what": key[1], "records": 0, "_variants": set(),
+                                        "example": None, "_questions": []})
+            if key not in mine:
+                mine.add(key)
+                row["records"] += 1
+            row["_variants"].add(fold_key(text))
+            if row["example"] is None:
+                t = str(text)
+                row["example"] = t if len(t) <= CODE_EXAMPLE_CHARS else t[:CODE_EXAMPLE_CHARS - 1] + "…"
+            for m in _QUESTION_ID_IN_TEXT.finditer(str(text)):
+                if m.group(0) not in row["_questions"]:
+                    row["_questions"].append(m.group(0))
+    out = []
+    for row in sorted(seen.values(), key=lambda r: -r["records"]):
+        qs = row.pop("_questions")
+        out.append({**{k: v for k, v in row.items() if k != "_variants"}, "variants": len(row["_variants"]),
+                    "questions": qs[:3], "questions_total": len(qs)})
+    return out
+
+
+def by_code_sentence(rows: Sequence[Mapping]) -> str:
+    """One short sentence for :func:`group_by_code` rows: "87 record(s) written without the potential set-point (18
+    variants; answer question Q-… and 10 more); 89 record(s) written without the start time (…)"."""
+    parts = []
+    for r in rows:
+        what = str(r["what"])
+        what = what[:1].lower() + what[1:]
+        notes = []
+        if r["variants"] > 1:
+            notes.append(f"{r['variants']} variants that differ only in the value, file or question they name")
+        if r["questions"]:
+            more = r["questions_total"] - 1
+            notes.append(f"answer question {r['questions'][0]}" + (f" and {more} more" if more > 0 else ""))
+        parts.append(f"{r['records']} record(s) {what}" + (f" ({'; '.join(notes)})" if notes else ""))
+    return "; ".join(parts)
+
+
 def grouped_sentence(rows: Sequence[Mapping]) -> str:
     """One sentence for :func:`group_by_text` rows: each text once, with how many records carry it and one example."""
     return "; ".join(f"{r['text']} ({r['records']} record(s)" + (f", e.g. question {r['example_question']}" if r["example_question"] else "")
@@ -3326,6 +3385,7 @@ def export_records(bundle_dir: Path, out: Path, *, run_portal=None, allow_indist
     exported, refused = [], []
     curve_older: list[str] = []
     said_each_record: list[list[str]] = []
+    coded_each_record: list[list[tuple[str, str]]] = []
     portal_warned: dict[str, list[dict]] = {}
     index = _read_export_index(out) if out.is_dir() else {"format": EXPORT_INDEX_FORMAT, "records": []}
     bundle_id = bundle.get("bundle_id")
@@ -3496,21 +3556,26 @@ def export_records(bundle_dir: Path, out: Path, *, run_portal=None, allow_indist
                "sidecar": sidecar_path.name,
                "artifacts": artifacts, "schemas_used": report["schemas_used"], "export": status,
                "statement": "Valid for the portal's pinned schema; NOT claimed valid for the website."}
-        still = [written_without(w) for w in sorted((w for w in warned if w["group_id"] == group_id),
-                                                    key=lambda w: warning_rank(w.get("code")))]
+        mine = sorted((w for w in warned if w["group_id"] == group_id), key=lambda w: warning_rank(w.get("code")))
+        still = [written_without(w) for w in mine]
+        codes = [str(w.get("code") or "warning") for w in mine]  # finding 16: each line's warning code, in step
         if link_left_out:
             still.append(L.NOT_WRITTEN_FOLLOWS.format(why=link_left_out))
+            codes.append(FOLLOWS_LEFT_OUT_CODE)
         if group_id in holds:
             # written although the completeness gate names it (--allow-indistinguishable): said on the row, first
             still.insert(0, f"Written although record completeness holds it ({CP.ALLOW_FLAG}): "
                          + holds[group_id]["text"].replace(f"Held ({CP.GATE_ID}): ", "", 1))
+            codes.insert(0, COMPLETENESS_CODE)
             held_now.append(group_id)
         if link is not None:
             row["follows"] = {"target": link["target"], "basis": link["basis"]}
         if any(w.get("code") == CURVE_OLDER_WARNING for w in warned if w["group_id"] == group_id):
             curve_older.append(group_id)  # finding 2: repeated in the reply's own block and outcome, first
         said_each_record.append(list(still))  # r5f L3: grouped by text for the summary below (rows keep their own)
+        coded_each_record.append(list(zip(codes, still)))  # finding 16: ...and by warning code, for the outcome
         written_notes = list(still)  # what export says the record is written without, kept for `upload --dry-run`
+        written_codes = list(codes)
         if pw := portal_warnings_of(report):
             # r4-b M7: a record the portal validator warns about says so on its row
             portal_warned[group_id] = pw
@@ -3556,7 +3621,7 @@ def export_records(bundle_dir: Path, out: Path, *, run_portal=None, allow_indist
                                          if status == "replaced" else list((prior or {}).get("replaced_record_ids") or [])),
                  # what export says this record is written without (every "Written without ..." line), kept so the
                  # upload dry run says exactly the same notes
-                 **({"written_without": written_notes} if written_notes else {}),
+                 **({"written_without": written_notes, "written_without_codes": written_codes} if written_notes else {}),
                  # r5f L3: what the portal validator warned about this record, kept so the dry run can say it once
                  **({"portal_warnings": [{"code": w["code"], "path": w["path"], "message": w["message"]} for w in pw]}
                     if (pw := portal_warnings_of(report)) else {})}
@@ -3621,7 +3686,12 @@ def export_records(bundle_dir: Path, out: Path, *, run_portal=None, allow_indist
         # r5f L3: the same warning on every record is said once here, with its record count and one example question;
         # each row of `exported` keeps its own `warnings`
         result["warnings_by_text"] = said_once
-        result["outcome"] += warnings_outcome_sentence(said_once)
+        # finding 16 (audit of 18 Nov 2026): the outcome says each KIND of warning once, by its code, with how many
+        # records carry it and how many variants it has (before: 18 "kinds" that differed only in a voltage, about
+        # 3,000 characters); `warnings_by_text` keeps every distinct sentence
+        result["warnings_by_code"] = group_by_code(coded_each_record)
+        result["outcome"] += " Warnings that apply, by kind: " + by_code_sentence(result["warnings_by_code"]) + (
+            " (`warnings_by_code`; every distinct sentence is in `warnings_by_text`).")
     if portal_warned:
         # r4-b M7: each portal warning once, with how many of the records written carry it
         result["portal_warnings"] = portal_warning_summary(portal_warned)
@@ -3768,13 +3838,21 @@ def upload_summary(plan: Sequence[Mapping], records_dir: Path, portal_url: str |
     ids = {Path(p["record"]).stem for p in plan}
     portal = _portal_warnings_in_index(Path(records_dir), ids)
     statement = lead + " Nothing was sent. The token is never read or printed."
+    # finding 16: by warning code, with counts (the codes export kept in its index; an older index has none, and its
+    # lines are grouped by their lead instead)
+    codes_of = _written_without_codes_in_index(Path(records_dir))
+    by_code = group_by_code(
+        zip(c if len(c := codes_of.get(Path(p["record"]).stem) or []) == len(p.get("notes") or ())
+            else [_lead(t) for t in p.get("notes") or ()], p.get("notes") or ()) for p in plan)
     if notes:
-        statement += " What these records are written without, each said once: " + grouped_sentence(notes) + " (records[].notes)."
+        statement += (" What these records are written without, by kind: " + by_code_sentence(by_code)
+                      + " (notes_by_code; each record's own lines are in records[].notes).")
     if portal:
         statement += (" The portal validator warned, each said once: "
                       + "; ".join(f"{w['code']}" + (f" at {w['path']}" if w.get("path") else "") + f": {w['message']} ({w['records']} record(s))"
                                   for w in portal) + " (portal_warnings).")
-    return {"statement": statement, "notes_by_text": notes, **({"portal_warnings": portal} if portal else {})}
+    return {"statement": statement, "notes_by_code": by_code, "notes_by_text": notes,
+            **({"portal_warnings": portal} if portal else {})}
 
 
 def _portal_warnings_in_index(records_dir: Path, record_ids: set[str]) -> list[dict]:
@@ -3836,6 +3914,19 @@ def _labels_in_index(records_dir: Path) -> dict[str, str]:
     rows = index.get("records") if isinstance(index, Mapping) else None
     return {r["record_id"]: r["label"] for r in rows or () if isinstance(r, Mapping)
             and isinstance(r.get("record_id"), str) and isinstance(r.get("label"), str)}
+
+
+def _written_without_codes_in_index(records_dir: Path) -> dict[str, list[str]]:
+    """``{record_id: the warning code of each "Written without ..." line}`` from the export index (finding 16);
+    ``{}`` for an index an older export wrote."""
+    try:
+        index = json.loads((records_dir / EXPORT_INDEX).read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return {}
+    rows = index.get("records") if isinstance(index, Mapping) else None
+    return {r["record_id"]: [str(c) for c in r["written_without_codes"]] for r in rows or ()
+            if isinstance(r, Mapping) and isinstance(r.get("record_id"), str)
+            and isinstance(r.get("written_without_codes"), list)}
 
 
 def _written_without_in_index(records_dir: Path) -> dict[str, list[str]]:
