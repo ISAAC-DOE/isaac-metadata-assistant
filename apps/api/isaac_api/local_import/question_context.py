@@ -109,6 +109,7 @@ RULES: Mapping[str, tuple[str, ...]] = {
     "technique": ("quote", "example_files"),
     "group": ("values",),
     "people": ("quote",),
+    "dose": ("plot", "values"),
 }
 
 _START_PATH = "timestamps.acquired_start_utc"
@@ -133,6 +134,8 @@ def theme_of(q: Mapping) -> str | None:
         return "naming"
     if kind == "confirm_absorber":
         return "curve"
+    if kind == "dose_reading":
+        return "dose"
     if kind == "optional_values":
         fields = list((q.get("fields") or {}).keys())
         if any(f.startswith("context.") for f in fields):
@@ -1124,7 +1127,42 @@ def _build(q: Mapping, idx: Index, theme: str | None) -> list[dict]:
         items += [v] if v else []
     elif theme == "people":
         items += _people_items(idx, runs, fields, q)
+    elif theme == "dose":
+        items += _dose_items(idx, q)
     return items
+
+
+#: finding 4 (audit of 18 Nov 2026): the beamtime-wide dose-reading question shows the processing plot of up to this
+#: many of the groups it is about (each plot draws every scan: kept solid, dropped dashed), and what the rule measured
+MAX_DOSE_PLOTS = 3
+
+
+def _dose_items(idx: Index, q: Mapping) -> list[dict]:
+    """The dose-reading question's context: the plot of up to :data:`MAX_DOSE_PLOTS` of its groups, then one row per
+    group with what the rule measured at its spots (an observation of the draft protocol, never the answer)."""
+    gids = [g for g in q.get("group_ids") or () if isinstance(g, str)]
+    out: list[dict] = []
+    for gid in gids[:MAX_DOSE_PLOTS]:
+        for item in _plot_items(idx, [gid]):
+            out.append({**item, "label": f"Every scan of {_group_words(idx, gid)} (the first scan at each spot is the "
+                                         "one in question)"})
+    rows = []
+    for gid in gids:
+        r = idx.result_for(gid) or {}
+        dd = r.get("dose_damage") if isinstance(r.get("dose_damage"), Mapping) else {}
+        spots = dd.get("per_spot") if isinstance(dd.get("per_spot"), Mapping) else {}
+        changed = [f"{lab}: scan 2 {100 * (x.get('d12') or 0):+.1f} %" for lab, x in spots.items()
+                   if isinstance(x, Mapping) and x.get("kind") not in (None, "none") and isinstance(x.get("d12"), (int, float))]
+        rows.append({"group": _group_words(idx, gid), "spots": _clip("; ".join(changed) or "see the result", CELL_CHARS),
+                     "why": _clip(dd.get("why") or "", 120)})
+    item = _values_item("What changes after the first scan at each spot", PROCESSING_SOURCE, rows,
+                        (("group", "Group"), ("spots", "White line after the first scan"), ("why", "Why the rule cannot tell")),
+                        total=len(gids),
+                        note="Measured by ISAAC's draft processing rule (normalised shape, edge-step units): an "
+                             "observation. Whether it is beam damage or a settling first scan is the scientist's word.")
+    if item:
+        out.append(item)
+    return out
 
 
 def _finish(items: Sequence[Mapping], full: bool) -> tuple[list[dict], list[tuple[str, str]]]:
