@@ -10,6 +10,7 @@ Read this at Step 7. Open another file only on its trigger:
 | they keep a word that is not on a field's list | `vocabulary-requests.md` |
 | a question shows `earlier_answers`, or you are about to ask whether to remember answers | `earlier-answers.md` |
 | a filled question workbook came back | `workbook-answers.md` |
+| they would rather answer a few at a time on a small site, or a site's `answers.json` came back | `question-site.md` |
 
 ## What the list gives you
 
