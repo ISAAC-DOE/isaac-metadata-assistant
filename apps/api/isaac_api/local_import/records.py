@@ -90,6 +90,8 @@ ATHENA_NOT_CHOSEN_WARNING = "athena_version_no_longer_chosen"
 #: r6h H2: a member run's ``macro_setpoint_disagrees`` conflict (a macro and the file name state other set-points for
 #: one measurement) is unanswered: the record goes out with the file's set-point (or none) while that is open.
 MACRO_SETPOINT_WARNING = "macro_setpoint_unanswered"
+#: ``approved_curve.WARNING``: the record's approved curve is older than a scan note or a newer result of its group
+CURVE_OLDER_WARNING = "approved_curve_older_than_evidence"
 #: r6h H3: an in-situ record carries no electrolyte, cell type or control mode (what it was measured in).
 IN_SITU_WARNING = "in_situ_conditions_not_in_record"
 START_TIME_LEFT_OUT = "start time left out: instrument clock zone deferred (question {question})"
@@ -1292,6 +1294,14 @@ def compose_group(bundle: Mapping, group: Mapping, bundle_dir: Path, index: dict
                                               index["memo"])
                           + _start_time_warnings(bundle, group, measured_ids, fields, index["memo"],
                                                  disagreements=report["disagreements"]))
+    # finding 2 (audit of 18 Nov 2026): the record's curve is an approved result OLDER THAN ITS EVIDENCE (a scan note
+    # it was processed without or that came after the approval, or a newer result): said at build-records, validate
+    # and export, first. The record keeps the approved curve: only the scientist changes that.
+    from . import approved_curve as AC
+
+    stale_curve = AC.older_than_evidence(bundle, group["group_id"], index["processing_state"])
+    if stale_curve is not None and (report.get("processing") or {}).get("result") == stale_curve["approved_result_id"]:
+        report["warnings"].insert(0, AC.warning(stale_curve))
     if chose_other is not None:
         # r5c C1: the record carries an approved result that is not the version the scientist chose last: said at
         # build-records, validate and export (on the record's row), never silent
@@ -1963,6 +1973,8 @@ def potential_warning_text(w: Mapping) -> str:
         return in_situ_text(w)
     if w.get("code") == ATHENA_NOT_CHOSEN_WARNING:
         return athena_choice_text(w, w["group_id"])
+    if w.get("code") == CURVE_OLDER_WARNING:
+        return w["text"]  # approved_curve.text: it names results and notes, never a question
     if w.get("code") == START_TIME_WARNING:
         return start_time_text(w)
     if w.get("open_circuit"):
@@ -2621,6 +2633,8 @@ def warning_rank(code: str | None) -> int:
     else; 2 = the routine start-time note. Only ORDERS the short list: nothing is dropped, and ``--full`` keeps the
     original order."""
     code = str(code or "")
+    if code == CURVE_OLDER_WARNING:
+        return -1  # finding 2: the one warning that says the record's CURVE may be wrong, before every other
     if code in (STATED_POTENTIAL_WARNING, POTENTIAL_SOURCES_WARNING, ATHENA_NOT_CHOSEN_WARNING,
                 MACRO_SETPOINT_WARNING) or code.startswith("portal:"):
         return 0
@@ -2773,6 +2787,8 @@ def written_without(w: Mapping) -> str:
         return f"Written without what it was measured in: {w['text']}"
     if w.get("code") == ATHENA_NOT_CHOSEN_WARNING:
         return f"Written with an approved curve that is not the chosen Athena version: {w['text']}"
+    if w.get("code") == CURVE_OLDER_WARNING:
+        return f"Written with an approved curve older than its evidence: {w['text']}"
     name = WRITTEN_WITHOUT_NAMES.get(w.get("path"), w.get("path") or "a stated condition")
     return f"Written without {name}: {w['text']}"
 
@@ -3183,6 +3199,7 @@ def export_records(bundle_dir: Path, out: Path, *, run_portal=None) -> dict:
     bundle = load_validated(bundle_dir)
     label_of = group_labels(bundle)  # r7 J6: each row names its first member file
     exported, refused = [], []
+    curve_older: list[str] = []
     said_each_record: list[list[str]] = []
     portal_warned: dict[str, list[dict]] = {}
     index = _read_export_index(out) if out.is_dir() else {"format": EXPORT_INDEX_FORMAT, "records": []}
@@ -3338,6 +3355,8 @@ def export_records(bundle_dir: Path, out: Path, *, run_portal=None) -> dict:
             still.append(L.NOT_WRITTEN_FOLLOWS.format(why=link_left_out))
         if link is not None:
             row["follows"] = {"target": link["target"], "basis": link["basis"]}
+        if any(w.get("code") == CURVE_OLDER_WARNING for w in warned if w["group_id"] == group_id):
+            curve_older.append(group_id)  # finding 2: repeated in the reply's own block and outcome, first
         said_each_record.append(list(still))  # r5f L3: grouped by text for the summary below (rows keep their own)
         written_notes = list(still)  # what export says the record is written without, kept for `upload --dry-run`
         if pw := portal_warnings_of(report):
@@ -3426,6 +3445,17 @@ def export_records(bundle_dir: Path, out: Path, *, run_portal=None) -> dict:
         "on_disk_drafts_ignored_because_they_differ": stale,
         "on_disk_drafts_ignored_with_no_confirmed_group": orphans,
     }
+    if curve_older:
+        # finding 2 (audit of 18 Nov 2026): said before every other warning, with the groups, never only on a row
+        said = (f"{len(curve_older)} record(s) carry an approved curve older than its evidence (a logbook scan note "
+                "it was processed without or that came after the approval, or a newer processing result): "
+                + ", ".join(curve_older[:REASONS_SHOWN])
+                + (f" and {len(curve_older) - REASONS_SHOWN} more" if len(curve_older) > REASONS_SHOWN else "")
+                + ". Each record keeps its approved curve; `isaac bundle validate <bundle_dir>` says what is newer "
+                  "and the next step for each.")
+        result["older_than_evidence"] = {"code": CURVE_OLDER_WARNING, "records": len(curve_older),
+                                         "group_ids": list(curve_older), "statement": said}
+        result["outcome"] += " " + said
     if (said_once := group_by_text(said_each_record)):
         # r5f L3: the same warning on every record is said once here, with its record count and one example question;
         # each row of `exported` keeps its own `warnings`
