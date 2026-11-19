@@ -21,6 +21,7 @@ whose stored state disagrees, so a hand-edited ``"value_state":
 
 from __future__ import annotations
 
+import dataclasses
 import hashlib
 import json
 import math
@@ -4485,7 +4486,9 @@ def build_bundle(
             if g.profile == XDC_PROFILE_ID and scans:
                 from .grouping import xdc_not_a_measurement
 
-                not_measured = xdc_not_a_measurement(g.label, run_statements)
+                # the scans' own header statements only: the experiment file's EXPT_TYPE is no scan's header
+                not_measured = xdc_not_a_measurement(
+                    g.label, [st for st in run_statements if st.get("key") != "exp_expt_type"])
             runs.append(
                 {
                     "run_id": run_id,
@@ -4547,6 +4550,7 @@ def build_bundle(
     out_candidates: list[dict] = []
     evidence_windows_truncated = 0
     conflicts: list[dict] = []
+    named_techniques: list[tuple] = []  # the engine's technique candidates (suggestions.TECHNIQUE_RULE_ID below)
     for ci, c in enumerate(candidates):
         bundle_cid = cand_bundle_ids[ci]
         run_id = run_of_index.get(ci)
@@ -4565,6 +4569,8 @@ def build_bundle(
         out_candidates.append(
             _candidate_record(c, bundle_cid=bundle_cid, run_id=run_id, key=key, evidence=evidence, total=total, writable=writable)
         )
+        if c.target_field_path == "system.technique":
+            named_techniques.append((ci, c, bundle_cid, run_id, key, evidence, total))
         if c.disagreement and (extracted == STATE_CONFLICTING or c.resolved_by_rule):
             # A disagreement a STORED rule resolved is still a conflict entry (review
             # L4): every reading is kept, and the rule that chose is carried beside it.
@@ -4617,6 +4623,23 @@ def build_bundle(
                 out_candidates.append(cand)
                 runs_by_id[run_id]["candidate_ids"].append(cand["candidate_id"])
     comment_runs_not_read = len(not_read)
+    # suggestions.TECHNIQUE_RULE_ID: the technique the INSTRUMENT configuration states, one suggestion for the beamtime
+    # (after every other candidate, so each keeps its id). Where it exists, a candidate that rests only on a macro's or
+    # a script's NAME is kept as evidence and no longer asks for the technique of each run.
+    from . import suggestions as _suggest
+
+    technique = (_suggest.technique_candidate(
+        runs, _suggest.technique_readings(runs, out_candidates, xdc_runs),
+        {s["source_id"]: s["relative_path"] for s in sources}, f"cand-{len(out_candidates) + 1:04d}", writable)
+        if len(out_candidates) < MAX_CANDIDATES else None)
+    if technique is not None:
+        out_candidates.append(technique)
+        shared_bundle_ids.append(technique["candidate_id"])
+        for ci, c, bundle_cid, run_id, key, evidence, total in named_techniques:
+            if _suggest.is_code_named_technique(out_candidates[ci]):
+                out_candidates[ci] = _candidate_record(
+                    dataclasses.replace(c, target_field_path=None, not_proposable_reason=_suggest.NOT_A_TECHNIQUE_REASON),
+                    bundle_cid=bundle_cid, run_id=run_id, key=key, evidence=evidence, total=total, writable=writable)
     if len(out_candidates) > MAX_CANDIDATES:
         raise BundleBoundsExceeded(f"{len(out_candidates)} candidates exceeds the bound of {MAX_CANDIDATES}.")
 

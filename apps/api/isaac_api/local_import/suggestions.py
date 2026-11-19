@@ -25,7 +25,7 @@ from __future__ import annotations
 
 import re
 from collections import Counter
-from typing import Any, Iterable, Mapping
+from typing import Any, Iterable, Mapping, Sequence
 
 from . import bundle as B
 from . import scan_notes as SN
@@ -703,3 +703,227 @@ def ai_hints(bundle: Mapping, target_ids: Iterable[str], *, limit: int = 5) -> l
             }
         h["targets"] += 1
     return sorted(by_value.values(), key=lambda h: -h["targets"])[:limit]
+
+
+# --- suggestions the IMPORT reads from the files themselves (audit of 18 Nov 2026) ------------------------------------
+#
+# A value the files state is read; a value that needs one step of interpretation is a SUGGESTION: a candidate that
+# NEEDS REVIEW, with the evidence it rests on and a reason that says what was read and why it is only a suggestion. A
+# scientist confirms it (one decision) or corrects it; no record carries it before that. Each is built through the
+# engine's own candidate type and ``bundle._candidate_record``, so its shape is every other candidate's and the
+# existing questions ask it. Nothing here writes a value silently.
+
+
+def suggested_candidate(*, engine_id: str, bundle_cid: str, run_id: str | None, key: str, path: str, value: Any,
+                        rule_id: str, rule: str, reason: str, witnesses: Sequence[Mapping], writable) -> dict:
+    """ONE candidate that needs review (``value`` may be ``None``: the reason then says what the files write and
+    why no value is offered). ``witnesses``: ``{relative_path, source_id, locator, literal, supports, normalization}``
+    in the order they are shown; the first ``supports`` one carries the value."""
+    from .. import historical_import as hist
+
+    evidence = []
+    for w in list(witnesses)[:B.MAX_EVIDENCE_PER_CANDIDATE]:
+        rel = w.get("relative_path")
+        evidence.append({
+            "evidence_id": f"{bundle_cid}.e{len(evidence) + 1:03d}",
+            "source_id": w.get("source_id"),
+            "relative_path": rel if w.get("source_id") else None,
+            "locator_kind": "source_file" if w.get("source_id") else "described",
+            "locator": str(w.get("locator") or ""),
+            "statement_key": key,
+            "literal_value": w.get("literal"),
+            "method": "deterministic_parser",
+            "method_id": rule_id,
+            "relation": "supports" if value is not None and w.get("supports") else "context",
+            "reading_index": None,
+            "normalization": list(w.get("normalization") or ()),
+        })
+    sources = tuple(dict.fromkeys(str(w.get("relative_path")) for w in witnesses if w.get("relative_path")))
+    engine = hist.SemanticCandidate(
+        candidate_id=engine_id,
+        kind=hist.CANDIDATE_KIND_FIELD,
+        determinism=hist.DETERMINISM_DETERMINISTIC,
+        rule=rule,
+        supporting_source_ids=sources,
+        target_field_path=path,
+        proposed_value=value,
+        not_proposable_reason=reason,
+        supporting_statement_total=len(witnesses),
+        distinct_sources=len(sources),
+    )
+    return B._candidate_record(engine, bundle_cid=bundle_cid, run_id=run_id, key=key, evidence=evidence,
+                               total=len(witnesses), writable=writable)
+
+
+CONFIRM_OR_CORRECT = "A scientist confirms it, or corrects it, before any record carries it."
+
+# --- the technique, from the instrument configuration (rule 7) --------------------------------------------------------
+
+TECHNIQUE_RULE_ID = "isaac.suggest.technique_from_configuration.v1"
+TECHNIQUE_RULE = (
+    f"{TECHNIQUE_RULE_ID}: the technique is suggested from what the INSTRUMENT recorded, never from a macro's, a "
+    "script's or a function's name. (a) A SPEC acquisition whose emission motor (`emiss` / `emission` in #O / #P) is "
+    "held, during an energy scan of the monochromator (gscan mono / energy), within the table's tolerance of an "
+    "emission line of an element whose absorption edge that scan crosses is high-energy-resolution "
+    "fluorescence-detected absorption: HERFD-XAS. (b) An SSRL XDC run whose own experiment file states EXPT_TYPE with "
+    "a word that is one of the schema's techniques (XAS) is that technique. Line and edge energies: "
+    "readers.xray_tables (a snapshot of xraydb). One suggestion for the beamtime when every run that states it "
+    "agrees; runs that differ give no value and both are shown. It needs review: a scientist confirms or corrects it."
+)
+TECHNIQUE_KEY = "technique_from_configuration"
+HERFD = "HERFD-XAS"
+#: the engine's macro reader: a technique candidate whose every witness it read carries a macro's or a script's NAME
+MACRO_READER_ID = "bl15_macro_v1"
+NOT_A_TECHNIQUE_REASON = (
+    "A macro's, a script's or a function's name is not a statement of the technique, and the instrument "
+    f"configuration of this beamtime states it (rule {TECHNIQUE_RULE_ID}: see the technique suggestion). The names "
+    "are kept here as evidence of what was run; they no longer ask for the technique of each run."
+)
+_EMISSION_MOTORS = ("emiss", "emission")
+_ENERGY_SCAN_MOTORS = ("mono", "energy")
+_MAX_TECHNIQUE_WITNESS_RUNS = 6
+
+
+def is_code_named_technique(candidate: Mapping) -> bool:
+    """A technique candidate that rests ONLY on what the macro reader read (a ``qdo`` include, a ``def`` symbol, a
+    helper script's function): a name, not a statement of the technique."""
+    witnesses = [e for e in candidate.get("evidence") or () if e.get("method") != "ai_interpretation"]
+    return (candidate.get("target_field_path") == TECHNIQUE_PATH and bool(witnesses)
+            and all(e.get("method_id") == MACRO_READER_ID for e in witnesses))
+
+
+def energy_scan_range(command: Any) -> tuple[float, float] | None:
+    """``(low, high)`` eV of a SPEC ``gscan`` of the monochromator (``gscan mono|energy E0 E1 step E2 step ... time``):
+    the start and every region end. ``None`` for any other scan (a stage or optics scan is no energy scan)."""
+    tokens = str(command or "").split()
+    if len(tokens) < 5 or tokens[0] != "gscan" or tokens[1] not in _ENERGY_SCAN_MOTORS:
+        return None
+    try:
+        numbers = [float(t) for t in tokens[2:-1]]
+    except ValueError:
+        return None
+    energies = [numbers[0], *numbers[1::2]]
+    return (min(energies), max(energies)) if len(energies) >= 2 else None
+
+
+def _herfd_reading(emission: Mapping | None, command: Mapping | None) -> dict | None:
+    """What ONE SPEC run's header states: its emission motor's energy, the line it is and the edge the scan crosses,
+    or ``None`` (no emission motor, no energy scan, several emission energies, or no line of a scanned element)."""
+    from .readers import xray_tables as X
+
+    if emission is None or command is None:
+        return None
+    held = [e for e in emission.get("evidence") or ()
+            if any(f"`{m}`" in str(e.get("locator") or "") for m in _EMISSION_MOTORS)]
+    scans = [(e, r) for e in command.get("evidence") or () if (r := energy_scan_range(e.get("literal_value"))) is not None]
+    if not held or not scans:
+        return None
+    # the HEADER's own positions only (every scan's, as far as the evidence window holds them): a macro call's
+    # argument is what was asked for, not what the instrument recorded
+    try:
+        energies = {float(e.get("literal_value")) for e in held}
+    except (TypeError, ValueError):
+        return None
+    if len(energies) != 1:
+        return None
+    energy = next(iter(energies))
+    low, high = min(r[0] for _, r in scans), max(r[1] for _, r in scans)
+    hits = [h for h in X.lines_near(energy)
+            if (edge := X.edge_energy(h["element"], h["edge"])) is not None and low <= edge <= high]
+    if len(hits) != 1:
+        return None
+    hit = hits[0]
+    return {"technique": HERFD, "held": held[0], "scan": scans[0][0], "energy": energy, "low": low, "high": high,
+            "element": hit["element"], "line": hit["line"], "line_eV": hit["energy_eV"], "edge": hit["edge"],
+            "edge_eV": X.edge_energy(hit["element"], hit["edge"])}
+
+
+def technique_readings(runs: Sequence[Mapping], candidates: Sequence[Mapping], xdc_runs: Sequence[tuple]) -> dict[str, dict]:
+    """``{run_id: reading}`` for every measurement run whose instrument files state the technique: a SPEC run's
+    emission motor (:func:`_herfd_reading`) or an XDC run's ``EXPT_TYPE`` (a word on the schema's technique list)."""
+    by_run: dict[str, dict[str, Mapping]] = {}
+    for c in candidates:
+        if c.get("run_id") and c.get("statement_key") in ("emission_energy", "scan_command"):
+            by_run.setdefault(c["run_id"], {}).setdefault(c["statement_key"], c)
+    allowed = set(B.allowed_values(TECHNIQUE_PATH) or ())
+    stated = {run_id: st for run_id, g, _scans in xdc_runs for st in g.statements if st.get("key") == "exp_expt_type"}
+    out: dict[str, dict] = {}
+    for run in runs:
+        if not run.get("run_candidate"):
+            continue
+        rid = run["run_id"]
+        if run.get("source_type") == B.SPEC_ACQUISITION_SOURCE_TYPE:
+            got = _herfd_reading(by_run.get(rid, {}).get("emission_energy"), by_run.get(rid, {}).get("scan_command"))
+            if got is not None:
+                out[rid] = got
+        elif run.get("source_type") == B.XDC_RUN_SOURCE_TYPE and rid in stated and stated[rid].get("literal") in allowed:
+            st = stated[rid]
+            out[rid] = {"technique": st["literal"], "expt": st}
+    return out
+
+
+def technique_candidate(runs: Sequence[Mapping], readings: Mapping[str, Mapping], sources: Mapping[str, str],
+                        bundle_cid: str, writable) -> dict | None:
+    """ONE beamtime-level candidate for ``system.technique`` from :func:`technique_readings`, or ``None`` when no run's
+    instrument files state it. Valued when every run that states it agrees; no value (both shown) when they differ."""
+    from .readers import xray_tables as X
+
+    if not readings:
+        return None
+    measured = [r for r in runs if r.get("run_candidate")
+                and r.get("source_type") in (B.SPEC_ACQUISITION_SOURCE_TYPE, B.XDC_RUN_SOURCE_TYPE)]
+    stating = [r for r in measured if r["run_id"] in readings]
+    by_technique: dict[str, list[Mapping]] = {}
+    for r in stating:
+        by_technique.setdefault(readings[r["run_id"]]["technique"], []).append(r)
+    id_of = {p: s for s, p in sources.items()}
+    witnesses: list[dict] = []
+    said: list[str] = []
+    value = next(iter(by_technique)) if len(by_technique) == 1 else None
+    for technique, members in by_technique.items():
+        n = len(members)
+        of = f"{n} of the {len(measured)} measurement runs read from instrument files"
+        first = readings[members[0]["run_id"]]
+        if "held" in first:
+            lines = sorted({(readings[r["run_id"]]["element"], readings[r["run_id"]]["line"]) for r in members})
+            energies = sorted({readings[r["run_id"]]["energy"] for r in members})
+            said.append(
+                f"{technique}: the emission spectrometer is held at {', '.join(f'{e:g}' for e in energies[:4])} eV during "
+                f"an energy scan from {first['low']:g} to {first['high']:g} eV in {of} (the emission motor's position in "
+                f"the scan header, e.g. {first['held'].get('locator')} of {first['held'].get('relative_path')}). That is "
+                f"the {' / '.join(f'{el} {line}' for el, line in lines)} emission line ({first['line_eV']:g} eV, within "
+                f"{X.LINE_TOLERANCE_EV:g} eV), and the scan crosses the {first['element']} {first['edge']} absorption "
+                f"edge ({first['edge_eV']:g} eV): an absorption scan recorded at one emission line with a crystal "
+                f"analyser, HERFD-XAS. Energies: {X.source()}.")
+        else:
+            st = first["expt"]
+            said.append(f"{technique}: the run's own experiment file states EXPT_TYPE {st['literal']} in {of} "
+                        f"(e.g. {str(st.get('locator')).replace('line:', 'line ')} of {st.get('source_relative_path')}).")
+        for r in members[:_MAX_TECHNIQUE_WITNESS_RUNS]:
+            got = readings[r["run_id"]]
+            if "held" in got:
+                h, sc = got["held"], got["scan"]
+                literal = str(h.get("literal_value"))
+                witnesses.append({"relative_path": h.get("relative_path"), "source_id": h.get("source_id"),
+                                  "locator": h.get("locator"), "literal": literal, "supports": True,
+                                  "normalization": [{"step": "derive", "rule_id": TECHNIQUE_RULE_ID, "from": literal,
+                                                     "to": technique, "unit": None}]})
+                witnesses.append({"relative_path": sc.get("relative_path"), "source_id": sc.get("source_id"),
+                                  "locator": sc.get("locator"), "literal": sc.get("literal_value"), "supports": False,
+                                  "normalization": []})
+            else:
+                st = got["expt"]
+                rel = st.get("source_relative_path")
+                witnesses.append({"relative_path": rel, "source_id": id_of.get(rel), "locator": st.get("locator"),
+                                  "literal": st["literal"], "supports": True, "normalization": []})
+    if value is not None:
+        reason = (f"Suggested from the instrument configuration, never from a macro or script name. {said[0]} "
+                  f"{CONFIRM_OR_CORRECT}")
+    else:
+        counts = "; ".join(f"{t} ({len(m)} run{'s' if len(m) != 1 else ''})" for t, m in by_technique.items())
+        reason = (f"The instrument configurations of this beamtime's runs suggest different techniques: {counts}. "
+                  + " ".join(said) + " Neither is offered for the whole beamtime: say which technique each group of "
+                  "runs is (the technique question of each record group).")
+    return suggested_candidate(
+        engine_id=f"shared::{TECHNIQUE_RULE_ID}", bundle_cid=bundle_cid, run_id=None, key=TECHNIQUE_KEY, path=TECHNIQUE_PATH,
+        value=value, rule_id=TECHNIQUE_RULE_ID, rule=TECHNIQUE_RULE, reason=reason, witnesses=witnesses, writable=writable)
