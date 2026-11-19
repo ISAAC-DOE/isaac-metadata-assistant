@@ -172,8 +172,8 @@ written against the shapes above keeps working; it may ignore every key it does 
 
 ### `yes_no` cards
 
-The contract lists the kind and not what the site sends. The import reads, for a `yes_no` card,
-**`action: "value"` with `value: "yes"` or `"no"`** (it also takes `true` / `false`, `"y"` / `"n"`, any case).
+The contract lists the kind and not what the site sends. The site sends **`action: "value"` with `value: true`
+or `false`**, and the import reads that (it also takes `"yes"` / `"no"`, `"y"` / `"n"`, any case).
 `yes` records the cover's `on_yes`. `no` records nothing: its note says what a person should do, and it is
 reported under "Nothing to record". `accept` is refused on a `yes_no` card (it has no suggestion) and
 `dont_know` records nothing.
@@ -279,6 +279,6 @@ recognised by that note and the name, so a second run writes nothing.
 ### The site template copy
 
 `--site-template` (default: the repository's `apps/question-site/`) is copied into `--out` so the folder
-deploys as it is. Never copied: a top-level `data/`, `test/`, `dev-server.js`, `.env.example`, `README.md`, and
-any `.vercel/`, `node_modules/` or `.git/`. When the template does not exist only `data/` is written, and the
-report says so.
+deploys as it is. Never copied: a top-level `data/`, `test/`, `dev-server.js`, `.dev-store.json`, `.impeccable/`
+and `README.md`, and, at any depth, `.vercel/`, `node_modules/`, `.git/` and every `.env*` file (one can hold the
+site's password). When the template does not exist only `data/` is written, and the report says so.
