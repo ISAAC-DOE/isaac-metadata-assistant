@@ -126,10 +126,10 @@ Read `reference/reading-unread-files.md`. `<isaac> bundle list <bundle> unread -
 - Read only inside the approved folder. A document beside it: name it and ask before opening it.
 - A filled ISAAC metadata sheet in the folder: ask whether it is theirs and to use it (`reference/template-and-own-sheet.md`).
 - Write every finding, and every note about which scans to use, to ONE findings file. Load it with
-  `annotate --from-readings --root <folder>` (preview, then `--apply`). A quote not found in its file is refused: fix it.
+  `annotate --from-readings --root <folder>`: always the preview first, then `--apply`. A quote not found in its file is refused: fix it.
 - Tell the scientist what each file held, what fit no field (with line numbers), and which files nobody could read.
-- **Step 6 does not start until this step is done.** Say how many scan notes you loaded, or that you read the whole
-  logbook and it has none.
+- **Step 6 does not start until this step is done.** End this step's message with how many scan notes you loaded, or
+  that you read the whole logbook and it has none.
 
 ## Step 5 · Groups
 
@@ -140,9 +140,11 @@ Read `reference/grouping-and-processing.md` (every command of Steps 5 and 6 is t
 2. **The counter question comes first.** `<isaac> bundle questions <bundle> --scope experiment` shows
    `naming_counter_positions` when grouping asks it. Ask it before any group is confirmed: a regroup keeps decided groups.
    Record the answer, say what it would join (`regroup_preview.statement`), then `<isaac> bundle group <bundle> --regroup`.
+   If the list shows no counter question, skip this step: no question, no regroup.
 3. **Load the findings file again** (`annotate --from-readings`, preview then `--apply`), now and after every later regroup.
 4. **Triage; do not walk every group.** Page the groups and the merge candidates.
-   - Needs a look: a row with `needs_care`, `role_proposed`, `exported_file` or `cannot_export_reason`; a group of several runs with a care flag; every merge candidate.
+   - Needs a look: a row with `needs_care`, `role_proposed`, `exported_file` or `cannot_export_reason`; a group of several runs with a care flag;
+     a group with an open disagreement about a condition that defines it (filter, potential, history); every merge candidate.
    - All others are "as proposed".
 5. **One message:** "N groups. M are as proposed (short table: sample, what tells them apart, how many). K need a look. Confirm the M together?"
    - On yes: one `--targets-file` confirm. Never include a group that needs a look. Offer to list any group in full.
@@ -154,7 +156,7 @@ Read `reference/grouping-and-processing.md` (every command of Steps 5 and 6 is t
 
 Keep `reference/grouping-and-processing.md` open ("Processing"). Athena is never used; its files are only listed.
 
-1. **Not before Step 4 is done.** Say "I loaded N scan notes" or "I read the whole logbook; it says nothing about which scans to use".
+1. **Not before Step 4 is done.** You said the scan-note count at the end of Step 4. If you did not, say it now, before `process`.
 2. `<isaac> process <bundle> --source <folder>`. Always pass `--source`, the folder that was imported.
 3. **The engine decides which scans are kept**, by its documented rule, with a reason for every drop. Decisions, not questions.
    - Every scan is aligned on its in-scan reference. An intensity drop alone never drops a scan.

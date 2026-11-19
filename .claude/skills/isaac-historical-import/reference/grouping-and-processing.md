@@ -44,6 +44,7 @@ It asks which positions of the file name hold a running counter, not sample iden
   command the reply prints.
 - "I don't know": `<isaac> bundle decide <bundle> --target experiment --decision defer --by "<name>"`. Grouping stays as it is.
 - Never guess a position.
+- **No counter question in the list:** skip this step. Ask nothing and do not regroup.
 
 ### Triage: one confirm for the plain groups, a look at the rest
 
@@ -60,6 +61,16 @@ A group needs a look when its row has any of these:
 | `cannot_export_reason` | it can never become a record as it stands (reasons below) | leave it out (`reject`), or leave it unconfirmed |
 | `members` 2 or more | check `bundle show <bundle> group <id>` for `merged_despite_engine_reading` (the importer read a difference) or `sample_key_basis: name_stem` (no file states the sample; grouped by file name) | one group, or split? |
 
+A group also needs a look when the files disagree about a condition that defines it.
+
+- `<isaac> bundle list <bundle> conflicts --limit 200` shows the open disagreements.
+- One about a condition in the row's `conditions_named` (filter, potential, cycling history, electrolyte) holds the
+  confirm: show both readings with their sources ("the file name says filter 20; every scan header says 10") and ask.
+  Several groups with the same disagreement are one question.
+- One about anything else (a comment, a unit spelling, a field that does not define the group) does not hold the
+  confirm. It is asked in Step 7.
+
+A group of one run merges nothing, so it needs no `bundle show`: its row is enough.
 Every merge candidate is also a look. Say its `caution` sentence before asking about it.
 
 All other groups are "as proposed". Put them in ONE message:
@@ -138,7 +149,8 @@ Athena is never used: Athena project files are listed as files and nothing is re
 
 ### Before you process
 
-Step 4 must be done first. Say one of these to the scientist before you run `process`:
+Step 4 must be done first. Its closing message says one of the lines below. If it did not, say one now, before you
+run `process`:
 
 - "I loaded N scan notes from the logbook" (N is `total` in `<isaac> bundle list <bundle> scan-notes --limit 1`), or
 - "I read the whole logbook; it says nothing about which scans to use", or

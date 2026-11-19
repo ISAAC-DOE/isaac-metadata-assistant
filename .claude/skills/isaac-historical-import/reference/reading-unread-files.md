@@ -177,6 +177,9 @@ potentiostat jumped to 2.5 V during this file", material loss). Scan numbers are
 <isaac> bundle annotate <bundle> --from-readings <findings.json> --model "<model name>" --root <folder> --apply
 ```
 
+Always run the preview before `--apply`, even when `check-readings` passed. `check-readings` checks the quotes only.
+The preview also shows which findings it cannot place and how many targets each one reaches.
+
 `<folder>` is the folder that was imported: when the bundle records it, `--root` may be left out and
 any other folder is refused; when not, a folder of another name is refused, and so is one holding none of the imported files with the bytes the import read. `check-readings` and the preview report every quote as
 `pass` or `fail` (and where a quote was found when it is not near its locator). `--apply` records NO
@@ -190,7 +193,7 @@ counts. Loading the same file again adds nothing. Never present your reading as 
 
 ## Before you leave this step
 
-Tell the scientist:
+End this step's message to the scientist with:
 
 - what each file held, and what fit no field (with line numbers);
 - which files nobody could read;
