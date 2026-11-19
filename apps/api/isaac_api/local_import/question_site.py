@@ -52,6 +52,7 @@ from typing import Any, Iterable, Mapping, Sequence
 
 from . import bundle as B
 from . import plain_questions as P
+from . import question_site_hints as H
 
 FORMAT_ID = "isaac.question_site"
 FORMAT_VERSION = "1.0.0"
@@ -91,8 +92,8 @@ LABEL_ASKS = {
     "tags": ("Should these records carry the tag {value}?", "Are the tags proposed for these records right?"),
 }
 
-CONFIDENCES = ("high", "medium", "low")
-BASES = ("files", "logbook", "reading", "earlier_answer", "rule", "general_knowledge")
+CONFIDENCES = H.CONFIDENCES
+BASES = H.BASES
 MAX_ITEMS = 40
 MAX_CONTEXT = 6
 MAX_EVIDENCE = 3
@@ -108,7 +109,11 @@ DOSE_LABELS = {
 PROBE_BY = "site export check (dry run, nothing recorded)"
 PROBE_TEXT = "site export check"
 _HASH_NAME = re.compile(r"^[0-9a-f]{64}\.(png|jpg|jpeg)$")
-_TEMPLATE_SKIP = shutil.ignore_patterns("node_modules", ".git", ".DS_Store", "__pycache__", "*.pyc")
+#: never copied from the site template, at any depth: installed packages, a deployment's own state, version control
+_TEMPLATE_SKIP = shutil.ignore_patterns("node_modules", ".vercel", ".git", ".DS_Store", "__pycache__", "*.pyc")
+#: not copied from the template's top folder: its sample data (the export writes the real data/), its tests and
+#: fixtures, its local dev server, its example environment file and its read-me (none is part of a deployment)
+TEMPLATE_ROOT_SKIP = ("data", "test", "dev-server.js", ".env.example", "README.md")
 
 
 class SiteRefused(ValueError):
@@ -260,9 +265,36 @@ def _why_not(q: Mapping, include: Sequence[str]) -> str | None:
     return None
 
 
+def _identity(view: _View, q: Mapping) -> tuple[str, str] | None:
+    """The grouping's own sample identity of a question's groups, ``(sample name, loading or thickness)``, when they
+    all share one and none is a conflicting reading (the electrode number is not part of it: it names the object,
+    not the material)."""
+    keys = set()
+    for gid in _groups_of(view, q):
+        sample = ((view.groups.get(gid) or {}).get("basis") or {}).get("sample") or {}
+        name, loading = sample.get("sample_name") or {}, sample.get("loading_or_thickness") or {}
+        if not name.get("value") or name.get("kind") == "conflicting" or loading.get("kind") == "conflicting":
+            return None
+        keys.add((str(name["value"]), str(loading.get("value") or "")))
+    return next(iter(keys)) if len(keys) == 1 else None
+
+
+def _loading_said(view: _View, q: Mapping) -> str | None:
+    """The loading or thickness of a question's first group as its files write it ("0p5nm"), or ``None``."""
+    for gid in _groups_of(view, q):
+        loading = (((view.groups.get(gid) or {}).get("basis") or {}).get("sample") or {}).get("loading_or_thickness") or {}
+        for cid in loading.get("candidate_ids") or ():
+            lits = (view.cands.get(cid) or {}).get("observed_literals") or ()
+            if lits:
+                return str(lits[0])
+        return str(loading["value"]) if loading.get("value") else None
+    return None
+
+
 def _units(view: _View, rows: Sequence[Mapping], include: Sequence[str]) -> tuple[list[dict], Counter]:
-    """``(units, left_out)``: each unit is one ask, ``{"questions", "named", "same_reading", "only_scopes", "field"}``;
-    ``left_out`` counts the questions not asked, by reason."""
+    """``(units, left_out)``: each unit is one ask, ``{"questions", "named", "same_reading", "each", "only_scopes",
+    "field"}`` (``each``: one call per question, for a part of a same-reading group); ``left_out`` counts the
+    questions not asked, by reason."""
     left: Counter = Counter()
     wanted = {}
     for q in rows:
@@ -288,8 +320,19 @@ def _units(view: _View, rows: Sequence[Mapping], include: Sequence[str]) -> tupl
                 done.add(m["question_id"])
                 if m["question_id"] not in wanted:
                     left[_why_not(m, include) or ""] -= 1
-            units.append({"questions": members, "named": members[0], "same_reading": True, "only_scopes": None,
-                          "field": None})
+            parts = [members]
+            if str(members[0].get("target_field_path") or "").startswith("sample."):
+                # one token, two materials (a 0.5 nm and a 2 nm film of one name): the grouping's own sample
+                # identity tells them apart, so they are two cards; an identity it does not state joins nothing apart
+                by_identity: dict[Any, list[Mapping]] = {}
+                for m in members:
+                    by_identity.setdefault(_identity(view, m), []).append(m)
+                if len(by_identity) > 1 and None not in by_identity:
+                    parts = list(by_identity.values())
+            for part in parts:
+                whole = len(part) == len(members)
+                units.append({"questions": part, "named": part[0], "same_reading": whole, "each": not whole,
+                              "split_identity": not whole, "only_scopes": None, "field": None})
             continue
         done.add(qid)
         scopes = _scopes(q)
@@ -426,9 +469,13 @@ def _suggestion_from_bundle(view: _View, unit: Mapping, shape: str, path: str) -
             any(h.get("kind") == "ai_suggestion" for h in q.get("hints") or ()) for q in qs):
         h = ai[0]
         quote = [{"quote": str(h["quote"]), "file": h.get("source_path"), "locator": h.get("locator")}] if h.get("quote") else []
+        stated = all(str(x.get("strength") or "") == "stated" for x in ai)
         return ({"value": h["literal"], "label": P.value_label(h["literal"], _unit_of(path)),
-                 "confidence": "medium" if str(h.get("strength") or "").casefold() in ("high", "strong") else "low",
-                 "basis": "reading", "reason": "An AI reading of your files suggests this. It is not file evidence.",
+                 # a reading is never file evidence: "stated" (the quoted line says it) is medium, "inferred" low
+                 "confidence": "medium" if stated else "low", "basis": "reading",
+                 "reason": ("An AI reading found this stated in your files, in the line quoted. Please check it."
+                            if stated else
+                            "An AI reading of your files infers this from the line quoted. It is not stated outright."),
                  "evidence": quote}, {"decision": "correct", "value": h["literal"]})
     return None, None
 
@@ -446,15 +493,18 @@ def _subject(view: _View, unit: Mapping, groups: Sequence[str], path: str | None
             name = ", ".join(x for x in (got["sample_name"], got.get("loading_or_thickness")) if x)
             number = f" (no. {got['sample_or_electrode_number']})" if got.get("sample_or_electrode_number") else ""
             return f"sample {name}{number}", False, f"{name}{number}"
-    if unit["same_reading"] and isinstance(path, str) and path.startswith("sample."):
+    if (unit["same_reading"] or unit.get("split_identity")) and isinstance(path, str) and path.startswith("sample."):
         tokens = q.get("shared_sample_tokens")
         literals = list(dict.fromkeys(str(h["literal"]) for h in _file_hints(unit["questions"])
                                       if h.get("kind") == "file_literal"))
         name = " ".join(str(t) for t in tokens) if tokens else literals[0] if len(literals) == 1 else None
+        loading = _loading_said(view, q) if unit.get("split_identity") else None
+        if name and loading and loading.casefold() not in name.casefold():
+            name = f"{name}, {loading}"
         if name:
             return f"sample {name}", False, name
     whole = (str(q.get("scope")) == "experiment" and not unit["only_scopes"] and not unit["same_reading"]
-             and not (q.get("partition") or "").startswith("sample="))
+             and not unit.get("each") and not (q.get("partition") or "").startswith("sample="))
     if whole:
         return None, False, None
     n = len(groups)
@@ -519,7 +569,8 @@ def _value_card(view: _View, unit: Mapping) -> dict:
                   else f"{said}. Please give the right {noun_}.")
     else:
         title = ask
-        detail = "None of your files say." + (" Not needed to export." if not any(m.get("blocking") for m in qs) else "")
+        detail = ("" if suggestion else P.NONE_SAY) + (" Not needed to export." if not any(m.get("blocking") for m in qs) else "")
+        detail = detail.strip()
     n = len(groups)
     if n > 1 and subject is None and len(_scopes(q)) > 1:
         detail = f"{detail} One answer covers all {n} measurements; if some differ, say which in the note.".strip()
@@ -530,18 +581,23 @@ def _value_card(view: _View, unit: Mapping) -> dict:
     covered = [m["question_id"] + (f"@{unit['only_scopes'][0]}" if unit["only_scopes"] else "") for m in qs]
     whole = subject is None
     section = ("optional" if not blocking else "beamtime" if whole else "samples" if sample else "records")
-    cover = {
-        "question_id": q["question_id"], "same_reading": bool(unit["same_reading"]),
-        "only_scopes": list(unit["only_scopes"]) if unit["only_scopes"] else None,
-        "field": unit["field"], "on_accept": on_accept, "on_value": {"decision": "correct"},
-        "on_dont_know": {"decision": "defer"} if "defer" in q["allowed_decisions"] else None, "target": None,
-        "questions": [m["question_id"] for m in qs],
-    }
+    def cover(named: Mapping, answers: Sequence[Mapping]) -> dict:
+        return {
+            "question_id": named["question_id"], "same_reading": bool(unit["same_reading"]),
+            "only_scopes": list(unit["only_scopes"]) if unit["only_scopes"] else None,
+            "field": unit["field"], "on_accept": dict(on_accept) if on_accept else None,
+            "on_value": {"decision": "correct"},
+            "on_dont_know": {"decision": "defer"} if "defer" in named["allowed_decisions"] else None, "target": None,
+            "questions": [m["question_id"] for m in answers],
+        }
+
+    # a part of a same-reading group is answered question by question: one call each, the same answer
+    covers = [cover(m, [m]) for m in qs] if unit.get("each") else [cover(q, qs)]
     return {
         "card_id": card_id(path, covered), "section": section, "blocking": blocking, "audience": "scientist",
         "title": title, "detail": detail, "field": {"path": path, "label": P.field_label(path)},
         "applies_to": _applies_to(view, groups, sample, whole), "unblocks": len(blocks) if blocking else 0,
-        "answer": _with_common(answer, path, suggestion), "suggestion": suggestion, "context": [], "covers": [cover],
+        "answer": _with_common(answer, path, suggestion), "suggestion": suggestion, "context": [], "covers": covers,
         "_questions": qs, "_groups": groups, "_sample": sample, "_folder_hint": [h for m in qs for h in m.get("hints") or ()
                                                               if h.get("kind") == "folder_name"],
     }
@@ -630,6 +686,7 @@ def _dose_card(view: _View) -> dict | None:
                      "columns": ["Measurement", "Spots measured twice", "Change at each changed spot"],
                      "rows": rows[:8], **({"more": len(rows) - 8} if len(rows) > 8 else {})}],
         "covers": [cover], "_questions": [], "_groups": asked, "_no_context": True, "_target_id": DOSE_TARGET_ID,
+        "_is_dose": True,
     }
 
 
@@ -705,102 +762,6 @@ def _approval_cards(view: _View) -> tuple[list[dict], Counter]:
     return cards, left
 
 
-# --- extra suggestions (--suggestions) ----------------------------------------------------------------------------------
-
-def read_suggestions(path: Path) -> list[dict]:
-    """The entries of a ``--suggestions`` file: ``{"suggestions": [{"question_id" | "field" (+ "applies_to"),
-    "suggestion": {...}}]}``, a bare list of such entries, or ``{"<question id>": {<suggestion>}}``."""
-    try:
-        raw = json.loads(Path(path).expanduser().read_text(encoding="utf-8"))
-    except OSError as exc:
-        raise SiteRefused(f"--suggestions: cannot read {Path(path).name!r} ({exc.__class__.__name__}).",
-                          code=EXIT_INPUT_REFUSED) from None
-    except ValueError:
-        raise SiteRefused(f"--suggestions: {Path(path).name!r} is not JSON.", code=EXIT_INPUT_REFUSED) from None
-    if isinstance(raw, Mapping) and isinstance(raw.get("suggestions"), list):
-        raw = raw["suggestions"]
-    elif isinstance(raw, Mapping):
-        raw = [{"question_id": k, "suggestion": v} for k, v in raw.items() if k not in ("format", "format_version")]
-    if not isinstance(raw, list) or not all(isinstance(e, Mapping) for e in raw):
-        raise SiteRefused("--suggestions: expected {\"suggestions\": [...]}, a list of entries, or a map from "
-                          "question id to suggestion.", code=EXIT_INPUT_REFUSED)
-    return [dict(e) for e in raw]
-
-
-def suggestion_problem(s: Any) -> str | None:
-    """Why a suggestion of a ``--suggestions`` file is not used (None when it is well formed)."""
-    if not isinstance(s, Mapping) or s.get("value") is None:
-        return "it has no value"
-    if s.get("confidence") not in CONFIDENCES:
-        return f"its confidence is not one of {', '.join(CONFIDENCES)}"
-    if s.get("basis") not in BASES:
-        return f"its basis is not one of {', '.join(BASES)}"
-    if s["basis"] == "general_knowledge" and s["confidence"] == "high":
-        return "general knowledge is never a high-confidence suggestion (say low or medium)"
-    if not isinstance(s.get("reason"), str) or not s["reason"].strip():
-        return "it gives no reason"
-    if (why := P.not_plain(s["reason"])) is not None:
-        return f"its reason is not plain words: {why}"
-    if not isinstance(s.get("evidence") or [], list):
-        return "its evidence is not a list"
-    return None
-
-
-def _entry_matches(entry: Mapping, card: Mapping) -> bool:
-    ids = {q["question_id"] for q in card["_questions"]} | ({card["_target_id"]} if card.get("_target_id") else set())
-    if entry.get("question_id"):
-        return entry["question_id"] in ids
-    field = (card.get("field") or {}).get("path")
-    if not entry.get("field") or entry["field"] != field:
-        return False
-    want = entry.get("applies_to")
-    if want in (None, "", "all", "*"):
-        return True
-    applies = card["applies_to"]
-    names = set(applies.get("items") or ())
-    if isinstance(want, str):
-        sample = str(card.get("_sample") or "")  # "ZZ1 (no. 01)": matched whole, or by the name alone
-        mine = {sample.casefold(), sample.split(" (")[0].casefold()} - {""}
-        return want == applies.get("summary") or want in names or want.casefold() in mine
-    if isinstance(want, list) and not applies.get("more"):
-        return bool(names) and names <= {str(w) for w in want}
-    return False
-
-
-def _apply_suggestions(cards: Sequence[dict], entries: Sequence[Mapping]) -> list[dict]:
-    """Put each ``--suggestions`` entry on the cards it names (over an earlier-answer or AI hint; never over a value
-    the files give, which a card confirms as it stands). Returns what happened to each entry."""
-    report = []
-    for n, entry in enumerate(entries):
-        s = entry.get("suggestion")
-        problem = suggestion_problem(s)
-        if problem:
-            report.append({"entry": n, "used_on": 0, "problem": problem})
-            continue
-        used = 0
-        for card in cards:
-            if not _entry_matches(entry, card):
-                continue
-            cover = card["covers"][0]
-            if (card.get("suggestion") or {}).get("basis") == "files" and (cover.get("on_accept") or {}).get("decision") == "confirm":
-                continue
-            kind = card["answer"]["kind"]
-            if kind == "yes_no" or cover.get("on_value") is None:
-                continue
-            label = s.get("label") or next((o["label"] for o in card["answer"].get("options") or () if o["value"] == s["value"]),
-                                           P.value_label(s["value"], card["answer"].get("unit")))
-            card["suggestion"] = {"value": s["value"], "label": str(label), "confidence": s["confidence"],
-                                  "basis": s["basis"], "reason": s["reason"].strip(),
-                                  "evidence": [dict(e) for e in s.get("evidence") or () if isinstance(e, Mapping)][:MAX_EVIDENCE]}
-            cover["on_accept"] = {"decision": cover["on_value"]["decision"], "value": s["value"]}
-            card["answer"] = _with_common({k: v for k, v in card["answer"].items() if k != "common"},
-                                          (card.get("field") or {}).get("path") or "", card["suggestion"])
-            card["_suggestion_entry"] = n
-            used += 1
-        report.append({"entry": n, "used_on": used, **({} if used else {"problem": "no card matches it"})})
-    return report
-
-
 # --- checking a card's calls by dry run -----------------------------------------------------------------------------
 
 def cover_call(cover: Mapping, action: Mapping, value: Any = None, *, as_said: bool = False) -> dict:
@@ -869,9 +830,10 @@ def _verify(card: dict, tmp: Path) -> tuple[bool, str | None]:
             why = _dry(cover_call(cover, acc, acc.get("value")), tmp)
             if why:
                 dropped = why
-                cover["on_accept"] = None
+                H.demote(card, why)
+                for c in card["covers"]:
+                    c["on_accept"] = None
                 card["suggestion"] = None
-                card["answer"].pop("common", None)
                 card.pop("_suggestion_entry", None)
             else:
                 proved = True
@@ -967,11 +929,13 @@ def _site_context(items: Sequence[Mapping], view: _View, img_dir: Path, images: 
 def _card_context(card: dict, view: _View, img_dir: Path, images: list[str], shown: list) -> None:
     from . import question_context as QC
 
+    extra = list(card.get("_extra_context") or ())  # what a reading found (--suggestions): shown first
     if card.get("_context_items") is not None:
-        card["context"] = _site_context(card["_context_items"], view, img_dir, images)
+        card["context"] = (extra + _site_context(card["_context_items"], view, img_dir, images))[:MAX_CONTEXT]
         shown += card.get("_shown") or []
         return
     if card.get("_no_context"):
+        card["context"] = (list(card.get("context") or ()) + extra)[:MAX_CONTEXT]
         return
     qs = card["_questions"]
     q = qs[0]
@@ -991,7 +955,7 @@ def _card_context(card: dict, view: _View, img_dir: Path, images: list[str], sho
         items = [{"kind": "quotes", "label": "The imported folder's name", "source": "the folder you imported",
                   "items": [{"quote": str(folder[0].get("literal")), "file": None,
                              "locator": "a name in a folder name is a hint, never an answer"}]}, *items][:MAX_CONTEXT]
-    card["context"] = items
+    card["context"] = (extra + items)[:MAX_CONTEXT]
 
 
 # --- the export ------------------------------------------------------------------------------------------------------
@@ -1025,7 +989,10 @@ def export_site(bundle_dir: Path, out: Path, *, suggestions: Path | None = None,
         raise SiteRefused(f"No bundle.json in {bundle_dir.name!r}.", code=EXIT_NOT_FOUND)
     if (problem := out_problem(out, bundle_dir)) is not None:
         raise SiteRefused(f"{problem} Nothing was written.", code=EXIT_OUTPUT_REFUSED)
-    entries = read_suggestions(suggestions) if suggestions is not None else []
+    try:
+        entries = H.read_suggestions(suggestions) if suggestions is not None else []
+    except H.HintsRefused as exc:
+        raise SiteRefused(f"{exc} Nothing was written.", code=EXIT_INPUT_REFUSED) from None
     try:
         bundle = M.load(bundle_dir)
     except M.MutationRefused as exc:
@@ -1055,7 +1022,7 @@ def export_site(bundle_dir: Path, out: Path, *, suggestions: Path | None = None,
         more, held = _approval_cards(view)
         cards += more
         left.update(held)
-    suggestion_report = _apply_suggestions(cards, entries)
+    suggestion_report = H.apply(cards, entries, _with_common)
 
     # every card's calls, dry-run on a temporary copy of bundle.json (not even a lock file in the bundle folder)
     kept: list[dict] = []
@@ -1153,7 +1120,7 @@ def export_site(bundle_dir: Path, out: Path, *, suggestions: Path | None = None,
         def skip(folder, names):
             hidden = set(_TEMPLATE_SKIP(folder, names))
             if Path(folder).resolve() == template.resolve():
-                hidden.add("data")  # the template's own sample data never replaces (or sits beside) the real export
+                hidden.update(TEMPLATE_ROOT_SKIP)  # its sample data never replaces (or sits beside) the real export
             return hidden
         shutil.copytree(template, out, dirs_exist_ok=True, ignore=skip)
         copied = True
@@ -1189,7 +1156,7 @@ def _first_sentence(text: str | None) -> str:
 
 def _without_quotes(text: str) -> str:
     """``text`` without what it quotes from the files ('...'): a file's own words may hold a dot or an underscore."""
-    return re.sub(r"'[^']*'", "''", str(text or ""))
+    return re.sub(r"“[^”]*”|'[^']*'", "''", str(text or ""))
 
 
 def render_export(rep: Mapping) -> str:
@@ -1204,9 +1171,18 @@ def render_export(rep: Mapping) -> str:
     if rep["left_out"]:
         out += ["", "Questions left out, and why:"]
         out += [f"  {n}: {why}" for why, n in rep["left_out"].items()]
-    for s in rep["suggestions_file"]:
-        if s.get("problem"):
-            out.append(f"  --suggestions entry {s['entry'] + 1} not used: {s['problem']}")
+    hints = rep["suggestions_file"]
+    if hints:
+        out += ["", f"--suggestions: {len(hints)} entr{'y' if len(hints) == 1 else 'ies'}; "
+                    f"{sum(1 for h in hints if h['suggested_on'])} became a suggestion, "
+                    f"{sum(1 for h in hints if h['context_on'] and not h['suggested_on'])} are shown as context only, "
+                    f"{sum(1 for h in hints if h.get('problem'))} not used."]
+        problems: dict[str, list[int]] = {}
+        for h in hints:
+            if h.get("problem"):
+                problems.setdefault(h["problem"], []).append(h["entry"] + 1)
+        out += [f"  not used ({why}): entr{'y' if len(ns) == 1 else 'ies'} {', '.join(map(str, ns))}"
+                for why, ns in problems.items()]
     for s in rep["suggestions_dropped"]:
         out.append(f"  suggestion dropped from \"{s['title']}\": {s['why']}")
     out += ["", rep["site_template_note"], f"Data: {rep['site_data']}"]
