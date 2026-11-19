@@ -2741,14 +2741,14 @@ def group_by_code(per_record: Iterable[Iterable[tuple[str, str]]]) -> list[dict]
     questions, questions_total}]`` over each record's ``(code, text)`` lines. ``what`` is the line's lead ("Written
     without the potential set-point"); ``records`` how many records carry the code; ``variants`` how many distinct
     sentences it has (they differ in a value, a file name or a question id); ``example`` one of them, clipped;
-    ``questions`` up to three question ids the sentences name. Most records first."""
+    ``questions`` up to three question ids the sentences name, the one most records name first. Most records first."""
     seen: dict[tuple[str, str], dict] = {}
     for lines in per_record:
         mine: set[tuple[str, str]] = set()
         for code, text in lines:
             key = (str(code), _lead(text))
             row = seen.setdefault(key, {"code": key[0], "what": key[1], "records": 0, "_variants": set(),
-                                        "example": None, "_questions": []})
+                                        "example": None, "_questions": {}})
             if key not in mine:
                 mine.add(key)
                 row["records"] += 1
@@ -2756,22 +2756,31 @@ def group_by_code(per_record: Iterable[Iterable[tuple[str, str]]]) -> list[dict]
             if row["example"] is None:
                 t = str(text)
                 row["example"] = t if len(t) <= CODE_EXAMPLE_CHARS else t[:CODE_EXAMPLE_CHARS - 1] + "…"
-            for m in _QUESTION_ID_IN_TEXT.finditer(str(text)):
-                if m.group(0) not in row["_questions"]:
-                    row["_questions"].append(m.group(0))
+            for qid in dict.fromkeys(m.group(0) for m in _QUESTION_ID_IN_TEXT.finditer(str(text))):
+                row["_questions"][qid] = row["_questions"].get(qid, 0) + 1
     out = []
     for row in sorted(seen.values(), key=lambda r: -r["records"]):
-        qs = row.pop("_questions")
+        # the question the most records name comes first (one that answers many at once), ties in first-seen order
+        counted = row.pop("_questions")
+        qs = sorted(counted, key=lambda q: -counted[q])
         out.append({**{k: v for k, v in row.items() if k != "_variants"}, "variants": len(row["_variants"]),
+                    # ONE sentence on every record that carries it: that sentence, whole (its question id folded)
+                    **({"text": next(iter(row["_variants"]))} if len(row["_variants"]) == 1 else {}),
                     "questions": qs[:3], "questions_total": len(qs)})
     return out
 
 
 def by_code_sentence(rows: Sequence[Mapping]) -> str:
     """One short sentence for :func:`group_by_code` rows: "87 record(s) written without the potential set-point (18
-    variants; answer question Q-… and 10 more); 89 record(s) written without the start time (…)"."""
+    variants; answer question Q-… and 10 more); 89 record(s) written without the start time (…)". A kind with ONE
+    sentence on all its records says that sentence whole, with its record count."""
     parts = []
     for r in rows:
+        if r.get("text"):
+            # one sentence, said whole, as before (r5f L3): nothing is gained by shortening it
+            parts.append(f"{r['text']} ({r['records']} record(s)"
+                         + (f", e.g. question {r['questions'][0]}" if r["questions"] else "") + ")")
+            continue
         what = str(r["what"])
         what = what[:1].lower() + what[1:]
         notes = []
@@ -3007,11 +3016,15 @@ def completeness_holds(bundle: Mapping, fresh: Sequence[tuple[str, Mapping, Mapp
     wanted = set(candidates)
     gate_of = CP.gates(bundle, {gid: comp for gid, _, comp in fresh})
     questions_of = CP.questions_for(payload)
+    # questions that share one reading are answered together (--same-reading): counted as ONE answer
+    batch_of = {q["question_id"]: q.get("same_reading_group") or q["question_id"]
+                for q in payload.get("questions") or () if q.get("completeness")}
     holds: dict[str, dict] = {}
     for gid, gate in gate_of.items():
         if gid in wanted and not gate["ready"]:
             qs = list(dict.fromkeys(q for path in gate["needs"] for q in (questions_of.get(gid) or {}).get(path, ())))
             holds[gid] = {"held_by": [CP.HELD_CONDITION], "needs": list(gate["needs"]), "questions": qs,
+                          "answers": list(dict.fromkeys(batch_of.get(q, q) for q in qs)),
                           "conditions": [r["condition"] for r in gate["conditions"] if r["state"] == CP.OPEN],
                           "text": CP.hold_text(gate, questions_of.get(gid))}
     first = first_member_runs(bundle)
@@ -3019,7 +3032,13 @@ def completeness_holds(bundle: Mapping, fresh: Sequence[tuple[str, Mapping, Mapp
     for same in sets:
         names = [str((first.get(g) or {}).get("stem") or g) for g in same]
         shown = ", ".join(names[:CP.NAMED]) + (f" and {len(names) - CP.NAMED} more" if len(names) > CP.NAMED else "")
-        qs = list(dict.fromkeys(q for g in same for ids in (questions_of.get(g) or {}).values() for q in ids))
+        # the questions that would tell them apart: the open ones of its members, the widest-reaching first
+        reach: dict[str, int] = {}
+        for g in same:
+            for ids in (questions_of.get(g) or {}).values():
+                for q in ids:
+                    reach[q] = reach.get(q, 0) + 1
+        qs = [q for q, _ in sorted(reach.items(), key=lambda kv: (-kv[1], kv[0]))]
         how = (f"Answer question {', '.join(qs[:3])}" + (f" (and {len(qs) - 3} more)" if len(qs) > 3 else "")
                + " to say what differs" if qs else
                "No open question tells them apart: if they are one measurement, merge their groups; if they are "
@@ -3028,10 +3047,12 @@ def completeness_holds(bundle: Mapping, fresh: Sequence[tuple[str, Mapping, Mapp
         said = (f"Held ({CP.GATE_ID}): these {len(same)} records would be indistinguishable (the same sample, system "
                 f"and context in every field): {shown}. {how}; `export {CP.ALLOW_FLAG}` writes them anyway.")
         for gid in same:
-            row = holds.setdefault(gid, {"held_by": [], "needs": [], "questions": [], "conditions": [], "text": ""})
+            row = holds.setdefault(gid, {"held_by": [], "needs": [], "questions": [], "answers": [], "conditions": [],
+                                         "text": ""})
             row["held_by"].append(CP.HELD_IDENTICAL)
             row["indistinguishable_from"] = [g for g in same if g != gid]
-            row["questions"] = list(dict.fromkeys([*row["questions"], *qs]))
+            if not row["questions"]:  # a member with no open condition of its own: the set's widest questions
+                row["questions"] = qs[:3]
             row["text"] = (row["text"] + " " if row["text"] else "") + said
     return holds, sets, gate_of
 
@@ -3054,7 +3075,7 @@ def completeness_summary(holds: Mapping[str, Mapping], sets: Sequence[Sequence[s
             by_reason[r] = by_reason.get(r, 0) + 1
         for c in h.get("conditions") or ():
             by_condition[c] = by_condition.get(c, 0) + 1
-        for q in h.get("questions") or ():
+        for q in (h.get("answers") or h.get("questions") or ()):
             asked[q] = asked.get(q, 0) + 1
     held = [g for g in wanted if g in holds]
     out: dict[str, Any] = {"gate": CP.GATE_ID, "checked": len(wanted), "ready": len(wanted) - len(held), "held": len(held),
@@ -3062,9 +3083,12 @@ def completeness_summary(holds: Mapping[str, Mapping], sets: Sequence[Sequence[s
                            "open_conditions": dict(sorted(by_condition.items(), key=lambda kv: (-kv[1], kv[0]))),
                            "indistinguishable_sets": [list(x) for x in sets][:REASONS_SHOWN * 4],
                            "indistinguishable_sets_total": len(sets),
-                           "answer_first": [{"question_id": q, "records": n} for q, n in
-                                            sorted(asked.items(), key=lambda kv: (-kv[1], kv[0]))[:ANSWER_FIRST_SHOWN]],
-                           "answer_first_total": len(asked)}
+                           # one row per ANSWER: a question id, or a same-reading batch (SR-…: answer any one of its
+                           # questions with --same-reading), with how many held records it reaches
+                           "answer_first": [{("same_reading_group" if str(q).startswith("SR-") else "question_id"): q,
+                                             "records": n}
+                                            for q, n in sorted(asked.items(), key=lambda kv: (-kv[1], kv[0]))[:ANSWER_FIRST_SHOWN]],
+                           "answers_needed": len(asked)}
     if not held:
         out["statement"] = (f"Record completeness ({CP.GATE_ID}, a local gate beside official validation): all "
                             f"{len(wanted)} record(s) carry or decline every condition that keeps them apart from "
@@ -3079,12 +3103,13 @@ def completeness_summary(holds: Mapping[str, Mapping], sets: Sequence[Sequence[s
         n = sum(len(x) for x in sets)
         parts.append(f"{n} would be indistinguishable from another record ({len(sets)} set(s) of records that say the "
                      "same thing in every sample, system and context field)")
-    first = "; ".join(f"{a['question_id']} ({a['records']} record(s))" for a in out["answer_first"][:5])
+    first = "; ".join(f"{a.get('question_id') or a.get('same_reading_group')} ({a['records']} record(s))"
+                      for a in out["answer_first"][:5])
     out["statement"] = (
         f"Record completeness ({CP.GATE_ID}, a local gate beside official validation, which it does not change): "
         f"{len(held)} of {len(wanted)} record(s) " + ("are written although " if allowed else "are held: ")
         + "; and ".join(parts) + "."
-        + (f" Answer first: {first}." if first else "")
+        + (f" {out['answers_needed']} answer(s) fill them; first: {first}." if first else "")
         + (" Each needs its condition confirmed, corrected or declined (reject)." if by_condition else "")
         + ("" if allowed else f" `isaac bundle export <bundle_dir> --out <dir> {CP.ALLOW_FLAG}` writes them anyway."))
     return out
@@ -3841,9 +3866,8 @@ def upload_summary(plan: Sequence[Mapping], records_dir: Path, portal_url: str |
     # finding 16: by warning code, with counts (the codes export kept in its index; an older index has none, and its
     # lines are grouped by their lead instead)
     codes_of = _written_without_codes_in_index(Path(records_dir))
-    by_code = group_by_code(
-        zip(c if len(c := codes_of.get(Path(p["record"]).stem) or []) == len(p.get("notes") or ())
-            else [_lead(t) for t in p.get("notes") or ()], p.get("notes") or ()) for p in plan)
+    by_code = group_by_code([((codes_of.get(Path(p["record"]).stem) or {}).get(t) or _lead(t), t)
+                             for t in p.get("notes") or ()] for p in plan)
     if notes:
         statement += (" What these records are written without, by kind: " + by_code_sentence(by_code)
                       + " (notes_by_code; each record's own lines are in records[].notes).")
@@ -3916,17 +3940,20 @@ def _labels_in_index(records_dir: Path) -> dict[str, str]:
             and isinstance(r.get("record_id"), str) and isinstance(r.get("label"), str)}
 
 
-def _written_without_codes_in_index(records_dir: Path) -> dict[str, list[str]]:
-    """``{record_id: the warning code of each "Written without ..." line}`` from the export index (finding 16);
-    ``{}`` for an index an older export wrote."""
+def _written_without_codes_in_index(records_dir: Path) -> dict[str, dict[str, str]]:
+    """``{record_id: {a "Written without ..." line: its warning code}}`` from the export index (finding 16); ``{}``
+    for an index an older export wrote. By the line's text, never by position: the dry run orders a record's notes
+    its own way."""
     try:
         index = json.loads((records_dir / EXPORT_INDEX).read_text(encoding="utf-8"))
     except (OSError, ValueError):
         return {}
     rows = index.get("records") if isinstance(index, Mapping) else None
-    return {r["record_id"]: [str(c) for c in r["written_without_codes"]] for r in rows or ()
+    return {r["record_id"]: {str(t): str(c) for t, c in zip(r["written_without"], r["written_without_codes"])}
+            for r in rows or ()
             if isinstance(r, Mapping) and isinstance(r.get("record_id"), str)
-            and isinstance(r.get("written_without_codes"), list)}
+            and isinstance(r.get("written_without_codes"), list) and isinstance(r.get("written_without"), list)
+            and len(r["written_without"]) == len(r["written_without_codes"])}
 
 
 def _written_without_in_index(records_dir: Path) -> dict[str, list[str]]:

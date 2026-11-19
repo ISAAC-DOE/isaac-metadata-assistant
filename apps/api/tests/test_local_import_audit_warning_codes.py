@@ -32,6 +32,10 @@ def test_warnings_are_grouped_by_code_with_counts_variants_and_a_question():
     potential = by["stated_potential_not_in_record"]
     assert potential["records"] == 5 and potential["variants"] == 4          # four different potentials, said once
     assert potential["questions"][0] == "Q-aaaaaaaa00" and potential["questions_total"] == 5
+    # a question many records name (one that answers them at once) leads, before each record's own
+    shared = [[("start_time_left_out", f"Written without the start time: unanswered (question Q-00000000{n:02d}). Or answer "
+                                       "every such group at once: question Q-ffffffffff.")] for n in range(3)]
+    assert R.group_by_code(shared)[0]["questions"][0] == "Q-ffffffffff"
     assert by["start_time_left_out"]["records"] == 6 and by["start_time_left_out"]["variants"] == 2
     said = R.by_code_sentence(rows)
     assert "5 record(s) written without the potential set-point (4 variants" in said
@@ -50,3 +54,13 @@ def test_an_export_index_without_codes_is_grouped_by_what_each_line_says(tmp_pat
         ("Written without the potential set-point", 3, 3), ("Written without the start time", 3, 1)]
     assert "3 record(s) written without the potential set-point (3 variants" in out["statement"]
     assert "600mV" not in out["statement"] and out["notes_by_text"]             # every sentence is still listed apart
+    # with the codes export keeps: by the line's text, whatever order the dry run lists a record's notes in
+    index = {"format": R.EXPORT_INDEX_FORMAT, "records": [
+        {"record_id": f"{n:026d}", "written_without": list(reversed(p["notes"])),
+         "written_without_codes": ["start_time_left_out", "stated_potential_not_in_record"]} for n, p in enumerate(plan)]}
+    (tmp_path / R.EXPORT_STATE_DIR).mkdir()
+    (tmp_path / R.EXPORT_INDEX).write_text(json.dumps(index))
+    coded = R.upload_summary(plan, tmp_path, None)["notes_by_code"]
+    assert [(r["code"], r["what"]) for r in coded] == [
+        ("stated_potential_not_in_record", "Written without the potential set-point"),
+        ("start_time_left_out", "Written without the start time")]

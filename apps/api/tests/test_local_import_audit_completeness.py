@@ -70,6 +70,33 @@ def test_a_condition_only_the_other_group_states_is_not_this_groups():
     assert CP.distinguishing_conditions(held, ["g-060"]) == {}      # the other group is no longer live
 
 
+def _specimen(gid, number, **extra):
+    return {"group_id": gid, "split_reasons": extra.pop("split_reasons", []),
+            "basis": {"sample": {"sample_name": {"value": "zz1"}, "sample_or_electrode_number": {"value": number}},
+                      "conditions": extra}}
+
+
+def test_two_specimens_of_one_material_are_told_apart_by_which_specimen_it_is():
+    """Grouping keeps electrode 02 and electrode 03 of one material apart as different samples and never compares
+    their conditions: without the sample id their records say the same thing."""
+    a, b, other = _specimen("g-02", "02"), _specimen("g-03", "03"), _specimen("g-x", "02")
+    other["basis"]["sample"]["sample_name"]["value"] = "zz9"
+    live = ["g-02", "g-03", "g-x"]
+    found = CP.distinguishing_conditions(a, live, [a, b, other])
+    assert list(found) == ["sample_or_electrode_number"] and found["sample_or_electrode_number"]["other_group_ids"] == ["g-03"]
+    assert CP.distinguishing_conditions(other, live, [a, b, other]) == {}   # the only group of its material
+    assert CP.distinguishing_conditions(a, live) == {}                        # without the peers: split reasons only
+
+
+def test_a_condition_the_groups_own_files_read_two_ways_must_be_said_when_another_record_shares_its_material():
+    care = [{"code": "conflicting_condition", "condition": "filter", "readings": ["10", "20"]}]
+    a = _specimen("g-a", "02", filter={"kind": "conflicting", "value": None}, split_reasons=care)
+    b = _specimen("g-b", "02")
+    found = CP.distinguishing_conditions(a, ["g-a", "g-b"], [a, b])
+    assert found["filter"]["own_files_disagree"] is True and found["filter"]["value"] == {"its files read": ["10", "20"]}
+    assert CP.distinguishing_conditions(a, ["g-a"], [a]) == {}                # alone in its material: nothing to tell apart
+
+
 # --- end to end on SYN scans ------------------------------------------------------------------------------------
 
 np = pytest.importorskip("numpy", reason="the processing tests need the optional `processing` extra (numpy)")
@@ -217,7 +244,10 @@ def test_official_validation_is_untouched_and_the_local_gate_holds_the_records(b
     rc = v["record_completeness"]
     assert v["ready_to_export"] == 0 and rc["gate"] == CP.GATE_ID and rc["held"] == 3
     assert rc["open_conditions"] == {"potential_magnitude": 2} and rc["indistinguishable_sets_total"] == 1
-    assert rc["answer_first"][0]["question_id"] == Q.potential_scale_question_id()
+    # the scale once (it also tells the third record, which states no potential, apart from the two that do), and
+    # each potential-stating group's own set-point
+    assert rc["answer_first"][0] == {"question_id": Q.potential_scale_question_id(), "records": 3}
+    assert rc["answers_needed"] == 3
     g060, gocv = _group_of(bdir, "01_"), _group_of(bdir, "03_")
     report = json.loads((bdir / "validation" / f"{g060}.json").read_text())
     assert report["verdict"] == "exportable" and report["record_completeness"]["ready"] is False
