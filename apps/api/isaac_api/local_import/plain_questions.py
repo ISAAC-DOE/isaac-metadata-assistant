@@ -170,8 +170,9 @@ FIELD_ASK_ABOUT: Mapping[str, str] = {
     "sample.sample_id": "What is the sample ID of {subject}?",
 }
 
-#: A choice field asked about something named: ``(one thing, several things)``.
+#: A choice field asked about something named: ``(one thing, several things)``, of a sample and of a measurement.
 CHOICE_ASK_ABOUT: Mapping[str, tuple[str, str]] = {"context.environment": ("Was {subject} measured", "Were {subject} measured")}
+CHOICE_ASK_OF_MEASUREMENT: Mapping[str, tuple[str, str]] = {"context.environment": ("Was {subject} done", "Were {subject} done")}
 
 #: Fields the port has no ask for, in a scientist's words (the question site asks optional fields too).
 MORE_ASKS: Mapping[str, str] = {
@@ -261,7 +262,8 @@ def ask_for(path: str, allowed: Sequence[Any] | None = None, *, subject: str | N
         return _base_ask(path, allowed)
     values = [v for v in allowed or () if isinstance(v, str) and v != ""]
     if path in CHOICE_ASK_ABOUT and len(values) > 1:
-        lead = CHOICE_ASK_ABOUT[path][1 if plural else 0].format(subject=subject)
+        asks = CHOICE_ASK_ABOUT if names_sample else CHOICE_ASK_OF_MEASUREMENT
+        lead = asks[path][1 if plural else 0].format(subject=subject)
         return f"{lead} {or_list([value_words(v) for v in values])}?"
     if path in FIELD_ASK_ABOUT:
         return FIELD_ASK_ABOUT[path].format(subject=subject if names_sample else f"the sample of {subject}")

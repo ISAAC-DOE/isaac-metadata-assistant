@@ -404,6 +404,9 @@ def test_not_plain_names_what_it_found():
     assert "command" in P.not_plain("Run isaac bundle decide")
     assert P.not_plain("Was this done operando, in situ, ex situ or in silico?") is None
     assert P.not_plain("Is the applied potential 0.8 V for these 3 measurements?") is None
+    assert P.ask_for(ENVIRONMENT, ["operando", "ex_situ"], subject="this measurement") == "Was this measurement done operando or ex situ?"
+    assert P.ask_for(ENVIRONMENT, ["operando", "ex_situ"], subject="sample ZZ1", names_sample=True) == (
+        "Was sample ZZ1 measured operando or ex situ?")
 
 
 def test_a_kind_with_no_plain_wording_is_left_out_and_counted(base, tmp_path):
