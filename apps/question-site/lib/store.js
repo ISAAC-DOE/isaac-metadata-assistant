@@ -11,7 +11,8 @@
 //   save(bundleId, answer)            -> answer            (replaces the card's current answer, appends to the log)
 //   clear(bundleId, event)            -> void              (removes the card's current answer, appends to the log)
 //   log(bundleId)                     -> [event]           (every save and clear, oldest first)
-//   hit(key, windowSeconds)           -> number            (a counter that expires: failed sign-ins)
+//   hit(key, windowSeconds)           -> number            (count one more in a window that expires: failed sign-ins)
+//   count(key)                        -> number            (the current count, without adding to it)
 
 import fs from 'node:fs/promises';
 import { HttpError } from './http.js';
@@ -38,6 +39,10 @@ export class MemoryStore {
   }
   async log(bundleId) {
     return [...(this.logs.get(bundleId) || [])];
+  }
+  async count(key, now = Date.now()) {
+    const cur = this.hits.get(key);
+    return cur && cur.until >= now ? cur.n : 0;
   }
   async hit(key, windowSeconds, now = Date.now()) {
     const cur = this.hits.get(key);
@@ -110,15 +115,25 @@ export class RedisStore {
     this.fetch = fetchImpl;
   }
   async #run(commands, atomic = false) {
-    const res = await this.fetch(`${this.url}/${atomic ? 'multi-exec' : 'pipeline'}`, {
-      method: 'POST',
-      headers: { Authorization: `Bearer ${this.token}`, 'Content-Type': 'application/json' },
-      body: JSON.stringify(commands),
-    });
+    let res;
+    try {
+      res = await this.fetch(`${this.url}/${atomic ? 'multi-exec' : 'pipeline'}`, {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${this.token}`, 'Content-Type': 'application/json' },
+        body: JSON.stringify(commands),
+        signal: AbortSignal.timeout(5000),
+      });
+    } catch {
+      throw new HttpError(503, 'The answer store is not reachable right now. Please try again.');
+    }
     if (!res.ok) throw new HttpError(503, 'The answer store is not reachable right now. Please try again.');
-    const out = await res.json();
+    const out = await res.json().catch(() => null);
+    // a discarded transaction comes back as one {error} object, not a list
+    if (!Array.isArray(out) || out.length !== commands.length) {
+      throw new HttpError(503, 'The answer store refused that. Please try again.');
+    }
     for (const item of out) {
-      if (item && item.error) throw new HttpError(503, 'The answer store refused that. Please try again.');
+      if (!item || item.error) throw new HttpError(503, 'The answer store refused that. Please try again.');
     }
     return out.map((item) => item.result);
   }
@@ -129,10 +144,19 @@ export class RedisStore {
     return `qs:${bundleId}:log`;
   }
   async current(bundleId) {
-    const [flat] = await this.#run([['HGETALL', this.#ak(bundleId)]]);
+    const [raw] = await this.#run([['HGETALL', this.#ak(bundleId)]]);
+    // HGETALL over REST is a flat [field, value, field, value, …] list; accept an object too
+    const pairs = Array.isArray(raw)
+      ? raw.reduce((acc, x, i) => (i % 2 ? acc : [...acc, [x, raw[i + 1]]]), [])
+      : Object.entries(raw || {});
     const out = {};
-    // HGETALL over REST is a flat [field, value, field, value, …] list
-    for (let i = 0; i + 1 < (flat || []).length; i += 2) out[flat[i]] = JSON.parse(flat[i + 1]);
+    for (const [field, value] of pairs) {
+      try {
+        out[field] = typeof value === 'string' ? JSON.parse(value) : value;
+      } catch {
+        // one unreadable entry must not hide every other answer; the log still holds what was saved
+      }
+    }
     return out;
   }
   async save(bundleId, answer) {
@@ -157,15 +181,30 @@ export class RedisStore {
   }
   async log(bundleId) {
     const [items] = await this.#run([['LRANGE', this.#lk(bundleId), '0', '-1']]);
-    return (items || []).map((x) => JSON.parse(x));
+    const out = [];
+    for (const x of items || []) {
+      try {
+        out.push(typeof x === 'string' ? JSON.parse(x) : x);
+      } catch {
+        out.push({ unreadable: String(x).slice(0, 200) });
+      }
+    }
+    return out;
+  }
+  async count(key) {
+    const [n] = await this.#run([['GET', `qs:hit:${key}`]]);
+    return Number(n) || 0;
   }
   async hit(key, windowSeconds) {
     const k = `qs:hit:${key}`;
-    // SET … NX starts the window only if no count is running; INCR then counts this hit
-    const [, n] = await this.#run([
-      ['SET', k, '0', 'EX', String(windowSeconds), 'NX'],
-      ['INCR', k],
-    ]);
+    // one transaction: count this hit, and start the window only if none is running
+    const [n] = await this.#run(
+      [
+        ['INCR', k],
+        ['EXPIRE', k, String(windowSeconds), 'NX'],
+      ],
+      true,
+    );
     return Number(n);
   }
 }

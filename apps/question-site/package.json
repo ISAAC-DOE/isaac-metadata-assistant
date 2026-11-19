@@ -4,7 +4,9 @@
   "private": true,
   "description": "A small password-protected site where a scientist answers an ISAAC bundle's open questions a few at a time.",
   "type": "module",
-  "engines": { "node": ">=20" },
+  "engines": {
+    "node": "24.x"
+  },
   "scripts": {
     "dev": "node dev-server.js",
     "test": "node --test \"test/*.test.js\""

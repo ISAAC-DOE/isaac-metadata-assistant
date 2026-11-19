@@ -23,9 +23,12 @@ The exported questions contain real beamtime details (sample names, logbook line
   `/api/image`). An image is served only by its exported name and only if its bytes are that image type.
 - Sign-in is one shared site password plus the name the person gives. The session is a signed, HttpOnly,
   Secure, SameSite=Strict cookie that lasts 30 days. Changing the password signs everyone out.
-- Wrong passwords are slowed down (10 per address per 15 minutes).
-- Every response says `noindex`, and `robots.txt` disallows everything.
+- Ten wrong passwords from one address lock that address out for 15 minutes. While it is locked out every try is
+  refused, the right password included, so the refusal tells a guesser nothing.
+- Every response says `noindex`, and `robots.txt` disallows everything. Images are never cached by the browser.
 - The name is not verified. The import records each answer as "`<name>` (question site)".
+- An answer is never overwritten unseen: if someone else answered a card while your page was open, the site shows
+  you their answer instead of saving yours over it. Every save and every clear is also kept in a log.
 
 ## Run it locally
 
@@ -46,14 +49,19 @@ Run these from the exported folder (`<dir>` above), not from this repository.
 1. Sign in to Vercel in a terminal: `npx vercel login`.
 2. Create the project and a first deployment: `npx vercel deploy --prod`. Accept the defaults.
 3. In the Vercel dashboard, open the project:
-   - **Storage** → **Create** → **Upstash for Redis** → connect it to the project. This sets
-     `KV_REST_API_URL` and `KV_REST_API_TOKEN`. Without it the site refuses to save.
-   - **Settings** → **Environment Variables** → add `SITE_PASSWORD` (at least 8 characters). This is the password
-     you give the scientist.
-   - **Settings** → **Deployment Protection** → turn Vercel Authentication off for Production, or the scientist
-     meets Vercel's own login before the site's.
+   - **Storage** → **Create** → **Upstash for Redis** → connect it to the project. Leave the "custom prefix" box
+     empty, so the variables are named `KV_REST_API_URL` and `KV_REST_API_TOKEN`. Pick one region with no read
+     replicas. Without the store the site refuses to save.
+   - **Settings** → **Environment Variables** → add `SITE_PASSWORD`: at least 12 characters. Four random words is
+     a good choice. This is the password you give the scientist.
+   - Optional, same page: add `SESSION_SECRET`, a long random string (`openssl rand -hex 32`). Nobody types it;
+     it makes a stolen cookie useless for guessing the password.
+   - **Settings** → **Deployment Protection**: keep the default (Standard Protection). It leaves the production
+     address open to the site's own sign-in and keeps old preview addresses behind Vercel's login.
+   - Optional: **Firewall** → add a rate-limit rule on `/api/login` (for example 20 requests per minute per IP).
 4. Deploy again so the settings take effect: `npx vercel deploy --prod`.
-5. Check it: `/data/site-data.json` must answer 404, `/api/state` must answer 401 until you sign in.
+5. Check it, signed out: `/data/site-data.json` must answer 404 and `/api/state` must answer 401. Then sign in and
+   check `/data/site-data.json` still answers 404 while the questions show on the page.
 
 ## Update the questions
 

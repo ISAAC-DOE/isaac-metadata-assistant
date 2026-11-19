@@ -10,6 +10,7 @@ function fakeRedis() {
   const hashes = new Map();
   const lists = new Map();
   const strings = new Map();
+  const expires = new Map();
   const calls = [];
   const run = ([cmd, key, ...rest]) => {
     if (cmd === 'HSET') return (hashes.set(key, { ...(hashes.get(key) || {}), [rest[0]]: rest[1] }), 1);
@@ -22,7 +23,8 @@ function fakeRedis() {
     if (cmd === 'HGETALL') return Object.entries(hashes.get(key) || {}).flat();
     if (cmd === 'RPUSH') return (lists.set(key, [...(lists.get(key) || []), rest[0]]), lists.get(key).length);
     if (cmd === 'LRANGE') return lists.get(key) || [];
-    if (cmd === 'SET') return strings.has(key) ? null : (strings.set(key, Number(rest[0])), 'OK');
+    if (cmd === 'GET') return strings.has(key) ? String(strings.get(key)) : null;
+    if (cmd === 'EXPIRE') return rest[1] === 'NX' && expires.has(key) ? 0 : (expires.set(key, Number(rest[0])), 1);
     if (cmd === 'INCR') return (strings.set(key, (strings.get(key) || 0) + 1), strings.get(key));
     throw new Error(`unexpected command ${cmd}`);
   };
@@ -30,7 +32,7 @@ function fakeRedis() {
     calls.push({ url, auth: init.headers.Authorization, commands: JSON.parse(init.body) });
     return { ok: true, json: async () => JSON.parse(init.body).map((c) => ({ result: run(c) })) };
   };
-  return { fetchImpl, calls };
+  return { fetchImpl, calls, expires };
 }
 
 const A = { card_id: 'C-1', action: 'value', value: 'one', typed: true, note: '', by: 'Tester', at: '2099-01-01T00:00:00Z' };
@@ -52,10 +54,16 @@ test('the Redis store keeps the current answer per card and an append-only log, 
   assert.equal(save.commands[0][1], 'qs:b1:answers');
 });
 
-test('the failed sign-in counter counts within its window', async () => {
+test('the failed sign-in counter counts in one transaction and always has an expiry', async () => {
   const redis = fakeRedis();
   const s = new RedisStore('https://redis.example.test', 't', redis.fetchImpl);
+  assert.equal(await s.count('login:x'), 0);
   assert.deepEqual([await s.hit('login:x', 900), await s.hit('login:x', 900), await s.hit('login:y', 900)], [1, 2, 1]);
+  assert.equal(await s.count('login:x'), 2);
+  const hit = redis.calls.find((c) => c.commands[0][0] === 'INCR');
+  assert.equal(hit.url, 'https://redis.example.test/multi-exec', 'count and expiry are set together, so a counter can never lose its expiry');
+  assert.deepEqual(hit.commands[1], ['EXPIRE', 'qs:hit:login:x', '900', 'NX']);
+  assert.equal(redis.expires.get('qs:hit:login:x'), 900);
 });
 
 test('an unreachable or refusing store is a 503, never a silent success', async () => {
@@ -63,6 +71,22 @@ test('an unreachable or refusing store is a 503, never a silent success', async 
   await assert.rejects(down.save('b1', A), (err) => err.status === 503);
   const refusing = new RedisStore('https://redis.example.test', 't', async () => ({ ok: true, json: async () => [{ error: 'READONLY' }] }));
   await assert.rejects(refusing.save('b1', A), (err) => err.status === 503);
+  const discarded = new RedisStore('https://redis.example.test', 't', async () => ({ ok: true, json: async () => ({ error: 'EXECABORT' }) }));
+  await assert.rejects(discarded.save('b1', A), (err) => err.status === 503, 'a discarded transaction is one error object, not a list');
+  const thrown = new RedisStore('https://redis.example.test', 't', async () => { throw new TypeError('fetch failed'); });
+  await assert.rejects(thrown.save('b1', A), (err) => err.status === 503, 'a network failure');
+  const notJson = new RedisStore('https://redis.example.test', 't', async () => ({ ok: true, json: async () => { throw new SyntaxError('x'); } }));
+  await assert.rejects(notJson.current('b1'), (err) => err.status === 503);
+});
+
+test('one unreadable stored entry does not hide the other answers', async () => {
+  const s = new RedisStore('https://redis.example.test', 't', async () => ({
+    ok: true,
+    json: async () => [{ result: ['C-1', JSON.stringify(A), 'C-2', '{not json'] }],
+  }));
+  assert.deepEqual(Object.keys(await s.current('b1')), ['C-1']);
+  const asObject = new RedisStore('https://redis.example.test', 't', async () => ({ ok: true, json: async () => [{ result: { 'C-1': JSON.stringify(A) } }] }));
+  assert.equal((await asObject.current('b1'))['C-1'].value, 'one', 'a reply shaped as an object is read too');
 });
 
 test('the file store survives a restart', async () => {

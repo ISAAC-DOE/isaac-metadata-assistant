@@ -4,6 +4,7 @@ import { Readable } from 'node:stream';
 import { fixtureDataDir } from './fixture-data.js';
 import { MemoryStore, useStore } from '../lib/store.js';
 import { resetDataCache } from '../lib/data.js';
+import { forgetLockouts } from '../api/login.js';
 
 export const FIXTURES = fixtureDataDir();
 export const PASSWORD = 'test-password-not-real';
@@ -15,6 +16,7 @@ export function setup() {
   const store = new MemoryStore();
   useStore(store);
   resetDataCache();
+  forgetLockouts();
   return store;
 }
 

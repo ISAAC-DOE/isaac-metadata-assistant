@@ -41,15 +41,50 @@ test('a name is required, and a long or empty one is refused before the password
   setup();
   assert.equal((await call(login, { method: 'POST', body: { name: '   ', password: PASSWORD } })).status, 400);
   assert.equal((await call(login, { method: 'POST', body: { name: 'x'.repeat(61), password: PASSWORD } })).status, 400);
+  assert.equal((await call(login, { method: 'POST', body: { name: { a: 1 }, password: PASSWORD } })).status, 400, 'a name must be text');
+  const hidden = await call(login, { method: 'POST', body: { name: 'Te\u202est\u200b Person', password: PASSWORD } });
+  assert.equal(hidden.json.name, 'Test Person', 'direction-changing and zero-width characters are dropped');
 });
 
-test('repeated wrong passwords from one address are slowed down; another address is not', async () => {
+test('ten wrong passwords lock an address out, and then even the right password is refused', async () => {
   setup();
-  let last;
-  for (let i = 0; i < 11; i += 1) last = await call(login, { method: 'POST', body: { name: 'A', password: 'nope-nope' }, ip: '198.51.100.1' });
-  assert.equal(last.status, 429);
-  const other = await call(login, { method: 'POST', body: { name: 'A', password: 'nope-nope' }, ip: '198.51.100.2' });
-  assert.equal(other.status, 401);
+  const wrong = (ip) => call(login, { method: 'POST', body: { name: 'A', password: 'nope-nope-nope' }, ip });
+  const right = (ip) => call(login, { method: 'POST', body: { name: 'A', password: PASSWORD }, ip });
+  for (let i = 0; i < 10; i += 1) assert.equal((await wrong('198.51.100.1')).status, 401, `try ${i + 1}`);
+  const blocked = await wrong('198.51.100.1');
+  assert.equal(blocked.status, 429);
+  // the refusal must not tell a guesser right from wrong
+  const rightWhileLocked = await right('198.51.100.1');
+  assert.equal(rightWhileLocked.status, 429);
+  assert.equal(rightWhileLocked.headers['set-cookie'], undefined);
+  assert.deepEqual(rightWhileLocked.json, blocked.json);
+  // another address is untouched
+  assert.equal((await wrong('198.51.100.2')).status, 401);
+  assert.equal((await right('198.51.100.2')).status, 200);
+});
+
+test('the lockout is kept in the store, so it holds on an instance that has not seen the address', async () => {
+  setup();
+  for (let i = 0; i < 10; i += 1) await call(login, { method: 'POST', body: { name: 'A', password: 'nope-nope-nope' }, ip: '198.51.100.9' });
+  const { forgetLockouts } = await import('../api/login.js');
+  forgetLockouts(); // a fresh instance
+  assert.equal((await call(login, { method: 'POST', body: { name: 'A', password: PASSWORD }, ip: '198.51.100.9' })).status, 429);
+});
+
+test('nine wrong passwords and then the right one signs in', async () => {
+  setup();
+  for (let i = 0; i < 9; i += 1) await call(login, { method: 'POST', body: { name: 'A', password: 'nope-nope-nope' }, ip: '198.51.100.3' });
+  assert.equal((await call(login, { method: 'POST', body: { name: 'A', password: PASSWORD }, ip: '198.51.100.3' })).status, 200);
+});
+
+test('when the counter store cannot be reached, nobody is signed in', async () => {
+  setup();
+  const { useStore } = await import('../lib/store.js');
+  const { HttpError } = await import('../lib/http.js');
+  useStore({ count: async () => { throw new HttpError(503, 'down'); }, hit: async () => { throw new HttpError(503, 'down'); } });
+  const out = await call(login, { method: 'POST', body: { name: 'A', password: PASSWORD } });
+  assert.equal(out.status, 503);
+  assert.equal(out.headers['set-cookie'], undefined);
 });
 
 test('a tampered, expired or foreign session is not a session', async () => {
@@ -63,8 +98,14 @@ test('a tampered, expired or foreign session is not a session', async () => {
   assert.equal(readSession(makeSession('Test Person', Date.now() - 40 * 86400_000)), null, 'an expired session');
   assert.equal(readSession('not-a-token'), null);
   assert.equal(readSession(undefined), null);
+  process.env.SESSION_SECRET = 'a-secret-added-later';
+  assert.equal(readSession(good), null, 'adding or changing the session secret signs everyone out');
+  const withSecret = makeSession('Test Person');
+  assert.equal(readSession(withSecret).name, 'Test Person');
   process.env.SITE_PASSWORD = 'a-different-password';
-  assert.equal(readSession(good), null, 'changing the site password signs everyone out');
+  assert.equal(readSession(withSecret), null, 'changing the site password signs everyone out, with a secret set too');
+  assert.equal(readSession(good), null);
+  delete process.env.SESSION_SECRET;
 });
 
 test('a site with no password set answers 503, never "signed in"', async () => {
@@ -73,8 +114,8 @@ test('a site with no password set answers 503, never "signed in"', async () => {
   delete process.env.SITE_PASSWORD;
   assert.equal((await call(state, { cookie })).status, 503);
   assert.equal((await call(login, { method: 'POST', body: { name: 'A', password: '' } })).status, 503);
-  process.env.SITE_PASSWORD = 'short';
-  assert.equal((await call(login, { method: 'POST', body: { name: 'A', password: 'short' } })).status, 503, 'a password under 8 characters is not a password');
+  process.env.SITE_PASSWORD = 'elevenchars';
+  assert.equal((await call(login, { method: 'POST', body: { name: 'A', password: 'elevenchars' } })).status, 503, 'a password under 12 characters is not a password');
 });
 
 test('a POST from another site is refused even with a valid cookie', async () => {
@@ -96,4 +137,22 @@ test('the wrong method is refused', async () => {
   setup();
   assert.equal((await call(login, { method: 'GET' })).status, 405);
   assert.equal((await call(state, { method: 'POST', body: {} })).status, 405);
+});
+
+test('malformed JSON is a 400 even when the host parses the body lazily and throws', async () => {
+  setup();
+  const { readJson } = await import('../lib/http.js');
+  const req = { headers: { 'content-type': 'application/json' }, get body() { throw new Error('Invalid JSON'); } };
+  await assert.rejects(readJson(req), (err) => err.status === 400);
+  const big = { headers: { 'content-type': 'application/json' }, body: { note: 'x'.repeat(70_000) } };
+  await assert.rejects(readJson(big), (err) => err.status === 413, 'a body the host already parsed is size-checked too');
+});
+
+test('the session cookie is not marked Secure on any localhost form, and is everywhere else', async () => {
+  setup();
+  const { sessionCookie } = await import('../lib/auth.js');
+  for (const host of ['localhost:5180', '127.0.0.1:5180', '[::1]:5180', 'localhost']) {
+    assert.ok(!sessionCookie({ headers: { host } }, 't').includes('Secure'), host);
+  }
+  assert.ok(sessionCookie({ headers: { host: 'questions.example.test' } }, 't').includes('Secure'));
 });

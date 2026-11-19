@@ -28,7 +28,12 @@ export function send(res, status, body, headers = {}) {
 export async function readJson(req) {
   const type = String(req.headers['content-type'] || '').split(';')[0].trim().toLowerCase();
   if (type !== 'application/json') throw new HttpError(415, 'Send JSON.');
-  let body = req.body;
+  let body;
+  try {
+    body = req.body; // Vercel parses the body lazily here, and throws on malformed JSON
+  } catch {
+    throw new HttpError(400, 'That is not valid JSON.');
+  }
   if (body === undefined) {
     const chunks = [];
     let size = 0;
@@ -49,6 +54,8 @@ export async function readJson(req) {
     }
   }
   if (!body || typeof body !== 'object' || Array.isArray(body)) throw new HttpError(400, 'Send a JSON object.');
+  // a body the host parsed for us never passed the size check above
+  if (JSON.stringify(body).length > MAX_BODY) throw new HttpError(413, 'That is too large.');
   return body;
 }
 

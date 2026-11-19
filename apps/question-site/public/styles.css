@@ -6,6 +6,7 @@
   --surface-subtle: #fbfcfd;
   --border: #e4e9ef;
   --border-strong: #d3dae2;
+  --control-border: #808b97; /* inputs and buttons: at least 3:1 against the surface */
   --text-heading: #111a24;
   --text: #1b2430;
   --text-secondary: #46515f;
@@ -41,6 +42,7 @@
     --surface-subtle: #1f2730;
     --border: #2b3540;
     --border-strong: #3a4653;
+    --control-border: #74818e;
     --text-heading: #f1f4f7;
     --text: #e3e8ed;
     --text-secondary: #bcc6d0;
@@ -244,7 +246,7 @@ h1:focus {
   min-height: 46px;
   padding: 10px 12px;
   background: var(--surface);
-  border: 1px solid var(--border-strong);
+  border: 1px solid var(--control-border);
   border-radius: var(--radius-control);
 }
 
@@ -273,7 +275,7 @@ textarea.input {
   min-height: 46px;
   padding: 10px 18px;
   border-radius: var(--radius-control);
-  border: 1px solid var(--border-strong);
+  border: 1px solid var(--control-border);
   background: var(--surface);
   color: var(--text);
   font-weight: 600;
@@ -334,7 +336,26 @@ textarea.input {
   padding: 1px 6px;
   border-radius: 5px;
   border: 1px solid currentColor;
-  opacity: 0.7;
+}
+
+.keys {
+  margin-top: 20px;
+  font-size: 14px;
+  color: var(--text-muted);
+}
+
+@media (hover: none) {
+  .keys {
+    display: none;
+  }
+}
+
+.notebox .btn {
+  margin-top: 8px;
+}
+
+label.group-label {
+  display: block;
 }
 
 @media (hover: none) {
@@ -399,7 +420,7 @@ textarea.input {
 .start select {
   min-height: 46px;
   padding: 8px 10px;
-  border: 1px solid var(--border-strong);
+  border: 1px solid var(--control-border);
   border-radius: var(--radius-control);
   background: var(--surface);
 }
@@ -459,7 +480,7 @@ textarea.input {
   height: 14px;
   margin-top: 5px;
   border-radius: 50%;
-  border: 2px solid var(--border-strong);
+  border: 2px solid var(--control-border);
 }
 
 .dot.done {
@@ -816,8 +837,9 @@ tr:last-child td {
 }
 
 .toast.bad {
-  background: var(--fail-text);
-  color: #ffffff;
+  background: var(--fail-bg);
+  color: var(--fail-text);
+  border: 1px solid var(--fail-border);
 }
 
 @media (max-width: 520px) {

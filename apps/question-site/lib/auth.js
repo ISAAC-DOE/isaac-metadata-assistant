@@ -9,20 +9,27 @@ import crypto from 'node:crypto';
 import { HttpError } from './http.js';
 
 export const COOKIE = 'qs_session';
+/** Zero-width and direction-changing characters: they can make a name or an answer display as something else. */
+export const INVISIBLE = /[\u200b-\u200f\u202a-\u202e\u2066-\u2069\u061c\ufeff]/g;
 const SESSION_DAYS = 30;
 const NAME_MAX = 60;
+export const MIN_PASSWORD = 12;
 
 export function sitePassword() {
   const pw = process.env.SITE_PASSWORD;
-  if (!pw || pw.length < 8) {
-    throw new HttpError(503, 'The site is not set up yet: its password is missing or shorter than 8 characters.');
+  if (!pw || pw.length < MIN_PASSWORD) {
+    throw new HttpError(503, `The site is not set up yet: its password is missing or shorter than ${MIN_PASSWORD} characters.`);
   }
   return pw;
 }
 
+// The key always depends on the password, so changing the password signs everyone out. A SESSION_SECRET, when set,
+// is mixed in, so a captured cookie cannot be used to guess the password offline.
 function key() {
-  const secret = process.env.SESSION_SECRET || sitePassword();
-  return crypto.createHmac('sha256', secret).update('isaac-question-site-session-v1').digest();
+  return crypto
+    .createHmac('sha256', `${process.env.SESSION_SECRET || ''}\n${sitePassword()}`)
+    .update('isaac-question-site-session-v2')
+    .digest();
 }
 
 function b64(buf) {
@@ -42,8 +49,10 @@ export function sameSecret(a, b) {
 
 /** The name as it will be recorded: trimmed, inner whitespace collapsed, control characters removed. */
 export function cleanName(raw) {
-  const name = String(raw ?? '')
+  if (typeof raw !== 'string') throw new HttpError(400, 'Please give your name.');
+  const name = raw
     .replace(/[\u0000-\u001f\u007f]/g, ' ')
+    .replace(INVISIBLE, '')
     .replace(/\s+/g, ' ')
     .trim();
   if (!name) throw new HttpError(400, 'Please give your name.');
@@ -83,7 +92,7 @@ export function parseCookies(req) {
 }
 
 function isLocal(req) {
-  const host = String(req.headers.host || '').split(':')[0];
+  const host = String(req.headers.host || '').replace(/:\d+$/, '');
   return host === 'localhost' || host === '127.0.0.1' || host === '[::1]';
 }
 

@@ -2,6 +2,7 @@
 // imported: the import (`isaac bundle site import`) checks everything again through the bundle's own decide path.
 
 import { HttpError } from './http.js';
+import { INVISIBLE } from './auth.js';
 
 export const ACTIONS = ['accept', 'value', 'dont_know'];
 const VALUE_MAX = 500;
@@ -10,9 +11,33 @@ const NOTE_MAX = 2000;
 function text(raw, max, what) {
   if (raw === undefined || raw === null) return '';
   if (typeof raw !== 'string') throw new HttpError(400, `The ${what} must be text.`);
-  const out = raw.replace(/[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f]/g, '').trim();
+  const out = raw.replace(/[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f]/g, '').replace(INVISIBLE, '').trim();
   if (out.length > max) throw new HttpError(400, `Please keep the ${what} under ${max} characters.`);
   return out;
+}
+
+const NUMBER = /^[+-]?\d+(?:[.,]\d+)?(?:[eE][+-]?\d+)?$/;
+const THOUSANDS = /^[+-]?\d{1,3}(?:,\d{3})+$/;
+
+/**
+ * A number as a person types it: digits, an optional sign, a decimal point or comma, an optional exponent. Anything
+ * else is refused instead of being reinterpreted ("0x10" is not 16), and "1,250" is refused because it reads as
+ * 1.25 to one person and 1250 to another.
+ */
+export function parseNumber(raw) {
+  if (typeof raw === 'number') {
+    if (!Number.isFinite(raw)) throw new HttpError(400, 'Please give a number.');
+    return raw;
+  }
+  if (typeof raw !== 'string') throw new HttpError(400, 'Please give a number.');
+  const t = raw.trim().replace(/^\u2212/, '-'); // a typeset minus sign
+  if (THOUSANDS.test(t)) {
+    throw new HttpError(400, 'Is that a thousands comma or a decimal comma? Please write it without the comma, or with a decimal point.');
+  }
+  if (!NUMBER.test(t)) throw new HttpError(400, 'Please give a number.');
+  const n = Number(t.replace(',', '.'));
+  if (!Number.isFinite(n)) throw new HttpError(400, 'Please give a number.');
+  return n;
 }
 
 function sameValue(a, b) {
@@ -45,11 +70,7 @@ export function buildAnswer(card, body, by, at) {
       value = body.value;
       typed = false;
     } else if (kind === 'number') {
-      const n = typeof body.value === 'number' ? body.value : Number(String(body.value ?? '').trim().replace(',', '.'));
-      if (!Number.isFinite(n) || String(body.value ?? '').trim() === '') {
-        throw new HttpError(400, 'Please give a number.');
-      }
-      value = n;
+      value = parseNumber(body.value);
       typed = true;
     } else {
       const picked = (card.answer?.options || []).find((o) => sameValue(o.value, body.value));

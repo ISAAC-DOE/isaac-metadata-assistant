@@ -51,9 +51,14 @@ test('a picked option, a typed word, a number and a yes/no are each stored as wh
   assert.deepEqual([picked.json.answer.value, picked.json.answer.typed], ['XAS', false]);
   const typed = await post(cookie, { card_id: 'C-0000000001', action: 'value', value: '  my own technique word ', typed: true });
   assert.deepEqual([typed.json.answer.value, typed.json.answer.typed], ['my own technique word', true]);
-  const number = await post(cookie, { card_id: 'C-0000000008', action: 'value', value: '1,25' });
-  assert.equal(number.json.answer.value, 1.25);
-  assert.equal((await post(cookie, { card_id: 'C-0000000008', action: 'value', value: 'about one' })).status, 400);
+  for (const [typedIn, stored] of [['1,25', 1.25], ['1.25', 1.25], [' -0.3 ', -0.3], ['\u22120.3', -0.3], ['1e-3', 0.001], [2, 2]]) {
+    const number = await post(cookie, { card_id: 'C-0000000008', action: 'value', value: typedIn });
+    assert.equal(number.json.answer.value, stored, String(typedIn));
+  }
+  // nothing is reinterpreted: these are refused, not turned into some number
+  for (const bad of ['about one', '', '0x10', '1,250', '12,345,678', [5], '1.2.3', 'Infinity', '1e999', null, true]) {
+    assert.equal((await post(cookie, { card_id: 'C-0000000008', action: 'value', value: bad })).status, 400, JSON.stringify(bad));
+  }
   const yes = await post(cookie, { card_id: 'C-0000000009', action: 'value', value: true });
   assert.equal(yes.json.answer.value, true);
   assert.equal((await post(cookie, { card_id: 'C-0000000009', action: 'value', value: 'yes' })).status, 400);
@@ -114,6 +119,7 @@ test('an image is served only by its contract name, only to a signed-in reader, 
   const ok = await call(image, { url: `/api/image?f=img/${name}`, cookie });
   assert.equal(ok.status, 200);
   assert.equal(ok.headers['content-type'], 'image/png');
+  assert.equal(ok.headers['cache-control'], 'no-store', 'nothing of an image stays in the browser after sign-out');
   assert.ok(Buffer.isBuffer(ok.body) && ok.body.length > 1000);
   for (const bad of ['../site-data.json', 'img/../site-data.json', 'site-data.json', `img/${name}/../../site-data.json`, 'img/%2e%2e/site-data.json', '', `img/${name.replace('.png', '.svg')}`, `img/${'0'.repeat(64)}.png`]) {
     const out = await call(image, { url: `/api/image?f=${encodeURIComponent(bad)}`, cookie });
@@ -136,4 +142,32 @@ test('a site with no questions, or questions in another format, answers 503', as
   const { resetDataCache } = await import('../lib/data.js');
   resetDataCache();
   assert.equal((await call(state, { cookie })).status, 503);
+});
+
+test('an answer someone else gave in the meantime is never overwritten unseen', async () => {
+  setup();
+  const first = await signIn(login, 'First Tester');
+  const second = await signIn(login, 'Second Tester');
+  // both have the page open with no answer on the card
+  const a = await post(first, { card_id: 'C-0000000002', action: 'value', value: 'Group one', typed: true, seen_at: null });
+  assert.equal(a.status, 200);
+  const b = await post(second, { card_id: 'C-0000000002', action: 'value', value: 'Group two', typed: true, seen_at: null });
+  assert.equal(b.status, 409);
+  assert.equal(b.json.answer.value, 'Group one', 'the page is sent what is there');
+  assert.match(b.json.error, /First Tester/);
+  // having seen it, the second person may change it
+  const c = await post(second, { card_id: 'C-0000000002', action: 'value', value: 'Group two', typed: true, seen_at: a.json.answer.at });
+  assert.equal(c.status, 200);
+  // a clear is protected the same way
+  assert.equal((await post(first, { card_id: 'C-0000000002', action: 'clear', seen_at: a.json.answer.at })).status, 409);
+  assert.equal((await post(first, { card_id: 'C-0000000002', action: 'clear', seen_at: c.json.answer.at })).status, 200);
+  // and answering a card that was cleared under you
+  assert.equal((await post(second, { card_id: 'C-0000000002', action: 'dont_know', seen_at: c.json.answer.at })).status, 409);
+});
+
+test('hidden direction-changing characters are dropped from answers and notes', async () => {
+  setup();
+  const cookie = await signIn(login);
+  const out = await post(cookie, { card_id: 'C-0000000002', action: 'value', value: 'Gro\u202eup\u200b one', typed: true, note: 'see\u2066 note' });
+  assert.deepEqual([out.json.answer.value, out.json.answer.note], ['Group one', 'see note']);
 });
