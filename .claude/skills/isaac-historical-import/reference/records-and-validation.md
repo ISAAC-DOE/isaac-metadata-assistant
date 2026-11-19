@@ -1,171 +1,128 @@
 # Build, validate, export (Steps 8–9)
 
+Read this at Step 8. The section "Reading summary.md" is for Step 2.
+
 ## Reading summary.md (Step 2)
 
-Do not quote `summary.md`'s "Questions: N" (fine-grained items) or its "Run groups" (file-name groups,
-not records). Brackets after "Conflicts: N" say how many of the N are real disagreements about a value
-and how many are something else (about files, or already decided): say that split in words. The question
-count comes in Step 7 (`bundle questions` → `counts`).
+- Do not quote its "Questions: N" (fine-grained items) or its "Run groups" (file-name groups, not records).
+- The brackets after "Conflicts: N" say how many are real disagreements about a value and how many are something
+  else (about files, or already decided). Say that split in words.
+- The question count comes in Step 7 (`bundle questions` → `counts`).
 
 ## Build and validate
 
-`build-records` writes one draft per confirmed group (`drafts/`), listing every required value nobody
-supplied. Its reply is counts: `drafts_total`, `complete` / `incomplete`, `by_reason`,
-`missing_required_by_field`, the first 3 drafts and `skipped_by_status`; `--full` prints every row, and
-`drafts/index.json` always holds them all. `validate` runs, per draft: the draft checks, an export dry
-run, the official schema and exactness checks, and the offline portal check. Its reply opens with
-`exportable` / `not_exportable`, `by_reason` (verdicts and processing blockers, counted),
-`missing_required_by_field` and `not_exportable_first` (3 groups with their plain reasons and
-`first_official_error`, the portal-target schema's first message, e.g. `context.electrochemistry.electrolyte:
-'concentration_M' is a required property`), then the `verdicts` map. The required list includes what an
-object the record carries requires (an electrolyte name makes `concentration_M` required, with
-`required_because` in the composition file), so `build-records` says it before `validate` does.
-A potentiostatic record whose set-point is confirmed but whose potential scale is not: the set-point goes in
-only beside its scale, so the scale is listed as missing (with `required_because`), never the set-point
-already answered; its question blocks that group and the minimum names it with its `command`.
-A set-point nobody answered lists its potential scale as missing too (`required_because` says why), in
-`build-records`, `validate` (`missing_required_by_field`) and the questions alike: ask both at once.
-Both replies also carry `warnings` (`warnings_total`; only the first 5 are printed, the warnings of exportable
-groups first, each row marked `group_exportable`; inside each part the serious ones come first: a stated value left out of the
-record, a value its sources disagree about, a portal warning, then the routine start-time note; `warnings_omitted` counts the rest and `warnings_full_list`
-says how to see them: `validate --full` (or `build-records --full`) lists every one): a group whose file names state a potential
-(`400mV`, `m800mV`) that its record will not carry until the potential scale (or the set-point) is
-confirmed, with the command that lets it in. When no set-point was read from the names (an unread token
-such as `-500mV`) and no scale is confirmed, the warning names BOTH (`also_needs`, `also_command`, also on
-each row of `warnings`): ask the set-point in volts and the scale together, so the scientist is not asked twice. A run a generic reader found
-(SSRL XDC) warns too: from its file name (`500mV`, `m600mV`, `1800mV`) and from a scan-header comment
-line (a set-point written in the plain form, `0.5 V vs RHE`, with its scale spelled as written: `Hg/HgO`,
-`Ag/AgCl`; a line that only mentions a potential, such as `sample in 1M KOH 0.5Vrhe`, is named with no
-number read from it); a run whose name and header write different numbers on the SAME named scale is named as a
-disagreement ("state different potentials") for the scientist to settle, while a scale missing on either
-side or two scales (`…_m600mV` with `0 V vs RHE`) may be one potential on two scales: the warning says "write
-different numbers (file name: no scale; scan header: RHE)" and to ask which applies. A record that CARRIES
-a set-point while its run's name and header write different numbers warns `potential_sources_disagree` until
-the scientist rules on the header's reading (in a bundle imported before header readings: by recording the
-record's set-point again, the warning's command). Re-importing instead starts with no answers: earlier
-decisions and a filled workbook do not carry over, and ids printed for the old bundle name other things. A name stating open
-circuit (`OCV`) warns until the control mode is confirmed. `macro_setpoint_unanswered` (ranked with a value its
-sources disagree about) warns while a macro and a run's file name state other set-points for one measurement and
-nobody has said which is right: the record carries the file's set-point (or none) meanwhile; ask the question the
-warning names (`question_id`). `in_situ_conditions_not_in_record` warns for an in-situ or operando electrochemical record (an electrochemistry field, or a
-file name stating a condition or a potential) that carries no
-electrolyte, cell type or control mode (and names its pH when it has none), quoting what the file names state
-(`10MNaOH`): ask each field with its command (`fields`); nothing is filled from a name. It does not quote an
-open-circuit token (`OCV`) when the record's confirmed control mode is another one. It is kept in the record's
-evidence `notes`, so `upload --dry-run` says it too. None of these is read as a value. It is not a refusal: the record can still be exportable,
-without the condition that defines it. Say each one to the scientist in words and ask the scale question it names (and the set-point when `also_needs` is set); its command is a template: run it only with their answer. Explain the counts first ("all 78 lack the producing group; 70 wait for a curve
-approval; 5 have no protocol"), then open `validation/<group id>.json` only for a group they leave
-unexplained.
+`<isaac> bundle build-records <bundle>` writes one draft per confirmed group and lists every required value nobody supplied.
+`<isaac> bundle validate <bundle>` runs every check on each draft: the draft checks, an export dry run, the official
+schema, and the offline portal check.
 
-## Record shape guidance
+The reply of `validate` opens with:
 
-When a scientist asks "what should this record hold?", answer from the upstream record contract, not from memory: `~/.cache/isaac/portal-validator/<sha>/src/data/record_contract.json` (the pinned clone; `definition`, `kinds`, `procedure`, `never_a_record`) and the wiki page "What an ISAAC record is". One record is one result: one sample, one measurement, one set of conditions, the values that measurement produced, and the one work they come from.
+- `exportable` / `not_exportable`;
+- `by_reason`: verdicts and processing blockers, counted;
+- `missing_required_by_field`;
+- `not_exportable_first`: three groups with their plain reasons and the schema's first message;
+- then `verdicts`, and `warnings`.
 
-## What a record of an approved curve carries
+Explain the counts first ("all 78 lack the producing group; 70 wait for a curve approval; 5 have no protocol").
+Open `validation/<group id>.json` only for a group those leave unexplained.
+`nothing_validated` means no group is confirmed yet: go back to Step 5.
 
-A record built from an approved `isaac.xas.v1` result (the vendored xas-analysis engine) says how its curve was
-made, in fields the official schema has:
-
-- `measurement.series`: `<group>_normalized` (the normalised curve) and `<group>_merged`, the merged RAW average it
-  was normalised from (IF/I0 in `arb`, role `derived_signal`, with the scans averaged at each energy, role
-  `quality_monitor`). Its standard error is given only where two or more scans contribute (the engine writes 0 where
-  one scan does, which is no measured spread): a channel of the merged series when that is every energy, else its
-  own series `<group>_merged_stderr` on those energies, else none. Each series has a one-line `notes`.
-- `measurement.processing.steps`: `energy_alignment`, `spectrum_merging`, `normalization`. v1 aligns each scan to one
-  beamtime reference and applies no absolute calibration (the mono is staff-calibrated), so `calibration` is not listed.
-- `descriptors.outputs[].generated_by`: agent `isaac.xas.v1`; `version` names the protocol, the adapter rule and the
-  vendored engine ("protocol 1.0.0; adapter isaac.xas.engine_adapter.v1; xas-analysis 0.1.0.dev0 (vendored, see
-  src/xas_analysis/PROVENANCE.md)"); `notes` says in plain words: no absolute calibration and why, the energy
-  reference (route, fit, window, the reference group and anchor), the per-scan shift range, scans kept and dropped
-  with the main reasons, the merge grid's scan, the normalisation model and windows, the edge step, and points
-  excluded (I0 dropouts). The edge step is in the notes, not a descriptor: the descriptor vocabulary has no
-  edge-step name. The only descriptor is `edge_position` (E0).
-- The evidence file `<ULID>.evidence.json` has a `processing` block with the full detail: result id, protocol,
-  versions, `energy` (absolute calibration, alignment, the reference evidence), the per-scan shift table, the decision
-  table (each scan: keep or drop, who decided, reason codes, reasons and remarks with their evidence), the merge,
-  normalisation parameters, excluded points, QC, and `artifacts` (params.json, scan_decisions.json, merged.csv,
-  normalized.csv, plot.png, qc.json), each with its path relative to the bundle and its sha256 (`matches_file`); a
-  path that is not bundle-relative is left out with a note. The block's `generated_by` is the record's own (none,
-  with `generated_by_note`, when the record has no descriptors output); `summary` always says the processing. The
-  same files are copied beside the record in `<ULID>.artifacts/`.
-
-A record of any other result (`isaac.xas.v0`) is written as before: the normalised series, its steps and E0. No
-`processing` block. The record body changed for v1, so re-exporting an earlier v1 record gives it a new id
-(`export: replaced`).
-
-In `show processing-result`, a v1 result's `calibration` block says the two things apart:
-`absolute_calibration` (none applied, none needed) and `alignment` (the per-scan shifts to the one reference). A
-scan's remarks never state its decision ("not a reason to drop"), so a dropped scan never carries a remark saying
-"kept".
-
-## Verdicts, in plain words, and the fix
+### Verdicts, in plain words, and the fix
 
 | Verdict | Tell the scientist | Fix |
 |---|---|---|
-| `incomplete` | "These required facts are still missing: …" (list them from `missing_required`) | answer the blocking questions (Step 7: `bundle questions --blocking-only`). `measurement.series`, `measurement.qc.status` and `descriptors.outputs` are listed as missing until the group's processing result is approved; the file's `processing_fix` says so. The fix is Step 6: show the curve, and approve it only when the scientist does, with the QC status they choose. `processing_fix` holds a template (`--qc-status <value>`): never run it as it is. Correcting a value never supplies them. When it says to re-run `isaac process`, add `--source <folder>` |
-| `invalid_official` | "A value is in the wrong form: …" (quote `first_official_error`) | correct that value with `decide --decision correct` |
+| `incomplete` | "These required facts are still missing: …" | answer the blocking questions (Step 7). `measurement.series`, `measurement.qc.status` and `descriptors.outputs` are missing until the group's curve is approved: the file's `processing_fix` says so, and the fix is Step 6. `processing_fix` is a template: never run it as it is |
+| `invalid_official` | "A value is in the wrong form: …" (quote `first_official_error`) | correct that value |
 | `portal_check_unavailable` | "The offline portal check is not installed, so this cannot count as ready." | `scripts/install_portal_validator.sh`, then `validate` again |
 | `portal_check_degraded` | "The portal check ran only partly, so this cannot count as ready." | re-install the validator; if it persists, report it |
 | `portal_hold` | "The portal would hold this record for a warning: …" | explain the warning; ask whether to fix or leave unexported |
 | `portal_reject` | "The portal would reject this: …" | fix the stated value or leave it unexported |
 | `exportable` | "Passes every check." | export |
 
-`validation/<group>.json` also has a `website_schema` result and a `schema_drift` block: how the
-record fares against the website's vendored schema beside the pinned portal schema. The website now
-vendors the same document the portal pins (`website_schema.same_as_local_export_target: true`), so
-both normally agree and `schema_drift` lists nothing. Both are for information only and gate
-nothing; the verdict comes from the portal schema and the portal check. If `blocked_by_schema_drift`
-is ever `true`, it is about the website schema only: the record can still be `exportable`. Tell the
-scientist so in plain words. An unknown temperature is written `temperature_K: null` with
-`temperature_basis: not_reported`, which both accept. The temperature stays an optional question if
-they know it; never press for one, and never default one.
+Exit 1 from `validate` means at least one draft is not exportable. That is information, not an error.
+After a fix, run `build-records` then `validate` again. Never hand-edit a draft or an evidence file. Never relax a check.
 
-`pending_vocabulary` names a field still missing because the scientist's word waits on a vocabulary proposal
-(`propose-terms`). When the group is exportable, its statement adds "this does not block export; the record is
-written without it" (`groups_exportable` counts those groups): say that, never as a block; ask for the term or
-an allowed value only if they want the field in this record.
+### Required because of another field
 
-Exit 1 from `validate` means at least one draft is not exportable; that is information, not an error.
-After fixing, run `build-records` then `validate` again. Never hand-edit a draft or an evidence file.
+- An electrolyte name makes its `concentration_M` required (`required_because`).
+- A potentiostatic record whose set-point is confirmed but whose potential scale is not: the set-point goes in only
+  beside its scale, so the scale is listed as missing, never the set-point already answered.
+- A set-point nobody answered lists its scale as missing too. Ask both at once.
 
-## Export and upload
+### Warnings: a record can be exportable and still lack what defines it
 
-`export --out <records>` writes `<ULID>.json`, `<ULID>.evidence.json` and a `<ULID>.artifacts/` folder
-(the processing files) for exportable drafts only and lists the rest with their verdicts. Its reply
-opens with `outcome` ("N record(s) ready (U unchanged since their export, W written), refused M group(s)": an
-unchanged record keeps its id and is not new; say "nothing new was written" when W is 0) and `records_ready` (N) /
-`records_written` (W: new or replacing records only; before r5 it counted unchanged ones too) /
-`records_unchanged` (U) / `groups_refused`.
-By default the reply lists in full every refused row (`refused`, with `refused_total`, `refused_by_reason` and
-`missing_required_by_field` whenever a group was refused; summary lines every refused row repeats are said once in
-`refused_every_summary_says`), every withdrawn row (`withdrawn`), every replaced or restored record (`exported[]` with
-`replaces_record_id` / `restored_from_withdrawn`) and every record with something of its own to say (a warning not
-every ready record carries, a refreshed evidence file, a refused artifact). Only the repeated "ok" rows are cut to
-the first 3 (`exported_shown`, `exported_omitted`, `exported_full_list`): what they carry is in the counts,
-`warnings_by_text` and `portal_warnings`. `schemas_used` and the rows' one statement (`records_statement`) are said
-once at the top. `export --full` prints every row; `<records>/isaac-export/index.json` lists every record id.
-Each `exported[]`, `refused[]` and dry-run `records[]` row has a `label`: the group's first member file. Use it
-to name the record to the scientist. In the evidence file, a `#D` local clock time with no zone beside the UTC
-start of record has `relation: not_comparable` (not comparable until the clock's zone is stated), never
-`contradicts`. Once the zone is confirmed, a converted `#D` reading is compared as an instant.
-A confirmed follows label becomes a link in the later record. The link names the earlier record's id, so the
-export writes the earlier record first and `upload --dry-run` lists it first. The id is part of the later record's
-body: when the earlier record gets a new id, the later one gets one too. A row with `follows` names the link. When
-the earlier record is not exported, or the two records do not carry the same sample id, the later record is written
-without the link and says so ("Written without its follows link: …"). Adding a condition label changes a record's
-body, so that record gets a new id (`export: replaced`).
-It exits 1 whenever any group is refused, **even when it wrote records**: read `outcome`, never the exit
-code alone, before telling the scientist what is ready. A record written while a warning still applies lists it
-in `exported[].warnings` ("Written without the potential set-point: …"; the first 5, with `warnings_total`), and
-`records_written_with_warnings` counts those newly written (`records_ready_with_warnings` counts every ready
-record with one; the outcome says unchanged ones apart): say each one, since the record lacks that condition. The portal
-validator's own warnings (a deprecated `three_electrode` cell type, no data owner) never change a verdict, but are said:
-`portal_warnings` in `validate` and `export` (each once, with its record count; also a `portal:<CODE>` row of
-`warnings`, ranked with the serious ones), `export` also says each other warning once in `warnings_by_text` and in its `outcome` (the same text on many records, with the record count and one example question; a start-time note differs between records only in its question id; a warning on SOME of the ready records lists every one of their `group_ids`, in `warnings_by_text` and `portal_warnings` alike), and "Written with a portal validator warning (…)" on each row the reply lists (the default lists repeated rows only in part; `export --full` names every row). The template keeps a term the validator
-warns is deprecated out of its dropdown and marks it on the Vocabulary sheet ("deprecated: use …"). Adopt's allowed
-lists, the Disagreements sheet and `bundle questions` (`deprecated_values_by_field`) mark it too, and the import
-preview warns under "Deprecated terms". Its index is
-`<records>/isaac-export/index.json`. Exporting again into the same `--out` reuses each unchanged record's id (`export: unchanged`: the record body is the same; with `evidence_refreshed` when only its evidence file was rewritten, e.g. the same value confirmed again, by someone else, or read from another file — `evidence_changed` says what changed; say so, the record is the same); a record whose body changed gets a new id and the old one is moved to `isaac-export/superseded/` (`export: replaced`); a record whose group is now refused or no longer confirmed is moved to `isaac-export/withdrawn/` (listed under `withdrawn`; if it was uploaded already, the portal still holds it) — say which. Then `upload <records> --dry-run`: its `statement` leads with "N records, 2 requests each, to <portal>", then says each note and each portal warning once (`notes_by_text`, `portal_warnings`, read from the export's index; an older export has none). `records` lists in full every record that replaces an earlier one and every one with a note of its own; of the rest (the same two requests; only the body size and hash differ) the first 3, with `records_total`, `records_omitted`, `body_bytes_total` (`--full` lists every record). Summarise records, target
-endpoints and body sizes, and name each record's `replaces_record_ids` (read its `replaces_statement`: it says where each earlier record is now; one already uploaded stays on the portal). State plainly: nothing was sent, this build cannot send, the key was not
-read. Never ask for or print a portal key. Tell the scientist the records are in `<records>` and
-the portal upload is theirs to do.
+A warning is not a refusal. It names something the record will be written without. Say each kind in words, with its
+count, and ask the question it names. Its command is a template: run it only with their answer.
+
+- Only the first 5 are printed, exportable groups' first (`group_exportable`), the serious ones first. `warnings_total`
+  counts them; `warnings_full_list` says how: `validate --full` lists every one.
+- **A potential the file names state** (`400mV`, `m800mV`) that the record will not carry until its scale is confirmed.
+  When no set-point was read either, the warning names both (`also_needs`, `also_command`): ask the set-point in volts
+  and the scale together.
+- **`potential_sources_disagree`**: the run's name and its scan header write different numbers on the same scale. The
+  scientist settles it. A scale missing on one side may be one potential on two scales: ask which applies.
+- **`macro_setpoint_unanswered`**: a macro and a file name state different set-points. Ask the question it names.
+- **`in_situ_conditions_not_in_record`**: an in-situ or operando electrochemical record carries no electrolyte, cell
+  type or control mode. It quotes what the file names state (`10MNaOH`). Ask each field; nothing is filled from a name.
+- **A name stating open circuit** (`OCV`) warns until the control mode is confirmed.
+- **Start time left out**: see `start-times-and-clock.md`.
+- **Portal warnings** (`portal_warnings`: a deprecated cell type, no data owner) never change a verdict, but are said.
+- **`pending_vocabulary`**: a field still missing because the scientist's word waits on a vocabulary proposal. When
+  the group is exportable, its statement adds "this does not block export; the record is
+  written without it". Say that, never as a block.
+- An unknown temperature is written as "not reported". Never press for one and never default one.
+
+Re-importing to fix anything starts with no answers: decisions and filled sheets do not carry over. Do not suggest it.
+
+## Record shape
+
+When the scientist asks "what should this record hold?", answer from the upstream record contract, not from memory:
+`~/.cache/isaac/portal-validator/<sha>/src/data/record_contract.json` and the wiki page "What an ISAAC record is".
+One record is one result: one sample, one measurement, one set of conditions, the values it produced, the work they come from.
+
+A record of an approved curve carries:
+
+- the normalised curve and the merged raw average it was normalised from;
+- the processing steps that were applied (alignment, merging, normalisation);
+- the edge position (E0) as its one descriptor; the edge step is in the notes;
+- in its evidence file, a `processing` block: the energy reference, each scan's shift, each scan's keep or drop with
+  who decided and why, the normalisation, the QC, and the processing files with their checksums.
+  The same files are copied beside the record in `<ULID>.artifacts/`.
+
+`validation/<group>.json` also holds `website_schema` and `schema_drift`. They are for information only and gate nothing.
+
+## Export
+
+`<isaac> bundle export <bundle> --out <records>` writes `<ULID>.json`, `<ULID>.evidence.json` and `<ULID>.artifacts/`
+for exportable drafts only.
+
+- **Read `outcome`, never the exit code.** It exits 1 whenever any group is refused, even when it wrote records.
+  `outcome`: "N record(s) ready (U unchanged since their export, W written), refused M group(s)".
+- `records_ready` = N. `records_written` = W: new or replacing records only. When W is 0 say "nothing new was written".
+- Do not read the `outcome` string out; it is long. Say: how many are ready, how many were refused and why
+  (`refused_by_reason`, `missing_required_by_field`; `refused_every_summary_says` holds what every refused row repeats),
+  then each warning kind with its record count ("87 records are written without their potential").
+- Warnings: `warnings_by_text` and `portal_warnings` say each one once with its record count; a warning on SOME of the
+  ready records lists every one of their `group_ids`. `exported[].warnings` lists a record's own;
+  `records_written_with_warnings` counts those written now, `records_ready_with_warnings` every ready one.
+- The reply lists in full every refused, withdrawn, replaced or restored row. Repeated ok rows are cut to the first 3
+  (`exported_shown`, `exported_omitted`). `schemas_used` is said once at the top. `export --full` names every row.
+- Each row has a `label`: the group's first file. Use it to name the record.
+- **Exporting again is safe.** An unchanged record keeps its id (`export: unchanged`; `evidence_refreshed` when only
+  its evidence file was rewritten). A changed one gets a new id and the old one moves to `isaac-export/superseded/`
+  (`export: replaced`). One whose group is no longer exportable moves to `isaac-export/withdrawn/`. Say which.
+- A confirmed follows label becomes a link in the later record. When the earlier record is not exported, the later
+  one is written without the link and says so.
+- In the evidence file, a `#D` local clock time beside the UTC start has `relation: not_comparable` until the clock's
+  zone is stated. It is never a contradiction.
+
+## The upload dry run
+
+`<isaac> bundle upload <records> --dry-run`
+
+- Its `statement` leads with "N records, 2 requests each, to <portal>", then each note and portal warning once.
+- `records` lists in full every record that replaces an earlier one and every one with a note of its own; of the rest
+  the first 3, with `records_total` and `records_omitted` (`--full` lists all).
+- Name each record's `replaces_record_ids` and read its `replaces_statement`: a record already uploaded stays on the portal.
+- State plainly: nothing was sent, this build cannot send, the key was not read.
+- Never ask for or print a portal key. The records are in `<records>`; the portal upload is theirs to do.

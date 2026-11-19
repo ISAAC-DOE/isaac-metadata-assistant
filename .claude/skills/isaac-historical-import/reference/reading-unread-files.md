@@ -1,8 +1,10 @@
 # Reading what code could not (Step 4)
 
+Read this at Step 4. Step 6 (processing) does not start until this step is done.
+
 `<isaac> bundle list <bundle> unread --limit 50 --offset 0` — each entry has `relative_path`, `source_id`,
-`source_type` and `reason_code`. An Athena project is listed as a file; nothing reads it (ignore its `read_by` marker:
-processing never uses Athena). The page's `not_listed.companion_not_opened` counts the files a run reader
+`source_type` and `reason_code`. An Athena project is listed as a file and nothing reads it: processing never uses
+Athena, whatever its `read_by` marker says. The page's `not_listed.companion_not_opened` counts the files a run reader
 kept beside a run without opening them (`.rgn/.det/.exp`, `profile.txt`, `binary/` originals): not unread,
 and not read; `unread --all` lists them with `run_id` and `role`, and `bundle show <bundle> source <id>`
 says the same (`read_as.opened: false`). Read them only if the scientist asks. Work through the unread
@@ -39,9 +41,8 @@ files in this order, and tell the scientist which you are on.
 
 ## Read a logbook completely
 
-A careful reading of one real 1,936-line logbook found the electrolyte per sample, every potential
-set-point, the cell, atmosphere, reaction and reference electrode, and the scans to leave out, none of
-which a skim had found. So:
+A logbook holds what no parser reads: the electrolyte per sample, each potential set-point, the cell, the
+reference electrode, and which scans to leave out. A skim misses them. So:
 
 - **Every line, never a skim.** Split a long logbook into sections of a few hundred lines and read each
   in full (Read with offset/limit). For a very long one (over ~800 lines) start one parallel reader per
@@ -60,7 +61,7 @@ which a skim had found. So:
   `reasoning`. Two named electrodes, or none: no finding. Never infer from what labs usually do.
 - **Curation notes are scan notes.** "Discard the first scan", "start from scan #5", "only scans 1-8
   usable", "ignore scan 8 (went to open circuit)", "the potentiostat jumped to 2.5 V": write each as a
-  `scan_note` finding (below). The processing step reads them when it proposes which scans to merge.
+  `scan_note` finding (below). Processing applies them when it decides which scans to keep.
 - **Scan headers and alignment files.** Read the SPEC files' `#C` comment lines and the alignment
   file's "mono reset" lines: they say when the energy or the sample changed.
 - **What fits no field** (a sample history, a beam dump, a changed detector setting): tell the scientist,
@@ -114,8 +115,7 @@ Write every finding to ONE JSON file (`isaac.reading_findings`) in a working fol
   both printed by `<isaac> bundle list <bundle> runs`; where two runs share a stem (the same name in
   two folders) the row also prints `path`, and that path or the `run_id` names one of them. Never use
   `label`: it reorders the name's tokens and drops some, so two runs (`_12_1200mV`, `_1_1200mV`) can
-  share one. A reference that names more than one run is skipped, never spread over both. (An older
-  findings file's `run_labels` is still read, with the same rule.)
+  share one. A reference that names more than one run is skipped, never spread over both.
 - `"scope": "runs"` whenever the statement is about particular samples or conditions;
   `"experiment"` only when the source says it of the whole beamtime. Two files that disagree:
   write both findings and tell the scientist. Never pick one.
@@ -141,13 +141,9 @@ Write every finding to ONE JSON file (`isaac.reading_findings`) in a working fol
 - The absorber has no record field: write `system.element` (a symbol, e.g. `Fe`) and
   `system.edge` (exactly `K`, `L1`-`L3` or `M1`-`M5`) as two findings. They are recorded on the
   record GROUPS holding the named runs (every live group for `"experiment"`). Before Step 5 the
-  preview skips them ("no live record group yet"): apply the same file again in Step 5, after the
-  counter question's regroup (re-applying adds only what is new). They feed the absorber question in Step 7 as AI
-  suggestions beside any file evidence. After a `--regroup`, apply it again for the new groups
-  (the earlier readings stay on the replaced groups and are not moved). A `"runs"` finding on a
-  group with other runs says which runs it was read for; tell the scientist.
-  A value of another shape is skipped, never normalised. A reading that differs from the files
-  is shown as differing; only the scientist's `set_absorber` answer gives the absorber.
+  preview skips them ("no live record group yet"): load the same file again in Step 5, after the regroup, and after
+  every later regroup (loading it again adds only what is new). They show as suggestions on the absorber question.
+  Only the scientist's `set_absorber` answer gives the absorber.
 
 ## Scan notes
 
@@ -166,9 +162,12 @@ A logbook's notes on which scans to use go in the same findings file, one `scan_
 `exclude` lists the scans to leave out; `start_from` takes ONE number (the first scan to keep);
 `keep_only` lists the scans to keep; `flag` takes no `scans` (advice that changes nothing: "the
 potentiostat jumped to 2.5 V during this file", material loss). Scan numbers are the logbook's own.
-"Probably discard the first 2" is `exclude [1, 2]`, `inferred`, and the reason says "probably". A scan
-note is an AI reading, never a decision: the scientist still decides which scans are merged (Step 6).
-See them with `<isaac> bundle list <bundle> scan-notes` and `<isaac> bundle show <bundle> run <id>`.
+"Probably discard the first 2" is `exclude [1, 2]`, `inferred`, and the reason says "probably".
+
+- A scan note is my reading of the logbook, not the scientist's decision.
+- Processing applies `exclude`, `start_from` and `keep_only` notes when it decides which scans to keep, and shows the
+  note as the reason (marked "inferred" when it is). The scientist can override any of them (Step 6).
+- See them with `<isaac> bundle list <bundle> scan-notes` and `<isaac> bundle show <bundle> run <id>`.
 
 ## Check, then load
 
@@ -186,6 +185,17 @@ is not on its field's list (`refused_by_reason`); there is no way to skip the ch
 load it again until nothing is refused. The preview also lists, per finding, how many targets it
 reaches and every finding it could NOT place (no such field in this bundle): fix those or tell the
 scientist.
-Each reading is an AI interpretation: cited, `needs_review` at most, never eligible on its own.
-The questions in Step 7 show it as a suggestion beside the question; the scientist's answer is
-what counts. Re-applying the same file adds nothing. Never present your reading as confirmed.
+Each reading is a suggestion with its citation. Step 7 shows it beside the question; the scientist's answer is what
+counts. Loading the same file again adds nothing. Never present your reading as confirmed.
+
+## Before you leave this step
+
+Tell the scientist:
+
+- what each file held, and what fit no field (with line numbers);
+- which files nobody could read;
+- how many scan notes you loaded (`total` in `<isaac> bundle list <bundle> scan-notes --limit 1`), or that you read the
+  whole logbook and it says nothing about which scans to use, or that the folder has no logbook.
+
+If you find a logbook statement later, after curves were approved: load it, tell the scientist, and re-process the
+groups it names (`grouping-and-processing.md`, "If evidence arrives after a curve was approved").

@@ -1,5 +1,7 @@
 # Data flow and consent (Step 1)
 
+Read this at Step 1, before you read anything else, in every conversation.
+
 Source of truth: `docs/local-first-data-flows.md`. Three flows exist and are approved separately (A–C);
 row D is the scientist's own action on the website, outside this skill, said here so they know it.
 
@@ -22,7 +24,22 @@ row D is the scientist's own action on the website, outside this skill, said her
 > read a few files myself before I see what ISAAC found, as a spot check; say if you'd rather skip it.
 
 Record: "Consent given by <name> at <time> for <folder>" in your reply. Use that name as `--by` for
-every decision; do not ask it again. Do not treat a yes about one folder as a yes about another.
+every decision; do not ask it again in this conversation. Do not treat a yes about one folder as a yes about another.
+
+## What is kept between conversations, and what is not
+
+- **The name is kept with every answer** in the working folder (each decision records who made it).
+  No command lists it yet, so in a new conversation ask it once, with the consent question.
+- **The consent is not kept anywhere.** It lives in the conversation where it was given. A new conversation asks the
+  one consent question again. Keep it to one line:
+  "Welcome back. Am I still allowed to read this beamtime's files and outputs, and under which name do I record?"
+- Every answer, approval and export so far IS kept. Never ask those again (Step 2, "A working folder that already exists").
+
+## Looking also writes
+
+Commands that only look still write to the working folder: a newer ISAAC upgrades its format on first use, and each
+page of questions records which values were shown. So use one session at a time on a working folder. Two at once (a
+second conversation, the Local Imports page) can get "The bundle changed since it was read": run the command again.
 
 ## If the answer is "no" or "not sure"
 
