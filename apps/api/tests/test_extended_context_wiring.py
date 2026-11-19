@@ -60,6 +60,7 @@ from __future__ import annotations
 import copy
 import hashlib
 import json
+import re
 
 import pytest
 from fastapi.testclient import TestClient
@@ -795,9 +796,10 @@ def test_no_nominal_value_is_offered_by_default(client):
     ]
     for run in exp.runs:
         assert nominal.NOMINAL_TEMPERATURE_PATH not in (run.draft.get("fields") or {})
-    serialised = json.dumps(body)
-    assert "298" not in serialised
-    assert "293.15" not in serialised
+    # The nominal temperatures as VALUES, not as digits anywhere in the text: a random id such as
+    # "...ae71784349298.1" contains "298" and failed this test on CI with nothing offered.
+    numbers = {float(n) for n in re.findall(r"(?<![\w.])-?\d+(?:\.\d+)?(?![\w.])", json.dumps(body))}
+    assert not numbers & {298.0, 298.15, 293.15}, sorted(numbers & {298.0, 298.15, 293.15})
 
 
 def test_the_session_says_temperature_is_not_recorded(client):
