@@ -1,0 +1,718 @@
+{
+ "format": "isaac.question_site",
+ "format_version": "1.0.0",
+ "bundle_id": "fake-bundle-0000",
+ "bundle_version": "v-fake-1",
+ "title": "FAKE_BL00_2099-01_Example_Demo",
+ "generated_at": "2099-01-01T00:00:00Z",
+ "totals": {
+  "records": 12,
+  "cards": 9,
+  "blocking_cards": 7
+ },
+ "sections": [
+  {
+   "id": "beamtime",
+   "title": "About the whole beamtime",
+   "blurb": "One answer covers every record."
+  },
+  {
+   "id": "samples",
+   "title": "About each sample",
+   "blurb": "One answer covers every measurement of that sample."
+  },
+  {
+   "id": "records",
+   "title": "About single measurements",
+   "blurb": ""
+  },
+  {
+   "id": "processing",
+   "title": "Processing",
+   "blurb": "How the spectra were merged."
+  },
+  {
+   "id": "optional",
+   "title": "Nice to have",
+   "blurb": "Not needed to export, but makes the records more useful."
+  }
+ ],
+ "cards": [
+  {
+   "card_id": "C-0000000001",
+   "section": "beamtime",
+   "blocking": true,
+   "audience": "scientist",
+   "title": "Which technique was used?",
+   "detail": "The files call the scan 'FakeL3_xas'. ISAAC needs one of its own technique names.",
+   "field": {
+    "path": "system.technique",
+    "label": "technique"
+   },
+   "applies_to": {
+    "count": 12,
+    "summary": "All 12 records",
+    "items": [
+     "01_FAKE-SAMPLE-A_step1",
+     "02_FAKE-SAMPLE-A_step2",
+     "03_FAKE-SAMPLE-A_step3",
+     "04_FAKE-SAMPLE-A_step4",
+     "05_FAKE-SAMPLE-A_step5",
+     "06_FAKE-SAMPLE-A_step6",
+     "07_FAKE-SAMPLE-A_step7",
+     "08_FAKE-SAMPLE-A_step8",
+     "09_FAKE-SAMPLE-A_step9",
+     "10_FAKE-SAMPLE-A_step10",
+     "11_FAKE-SAMPLE-A_step11",
+     "12_FAKE-SAMPLE-A_step12"
+    ]
+   },
+   "unblocks": 12,
+   "answer": {
+    "kind": "choice",
+    "options": [
+     {
+      "value": "XAS",
+      "label": "XAS"
+     },
+     {
+      "value": "HERFD-XAS",
+      "label": "HERFD-XAS"
+     },
+     {
+      "value": "XES",
+      "label": "XES"
+     },
+     {
+      "value": "RIXS",
+      "label": "RIXS"
+     },
+     {
+      "value": "XPS",
+      "label": "XPS"
+     },
+     {
+      "value": "XRF",
+      "label": "XRF"
+     },
+     {
+      "value": "XRD",
+      "label": "XRD"
+     },
+     {
+      "value": "SAXS",
+      "label": "SAXS"
+     },
+     {
+      "value": "WAXS",
+      "label": "WAXS"
+     },
+     {
+      "value": "PDF",
+      "label": "PDF"
+     },
+     {
+      "value": "EIS",
+      "label": "EIS"
+     },
+     {
+      "value": "TEM",
+      "label": "TEM"
+     },
+     {
+      "value": "SEM",
+      "label": "SEM"
+     },
+     {
+      "value": "Raman",
+      "label": "Raman"
+     },
+     {
+      "value": "FTIR",
+      "label": "FTIR"
+     }
+    ],
+    "common": [
+     "HERFD-XAS",
+     "XAS"
+    ],
+    "allow_text": true,
+    "unit": null,
+    "placeholder": null
+   },
+   "suggestion": {
+    "value": "HERFD-XAS",
+    "label": "HERFD-XAS",
+    "confidence": "high",
+    "basis": "files",
+    "reason": "Every scan records an emission energy and a crystal analyzer, which is how a high-resolution fluorescence measurement is set up.",
+    "evidence": [
+     {
+      "quote": "#C emission energy fixed at 9999.0 eV (synthetic)",
+      "file": "fake_run01.dat",
+      "locator": "line 14"
+     }
+    ]
+   },
+   "context": [
+    {
+     "kind": "values",
+     "label": "From the files",
+     "columns": [
+      "file",
+      "emission energy (eV)",
+      "analyzer"
+     ],
+     "rows": [
+      [
+       "fake_run01.dat",
+       "9999.0",
+       "Fake(800)"
+      ],
+      [
+       "fake_run02.dat",
+       "9999.0",
+       "Fake(800)"
+      ]
+     ]
+    }
+   ],
+   "covers": [
+    {
+     "question_id": "Q-fake0001",
+     "same_reading": false,
+     "only_scopes": null,
+     "on_accept": {
+      "decision": "confirm",
+      "value": null
+     },
+     "on_value": {
+      "decision": "correct"
+     },
+     "on_dont_know": {
+      "decision": "defer"
+     },
+     "target": null
+    }
+   ]
+  },
+  {
+   "card_id": "C-0000000002",
+   "section": "beamtime",
+   "blocking": true,
+   "audience": "scientist",
+   "title": "Which research group produced this data?",
+   "detail": "No file says. The folder name mentions 'Example', which is only a hint.",
+   "field": {
+    "path": "attribution.produced_by.group",
+    "label": "research group"
+   },
+   "applies_to": {
+    "count": 12,
+    "summary": "All 12 records",
+    "items": []
+   },
+   "unblocks": 12,
+   "answer": {
+    "kind": "text",
+    "options": [],
+    "allow_text": true,
+    "unit": null,
+    "placeholder": "e.g. the Example group"
+   },
+   "suggestion": null,
+   "context": [
+    {
+     "kind": "quotes",
+     "label": "Folder name",
+     "items": [
+      {
+       "quote": "FAKE_BL00_2099-01_Example_Demo",
+       "file": "(the imported folder)",
+       "locator": "name"
+      }
+     ]
+    }
+   ],
+   "covers": [
+    {
+     "question_id": "Q-fake0002",
+     "same_reading": false,
+     "only_scopes": null,
+     "on_accept": {
+      "decision": "confirm",
+      "value": null
+     },
+     "on_value": {
+      "decision": "correct"
+     },
+     "on_dont_know": {
+      "decision": "defer"
+     },
+     "target": null
+    }
+   ]
+  },
+  {
+   "card_id": "C-0000000003",
+   "section": "beamtime",
+   "blocking": true,
+   "audience": "scientist",
+   "title": "Was this measured operando, in situ or ex situ?",
+   "detail": "",
+   "field": {
+    "path": "context.environment",
+    "label": "measurement environment"
+   },
+   "applies_to": {
+    "count": 10,
+    "summary": "10 records measured in the cell",
+    "items": []
+   },
+   "unblocks": 10,
+   "answer": {
+    "kind": "choice",
+    "options": [
+     {
+      "value": "operando",
+      "label": "operando"
+     },
+     {
+      "value": "in_situ",
+      "label": "in situ"
+     },
+     {
+      "value": "ex_situ",
+      "label": "ex situ"
+     },
+     {
+      "value": "in_silico",
+      "label": "in silico"
+     }
+    ],
+    "allow_text": true,
+    "unit": null,
+    "placeholder": null
+   },
+   "suggestion": {
+    "value": "operando",
+    "label": "operando",
+    "confidence": "medium",
+    "basis": "logbook",
+    "reason": "The logbook says each spectrum was taken while the potential was held.",
+    "evidence": [
+     {
+      "quote": "hold 1.0 V, start XAS once current is stable (synthetic logbook)",
+      "file": "fake_logbook.txt",
+      "locator": "line 31"
+     }
+    ]
+   },
+   "context": [
+    {
+     "kind": "quotes",
+     "label": "Logbook",
+     "items": [
+      {
+       "quote": "hold 1.0 V, start XAS once current is stable (synthetic logbook)",
+       "file": "fake_logbook.txt",
+       "locator": "line 31"
+      },
+      {
+       "quote": "switch to 1.2 V, wait 5 min, 4 scans (synthetic logbook)",
+       "file": "fake_logbook.txt",
+       "locator": "line 38"
+      }
+     ]
+    }
+   ],
+   "covers": [
+    {
+     "question_id": "Q-fake0003",
+     "same_reading": false,
+     "only_scopes": null,
+     "on_accept": {
+      "decision": "confirm",
+      "value": null
+     },
+     "on_value": {
+      "decision": "correct"
+     },
+     "on_dont_know": {
+      "decision": "defer"
+     },
+     "target": null
+    }
+   ]
+  },
+  {
+   "card_id": "C-0000000004",
+   "section": "samples",
+   "blocking": true,
+   "audience": "scientist",
+   "title": "What material is sample FAKE-A?",
+   "detail": "The file names only carry the code 'FAKE-A'.",
+   "field": {
+    "path": "sample.material.name",
+    "label": "sample material"
+   },
+   "applies_to": {
+    "count": 8,
+    "summary": "8 measurements of sample FAKE-A",
+    "items": [
+     "01_FAKE-A_step1",
+     "02_FAKE-A_step2",
+     "03_FAKE-A_step3",
+     "04_FAKE-A_step4",
+     "05_FAKE-A_step5",
+     "06_FAKE-A_step6",
+     "07_FAKE-A_step7",
+     "08_FAKE-A_step8"
+    ]
+   },
+   "unblocks": 8,
+   "answer": {
+    "kind": "text",
+    "options": [],
+    "allow_text": true,
+    "unit": null,
+    "placeholder": "e.g. the material's formula or name"
+   },
+   "suggestion": {
+    "value": "Examplium oxide on carbon paper",
+    "label": "Examplium oxide on carbon paper",
+    "confidence": "medium",
+    "basis": "reading",
+    "reason": "The logbook's sample table lists FAKE-A with this description.",
+    "evidence": [
+     {
+      "quote": "FAKE-A: Examplium oxide on carbon paper, 0.1 mg/cm2 (synthetic)",
+      "file": "fake_logbook.txt",
+      "locator": "line 9"
+     }
+    ]
+   },
+   "context": [],
+   "covers": [
+    {
+     "question_id": "Q-fake0004",
+     "same_reading": false,
+     "only_scopes": null,
+     "on_accept": {
+      "decision": "confirm",
+      "value": null
+     },
+     "on_value": {
+      "decision": "correct"
+     },
+     "on_dont_know": {
+      "decision": "defer"
+     },
+     "target": null
+    }
+   ]
+  },
+  {
+   "card_id": "C-0000000005",
+   "section": "samples",
+   "blocking": true,
+   "audience": "scientist",
+   "title": "What form was sample FAKE-A in?",
+   "detail": "",
+   "field": {
+    "path": "sample.sample_form",
+    "label": "sample form"
+   },
+   "applies_to": {
+    "count": 8,
+    "summary": "8 measurements of sample FAKE-A",
+    "items": []
+   },
+   "unblocks": 8,
+   "answer": {
+    "kind": "choice",
+    "options": [
+     {
+      "value": "powder",
+      "label": "powder"
+     },
+     {
+      "value": "pellet",
+      "label": "pellet"
+     },
+     {
+      "value": "thin_film",
+      "label": "thin film"
+     },
+     {
+      "value": "foil",
+      "label": "foil"
+     },
+     {
+      "value": "single_crystal",
+      "label": "single crystal"
+     },
+     {
+      "value": "solution",
+      "label": "solution"
+     },
+     {
+      "value": "electrode",
+      "label": "electrode"
+     },
+     {
+      "value": "membrane",
+      "label": "membrane"
+     },
+     {
+      "value": "ink",
+      "label": "ink"
+     },
+     {
+      "value": "other",
+      "label": "other"
+     }
+    ],
+    "common": [
+     "electrode",
+     "thin_film",
+     "powder",
+     "pellet"
+    ],
+    "allow_text": true,
+    "unit": null,
+    "placeholder": null
+   },
+   "suggestion": null,
+   "context": [],
+   "covers": [
+    {
+     "question_id": "Q-fake0005",
+     "same_reading": false,
+     "only_scopes": null,
+     "on_accept": {
+      "decision": "confirm",
+      "value": null
+     },
+     "on_value": {
+      "decision": "correct"
+     },
+     "on_dont_know": {
+      "decision": "defer"
+     },
+     "target": null
+    }
+   ]
+  },
+  {
+   "card_id": "C-0000000006",
+   "section": "samples",
+   "blocking": true,
+   "audience": "scientist",
+   "title": "What material is sample FAKE-B?",
+   "detail": "The file names only carry the code 'FAKE-B'.",
+   "field": {
+    "path": "sample.material.name",
+    "label": "sample material"
+   },
+   "applies_to": {
+    "count": 4,
+    "summary": "4 measurements of sample FAKE-B",
+    "items": []
+   },
+   "unblocks": 4,
+   "answer": {
+    "kind": "text",
+    "options": [],
+    "allow_text": true,
+    "unit": null,
+    "placeholder": null
+   },
+   "suggestion": null,
+   "context": [],
+   "covers": [
+    {
+     "question_id": "Q-fake0006",
+     "same_reading": false,
+     "only_scopes": null,
+     "on_accept": {
+      "decision": "confirm",
+      "value": null
+     },
+     "on_value": {
+      "decision": "correct"
+     },
+     "on_dont_know": {
+      "decision": "defer"
+     },
+     "target": null
+    }
+   ]
+  },
+  {
+   "card_id": "C-0000000007",
+   "section": "processing",
+   "blocking": true,
+   "audience": "processing",
+   "title": "When later scans at one spot differ from the first, is that beam damage or the sample still settling?",
+   "detail": "On 5 groups the white line changes from the first scan to the later ones, and the skill cannot tell which it is. Your answer decides which scans are kept.",
+   "field": null,
+   "applies_to": {
+    "count": 5,
+    "summary": "5 groups in this beamtime",
+    "items": []
+   },
+   "unblocks": 0,
+   "answer": {
+    "kind": "choice",
+    "options": [
+     {
+      "value": "damage",
+      "label": "Beam damage: keep the first scan at each spot"
+     },
+     {
+      "value": "settling",
+      "label": "Settling: drop the first scan, keep the later ones"
+     },
+     {
+      "value": "neither",
+      "label": "Neither: keep all scans"
+     }
+    ],
+    "allow_text": false,
+    "unit": null,
+    "placeholder": null
+   },
+   "suggestion": null,
+   "context": [
+    {
+     "kind": "image",
+     "label": "Example: FAKE-SAMPLE-A at 1.0 V",
+     "image": "img/c5f684396c9cb22cbba113a7e184f00b9f1115bdb717993dab379211a903b433.png",
+     "alt": "A made-up merged spectrum with the first scan drawn dashed."
+    }
+   ],
+   "covers": [
+    {
+     "question_id": "Q-fake0007",
+     "same_reading": false,
+     "only_scopes": null,
+     "on_accept": {
+      "decision": "confirm",
+      "value": null
+     },
+     "on_value": {
+      "decision": "correct"
+     },
+     "on_dont_know": {
+      "decision": "defer"
+     },
+     "target": null
+    }
+   ]
+  },
+  {
+   "card_id": "C-0000000008",
+   "section": "optional",
+   "blocking": false,
+   "audience": "scientist",
+   "title": "What potential was applied for the 'step3' measurements?",
+   "detail": "",
+   "field": {
+    "path": "context.electrochemistry.potential_setpoint_V",
+    "label": "applied potential"
+   },
+   "applies_to": {
+    "count": 2,
+    "summary": "2 measurements",
+    "items": []
+   },
+   "unblocks": 0,
+   "answer": {
+    "kind": "number",
+    "options": [],
+    "allow_text": false,
+    "unit": "V",
+    "placeholder": "e.g. 1.2"
+   },
+   "suggestion": {
+    "value": 1.2,
+    "label": "1.2 V",
+    "confidence": "high",
+    "basis": "files",
+    "reason": "The file names say 1200mV.",
+    "evidence": [
+     {
+      "quote": "03_FAKE-A_step3_1200mV",
+      "file": "(file name)",
+      "locator": "token 4"
+     }
+    ]
+   },
+   "context": [],
+   "covers": [
+    {
+     "question_id": "Q-fake0008",
+     "same_reading": false,
+     "only_scopes": null,
+     "on_accept": {
+      "decision": "confirm",
+      "value": null
+     },
+     "on_value": {
+      "decision": "correct"
+     },
+     "on_dont_know": {
+      "decision": "defer"
+     },
+     "target": null
+    }
+   ]
+  },
+  {
+   "card_id": "C-0000000009",
+   "section": "optional",
+   "blocking": false,
+   "audience": "scientist",
+   "title": "Was the electrolyte purged with argon?",
+   "detail": "",
+   "field": {
+    "path": "context.thermodynamics.atmosphere",
+    "label": "atmosphere"
+   },
+   "applies_to": {
+    "count": 10,
+    "summary": "10 records measured in the cell",
+    "items": []
+   },
+   "unblocks": 0,
+   "answer": {
+    "kind": "yes_no",
+    "options": [],
+    "allow_text": false,
+    "unit": null,
+    "placeholder": null
+   },
+   "suggestion": null,
+   "context": [],
+   "covers": [
+    {
+     "question_id": "Q-fake0009",
+     "same_reading": false,
+     "only_scopes": null,
+     "on_accept": {
+      "decision": "confirm",
+      "value": null
+     },
+     "on_value": {
+      "decision": "correct"
+     },
+     "on_dont_know": {
+      "decision": "defer"
+     },
+     "target": null
+    }
+   ]
+  }
+ ]
+}

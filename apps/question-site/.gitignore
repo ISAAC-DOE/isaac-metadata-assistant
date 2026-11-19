@@ -1,0 +1,7 @@
+# the exported questions hold real beamtime details: never committed
+data/
+.vercel/
+.env
+.env.local
+.dev-store.json
+node_modules/
