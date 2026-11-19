@@ -4100,7 +4100,22 @@ def build_bundle(
 
     # candidates, in engine order: each unit's are consecutive (read_archive_at extends
     # them unit by unit), so they are assigned by POSITION, not by their engine id.
-    cand_bundle_ids = [f"cand-{i:04d}" for i in range(1, len(candidates) + 1)]
+    # A CANDIDATE THIS BUILD NEWLY READS IS NUMBERED AFTER EVERY OTHER (1.14.0): a run's set-point read only from a
+    # signed file-name token (`m800mV`; bl15.filenames.signed_potential.v1) did not exist for the build before, so it
+    # takes its id at the END (after the XDC rules' candidates) and every id that build gave names what it named.
+    from ..bl15 import filenames as _fn
+
+    signed_rule = _rule_id(_fn.RULE_SIGNED_POTENTIAL)
+
+    def _newly_read(c) -> bool:
+        if not c.candidate_id.endswith("::potential_magnitude"):
+            return False
+        witnesses, _total = _evidence_for(c, "cand-0000", "potential_magnitude", archive_paths, sid_of, ev_index)
+        return bool(witnesses) and all(any(n.get("rule_id") == signed_rule for n in e["normalization"]) for e in witnesses)
+
+    deferred = [_newly_read(c) for c in candidates]
+    _numbers = iter(range(1, len(candidates) + 1))
+    cand_bundle_ids: list = [None if late else f"cand-{next(_numbers):04d}" for late in deferred]
     run_of_index: dict[int, str] = {}
     unit_cand_ids: list[list[str]] = []
     used: set[int] = set()
@@ -4117,10 +4132,12 @@ def build_bundle(
             used.add(idx)
             cursor = idx + 1
             run_of_index[idx] = run_ids[ui]
-            mine.append(cand_bundle_ids[idx])
+            if cand_bundle_ids[idx] is not None:  # a newly read one joins its run when it gets its id (below)
+                mine.append(cand_bundle_ids[idx])
         unit_cand_ids.append(mine)
     shared_ids_set = set(reading.shared_candidate_ids)
-    shared_bundle_ids = [cand_bundle_ids[j] for j, c in enumerate(candidates) if j not in used and c.candidate_id in shared_ids_set]
+    shared_bundle_ids = [cand_bundle_ids[j] for j, c in enumerate(candidates)
+                         if j not in used and c.candidate_id in shared_ids_set and cand_bundle_ids[j] is not None]
 
     # samples, from the relationship groups
     samples: list[dict] = []
@@ -4564,11 +4581,13 @@ def build_bundle(
     # -- candidates -------------------------------------------------------------------
     decisions: list = []  # a freshly built bundle has none
     out_candidates: list[dict] = []
-    evidence_windows_truncated = 0
+    windows_truncated = [0]
     conflicts: list[dict] = []
     named_techniques: list[tuple] = []  # the engine's technique candidates (suggestions.TECHNIQUE_RULE_ID below)
-    for ci, c in enumerate(candidates):
-        bundle_cid = cand_bundle_ids[ci]
+    late_conflicts: list[tuple] = []  # a newly read candidate's conflict takes its id after every other conflict
+    newly_read_ids: set[str] = set()  # candidates the build before did not give (their slots keep their numbers)
+
+    def _add_engine_candidate(ci: int, c, bundle_cid: str, *, late: bool) -> None:
         run_id = run_of_index.get(ci)
         statements = list(c.supporting_statements)
         key = (
@@ -4580,13 +4599,13 @@ def build_bundle(
             c, bundle_cid, key, archive_paths, sid_of, ev_index
         )
         if total > len(evidence):
-            evidence_windows_truncated += 1
+            windows_truncated[0] += 1
         extracted = _extracted_state_of(c)
         out_candidates.append(
             _candidate_record(c, bundle_cid=bundle_cid, run_id=run_id, key=key, evidence=evidence, total=total, writable=writable)
         )
         if c.target_field_path == "system.technique":
-            named_techniques.append((ci, c, bundle_cid, run_id, key, evidence, total))
+            named_techniques.append((len(out_candidates) - 1, c, bundle_cid, run_id, key, evidence, total))
         if c.disagreement and (extracted == STATE_CONFLICTING or c.resolved_by_rule):
             # A disagreement a STORED rule resolved is still a conflict entry (review
             # L4): every reading is kept, and the rule that chose is carried beside it.
@@ -4597,12 +4616,19 @@ def build_bundle(
                     engine_conflict = conflicts_of_run.get(run_id, [])[idx]
                 except (ValueError, IndexError):
                     engine_conflict = None
-            conflicts.append(
-                _conflict_from_candidate(
-                    f"conf-{len(conflicts) + 1:03d}", c, bundle_cid, run_id, engine_conflict,
-                    archive_paths, sid_of,
+            if late:
+                late_conflicts.append((c, bundle_cid, run_id, engine_conflict))
+            else:
+                conflicts.append(
+                    _conflict_from_candidate(
+                        f"conf-{len(conflicts) + 1:03d}", c, bundle_cid, run_id, engine_conflict,
+                        archive_paths, sid_of,
+                    )
                 )
-            )
+
+    for ci, c in enumerate(candidates):
+        if not deferred[ci]:
+            _add_engine_candidate(ci, c, cand_bundle_ids[ci], late=False)
 
     # ssrl_xdc_scan_start_v1, then ssrl_xdc_header_comment_v1, continuing the cand sequence. FIRST over the runs reader
     # ssrl_xdc 1.0.0 found too, THEN over the runs only a later reader finds (its ``late_runs``: a 2.0-only or bare
@@ -4648,6 +4674,16 @@ def build_bundle(
                 out_candidates.append(cand)
                 runs_by_id[run_id]["candidate_ids"].append(cand["candidate_id"])
     comment_runs_not_read = len(not_read)
+    # the candidates this build newly reads from the engine (a signed set-point), numbered after every other
+    for ci, c in enumerate(candidates):
+        if deferred[ci]:
+            cand_bundle_ids[ci] = f"cand-{len(out_candidates) + 1:04d}"
+            _add_engine_candidate(ci, c, cand_bundle_ids[ci], late=True)
+            newly_read_ids.add(cand_bundle_ids[ci])
+            if run_of_index.get(ci) in runs_by_id:
+                runs_by_id[run_of_index[ci]]["candidate_ids"].append(cand_bundle_ids[ci])
+            elif c.candidate_id in shared_ids_set:
+                shared_bundle_ids.append(cand_bundle_ids[ci])
     # suggestions.TECHNIQUE_RULE_ID: the technique the INSTRUMENT configuration states, one suggestion for the beamtime
     # (after every other candidate, so each keeps its id). Where it has a VALUE, a candidate that rests only on a
     # macro's or a script's NAME is kept as evidence and no longer asks for the technique of each run; where it has
@@ -4658,11 +4694,14 @@ def build_bundle(
         runs, _suggest.technique_readings(runs, out_candidates, xdc_runs),
         {s["source_id"]: s["relative_path"] for s in sources}, f"cand-{len(out_candidates) + 1:04d}", writable)
         if len(out_candidates) < MAX_CANDIDATES else None)
+    detargeted_ids: set[str] = set()  # macro-name candidates that targeted the technique for the build before
     if technique is not None:
         out_candidates.append(technique)
         shared_bundle_ids.append(technique["candidate_id"])
+        newly_read_ids.add(technique["candidate_id"])
         for ci, c, bundle_cid, run_id, key, evidence, total in named_techniques:
             if technique["value"] is not None and _suggest.is_code_named_technique(out_candidates[ci]):
+                detargeted_ids.add(bundle_cid)
                 out_candidates[ci] = _candidate_record(
                     dataclasses.replace(c, target_field_path=None, not_proposable_reason=_suggest.NOT_A_TECHNIQUE_REASON),
                     bundle_cid=bundle_cid, run_id=run_id, key=key, evidence=evidence, total=total, writable=writable)
@@ -4770,6 +4809,9 @@ def build_bundle(
     # r5f M7: a macro's declared name that states another set-point than the file acquired in its place
     for extra in _macro_setpoint_conflicts(runs, conflicts, out_candidates, sources):
         conflicts.append({**extra, "conflict_id": f"conf-{len(conflicts) + 1:03d}"})
+    for c, bundle_cid, run_id, engine_conflict in late_conflicts:
+        conflicts.append(_conflict_from_candidate(f"conf-{len(conflicts) + 1:03d}", c, bundle_cid, run_id, engine_conflict,
+                                                  archive_paths, sid_of))
     for conflict in conflicts:
         for rid in conflict["run_ids"]:
             if rid in runs_by_id:
@@ -4809,6 +4851,21 @@ def build_bundle(
     # where one of that run's own sources mentions it
     run_texts = _suggest.run_source_texts(runs, out_candidates, generic_statements)
     numbered = 0  # value ids are numbered by POSITION, counting a value that is not asked: every other id stands
+    # VALUE IDS STAND (1.14.0): numbered by the position the BUILD BEFORE gave. A slot this build newly FILLS (a
+    # candidate that build did not give: `newly_read_ids`) keeps its number, unused; a slot this build newly ASKS (a
+    # candidate that build gave and this one does not target there: `detargeted_ids`) is numbered after every other.
+    before_by_run: dict[str | None, set[str]] = {}
+    for cand in out_candidates:
+        was = "system.technique" if cand["candidate_id"] in detargeted_ids else cand["target_field_path"]
+        if was and cand["candidate_id"] not in newly_read_ids:
+            before_by_run.setdefault(cand["run_id"], set()).add(was)
+    any_before = set().union(*before_by_run.values()) if before_by_run else set()
+    newly_asked: list[tuple] = []
+
+    def _record_asked(by_run: Mapping, anywhere: set, phase_runs: Sequence[Mapping], path: str) -> bool:
+        return (any(r["run_candidate"] and path not in by_run.get(r["run_id"], set()) for r in phase_runs)
+                and (path not in anywhere or by_run.get(None, set()).isdisjoint({path})))
+
     for late in (False, True):
         phase_runs = [r for r in runs if (r["run_key"] in late_keys) is late]
         for path in sorted(writable, key=_value_id_order):
@@ -4817,20 +4874,36 @@ def build_bundle(
                 # ONE record-scope question, asked whenever ANY run that becomes a record lacks
                 # a reading for it (real-data finding D3): "some run states it" used to suppress
                 # the question, leaving the other runs' records with no way to be answered.
-                lacking = [r for r in phase_runs if r["run_candidate"] and path not in targets_by_run.get(r["run_id"], set())]
-                if (lacking and path not in record_asked
-                        and (path not in any_target or targets_by_run.get(None, set()).isdisjoint({path}))):
+                if path in record_asked:
+                    continue
+                now = _record_asked(targets_by_run, any_target, phase_runs, path)
+                before = _record_asked(before_by_run, any_before, phase_runs, path)
+                if now and not before:
                     record_asked.add(path)
-                    missing.append(_missing(numbered, None, path, "record", reason, beamtime_targets, writable))
+                    newly_asked.append((None, path, "record"))
+                elif now or before:
+                    record_asked.add(path)
+                    if now:
+                        missing.append(_missing(numbered, None, path, "record", reason, beamtime_targets, writable))
                     numbered += 1
                 continue
             for run in phase_runs:
                 if not run["run_candidate"]:
                     continue
-                if path not in targets_by_run.get(run["run_id"], set()):
+                filled = path in targets_by_run.get(run["run_id"], set())
+                was_filled = path in before_by_run.get(run["run_id"], set())
+                if not filled and was_filled:
+                    newly_asked.append((run["run_id"], path, "run"))
+                elif not filled:
                     if _suggest.asks_field(path, run_texts.get(run["run_id"])):
                         missing.append(_missing(numbered, run["run_id"], path, "run", reason, beamtime_targets, writable))
                     numbered += 1
+                elif not was_filled:
+                    numbered += 1
+    for run_id, path, scope in newly_asked:
+        if run_id is None or _suggest.asks_field(path, run_texts.get(run_id)):
+            missing.append(_missing(numbered, run_id, path, scope, reason, beamtime_targets, writable))
+        numbered += 1
 
     unmapped = [
         {
@@ -5048,7 +5121,7 @@ def build_bundle(
             "max_string_chars": MAX_STRING_CHARS,
             "max_bundle_bytes": MAX_BUNDLE_BYTES,
             "strings_truncated": 0,
-            "evidence_windows_truncated": evidence_windows_truncated,
+            "evidence_windows_truncated": windows_truncated[0],
             "candidates_truncated_by_engine": bool(reading.candidates_truncated),
             "engine_candidate_total": int(reading.candidate_total),
         },
