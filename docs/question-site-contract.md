@@ -202,7 +202,9 @@ reported under "Nothing to record". `accept` is refused on a `yes_no` card (it h
 `dont_know` records nothing.
 
 `yes_no` cards are: a condition label ISAAC proposes from the file names (`--include optional`: yes confirms each
-proposal), confirming a record group, and approving a merged curve (`--include approvals`).
+proposal), confirming a record group, and approving a merged curve (`--include approvals`). A label card shows every
+distinct proposed value with its count and an example file (context `values`, columns Proposed, Measurements,
+For example); a label with more than 12 different values is left out and counted.
 
 ### The processing card and the approval cards
 
