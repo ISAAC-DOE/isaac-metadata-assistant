@@ -649,8 +649,10 @@ def test_a_value_the_files_give_is_a_suggestion_that_accept_confirms(base, tmp_p
     data = json.loads((tmp_path / "site" / "data" / "site-data.json").read_text())
     card = next(c for c in data["cards"] if c["title"] == "Is the applied potential 0.8 V for these 3 measurements?")
     s = card["suggestion"]
-    assert (s["value"], s["label"], s["basis"], s["confidence"]) == (0.8, "0.8 V", "files", "high")
-    assert s["reason"] == "Your files write '800mV'." and s["evidence"][0]["quote"] == "800mV"
+    # a potential read from the token '800mV' is ISAAC's reading of it: likely, and to be checked (review, minor)
+    assert (s["value"], s["label"], s["basis"], s["confidence"]) == (0.8, "0.8 V", "files", "medium")
+    assert s["reason"] == "Read from '800mV' in your files as 0.8 V; likely, please check." and s["evidence"][0]["quote"] == "800mV"
+    assert S._same_written("0.8", 0.8) and S._same_written("Ex_Situ", "ex_situ") and not S._same_written("800mV", 0.8)
     assert card["covers"][0]["on_accept"] == {"decision": "confirm", "value": None} and card["covers"][0]["same_reading"]
     assert card["answer"]["kind"] == "number" and card["answer"]["unit"] == "V" and not card["blocking"]
     assert card["section"] == "optional"
@@ -782,6 +784,25 @@ def test_an_entry_for_some_of_a_cards_questions_is_never_the_whole_cards_suggest
     assert one["suggestion"]["confidence"] == "medium"
 
 
+def test_a_files_label_must_say_its_value_and_a_file_cannot_claim_basis_files():
+    card = {"field": {"path": ENVIRONMENT}, "_questions": [{"question_id": "Q-syn0000001"}], "_groups": ["rg-a"],
+            "applies_to": {"count": 1, "summary": "SYN", "items": ["a"]}, "suggestion": None, "detail": "", "_lead": "",
+            "answer": {"kind": "choice", "options": [{"value": "in_situ", "label": "in situ"}, {"value": "operando", "label": "operando"}]},
+            "covers": [{"on_value": {"decision": "correct"}, "on_accept": None}]}
+    quote = [{"quote": "SYN in situ", "file": "syn.txt", "locator": "line 1"}]
+
+    def entry(**s):
+        return H.normalise({"question_id": "Q-syn0000001", "suggestion": {"value": "in_situ", "confidence": "low",
+                                                                           "basis": "logbook", "reason": "SYN.", "evidence": quote, **s}}, 0)
+
+    lying, honest = dict(card), {**card}
+    H.apply([lying], [entry(label="operando")], lambda a, p, x: a)
+    assert lying["suggestion"]["label"] == "in situ" and lying["covers"][0]["on_accept"]["value"] == "in_situ"
+    H.apply([honest], [entry(label="In Situ")], lambda a, p, x: a)
+    assert honest["suggestion"]["label"] == "In Situ"
+    assert H.entry_problem(entry(basis="files")).startswith("a suggestions file cannot say the files give the value")
+
+
 def test_a_high_suggestion_needs_a_quote_that_holds_the_value_and_none_without_evidence_is_offered():
     """Review I2: "high" is earned by a quote that holds the value (or a synonym the entry states). Without one the
     card says "medium"; an entry that quotes nothing is not used at all (a hint is shown with its line)."""
@@ -862,7 +883,8 @@ def test_hint_entries_are_matched_most_specific_first():
                            "suggested_value": {"SYNDIR/syn_a.mca": "pellet", "syn_b": "film"}}, 0)
     one_file = {**card, "applies_to": {"count": 1, "summary": "syn_a", "items": ["syn_a"]}}
     assert H._value_for(by_file, one_file) == "pellet" and H._value_for(by_file, card) is None
-    assert H.two_sentences("One. Two. Three.") == "One. Two." and len(H.two_sentences("word " * 200)) <= H.MAX_REASON_CHARS + 2
+    assert H.two_sentences("One. Two. Three.") == "One. Two." and H.two_sentences("word " * 200) == ""
+    assert H.two_sentences("Short one. Word " + "word " * 100 + "end.") == "Short one."
 
 
 def test_an_ai_reading_loaded_into_the_bundle_becomes_a_suggestion_with_its_quote(base, tmp_path):
@@ -926,7 +948,9 @@ def test_the_dose_question_is_one_beamtime_wide_processing_card(dosed, tmp_path)
     data = json.loads((tmp_path / "site" / "data" / "site-data.json").read_text())
     (card,) = [c for c in data["cards"] if c["section"] == "processing"]
     assert card == data["cards"][-1] and not card["blocking"] and card["audience"] == "processing" and card["field"] is None
-    assert card["title"] == "The white line drops after the first scan at each spot: is that beam damage?"
+    assert card["title"] == ("At 2 of 4 spots measured more than once, the white line drops after the first scan: "
+                             "is that beam damage?")
+    assert card["answer"]["options"][2]["label"] == "Not beam damage: every scan is judged by the other rules"
     assert card["detail"].startswith("Seen in 2 of 9 measurements;") and P.not_plain(card["detail"]) is None
     assert [o["value"] for o in card["answer"]["options"]] == ["beam_damage", "first_scan_settling", "not_beam_damage"]
     assert set(o["value"] for o in card["answer"]["options"]) == set(B.DOSE_READINGS) and not card["answer"]["allow_text"]

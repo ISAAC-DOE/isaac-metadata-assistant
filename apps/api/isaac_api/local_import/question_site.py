@@ -108,7 +108,7 @@ DOSE_TARGET_ID = "experiment:set_dose_reading"
 DOSE_LABELS = {
     "beam_damage": "Yes, beam damage: keep only the first scan at each spot",
     "first_scan_settling": "No, the first scan was still settling: leave the first scan out",
-    "not_beam_damage": "Neither: keep every scan",
+    "not_beam_damage": "Not beam damage: every scan is judged by the other rules",
 }
 PROBE_BY = "site export check (dry run, nothing recorded)"
 PROBE_TEXT = "site export check"
@@ -482,6 +482,17 @@ def _file_values(view: _View, questions: Sequence[Mapping]) -> tuple[list[Any], 
     return list(values.values()), first
 
 
+def _same_written(literal: Any, value: Any) -> bool:
+    """Whether the files' own text IS the value: the same word (any case), or the same number written as a number."""
+    text = str(literal).strip()
+    if isinstance(value, (int, float)) and not isinstance(value, bool):
+        try:
+            return float(text) == float(value)
+        except ValueError:
+            return False
+    return text.casefold() == str(value).casefold()
+
+
 def _suggestion_from_bundle(view: _View, unit: Mapping, shape: str, path: str) -> tuple[dict | None, dict | None]:
     """``(suggestion, on_accept)`` from what the bundle holds for a value card, or ``(None, None)``."""
     qs = unit["questions"]
@@ -492,12 +503,14 @@ def _suggestion_from_bundle(view: _View, unit: Mapping, shape: str, path: str) -
         if len(values) == 1:
             hints = [h for h in _file_hints(qs) if h.get("carries_value") is not False]
             written = P.quoted([h["literal"] for h in hints])
-            exact = isinstance(values[0], (int, float)) or any(str(h["literal"]).casefold() == str(values[0]).casefold()
-                                                               for h in hints)
-            return ({"value": values[0], "label": P.value_label(values[0], _unit_of(path, cand)),
-                     "confidence": "high" if exact else "medium", "basis": "files",
-                     "reason": f"Your files write {written}." if written else "Read from your files.",
-                     "evidence": _evidence(hints)}, {"decision": "confirm", "value": None})
+            # "high" only when the files write the value itself; a value read from a token ("060mV" -> 0.06 V) is
+            # ISAAC's reading of it: likely, and to be checked
+            exact = any(_same_written(h["literal"], values[0]) for h in hints)
+            label = P.value_label(values[0], _unit_of(path, cand))
+            reason = (f"Your files write {written}." if exact or not written else
+                      f"Read from {written} in your files as {label}; likely, please check.")
+            return ({"value": values[0], "label": label, "confidence": "high" if exact else "medium", "basis": "files",
+                     "reason": reason, "evidence": _evidence(hints)}, {"decision": "confirm", "value": None})
     if "correct" not in allowed:
         return None, None
     if kind == "resolve_conflict":
@@ -764,6 +777,7 @@ def _dose_card(view: _View) -> dict | None:
     own = {(d.get("target") or {}).get("id") for d in bundle.get("scientist_decisions") or ()
            if d.get("decision") == B.DOSE_READING_DECISION and (d.get("target") or {}).get("kind") == "record_group"}
     asked, rows, changes, reasons = [], [], [], Counter()
+    changed_spots = measured_spots = 0
     for gid in view.live:
         r = Q.curve_result(bundle, gid) if gid not in own else None
         if r is None or DOSE_QUESTION_FLAG not in (r.get("review_flags") or ()):
@@ -773,6 +787,8 @@ def _dose_card(view: _View) -> dict | None:
         spots = [s for s in (dose.get("per_spot") or {}).values() if s.get("kind") not in (None, "none")]
         got = [float(s["d12"]) * 100 for s in spots if isinstance(s.get("d12"), (int, float))]
         changes += got
+        changed_spots += len(spots)
+        measured_spots += int(dose.get("spots_measured_more_than_once") or len(spots))
         reasons[str(dose.get("why") or "")] += 1
         rows.append([view.group_name(gid), str(dose.get("spots_measured_more_than_once") or len(spots)),
                      ", ".join(f"{c:+.1f} %" for c in got) or "-"])
@@ -790,7 +806,8 @@ def _dose_card(view: _View) -> dict | None:
              "target": {"target": "experiment", "decision": B.DOSE_READING_DECISION}, "questions": []}
     return {
         "card_id": card_id(None, [DOSE_TARGET_ID]), "section": "processing", "blocking": False, "audience": "processing",
-        "title": f"The white line {what}s after the first scan at each spot: is that beam damage?",
+        "title": f"At {changed_spots} of {measured_spots} spots measured more than once, the white line {what}s after "
+                 "the first scan: is that beam damage?",
         "detail": f"Seen in {n} of {total} measurements; {why}. Your answer decides which scans go into every "
                   "merged spectrum.",
         "field": None,
