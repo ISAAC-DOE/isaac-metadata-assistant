@@ -285,6 +285,21 @@ def _identity(view: _View, q: Mapping) -> tuple[str, str] | None:
     return next(iter(keys)) if len(keys) == 1 else None
 
 
+def _by_identity(view: _View, members: Sequence[Mapping]) -> list[list[Mapping]]:
+    """The questions of one same-reading group as the parts that are one ask each: one part per sample identity the
+    grouping states (one token, two materials: a 0.5 nm and a 2 nm film of one name are two parts), and a member
+    whose groups state NO identity as a part of its own (nothing says it is the same sample as any other). When no
+    member states an identity the group's own reading is all there is, and it stays whole."""
+    stated: dict[Any, list[Mapping]] = {}
+    lone: list[Mapping] = []
+    for m in members:
+        key = _identity(view, m)
+        (stated.setdefault(key, []) if key is not None else lone).append(m)
+    if not stated or (len(stated) == 1 and not lone):
+        return [list(members)]
+    return [*stated.values(), *([m] for m in lone)]
+
+
 def _loading_said(view: _View, q: Mapping) -> str | None:
     """The loading or thickness of a question's first group as its files write it ("0p5nm"), or ``None``."""
     for gid in _groups_of(view, q):
@@ -328,13 +343,7 @@ def _units(view: _View, rows: Sequence[Mapping], include: Sequence[str]) -> tupl
                     left[_why_not(m, include) or ""] -= 1
             parts = [members]
             if str(members[0].get("target_field_path") or "").startswith("sample."):
-                # one token, two materials (a 0.5 nm and a 2 nm film of one name): the grouping's own sample
-                # identity tells them apart, so they are two cards; an identity it does not state joins nothing apart
-                by_identity: dict[Any, list[Mapping]] = {}
-                for m in members:
-                    by_identity.setdefault(_identity(view, m), []).append(m)
-                if len(by_identity) > 1 and None not in by_identity:
-                    parts = list(by_identity.values())
+                parts = _by_identity(view, members)
             for part in parts:
                 whole = len(part) == len(members)
                 units.append({"questions": part, "named": part[0], "same_reading": whole, "each": not whole,

@@ -208,6 +208,32 @@ def test_one_token_naming_two_materials_is_split_by_the_groupings_own_sample_ide
     assert one["same_reading"] and not one["each"] and len(one["questions"]) == 3
 
 
+def test_a_member_with_no_stated_identity_is_its_own_part_and_the_split_survives():
+    """Review I3: a 1 nm film, a 5 nm film and a group whose files state no sample at all share one token. The
+    unidentified one is nobody's sample: it is a card of its own, and the two films stay two cards."""
+    def group(loading):
+        return {"basis": {"sample": {"sample_name": {"value": "synfilm"}, "loading_or_thickness": {"value": loading}}}}
+
+    def q(n, gid):
+        return {"question_id": f"Q-syn000000{n}", "kind": "confirm_value", "scope": f"group:{gid}", "blocking": True,
+                "target_field_path": MATERIAL, "allowed_decisions": ["correct", "defer"], "same_reading_group": "SR-syn",
+                "per_scope_targets": {f"group:{gid}": [f"cand-{n}"]}, "targets": [], "no_value": True}
+
+    groups = {"rg-a": group("1nm"), "rg-b": group("5nm"), "rg-c": {"basis": {}}, "rg-d": {"basis": {"sample": {}}},
+              "rg-e": {"basis": {"sample": {"sample_name": {"kind": "conflicting", "value": "synfilm"}}}}}
+    view = SimpleNamespace(groups=groups, cands={})
+    units, _left = S._units(view, [q(n, g) for n, g in enumerate(groups, start=1)], ())
+    assert [[m["question_id"][-1] for m in u["questions"]] for u in units] == [["1"], ["2"], ["3"], ["4"], ["5"]]
+    assert all(u["each"] and not u["same_reading"] for u in units)
+    one_film = SimpleNamespace(groups={"rg-a": group("1nm"), "rg-b": group("1nm"), "rg-c": {"basis": {}}}, cands={})
+    units, _left = S._units(one_film, [q(1, "rg-a"), q(2, "rg-b"), q(3, "rg-c")], ())
+    assert [[m["question_id"][-1] for m in u["questions"]] for u in units] == [["1", "2"], ["3"]]
+    # no member states an identity: the same-reading group is all there is, and it stays one card
+    none = SimpleNamespace(groups={"rg-a": {"basis": {}}, "rg-b": {"basis": {}}}, cands={})
+    (whole,) = S._units(none, [q(1, "rg-a"), q(2, "rg-b")], ())[0]
+    assert whole["same_reading"] and len(whole["questions"]) == 2
+
+
 def test_titles_and_details_are_plain_words(base, tmp_path):
     bdir = tmp_path / "bundle"
     shutil.copytree(base, bdir)
