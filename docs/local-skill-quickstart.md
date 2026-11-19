@@ -31,6 +31,12 @@ ISAAC portal expects, plus a plain list of what is still missing. **It never upl
 
    You want to see `0 failed` at the end. Lines marked `SKIP` are parts you have not installed.
 
+   What it covers: the straight line from import to an upload dry run (import, check, spot check, groups,
+   processing, a handful of decisions, build, validate, export). What it does not cover yet: loading logbook
+   readings and scan notes, the counter question and a regroup, answering several questions at once, "I don't
+   know", scan and dose decisions, a second export, a ZIP, the template and the question workbook. A pass means
+   the installation works; it does not test those paths.
+
 Run `scripts/setup_isaac_local.sh --check` any time to see what is installed. It also tells you:
 
 - when the skill copy in `~/.claude/skills` (or the folder you pass with `--skill-dir`) differs from the
@@ -60,15 +66,22 @@ Run `scripts/setup_isaac_local.sh --check` any time to see what is installed. It
    3. **Spot check.** Claude reads a few key facts from the raw files *before* seeing what the
       program extracted, then compares. Differences become questions for you.
    4. **Files the program could not read.** Claude reads Word, PowerPoint, Excel, PDFs and images.
-   5. **Groups.** Which scans belong in one record (same sample, same conditions). You confirm,
-      split or merge.
-   6. **Spectra.** ISAAC processes each group and shows a plot and a quality verdict. You approve or
-      reject each, and when you approve you state the **QC status** yourself (the program never turns
-      a warning into a status for you). The processing recipe is a draft until Oscar and Angel review it.
-   7. **Questions.** Only what blocks a record comes first, asked once for the whole beamtime where
-      the answer is shared ("this applies to 9 groups") and once per group where it differs. Claude
-      tells you how many answers make a group ready (often 4 to 7). Conflicts that affect a record
-      come next; "I don't know" is fine and the value stays missing. Where the record takes only
+   5. **Groups.** Which scans belong in one record (same sample, same conditions). Claude shows you a
+      table of the groups that are as proposed, for one confirmation, and then only the ones that need a
+      look. You can ask to see any group.
+   6. **Spectra.** ISAAC processes each group: it aligns every scan on its in-scan reference, decides
+      which scans to keep by a written rule (never on intensity alone) and says why it dropped each one.
+      Claude shows the curves that passed every check in one table with a few example plots, for one
+      approval, and then each curve that needs a look with its plot. You can ask to see any curve and
+      overrule any scan decision. When you approve you state the **QC status** yourself (the program never
+      turns a warning into a status for you). The processing recipe is a draft until the ISAAC
+      processing reviewers have reviewed it.
+   7. **Questions.** In up to three messages: first only what blocks a record, as yes/no or a pick,
+      asked once for the whole beamtime where the answer is shared ("this applies to 9 groups"); then
+      one list of values ISAAC proposes from your files (start time, absorber, potentials and their
+      reference, cycling history, filter, sample ids) for you to confirm; then, only if you want, the
+      rest. "I don't know" is fine: Claude says what it costs (those records cannot be exported until
+      someone answers) and offers a sheet to pass to a colleague. Where the record takes only
       fixed words (for example `in_situ`, `powder`), Claude matches your words to one of them and
       asks you to confirm it; ISAAC refuses any other word. Some items are only listed for
       information, because no answer could go into the record; you are not asked about them.
@@ -76,6 +89,10 @@ Run `scripts/setup_isaac_local.sh --check` any time to see what is installed. It
       *Local Imports* page (setup in `docs/ui-local-dev.md`). It runs the same checks.
    8. **Checks.** Each record is checked against the schema and the portal's rules. Claude explains
       anything that fails and how to fix it.
+   You can stop at any point and come back later. Start Claude Code again, type
+   `/isaac-historical-import` and name the same folder: it checks what is already recorded and carries on
+   from there. It asks the permission question and your name again (one line); it does not ask again for
+   anything you already answered.
 4. **What you get:** a folder of records (`<id>.json` and `<id>.evidence.json`) for every record that
    passes every check, plus a summary of what was not ready and why. `upload --dry-run` shows what
    *would* be sent to the portal; **nothing is sent**. You upload through the portal yourself.
