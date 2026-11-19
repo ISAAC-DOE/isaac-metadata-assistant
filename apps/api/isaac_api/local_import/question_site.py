@@ -38,6 +38,7 @@ changes. ``--out`` must be outside every git working tree and outside the bundle
 from __future__ import annotations
 
 import contextlib
+import fnmatch
 import hashlib
 import io
 import json
@@ -56,7 +57,6 @@ from . import question_site_hints as H
 
 FORMAT_ID = "isaac.question_site"
 FORMAT_VERSION = "1.0.0"
-SUGGESTIONS_FORMAT_ID = "isaac.question_site_suggestions"
 EXPOSURE_COMMAND = "bundle site export"
 
 EXIT_USAGE = 2
@@ -978,6 +978,15 @@ def default_template() -> Path:
     return Path(__file__).resolve().parents[3] / "question-site"
 
 
+def _vercelignore(template: Path) -> list[str]:
+    """The paths the site template's own ``.vercelignore`` lists (never part of a deployment, so never copied)."""
+    try:
+        lines = (template / ".vercelignore").read_text(encoding="utf-8").splitlines()
+    except OSError:
+        return []
+    return [p.strip().strip("/") for p in lines if p.strip() and not p.strip().startswith(("#", "!"))]
+
+
 def _progress(text: str, quiet: bool) -> None:
     if not quiet:
         print(text, file=sys.stderr, flush=True)
@@ -1126,10 +1135,16 @@ def export_site(bundle_dir: Path, out: Path, *, suggestions: Path | None = None,
     template = Path(site_template).expanduser() if site_template is not None else default_template()
     copied = False
     if template.is_dir():
+        ignored = _vercelignore(template)
+
         def skip(folder, names):
             hidden = set(_TEMPLATE_SKIP(folder, names))
-            if Path(folder).resolve() == template.resolve():
+            at_root = Path(folder).resolve() == template.resolve()
+            if at_root:
                 hidden.update(TEMPLATE_ROOT_SKIP)  # its sample data never replaces (or sits beside) the real export
+            rel = "" if at_root else Path(folder).resolve().relative_to(template.resolve()).as_posix() + "/"
+            # what the site itself says is not deployed (.vercelignore): by name anywhere, or by path from its top
+            hidden.update(n for n in names if any(fnmatch.fnmatch(n, pat) or fnmatch.fnmatch(rel + n, pat) for pat in ignored))
             return hidden
         shutil.copytree(template, out, dirs_exist_ok=True, ignore=skip)
         copied = True

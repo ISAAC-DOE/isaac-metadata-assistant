@@ -32,7 +32,7 @@ import json
 import shutil
 import tempfile
 from pathlib import Path
-from typing import Any, Mapping, Sequence
+from typing import Any, Mapping
 
 from . import bundle as B
 from . import question_site as S
@@ -180,6 +180,8 @@ def _plans(entry: Mapping, card: Mapping, ctx: _Ctx) -> tuple[list[dict], str | 
                 value, as_said = (raw.strip() if isinstance(raw, str) else raw), False
             else:
                 rule = ctx.rule(cover.get("field") or path)
+                if rule and not rule.get("numeric") and isinstance(raw, (int, float)) and not isinstance(raw, bool):
+                    return [], "this field takes text, not a number", None
                 value, why = (T._parse_for(raw, {**rule, "allowed": None}, cover.get("field") or path) if rule
                               else (raw.strip() if isinstance(raw, str) else raw, None))
                 if why or value is None:

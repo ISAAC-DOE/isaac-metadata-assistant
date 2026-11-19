@@ -418,7 +418,9 @@ def test_the_site_template_is_copied_without_its_tests_sample_data_or_local_file
     bdir = tmp_path / "bundle"
     shutil.copytree(base, bdir)
     template = tmp_path / "template"
-    for rel, text in {"index.html": "<p>SYN site</p>", "app.js": "// SYN", ".vercelignore": "test\n", "api/answers.js": "// SYN",
+    for rel, text in {"index.html": "<p>SYN site</p>", "app.js": "// SYN", "api/answers.js": "// SYN",
+                      ".vercelignore": "# SYN\ntest/\nsyn-local.txt\nlib/scratch\n", "syn-local.txt": "SYN",
+                      "lib/scratch/x.js": "// SYN", "lib/syn-local.txt": "SYN",
                       "lib/data/kept.js": "// a nested folder named data is the site's own code",
                       "data/site-data.json": "{\"SYN\": \"sample\"}", "data/img/sample.png": "x", "test/fixture.txt": "SYN",
                       "dev-server.js": "// SYN", ".env.example": "SYN=1", "README.md": "SYN", ".vercel/project.json": "{}",
