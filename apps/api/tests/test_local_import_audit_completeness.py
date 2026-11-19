@@ -1,0 +1,286 @@
+"""Audit of 18 Nov 2026, finding 1: a record must not count as ready without the conditions that make it that
+record. SYNTHETIC data only (``SYN_`` files, the invented sample ``ZZ1``).
+
+The local completeness gate (``completeness.py``, ``isaac.local.record_completeness.v1``):
+
+* a condition grouping used to keep two records of one sample apart must be in the record, or declined by the
+  scientist, before ``export`` writes it; two records that would say the same thing are held too;
+  ``--allow-indistinguishable`` writes them anyway;
+* official validation is untouched: a held record's verdict is still ``exportable``;
+* the questions that fill such a condition are their own tier in ``bundle questions``, after the blocking ones and
+  before the optional ones; no existing question id changes;
+* ONE beamtime-wide question asks the potential scale, and reaches only the groups whose names state a potential.
+"""
+
+from __future__ import annotations
+
+import json
+import shutil
+
+import pytest
+
+from isaac_api.local_import import cli
+from isaac_api.local_import import completeness as CP
+from isaac_api.local_import import mutations as M
+from isaac_api.local_import import questions as Q
+from isaac_api.local_import import records as R
+
+from test_local_import_final_review import _portal
+from tests_support_records import BY, fake_upstream_env  # noqa: F401
+
+SETPOINT, SCALE = CP.SETPOINT_PATH, CP.SCALE_PATH
+
+
+# --- the catch-all: records that say the same thing (no processing extra needed) ---------------------------------
+
+
+def _draft(**fields):
+    return {"fields": {k: {"value": v} for k, v in fields.items()}}
+
+
+def test_records_that_say_the_same_thing_are_one_set_whatever_their_curve_ids_or_times():
+    same = {"sample.material.name": "ZZ1 synthetic", "system.technique": "HERFD-XAS", "context.environment": "in_situ"}
+    drafts = [("g1", _draft(**same, **{"timestamps.acquired_start_utc": "2025-01-01T00:00:00Z"})),
+              ("g2", _draft(**same, **{"timestamps.acquired_start_utc": "2025-01-02T00:00:00Z"})),
+              ("g3", _draft(**same, **{SETPOINT: 0.06, SCALE: "RHE"}))]
+    assert CP.identical_sets({}, drafts) == [["g1", "g2"]]
+
+
+def test_groups_a_scientist_kept_apart_are_declared_repeats_and_never_a_set():
+    same = {"sample.material.name": "ZZ1 synthetic"}
+    bundle = {"merge_candidates": [{"merge_candidate_id": "mc-1", "group_ids": ["g1", "g2"]}],
+              "scientist_decisions": [{"decision_id": "d-1", "target": {"kind": "merge_candidate", "id": "mc-1"},
+                                       "decision": "keep_apart"}]}
+    drafts = [("g1", _draft(**same)), ("g2", _draft(**same))]
+    assert CP.identical_sets(bundle, drafts) == []
+    assert CP.identical_sets({}, drafts) == [["g1", "g2"]]
+
+
+def test_a_condition_only_the_other_group_states_is_not_this_groups():
+    group = {"group_id": "g-ocv", "basis": {"conditions": {"filter": {"value": "10"}}},
+             "split_reasons": [{"code": "conditions_differ", "other_group_id": "g-060",
+                                "differences": [{"condition": "potential_magnitude", "key_class": "condition",
+                                                 "kind": "unknown_vs_known", "this": None, "other": 0.06}]}]}
+    assert CP.distinguishing_conditions(group, ["g-ocv", "g-060"]) == {}
+    held = {"group_id": "g-060", "basis": {"conditions": {"potential_magnitude": {"value": 0.06}}},
+            "split_reasons": [{"code": "conditions_differ", "other_group_id": "g-ocv",
+                               "differences": [{"condition": "potential_magnitude", "key_class": "condition",
+                                                "kind": "unknown_vs_known", "this": 0.06, "other": None}]}]}
+    assert list(CP.distinguishing_conditions(held, ["g-ocv", "g-060"])) == ["potential_magnitude"]
+    assert CP.distinguishing_conditions(held, ["g-060"]) == {}      # the other group is no longer live
+
+
+# --- end to end on SYN scans ------------------------------------------------------------------------------------
+
+np = pytest.importorskip("numpy", reason="the processing tests need the optional `processing` extra (numpy)")
+pytest.importorskip("larch", reason="the processing tests need the optional `processing` extra (xraylarch)")
+pytest.importorskip("scipy", reason="the xas-analysis engine needs scipy")
+pytest.importorskip("yaml", reason="the xas-analysis engine needs pyyaml")
+
+import test_local_import_engine_xas as T  # noqa: E402
+
+VALUES = {"attribution.produced_by.group": "Synthetic group", "attribution.produced_by.organization": "Synthetic University",
+          "context.environment": "in_situ", "sample.sample_form": "powder", "system.domain": "experimental",
+          "system.technique": "HERFD-XAS", "sample.material.name": "ZZ1 synthetic"}
+
+
+def answer_required(bdir):
+    """Answer every blocking question with an invented value (the scientist's part of the minimum)."""
+    for _ in range(60):
+        open_ = [q for q in Q.consolidate(M.load(bdir))["questions"] if q["blocking"] and q.get("target_field_path") in VALUES]
+        if not open_:
+            return
+        q = open_[0]
+        M.decide_question(bdir, question_id=q["question_id"], decision="correct", value=VALUES[q["target_field_path"]], **BY)
+    raise AssertionError("blocking questions never ran out")
+
+
+@pytest.fixture(scope="module")
+def pristine(tmp_path_factory):
+    """Three SYN groups of one sample: held at 60 mV, at 120 mV, and one whose name states no potential. Imported,
+    grouped, processed, every blocking question answered, groups confirmed, curves approved: what the audit called
+    "the minimum"."""
+    with pytest.MonkeyPatch.context() as mp:
+        mp.setenv("ISAAC_PROCESSING_ENGINE", "v1")
+        tmp = tmp_path_factory.mktemp("completeness")
+        runs = [("01_SYN_ZZ1_base_060mV", 9, [T.scan_cols(10 + k) for k in range(4)]),
+                ("02_SYN_ZZ1_base_120mV", 10, [T.scan_cols(40 + k) for k in range(4)]),
+                ("03_SYN_ZZ1_base_OCV", 11, [T.scan_cols(60 + k) for k in range(4)])]
+        root = tmp / "SYN_beamtime"
+        T.write_beamtime(root, runs)
+        out = tmp / "out"
+        assert cli.main(["import", str(root), "--out", str(out)]) == 0
+        M.group(out)
+        M.process(out, source=str(root))
+        answer_required(out)
+        b = M.load(out)
+        M.decide(out, target_ids=[g["group_id"] for g in b["record_groups"]], decision="confirm", value=None, **BY)
+        M.decide(out, target_ids=[r["result_id"] for r in b["processing_results"]], decision="approve", value=None,
+                 qc_status="valid", **BY)
+        return out
+
+
+@pytest.fixture()
+def bdir(pristine, tmp_path):
+    target = tmp_path / "b"
+    shutil.copytree(pristine, target)
+    return target
+
+
+def _group_of(bdir, stem_prefix):
+    b = M.load(bdir)
+    key = next(r["run_key"] for r in b["runs"] if r["stem"].startswith(stem_prefix))
+    return next(g["group_id"] for g in b["record_groups"] if key in g["member_run_keys"])
+
+
+def _setpoint_question(payload, gid):
+    return next(q for q in payload["questions"] if q.get("target_field_path") == SETPOINT and q["scope"] == f"group:{gid}")
+
+
+def test_the_questions_that_fill_a_distinguishing_condition_are_their_own_tier(bdir, monkeypatch):
+    payload = Q.consolidate(M.load(bdir))
+    qs = [q for q in payload["questions"] if not q.get("informational")]
+    marked = [q for q in qs if q.get("completeness")]
+    g060, g120, gocv = (_group_of(bdir, p) for p in ("01_", "02_", "03_"))
+    # the beamtime-wide scale question and each potential-stating group's own set-point and scale questions
+    assert {q["question_id"] for q in marked} >= {Q.potential_scale_question_id(),
+                                                  _setpoint_question(payload, g060)["question_id"],
+                                                  _setpoint_question(payload, g120)["question_id"]}
+    assert all(q["completeness"]["gate"] == CP.GATE_ID and q["completeness"]["tier"] == "distinguishing" for q in marked)
+    assert all(gocv not in q["completeness"]["group_ids"] for q in marked)   # its name states no potential
+    # after the blocking ones, before every other question; the tier NUMBER of no question changed
+    kinds = ["blocking" if q["blocking"] else "distinguishing" if q.get("completeness") else "rest" for q in qs]
+    assert kinds == sorted(kinds, key=["blocking", "distinguishing", "rest"].index)
+    assert all(q["tier"] in (Q.TIER_BLOCKING, Q.TIER_CONFLICT, Q.TIER_OPTIONAL) for q in qs)
+    assert payload["counts"]["distinguishing"] == len([q for q in marked if not q["blocking"]])
+    assert payload["record_completeness"]["held"] == 2 and payload["record_completeness"]["open_conditions"] == {
+        "potential_magnitude": 2}
+    # no existing question changed: without the new question and the marking, the same ids, tiers and texts
+    monkeypatch.setattr(Q, "_potential_scale_question", lambda *a, **k: None)
+    monkeypatch.setattr(CP, "mark_questions", lambda *a, **k: None)
+    before = {q["question_id"]: (q["tier"], q["text"], q["scope"]) for q in Q.consolidate(M.load(bdir))["questions"]}
+    after = {q["question_id"]: (q["tier"], q["text"], q["scope"]) for q in payload["questions"]
+             if q["question_id"] != Q.potential_scale_question_id()}
+    assert before == after
+
+
+def test_one_beamtime_question_asks_the_potential_scale_of_the_groups_that_state_a_potential(bdir, capsys):
+    payload = Q.consolidate(M.load(bdir))
+    q = Q.question(payload, Q.potential_scale_question_id())
+    g060, g120, gocv = (_group_of(bdir, p) for p in ("01_", "02_", "03_"))
+    assert q["scope"] == "experiment" and q["kind"] == "missing_value" and q["target_field_path"] == SCALE
+    assert set(q["per_scope_targets"]) == {f"group:{g060}", f"group:{g120}"}       # never the open-circuit group
+    assert q["applies_to"]["groups"] == 2 and q["applies_to"]["groups_not_reached"] == 1
+    assert "confirm" not in q["allowed_decisions"] and q["hints"] == []            # nothing is suggested: no file states it
+    assert "RHE" in q["allowed_values"] and "01_SYN_ZZ1_base_060mV" in q["text"]
+    # one answer, through the CLI, is recorded for exactly those groups' runs
+    assert cli.main(["bundle", "decide", str(bdir), "--question", q["question_id"], "--decision", "correct",
+                     "--value", "RHE", "--by", "SYN Scientist"]) == 0
+    said = json.loads(capsys.readouterr().out)
+    assert len(said["recorded"]) == 2
+    b = M.load(bdir)
+    by_id = {m["value_id"]: m for m in b["missing_values"]}
+    runs = {by_id[d["target"]["id"]]["run_id"] for d in b["scientist_decisions"]
+            if d["target"]["kind"] == "missing_value" and d["value"] == "RHE"}
+    stems = {r["stem"] for r in b["runs"] if r["run_id"] in runs}
+    assert stems == {"01_SYN_ZZ1_base_060mV", "02_SYN_ZZ1_base_120mV"}
+    payload = Q.consolidate(b)
+    assert Q.question(payload, Q.potential_scale_question_id()) is None             # answered: no longer asked
+    still = [q for q in payload["questions"] if q["kind"] == "optional_values" and SCALE in (q.get("fields") or {})]
+    assert [q["scope"] for q in still] == [f"group:{gocv}"]                         # only the group it never reached
+
+
+def test_bundle_questions_lists_the_tier_after_the_blocking_questions(bdir, capsys):
+    assert cli.main(["bundle", "questions", str(bdir), "--no-context", "--limit", "200"]) == 0
+    said = json.loads(capsys.readouterr().out)
+    assert said["record_completeness"]["gate"] == CP.GATE_ID and said["counts"]["distinguishing"] >= 3
+    first = [q for q in said["questions"] if not q["blocking"]][0]
+    assert first["completeness"]["tier"] == "distinguishing" and "group_ids" not in first["completeness"]
+    assert cli.main(["bundle", "questions", str(bdir), "--no-context", "--distinguishing-only"]) == 0
+    only = json.loads(capsys.readouterr().out)
+    assert only["total"] == said["counts"]["distinguishing"] and all(q["completeness"] for q in only["questions"])
+
+
+def test_the_scale_question_can_be_answered_for_some_groups_only(bdir):
+    g060 = _group_of(bdir, "01_")
+    M.decide_question(bdir, question_id=Q.potential_scale_question_id(), only=f"group:{g060}", decision="correct",
+                      value="Ag/AgCl", **BY)
+    b = M.load(bdir)
+    assert len([d for d in b["scientist_decisions"] if d["value"] == "Ag/AgCl"]) == 1
+    # one potential-stating group left: its own question is the one question
+    assert Q.question(Q.consolidate(b), Q.potential_scale_question_id()) is None
+
+
+def test_official_validation_is_untouched_and_the_local_gate_holds_the_records(bdir, tmp_path, fake_upstream_env):
+    v = R.validate_records(bdir, run_portal=_portal())
+    assert v["exportable"] == 3 and set(v["verdicts"].values()) == {"exportable"}   # official validation: unchanged
+    rc = v["record_completeness"]
+    assert v["ready_to_export"] == 0 and rc["gate"] == CP.GATE_ID and rc["held"] == 3
+    assert rc["open_conditions"] == {"potential_magnitude": 2} and rc["indistinguishable_sets_total"] == 1
+    assert rc["answer_first"][0]["question_id"] == Q.potential_scale_question_id()
+    g060, gocv = _group_of(bdir, "01_"), _group_of(bdir, "03_")
+    report = json.loads((bdir / "validation" / f"{g060}.json").read_text())
+    assert report["verdict"] == "exportable" and report["record_completeness"]["ready"] is False
+    [row] = report["record_completeness"]["conditions"]
+    assert row["condition"] == "potential_magnitude" and row["state"] == "open" and row["paths"] == [SETPOINT]
+    assert json.loads((bdir / "validation" / f"{gocv}.json").read_text())["record_completeness"]["ready"] is True
+
+    out = R.export_records(bdir, tmp_path / "records", run_portal=_portal())
+    assert out["exported"] == [] and not (tmp_path / "records").exists()
+    assert out["records_held_by_completeness"] == 3 and len(out["refused"]) == 3
+    for row in out["refused"]:
+        assert row["verdict"] == R.HELD_VERDICT and row["official_validation"] == "passed"
+        assert "these 3 records would be indistinguishable" in row["summary"][0]
+        assert "--allow-indistinguishable" in row["summary"][0] and row["answer"]
+    held = next(r for r in out["refused"] if r["group_id"] == g060)
+    assert CP.HELD_CONDITION in held["held_by"] and "without the potential" in held["summary"][0]
+    assert Q.potential_scale_question_id() in held["summary"][0]
+    assert "are held" in out["outcome"] and CP.GATE_ID in out["outcome"]
+
+
+def test_confirming_or_declining_each_condition_makes_every_record_ready(bdir, tmp_path, fake_upstream_env):
+    g060, g120 = _group_of(bdir, "01_"), _group_of(bdir, "02_")
+    M.decide_question(bdir, question_id=Q.potential_scale_question_id(), decision="correct", value="RHE", **BY)
+    payload = Q.consolidate(M.load(bdir))
+    M.decide_question(bdir, question_id=_setpoint_question(payload, g060)["question_id"], decision="confirm", value=None, **BY)
+    v = R.validate_records(bdir, run_portal=_portal())
+    assert v["ready_to_export"] == 2 and v["record_completeness"]["open_conditions"] == {"potential_magnitude": 1}
+    # the scientist DECLINES the other potential: left out on purpose, and the record is then ready
+    M.decide_question(bdir, question_id=_setpoint_question(payload, g120)["question_id"], decision="reject", value=None, **BY)
+    v = R.validate_records(bdir, run_portal=_portal())
+    assert v["ready_to_export"] == 3 and v["record_completeness"]["held"] == 0
+    rows = json.loads((bdir / "validation" / f"{g120}.json").read_text())["record_completeness"]["conditions"]
+    assert [r["state"] for r in rows] == ["declined"]
+    assert not [q for q in Q.consolidate(M.load(bdir))["questions"] if q.get("completeness")]
+    out = R.export_records(bdir, tmp_path / "records", run_portal=_portal())
+    assert out["records_written"] == 3 and out["refused"] == [] and "records_held_by_completeness" not in out
+    bodies = set()
+    for row in out["exported"]:
+        rec = json.loads((tmp_path / "records" / row["record"]).read_text())
+        bodies.add(json.dumps({k: rec.get(k) for k in ("sample", "system", "context")}, sort_keys=True))
+    assert len(bodies) == 3                                                         # no two records say the same thing
+    carried = json.loads((tmp_path / "records" / next(r["record"] for r in out["exported"] if r["group_id"] == g060)).read_text())
+    assert carried["context"]["electrochemistry"]["potential_setpoint_V"] == 0.06
+
+
+def test_declining_the_scale_declines_the_potential_it_goes_with(bdir, fake_upstream_env):
+    g060 = _group_of(bdir, "01_")
+    M.decide_question(bdir, question_id=Q.potential_scale_question_id(), only=f"group:{g060}", decision="reject",
+                      value=None, **BY)
+    R.validate_records(bdir, run_portal=_portal())
+    rows = json.loads((bdir / "validation" / f"{g060}.json").read_text())["record_completeness"]["conditions"]
+    assert [r["state"] for r in rows] == ["declined"]
+
+
+def test_the_flag_writes_held_records_anyway_and_every_row_says_so(bdir, tmp_path, fake_upstream_env, capsys):
+    code = cli.main(["bundle", "export", str(bdir), "--out", str(tmp_path / "records")])
+    assert code == 1 and not (tmp_path / "records").exists()
+    capsys.readouterr()
+    out = R.export_records(bdir, tmp_path / "records", run_portal=_portal(), allow_indistinguishable=True)
+    assert out["records_written"] == 3 and out["refused"] == [] and out["records_written_although_incomplete"] == 3
+    for row in out["exported"]:
+        assert row["warnings"][0].startswith("Written although record completeness holds it (--allow-indistinguishable)")
+    assert "are written although" in out["record_completeness"]["statement"]
+    # without the flag the next export holds them again and withdraws what was written
+    again = R.export_records(bdir, tmp_path / "records", run_portal=_portal())
+    assert again["exported"] == [] and len(again["withdrawn"]) == 3

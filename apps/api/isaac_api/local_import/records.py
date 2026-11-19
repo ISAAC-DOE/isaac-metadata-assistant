@@ -92,6 +92,9 @@ ATHENA_NOT_CHOSEN_WARNING = "athena_version_no_longer_chosen"
 MACRO_SETPOINT_WARNING = "macro_setpoint_unanswered"
 #: ``approved_curve.WARNING``: the record's approved curve is older than a scan note or a newer result of its group
 CURVE_OLDER_WARNING = "approved_curve_older_than_evidence"
+#: finding 1: ``export``'s verdict for a record official validation passes that the LOCAL completeness gate holds
+HELD_VERDICT = "held_by_record_completeness"
+ANSWER_FIRST_SHOWN = 20
 #: r6h H3: an in-situ record carries no electrolyte, cell type or control mode (what it was measured in).
 IN_SITU_WARNING = "in_situ_conditions_not_in_record"
 START_TIME_LEFT_OUT = "start time left out: instrument clock zone deferred (question {question})"
@@ -2839,7 +2842,13 @@ def validate_records(bundle_dir: Path, *, run_portal=None, full: bool = False) -
     verdicts, stale, not_exportable = {}, [], []
     portal_warned: dict[str, list[dict]] = {}
     fresh = fresh_compositions(bundle_dir, bundle, test_marker=marked)
-    warned = with_question_commands(bundle, [w for _, _, comp in fresh for w in comp.get("warnings") or ()])
+    from . import questions as Q
+
+    payload = Q.consolidate(bundle) if fresh else {"questions": []}
+    warned = with_question_commands(bundle, [w for _, _, comp in fresh for w in comp.get("warnings") or ()], payload)
+    # finding 1: the LOCAL record-completeness gate, per group (each condition, its state, what answers it); it is
+    # reported under its own name and never moves a verdict
+    holds_all, _, gate_of = completeness_holds(bundle, fresh, payload, [gid for gid, _, _ in fresh])
     for group_id, draft, composition in fresh:
         if _on_disk_differs(bundle_dir, group_id, draft, composition):
             stale.append(group_id)
@@ -2848,6 +2857,12 @@ def validate_records(bundle_dir: Path, *, run_portal=None, full: bool = False) -
         report["composed_from"] = "the validated bundle, now (an on-disk draft is never trusted)"
         report["on_disk_draft_differs"] = group_id in stale
         report["warnings"] = [w for w in warned if w["group_id"] == group_id]
+        if group_id in gate_of:
+            h = holds_all.get(group_id) or {}
+            report["record_completeness"] = {**gate_of[group_id],
+                                             **({"questions": h["questions"]} if h.get("questions") else {}),
+                                             "note": "A local gate beside official validation: it never changes the "
+                                                     "verdict above; `export` holds a record it names."}
         _atomic_write(out_dir / f"{group_id}.json", _json_bytes(report))
         verdicts[group_id] = report["verdict"]
         if pw := portal_warnings_of(report):
@@ -2872,6 +2887,12 @@ def validate_records(bundle_dir: Path, *, run_portal=None, full: bool = False) -
             not_exportable_omitted=max(0, len(not_exportable) - REASONS_SHOWN),
             reports=f"{VALIDATION_DIR}/<group_id>.json holds each group's full report (every gate, verbatim).",
         )
+    if verdicts:
+        # finding 1: of the records official validation passes, how many the local completeness gate holds, and why
+        passing = [g for g, v in verdicts.items() if v == "exportable"]
+        holds, sets, _ = completeness_holds(bundle, fresh, payload, passing)
+        out["record_completeness"] = completeness_summary(holds, sets, gate_of, passing)
+        out["ready_to_export"] = len(passing) - sum(1 for g in passing if g in holds)
     # r8: the condition labels' own warnings (two ready records ISAAC cannot tell apart; a label not proposed)
     warned = warned + L.record_warnings(bundle, fresh, [g for g, v in verdicts.items() if v == "exportable"])
     out.update(warning_summary(warned, first=[g for g, v in verdicts.items() if v == "exportable"], full=full,
@@ -2909,6 +2930,104 @@ def validate_records(bundle_dir: Path, *, run_portal=None, full: bool = False) -
         # an empty verdict list is "nothing checked", never "everything passed"
         out["nothing_validated"] = ("No record draft to validate: no record group is confirmed yet. Confirm the groups "
                                     "(`isaac bundle decide --decision confirm`), then run `isaac bundle build-records`.")
+    return out
+
+
+def completeness_holds(bundle: Mapping, fresh: Sequence[tuple[str, Mapping, Mapping]], payload: Mapping,
+                       candidates: Sequence[str]) -> tuple[dict[str, dict], list[list[str]], dict[str, dict]]:
+    """Finding 1 (audit of 18 Nov 2026), the LOCAL record-completeness gate (``completeness.py``) over the groups
+    ``candidates`` (those that would otherwise be written): ``(holds, identical sets, gate per group)``.
+
+    ``holds``: ``{group_id: {"held_by": [reason, ...], "text", "needs", "questions", "indistinguishable_from"}}`` for
+    each group with an OPEN distinguishing condition (a condition grouping used to keep it apart from another record
+    of its sample that is neither in its record nor declined) or whose record would say exactly what another one
+    says. Official validation is not read and not changed here."""
+    from . import completeness as CP
+    from . import questions as Q
+
+    wanted = set(candidates)
+    gate_of = CP.gates(bundle, {gid: comp for gid, _, comp in fresh})
+    questions_of = CP.questions_for(payload)
+    holds: dict[str, dict] = {}
+    for gid, gate in gate_of.items():
+        if gid in wanted and not gate["ready"]:
+            qs = list(dict.fromkeys(q for path in gate["needs"] for q in (questions_of.get(gid) or {}).get(path, ())))
+            holds[gid] = {"held_by": [CP.HELD_CONDITION], "needs": list(gate["needs"]), "questions": qs,
+                          "conditions": [r["condition"] for r in gate["conditions"] if r["state"] == CP.OPEN],
+                          "text": CP.hold_text(gate, questions_of.get(gid))}
+    first = first_member_runs(bundle)
+    sets = CP.identical_sets(bundle, [(gid, draft) for gid, draft, _ in fresh if gid in wanted])
+    for same in sets:
+        names = [str((first.get(g) or {}).get("stem") or g) for g in same]
+        shown = ", ".join(names[:CP.NAMED]) + (f" and {len(names) - CP.NAMED} more" if len(names) > CP.NAMED else "")
+        qs = list(dict.fromkeys(q for g in same for ids in (questions_of.get(g) or {}).values() for q in ids))
+        how = (f"Answer question {', '.join(qs[:3])}" + (f" (and {len(qs) - 3} more)" if len(qs) > 3 else "")
+               + " to say what differs" if qs else
+               "No open question tells them apart: if they are one measurement, merge their groups; if they are "
+               "intended repeats, keep them apart on their merge candidate (keep_apart) or give each its own sample id "
+               "or history label")
+        said = (f"Held ({CP.GATE_ID}): these {len(same)} records would be indistinguishable (the same sample, system "
+                f"and context in every field): {shown}. {how}; `export {CP.ALLOW_FLAG}` writes them anyway.")
+        for gid in same:
+            row = holds.setdefault(gid, {"held_by": [], "needs": [], "questions": [], "conditions": [], "text": ""})
+            row["held_by"].append(CP.HELD_IDENTICAL)
+            row["indistinguishable_from"] = [g for g in same if g != gid]
+            row["questions"] = list(dict.fromkeys([*row["questions"], *qs]))
+            row["text"] = (row["text"] + " " if row["text"] else "") + said
+    return holds, sets, gate_of
+
+
+def completeness_summary(holds: Mapping[str, Mapping], sets: Sequence[Sequence[str]], gate_of: Mapping[str, Mapping],
+                         candidates: Sequence[str], *, allowed: bool = False) -> dict:
+    """The reply's ``record_completeness`` block: the gate by name, how many of the ``candidates`` it holds and for
+    what, the questions that answer the most held records first, and one plain statement."""
+    from . import completeness as CP
+
+    wanted = list(candidates)
+    by_reason: dict[str, int] = {}
+    by_condition: dict[str, int] = {}
+    asked: dict[str, int] = {}
+    for gid in wanted:
+        h = holds.get(gid)
+        if not h:
+            continue
+        for r in h["held_by"]:
+            by_reason[r] = by_reason.get(r, 0) + 1
+        for c in h.get("conditions") or ():
+            by_condition[c] = by_condition.get(c, 0) + 1
+        for q in h.get("questions") or ():
+            asked[q] = asked.get(q, 0) + 1
+    held = [g for g in wanted if g in holds]
+    out: dict[str, Any] = {"gate": CP.GATE_ID, "checked": len(wanted), "ready": len(wanted) - len(held), "held": len(held),
+                           "held_by_reason": by_reason,
+                           "open_conditions": dict(sorted(by_condition.items(), key=lambda kv: (-kv[1], kv[0]))),
+                           "indistinguishable_sets": [list(x) for x in sets][:REASONS_SHOWN * 4],
+                           "indistinguishable_sets_total": len(sets),
+                           "answer_first": [{"question_id": q, "records": n} for q, n in
+                                            sorted(asked.items(), key=lambda kv: (-kv[1], kv[0]))[:ANSWER_FIRST_SHOWN]],
+                           "answer_first_total": len(asked)}
+    if not held:
+        out["statement"] = (f"Record completeness ({CP.GATE_ID}, a local gate beside official validation): all "
+                            f"{len(wanted)} record(s) carry or decline every condition that keeps them apart from "
+                            "another record of their sample, and no two say the same thing.")
+        return out
+    parts = []
+    if by_condition:
+        parts.append(f"{by_reason.get(CP.HELD_CONDITION, 0)} would be written without a condition that keeps them apart "
+                     "from another record of their sample ("
+                     + "; ".join(f"{w}: {n}" for w, n in CP._by_words(out["open_conditions"]).items()) + ")")
+    if sets:
+        n = sum(len(x) for x in sets)
+        parts.append(f"{n} would be indistinguishable from another record ({len(sets)} set(s) of records that say the "
+                     "same thing in every sample, system and context field)")
+    first = "; ".join(f"{a['question_id']} ({a['records']} record(s))" for a in out["answer_first"][:5])
+    out["statement"] = (
+        f"Record completeness ({CP.GATE_ID}, a local gate beside official validation, which it does not change): "
+        f"{len(held)} of {len(wanted)} record(s) " + ("are written although " if allowed else "are held: ")
+        + "; and ".join(parts) + "."
+        + (f" Answer first: {first}." if first else "")
+        + (" Each needs its condition confirmed, corrected or declined (reject)." if by_condition else "")
+        + ("" if allowed else f" `isaac bundle export <bundle_dir> --out <dir> {CP.ALLOW_FLAG}` writes them anyway."))
     return out
 
 
@@ -3169,7 +3288,7 @@ def _withdrawal_statement(record_id: str, exported_utc: Any, moved: Sequence[str
             f"what the bundle composes; {where}. Do not upload it. If it was already uploaded, the portal still holds it.")
 
 
-def export_records(bundle_dir: Path, out: Path, *, run_portal=None) -> dict:
+def export_records(bundle_dir: Path, out: Path, *, run_portal=None, allow_indistinguishable: bool = False) -> dict:
     """Write ONLY records that pass the portal-target official validation AND whose portal
     outcome is ``publish`` (DEC-76). Every gate is re-run here; a stale validation file is
     never trusted. The record is composed with ``export.transform`` and its sidecar with
@@ -3186,7 +3305,13 @@ def export_records(bundle_dir: Path, out: Path, *, run_portal=None) -> dict:
     exportable now — refused by a gate, or no longer a scientist-confirmed group — has its record moved to
     ``withdrawn/`` (kept, never in an upload plan; nothing replaces it), its index entry marked
     ``withdrawn_utc``, and the result lists it under ``withdrawn`` (and on its ``refused`` row). Exporting
-    the same record body again later restores it under the same id, and its withdrawn copy is removed."""
+    the same record body again later restores it under the same id, and its withdrawn copy is removed.
+
+    THE LOCAL COMPLETENESS GATE (finding 1 of the 18 Nov 2026 audit; ``completeness.py``): a record official
+    validation passes is HELD (not written; listed under ``refused`` with ``verdict: held_by_record_completeness``
+    and ``official_validation: passed``) while a condition grouping used to keep it apart from another record of its
+    sample is neither in it nor declined, or while it would say exactly what another record says.
+    ``allow_indistinguishable`` writes such records anyway, each row saying so."""
     from isaac_records.export import build_sidecar
     from isaac_records.ids import new_record_id
     from isaac_records.official import validate_official
@@ -3220,7 +3345,15 @@ def export_records(bundle_dir: Path, out: Path, *, run_portal=None) -> dict:
     minted: dict[str, str] = {}
     withdrawn: list[dict] = []
     # c11-a: a record written while a warning still applies says so on its row ("Written without …"), never silent
-    warned = with_question_commands(bundle, [w for _, _, comp in fresh for w in comp.get("warnings") or ()])
+    from . import completeness as CP
+    from . import questions as Q
+
+    payload = Q.consolidate(bundle) if fresh else {"questions": []}
+    warned = with_question_commands(bundle, [w for _, _, comp in fresh for w in comp.get("warnings") or ()], payload)
+    # finding 1: the local completeness gate over the groups whose draft is complete (the ones that can be written)
+    writable = [gid for gid, _, comp in fresh if not comp.get("missing_required") and not comp.get("disagreements")]
+    holds, identical, gate_of = completeness_holds(bundle, fresh, payload, writable)
+    held_now: list[str] = []
 
     def withdraw(earlier: dict, why: str) -> dict:
         """Move an earlier export's record to WITHDRAWN_DIR and mark its index entry; the row's keys."""
@@ -3258,6 +3391,20 @@ def export_records(bundle_dir: Path, out: Path, *, run_portal=None) -> dict:
                 # out of --out's top level, so `upload --dry-run` no longer lists it, and the row says so
                 row.update(withdraw(earlier, f"this export refused the group ({report['verdict']})"))
             refused.append(row)
+            continue
+        if group_id in holds and not allow_indistinguishable:
+            # HELD by the local completeness gate: official validation passed, and the record is still not written
+            h = holds[group_id]
+            row = {"group_id": group_id, **_label(label_of, group_id), "verdict": HELD_VERDICT,
+                   "official_validation": "passed", "held_by": list(h["held_by"]), "summary": [h["text"]],
+                   "missing_required": [], "processing_blocker": None,
+                   **({"answer": h["questions"][:5]} if h.get("questions") else {}),
+                   **({"indistinguishable_from": h["indistinguishable_from"]} if h.get("indistinguishable_from") else {})}
+            earlier = prior_of.get((bundle_id, group_id))
+            if earlier is not None and earlier.get("record_id"):
+                row.update(withdraw(earlier, f"this export holds the group ({CP.GATE_ID})"))
+            refused.append(row)
+            held_now.append(group_id)
             continue
         where = P.locate()
         from .mutations import now_utc
@@ -3353,6 +3500,11 @@ def export_records(bundle_dir: Path, out: Path, *, run_portal=None) -> dict:
                                                     key=lambda w: warning_rank(w.get("code")))]
         if link_left_out:
             still.append(L.NOT_WRITTEN_FOLLOWS.format(why=link_left_out))
+        if group_id in holds:
+            # written although the completeness gate names it (--allow-indistinguishable): said on the row, first
+            still.insert(0, f"Written although record completeness holds it ({CP.ALLOW_FLAG}): "
+                         + holds[group_id]["text"].replace(f"Held ({CP.GATE_ID}): ", "", 1))
+            held_now.append(group_id)
         if link is not None:
             row["follows"] = {"target": link["target"], "basis": link["basis"]}
         if any(w.get("code") == CURVE_OLDER_WARNING for w in warned if w["group_id"] == group_id):
@@ -3445,6 +3597,15 @@ def export_records(bundle_dir: Path, out: Path, *, run_portal=None) -> dict:
         "on_disk_drafts_ignored_because_they_differ": stale,
         "on_disk_drafts_ignored_with_no_confirmed_group": orphans,
     }
+    if writable:
+        # finding 1: the local gate by name, what it holds and what answers it; nothing about official validation
+        block = completeness_summary({g: holds[g] for g in held_now}, [x for x in identical if set(x) & set(held_now)],
+                                     gate_of, writable, allowed=allow_indistinguishable)
+        result["record_completeness"] = block
+        if held_now:
+            result["records_held_by_completeness" if not allow_indistinguishable
+                   else "records_written_although_incomplete"] = len(held_now)
+            result["outcome"] += " " + block["statement"]
     if curve_older:
         # finding 2 (audit of 18 Nov 2026): said before every other warning, with the groups, never only on a row
         said = (f"{len(curve_older)} record(s) carry an approved curve older than its evidence (a logbook scan note "

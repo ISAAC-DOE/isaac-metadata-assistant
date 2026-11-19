@@ -1,0 +1,361 @@
+"""RECORD COMPLETENESS, a LOCAL gate (audit of 18 Nov 2026, finding 1). Stdlib only; reads the bundle.
+
+WHY. Grouping keeps two runs of one sample apart because their files state different conditions (the potential,
+the cycling history, the filter). Nothing required those conditions to reach the records: with every
+schema-required question answered, a beamtime exported 89 valid records with 5 distinct metadata bodies. Each was
+"valid for the portal's pinned schema" and nobody could tell 38 of them apart except by their curve.
+
+WHAT THIS IS. A gate of this tool, beside official validation and never part of it:
+
+* **A distinguishing condition** of a record group is a condition its grouping basis states and a
+  ``conditions_differ`` split reason names against another live group of the same sample: exactly what kept the two
+  records apart. It must be IN THE RECORD (the composer filled the field that carries it) or DECLINED by the
+  scientist (a ``reject`` on that value or label: "leave it out"), or the group is not :data:`READY`.
+  A condition no record field can carry (the emission energy, a step number) is said and never holds a record.
+* **Indistinguishable records**: two records that would be written with the same ``sample``, ``system`` and
+  ``context`` are held, whatever the conditions above say (the catch-all for what no rule maps).
+
+``validate`` reports it under its own name (:data:`GATE_ID`); ``export`` holds the records it names and says which
+question answers each, unless :data:`ALLOW_FLAG` is given; ``bundle questions`` lists the questions that fill a
+distinguishing condition as their own tier (:data:`TIER`), after the blocking ones and before the optional ones.
+
+WHAT THIS IS NOT. It never changes a verdict of the official schema or the portal validator, never fills a value,
+and never reads a condition into a record: every value is still a scientist's confirmation. ``verdict:
+exportable`` keeps meaning "official validation passed".
+"""
+
+from __future__ import annotations
+
+import json
+from typing import Any, Iterable, Mapping, Sequence
+
+from . import bundle as B
+
+GATE_ID = "isaac.local.record_completeness.v1"
+TIER = "distinguishing"
+ALLOW_FLAG = "--allow-indistinguishable"
+#: why a group is held
+HELD_CONDITION = "distinguishing_condition_not_in_record"
+HELD_IDENTICAL = "indistinguishable_from_another_record"
+#: a condition's state for one group
+IN_RECORD, DECLINED, OPEN, NO_RECORD_FIELD = "in_record", "declined", "open", "no_record_field"
+
+SETPOINT_PATH = "context.electrochemistry.potential_setpoint_V"
+SCALE_PATH = "context.electrochemistry.potential_scale"
+#: A path that goes into the record only beside these (``records.SETPOINT_NEEDS_SCALE``): answering them is part of
+#: putting the condition in the record, and declining one declines the condition.
+COMPANIONS: Mapping[str, tuple[str, ...]] = {SETPOINT_PATH: (SCALE_PATH,)}
+#: ``records.FIELD_REMAP``: the path a candidate names -> the path the composer fills.
+REMAP = {"context.electrochemistry.reaction": "context.reaction.name"}
+#: The record sections that say what was measured (``labels.record_warnings`` compares the same three).
+BODY_SECTIONS = ("sample", "system", "context")
+#: What each grouping condition is called when a person is told about it.
+WORDS = {"potential_magnitude": "the potential", "scan_header_potential": "the potential",
+         "cycling_state": "the cycling history", "before_after_state": "the cycling history", "filter": "the filter",
+         "electrolyte_or_medium": "the electrolyte or medium", "ph": "the pH", "gas_condition": "the gas",
+         "temperature_statement": "the temperature", "step_number": "the step number",
+         "emission_energy": "the emission energy", "dry_state": "the dry state", "flow_rate": "the flow rate",
+         "acquisition_method": "the technique", "loading_or_thickness": "the loading"}
+NAMED = 5
+
+
+def _label_paths() -> dict[str, str]:
+    """grouping condition -> the condition label that carries it (``labels.py``)."""
+    from . import labels as L
+
+    return {"filter": L.FILTER_PATH, **{k: L.HISTORY_PATH for k in L.HISTORY_KEYS}}
+
+
+def words(condition: str) -> str:
+    return WORDS.get(condition, condition.replace("_", " "))
+
+
+def _run_ids(bundle: Mapping, group: Mapping) -> list[str]:
+    by_key = {r["run_key"]: r["run_id"] for r in bundle.get("runs") or ()}
+    context = set(group.get("context_run_keys") or ())
+    return [by_key[k] for k in group.get("member_run_keys") or () if k in by_key and k not in context]
+
+
+def _basis_entries(group: Mapping) -> list[tuple[str, Mapping]]:
+    """``[(condition, its basis entry)]`` of a group's conditions, technique and environment; a basis part that is
+    not a mapping (a hand-written or older group) holds none."""
+    basis = group.get("basis") if isinstance(group.get("basis"), Mapping) else {}
+    return [(k, v) for cat in ("conditions", "technique", "environment") if isinstance(basis.get(cat), Mapping)
+            for k, v in basis[cat].items() if isinstance(v, Mapping)]
+
+
+def distinguishing_conditions(group: Mapping, live_ids: Iterable[str]) -> dict[str, dict]:
+    """``{condition: {"condition", "value", "other_group_ids"}}``: each condition THIS group states that a
+    ``conditions_differ`` split reason names against another LIVE group of its sample. A condition only the other
+    group states (``this`` is None) is not one of this group's: there is nothing of it to put in this record."""
+    live = set(live_ids)
+    stated = dict(_basis_entries(group))
+    out: dict[str, dict] = {}
+    for sr in group.get("split_reasons") or ():
+        if sr.get("code") != "conditions_differ" or sr.get("other_group_id") not in live:
+            continue
+        for d in sr.get("differences") or ():
+            key = d.get("condition")
+            if d.get("key_class") != "condition" or d.get("this") is None or key not in stated:
+                continue
+            row = out.setdefault(key, {"condition": key, "value": d.get("this"), "other_group_ids": []})
+            if sr["other_group_id"] not in row["other_group_ids"]:
+                row["other_group_ids"].append(sr["other_group_id"])
+    return out
+
+
+class _Index:
+    """What the gate reads of the whole bundle, built once: each run's answerable targets per field path, and the
+    latest decision on each."""
+
+    def __init__(self, bundle: Mapping, decisions: Mapping | None = None):
+        self.bundle = bundle
+        self.decisions = decisions if decisions is not None else B._decisions_by_target(
+            bundle.get("scientist_decisions") or ())
+        self.cand = {c["candidate_id"]: c for c in bundle.get("candidates") or ()}
+        self.targets: dict[tuple[Any, str], list[tuple[str, str]]] = {}
+        for c in bundle.get("candidates") or ():
+            if c.get("target_field_path"):
+                self.targets.setdefault((c.get("run_id"), c["target_field_path"]), []).append(("candidate", c["candidate_id"]))
+        for m in bundle.get("missing_values") or ():
+            if m.get("target_field_path"):
+                self.targets.setdefault((m.get("run_id"), m["target_field_path"]), []).append(("missing_value", m["value_id"]))
+        self.label_paths = _label_paths()
+
+    def paths(self, group: Mapping, condition: str) -> list[str]:
+        """The record field(s) that carry ``condition`` for ``group``: what its basis candidates target, else the
+        condition label ISAAC proposes for it. ``[]``: no record field carries it."""
+        entry = next((v for k, v in _basis_entries(group) if k == condition), None) or {}
+        found = [p for i in entry.get("candidate_ids") or () if (p := (self.cand.get(i) or {}).get("target_field_path"))]
+        if not found and condition in self.label_paths:
+            found = [self.label_paths[condition]]
+        return list(dict.fromkeys(found))
+
+    def declined(self, run_ids: Sequence[str], path: str) -> bool:
+        """True when the scientist's latest word on ``path`` for these runs is ``reject`` ("leave it out") and no run
+        of them holds a confirmed or corrected value for it."""
+        latest = [self.decisions.get(t) for rid in run_ids for t in self.targets.get((rid, path), ())]
+        said = [d.get("decision") for d in latest if d]
+        return "reject" in said and not any(s in ("confirm", "correct", "provide_value", "choose_reading") for s in said)
+
+
+def group_gate(index: _Index, group: Mapping, report: Mapping, live_ids: Iterable[str]) -> dict:
+    """The gate for one group: ``{"gate", "ready", "conditions": [...], "held_by": [...], "needs": [paths]}``.
+    ``report``: the composer's report for the group (``records.compose_group``): what it FILLED is what is in the
+    record."""
+    filled = {f["path"] for f in report.get("filled") or ()}
+    run_ids = _run_ids(index.bundle, group)
+    rows, needs = [], []
+    for key, d in sorted(distinguishing_conditions(group, live_ids).items()):
+        paths = index.paths(group, key)
+        carried = [REMAP.get(p, p) for p in paths]
+        if not paths:
+            state = NO_RECORD_FIELD
+        elif any(p in filled for p in carried):
+            state = IN_RECORD
+        elif any(index.declined(run_ids, p) or any(index.declined(run_ids, c) for c in COMPANIONS.get(p, ()))
+                 for p in paths):
+            state = DECLINED
+        else:
+            state = OPEN
+            for p in paths:
+                for x in (p, *COMPANIONS.get(p, ())):
+                    if x not in filled and x not in needs:
+                        needs.append(x)
+        rows.append({"condition": key, "words": words(key), "value": d["value"], "paths": paths, "state": state,
+                     "keeps_apart_from": len(d["other_group_ids"])})
+    open_rows = [r for r in rows if r["state"] == OPEN]
+    return {"gate": GATE_ID, "group_id": group["group_id"], "ready": not open_rows, "conditions": rows,
+            "held_by": [HELD_CONDITION] if open_rows else [], "needs": needs}
+
+
+def live_record_group_ids(bundle: Mapping) -> list[str]:
+    """The live groups that can become a record as they stand (``questions.cannot_export_reasons`` names the rest):
+    a condition keeps a record apart only from another record."""
+    from . import questions as Q
+
+    never = Q.cannot_export_reasons(bundle)
+    return [g["group_id"] for g in bundle.get("record_groups") or ()
+            if g.get("status") in B.LIVE_GROUP_STATUSES and g["group_id"] not in never]
+
+
+def gates(bundle: Mapping, reports: Mapping[str, Mapping], decisions: Mapping | None = None,
+          live_ids: Sequence[str] | None = None) -> dict[str, dict]:
+    """``{group_id: group_gate}`` for every group of ``reports`` (the composer's report per group) that is among
+    ``live_ids`` (default :func:`live_record_group_ids`)."""
+    live = list(live_ids) if live_ids is not None else live_record_group_ids(bundle)
+    index = _Index(bundle, decisions)
+    by_id = {g["group_id"]: g for g in bundle.get("record_groups") or ()}
+    return {gid: group_gate(index, by_id[gid], reports[gid], live) for gid in live if gid in reports and gid in by_id}
+
+
+# --- the questions' tier --------------------------------------------------------------------------------------------
+
+
+def mark_questions(questions: list[dict], bundle: Mapping, gate_of: Mapping[str, Mapping],
+                   group_of: Mapping[str, str]) -> None:
+    """Set ``completeness`` on every open question whose answer puts an OPEN distinguishing condition into a record:
+    ``{"gate", "tier": "distinguishing", "groups", "conditions", "fields", "why"}``. No id, tier number, text or
+    target of any question changes; the listing sorts these after the blocking questions and before the rest."""
+    needed: dict[str, dict[str, list[str]]] = {}  # path -> {group id: [conditions]}
+    for gid, gate in gate_of.items():
+        for row in gate["conditions"]:
+            if row["state"] != OPEN:
+                continue
+            for p in row["paths"]:
+                for x in (p, *COMPANIONS.get(p, ())):
+                    if x in gate["needs"]:
+                        needed.setdefault(x, {}).setdefault(gid, []).append(row["condition"])
+    if not needed:
+        return
+    run_of: dict[str, Any] = {c["candidate_id"]: c.get("run_id") for c in bundle.get("candidates") or ()}
+    run_of.update({m["value_id"]: m.get("run_id") for m in bundle.get("missing_values") or ()})
+    found: list[tuple[dict, dict[str, tuple[set[str], set[str]]]]] = []  # (question, {path: (groups, target ids)})
+    for q in questions:
+        if q.get("informational") or q.get("outside_live_groups") or not q.get("allowed_decisions", True):
+            continue
+        if q.get("kind") == "optional_values":
+            asked = [(f, list(ids)) for f, ids in (q.get("fields") or {}).items()]
+        elif q.get("target_field_path"):
+            asked = [(q["target_field_path"], [t["id"] for t in q.get("targets") or ()])]
+        else:
+            continue
+        per_path: dict[str, tuple[set[str], set[str]]] = {}
+        for path, ids in asked:
+            want = needed.get(path) or needed.get(REMAP.get(path, path))
+            if not want:
+                continue
+            scoped = {s[len("group:"):] for s in (q.get("per_scope_targets") or {}) if s.startswith("group:")}
+            reached = scoped | {group_of[r] for i in ids if (r := run_of.get(i)) in group_of}
+            if any(i in run_of and run_of[i] is None for i in ids):
+                reached |= set(want)  # a beamtime-level value reaches every group
+            got = reached & set(want)
+            if got:
+                per_path[path] = (got, set(ids))
+        if per_path:
+            found.append((q, per_path))
+    for q, per_path in found:
+        # A WIDER QUESTION THAT ASKS THE SAME TARGETS is the one to answer (the beamtime-wide potential scale over
+        # each group's own optional question): the narrower one is its `--only` route, not a second question
+        mine = {path: (groups, ids) for path, (groups, ids) in per_path.items()
+                if not any(o is not q and path in other and len(other[path][0]) > len(groups) and ids <= other[path][1]
+                           for o, other in found)}
+        if not mine:
+            continue
+        hit_groups: dict[str, set[str]] = {}
+        for path, (groups, _ids) in mine.items():
+            want = needed.get(path) or needed.get(REMAP.get(path, path)) or {}
+            for gid in groups:
+                hit_groups.setdefault(gid, set()).update(want.get(gid) or ())
+        conds = sorted({c for cs in hit_groups.values() for c in cs})
+        said = ", ".join(dict.fromkeys(words(c) for c in conds))
+        q["completeness"] = {
+            "gate": GATE_ID, "tier": TIER, "groups": len(hit_groups), "group_ids": sorted(hit_groups),
+            "conditions": conds, "fields": list(mine),
+            "why": (f"Needed before export: {said} is what keeps {len(hit_groups)} record(s) apart from another "
+                    "record of the same sample, and it is not in the record yet. Confirm it, correct it, or decline "
+                    "it (reject) to leave it out on purpose."),
+        }
+
+
+def answers_needed(questions: Sequence[Mapping]) -> dict:
+    """How many questions carry the tier, and how many ANSWERS that is: questions that share one reading are answered
+    together (``--same-reading``), so a batch counts once."""
+    marked = [q for q in questions if q.get("completeness")]
+    batches = {q.get("same_reading_group") or q["question_id"] for q in marked}
+    return {"questions": len(marked), "answers": len(batches)}
+
+
+def _by_words(counts: Mapping[str, int]) -> dict[str, int]:
+    """``{what a person calls the condition: groups}``: two grouping keys with one name (the cycling state and the
+    before/after state are both "the cycling history") are said once, with the larger count."""
+    out: dict[str, int] = {}
+    for key, n in counts.items():
+        out[words(key)] = max(n, out.get(words(key), 0))
+    return out
+
+
+def summary(gate_of: Mapping[str, Mapping], group_ids: Iterable[str] | None = None) -> dict:
+    """The gate over several groups, counted: ``{"gate", "groups", "ready", "held", "open_conditions": {condition:
+    groups}, "statement"}``."""
+    wanted = set(group_ids) if group_ids is not None else None
+    rows = [g for gid, g in gate_of.items() if wanted is None or gid in wanted]
+    held = [g for g in rows if not g["ready"]]
+    open_by: dict[str, int] = {}
+    for g in held:
+        for r in g["conditions"]:
+            if r["state"] == OPEN:
+                open_by[r["condition"]] = open_by.get(r["condition"], 0) + 1
+    unmapped = sorted({r["condition"] for g in rows for r in g["conditions"] if r["state"] == NO_RECORD_FIELD})
+    out = {"gate": GATE_ID, "groups": len(rows), "ready": len(rows) - len(held), "held": len(held),
+           "open_conditions": dict(sorted(open_by.items(), key=lambda kv: (-kv[1], kv[0])))}
+    if held:
+        out["statement"] = (
+            f"{len(held)} of {len(rows)} record group(s) are not complete ({GATE_ID}, a local gate; official "
+            "validation is not changed by it): " + "; ".join(f"{w} in {n}" for w, n in _by_words(out["open_conditions"]).items())
+            + ". These are the conditions grouping used to keep records of one sample apart; each must be in the "
+              "record or declined before export writes it. `isaac bundle questions <bundle_dir>` lists the questions "
+              f"that fill them right after the blocking ones (`completeness`); `export {ALLOW_FLAG}` writes them anyway.")
+    else:
+        out["statement"] = (f"Every distinguishing condition of {len(rows)} record group(s) is in its record or "
+                            f"declined ({GATE_ID}).")
+    if unmapped:
+        out["no_record_field"] = unmapped
+        out["statement"] += (" No record field carries " + ", ".join(words(c) for c in unmapped)
+                             + ": it never holds a record, and records that differ only there are caught as "
+                               "indistinguishable at export.")
+    return out
+
+
+# --- indistinguishable records --------------------------------------------------------------------------------------
+
+
+def metadata_key(draft: Mapping) -> str:
+    """What a record says was measured, as one comparable string: every ``sample``, ``system`` and ``context`` field
+    of its draft. Never the curve, the ids, the files or the timestamps."""
+    fields = draft.get("fields") or {}
+    return json.dumps({p: (fields[p] or {}).get("value") for p in sorted(fields)
+                       if p.split(".", 1)[0] in BODY_SECTIONS}, sort_keys=True, default=str)
+
+
+def identical_sets(bundle: Mapping, drafts: Sequence[tuple[str, Mapping]]) -> list[list[str]]:
+    """Group ids whose drafts say the same thing (:func:`metadata_key`), two or more per set, in the order given.
+    Groups a scientist kept apart on purpose (``keep_apart`` on their merge candidate: declared repeats) are not a
+    set."""
+    by_key: dict[str, list[str]] = {}
+    for gid, draft in drafts:
+        by_key.setdefault(metadata_key(draft), []).append(gid)
+    kept = [set(mc.get("group_ids") or ()) for mc in bundle.get("merge_candidates") or ()
+            if (mc.get("merge_candidate_id") or mc.get("id")) in B.kept_apart(bundle)]
+    return [gids for gids in by_key.values() if len(gids) > 1 and not any(set(gids) <= k for k in kept)]
+
+
+def questions_for(payload: Mapping) -> dict[str, dict[str, list[str]]]:
+    """``{group id: {field path: [question id]}}`` of the open questions marked ``completeness`` in a consolidated
+    payload: what answers each held group's open condition. A question that reaches the most groups first (the
+    beamtime-wide one before a group's own)."""
+    out: dict[str, dict[str, list[str]]] = {}
+    marked = [q for q in payload.get("questions") or () if q.get("completeness")]
+    for q in sorted(marked, key=lambda q: -int(q["completeness"].get("groups") or 0)):
+        for gid in q["completeness"].get("group_ids") or ():
+            for path in q["completeness"].get("fields") or ():
+                # ONE question per group and field: the one that reaches the most groups (a group's own question
+                # asking the same targets is the `--only` way to answer it, not a second thing to answer)
+                out.setdefault(gid, {}).setdefault(path, [q["question_id"]])
+    return out
+
+
+def hold_text(gate: Mapping, questions_of: Mapping[str, Sequence[str]] | None = None) -> str:
+    """Why one group is held for an open condition, with the question(s) that answer it."""
+    open_rows = [r for r in gate["conditions"] if r["state"] == OPEN]
+    said = "; ".join(f"{r['words']} ({_shown(r['value'])}, which keeps it apart from {r['keeps_apart_from']} other "
+                     f"record(s) of its sample)" for r in open_rows)
+    qs = list(dict.fromkeys(q for p in gate.get("needs") or () for q in (questions_of or {}).get(p, ())))
+    how = (f" Answer question {', '.join(qs[:3])}" + (f" (and {len(qs) - 3} more)" if len(qs) > 3 else "")
+           if qs else f" Answer the question that asks {', '.join(gate.get('needs') or ())}")
+    return (f"Held ({GATE_ID}): the record would be written without {said}." + how
+            + f", or decline it (reject) to leave it out on purpose; `export {ALLOW_FLAG}` writes it anyway.")
+
+
+def _shown(value: Any) -> str:
+    return json.dumps(value, default=str) if not isinstance(value, str) else value

@@ -89,7 +89,9 @@ def _conflict_q(payload, conflict_id):
 
 def test_every_question_id_of_the_synthetic_grouped_bundle_is_unchanged(grouped):
     # the condition labels (labels.py) are new questions beside these: every id here is unchanged
-    ids = sorted(q["question_id"] for q in Q.consolidate(M.load(grouped))["questions"] if q["kind"] != L.KIND)
+    # ...and so is the beamtime-wide potential-scale question (audit of 18 Nov 2026, finding 1): its own new id
+    ids = sorted(q["question_id"] for q in Q.consolidate(M.load(grouped))["questions"]
+                 if q["kind"] != L.KIND and q["question_id"] != Q.potential_scale_question_id())
     assert (len(ids), hashlib.sha256("\n".join(ids).encode()).hexdigest()) == GOLDEN_IDS
 
 

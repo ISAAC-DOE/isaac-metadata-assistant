@@ -273,7 +273,9 @@ def command_for_targets(payload: Mapping, target_ids: Sequence[str], path: str, 
     if not wanted:
         return None
     for q in payload["questions"]:
-        if q["kind"] not in VALUE_KINDS or q.get("informational"):
+        # a group's own question, never the beamtime-wide one that asks the same targets for many groups (the
+        # potential-scale question, finding 1 of the 18 Nov 2026 audit): this command is for ONE record's warning
+        if q["kind"] not in VALUE_KINDS or q.get("informational") or q.get("beamtime_wide"):
             continue
         for field, ids in _value_paths(q):
             if field == path and wanted.intersection(ids):
@@ -1483,9 +1485,13 @@ def consolidate(bundle: Mapping, *, compositions_out: dict | None = None, includ
         # (the beamtime-wide start-time question too: after the other disagreements, before the per-group ones by scope)
         start_time = (q["kind"] in ("resolve_conflict", STATED_UTC_START_KIND)
                       and (q["target_field_path"] or "").startswith("timestamps."))
-        return (first, q["tier"], start_time, bool(q.get("informational")), bool(q.get("deferred")), s,
+        # finding 1 (audit of 18 Nov 2026): the questions that put a DISTINGUISHING condition into a record
+        # (``completeness``) come right after the blocking ones and before every other, whatever their tier number
+        rank = 0 if q["tier"] == TIER_BLOCKING else (1 if q.get("completeness") else 2)
+        return (first, rank, q["tier"], start_time, bool(q.get("informational")), bool(q.get("deferred")), s,
                 q["target_field_path"] or "", q["question_id"])
 
+    completeness = None
     if has_groups:
         reports = compositions(bundle, decision_of=decisions)
         if compositions_out is not None:
@@ -1516,6 +1522,20 @@ def consolidate(bundle: Mapping, *, compositions_out: dict | None = None, includ
         from .labels import point_conflicts_at_labels
 
         point_conflicts_at_labels(questions, bundle, group_of)
+        # finding 1: ONE beamtime-wide question for the potential scale (its own id), reaching only the groups whose
+        # names or files state a potential; then the local completeness tier is marked on every question that fills
+        # a condition grouping used to keep two records apart
+        scale_q = _potential_scale_question(questions, bundle, groups, group_of, context)
+        if scale_q is not None:
+            questions.append(scale_q)
+        # finding 1: the local completeness gate per group, and its tier on the questions
+        from . import completeness as CP
+
+        gate_of = CP.gates(bundle, reports, decisions, [g["group_id"] for g in groups if g["group_id"] not in cannot_export])
+        for q in questions:
+            q.setdefault("allowed_decisions", list(ALLOWED_DECISIONS.get(q["kind"], ())))
+        CP.mark_questions(questions, bundle, gate_of, group_of)
+        completeness = {**CP.summary(gate_of), **CP.answers_needed(questions)}
     questions.sort(key=order)
     _quote_passing_once(questions, passing_of)
     for q in questions:
@@ -1526,7 +1546,103 @@ def consolidate(bundle: Mapping, *, compositions_out: dict | None = None, includ
         "bundle_id": bundle.get("bundle_id"),
         "blocking_basis": basis,
         "counts": question_counts(questions, fine_grained_v1=len(bundle.get("questions") or ())),
+        **({"record_completeness": completeness} if completeness is not None else {}),
         "questions": questions,
+    }
+
+
+#: finding 1 (audit of 18 Nov 2026): the id of the beamtime-wide potential-scale question (DEC-91: from its scope,
+#: kind, field and partition only; a new id, no existing question changes).
+POTENTIAL_SCALE_PARTITION = "stated_potentials"
+#: Fewer groups than this stating a potential: each group's own question is the one question.
+_SCALE_MIN_GROUPS = 2
+_SCALE_EXAMPLES = 5
+
+
+def _states_a_potential(bundle: Mapping, group: Mapping, run_ids: Sequence[str]) -> list[str]:
+    """What says group ``group`` was held at a potential: the potential its grouping basis holds (read from its
+    file names or scan headers), else the potential tokens its files' names or headers state (``records``). ``[]``:
+    nothing states one (open circuit, dry, a reference), so the beamtime-wide scale question never reaches it."""
+    conds = (group.get("basis") or {}).get("conditions") if isinstance(group.get("basis"), Mapping) else None
+    conds = conds if isinstance(conds, Mapping) else {}
+    said = [(f"{v:g} V" if isinstance(v, (int, float)) and not isinstance(v, bool) else str(v))
+            for k in ("potential_magnitude", "scan_header_potential")
+            if isinstance(conds.get(k), Mapping) and (v := conds[k].get("value")) is not None]
+    if said:
+        return said
+    from .records import _stated_potentials
+
+    return [str(x.get("literal")) for x in _stated_potentials(bundle, set(run_ids)) if x.get("literal")]
+
+
+def potential_scale_question_id() -> str:
+    return _qid("experiment", "missing_value", SCALE_PATH, POTENTIAL_SCALE_PARTITION)
+
+
+def _potential_scale_question(questions: Sequence[Mapping], bundle: Mapping, groups: Sequence[Mapping],
+                              group_of: Mapping[str, str], context: Container[str] = ()) -> dict | None:
+    """ONE question for the beamtime: "all potential holds here are quoted against which reference scale?".
+
+    Its targets are exactly the potential-scale targets the per-group questions already ask (so an answer here is
+    the same decision on the same targets, and each group's question then no longer asks the scale), of the groups
+    whose names or files state a potential ONLY: a group that states none (open circuit, dry, a reference) is never
+    reached (DEC-90). ``None`` with fewer than :data:`_SCALE_MIN_GROUPS` such groups. Nothing is suggested unless
+    the groups' own questions already carry a hint: no file states a scale here, and none is invented."""
+    run_by_key = {r["run_key"]: r for r in bundle.get("runs") or ()}
+    members = {g["group_id"]: [run_by_key[k]["run_id"] for k in g.get("member_run_keys") or ()
+                               if k in run_by_key and run_by_key[k]["run_id"] not in context] for g in groups}
+    asked: dict[str, list[str]] = {}
+    hints: list[dict] = []
+    for q in questions:
+        scope = str(q.get("scope") or "")
+        if not scope.startswith("group:") or q.get("kind") not in VALUE_KINDS or q.get("outside_live_groups"):
+            continue
+        ids = dict(_value_paths(q)).get(SCALE_PATH)
+        if ids:
+            asked.setdefault(scope[len("group:"):], []).extend(i for i in ids if i not in asked.get(scope[len("group:"):], ()))
+            for h in ((q.get("field_hints") or {}).get(SCALE_PATH) or ())[:1]:
+                if len(hints) < _SCALE_EXAMPLES:
+                    hints.append({**h, "group_id": scope[len("group:"):]})
+    stated = {gid: said for g in groups if (gid := g["group_id"]) in asked
+              and (said := _states_a_potential(bundle, g, members.get(gid, ())))}
+    if len(stated) < _SCALE_MIN_GROUPS:
+        return None
+    qid = potential_scale_question_id()
+    stem_of = {r["run_id"]: str(r.get("stem") or "") for r in bundle.get("runs") or ()}
+    first = {gid: stem_of.get((members.get(gid) or [None])[0], gid) for gid in stated}
+    examples = [f"{first[gid]} ({stated[gid][0]})" for gid in list(stated)[:_SCALE_EXAMPLES]]
+    allowed = _eligible_values(SCALE_PATH)
+    not_reached = len([g for g in groups if g["group_id"] not in stated])
+    targets = [i for gid in stated for i in asked[gid]]
+    return {
+        "question_id": qid,
+        "partition": POTENTIAL_SCALE_PARTITION,
+        "tier": TIER_OPTIONAL,
+        "blocking": False,
+        "why": ("Optional for the schema, needed to say what was measured: a potential goes into a record only beside "
+                "the reference scale it is quoted against, and no file here states one."),
+        "kind": "missing_value",
+        "scope": "experiment",
+        "target_field_path": SCALE_PATH,
+        "beamtime_wide": True,
+        "text": (f"All potential holds in this beamtime are quoted against which reference scale? The names or scan "
+                 f"headers of {len(stated)} record groups state a potential (e.g. {'; '.join(examples)}), and none "
+                 "states the scale, so nothing is suggested and no record carries its potential until a scientist "
+                 f"says it. One answer here reaches those {len(stated)} groups only"
+                 + (f": the other {not_reached} (no potential stated: open circuit, dry, a reference) are not reached"
+                    if not_reached else "")
+                 + ". If some groups were quoted against another scale, answer those with --only group:<group id>, "
+                   "or each on its own question."
+                 + (f" Allowed values: {', '.join(map(str, allowed))}." if allowed else "")),
+        "applies_to": {"groups": len(stated), "runs": sum(len(members.get(g, ())) for g in stated), "targets": len(targets),
+                       "groups_not_reached": not_reached},
+        "targets": [{"kind": "missing_value", "id": i} for i in targets],
+        "per_scope_targets": {f"group:{gid}": list(asked[gid]) for gid in stated},
+        "hints": hints,
+        "allowed_values": allowed,
+        "allowed_decisions": list(VALUELESS_DECISIONS),
+        "answer_command": (f"isaac bundle decide <bundle_dir> --question {qid} --decision correct --value "
+                           f'<one of its allowed values> --by "<your name>"   # some groups only: add --only group:<group_id>'),
     }
 
 
@@ -2010,6 +2126,11 @@ def question_counts(questions: Sequence[Mapping], *, fine_grained_v1: int | None
         # targets a scientist answered with a value the record cannot take, asked again
         "asked_again": sum(len(q.get("asked_again") or ()) for q in questions),
     }
+    distinguishing = sum(1 for q in questions if q.get("completeness") and q["tier"] != TIER_BLOCKING)
+    if distinguishing:
+        # finding 1: questions (already counted above, in their own tier) whose answer puts a condition grouping
+        # used to keep two records apart into a record: listed right after the blocking ones
+        out["distinguishing"] = distinguishing
     if fine_grained_v1 is not None:
         out["fine_grained_v1"] = fine_grained_v1
     return out

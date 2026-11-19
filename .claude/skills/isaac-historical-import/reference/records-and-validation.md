@@ -116,6 +116,17 @@ scan's remarks never state its decision ("not a reason to drop"), so a dropped s
 | `portal_reject` | "The portal would reject this: …" | fix the stated value or leave it unexported |
 | `exportable` | "Passes every check." | export |
 
+**Record completeness** (`record_completeness`, gate `isaac.local.record_completeness.v1`) is a local gate beside
+these verdicts and never changes one: a condition grouping used to keep two records of one sample apart (the
+potential, the cycling history, the filter) must be in the record or declined (`reject`) before `export` writes it,
+and two records that would say the same thing are held too. `validate` gives `ready_to_export`, what is open and
+`answer_first`; `bundle questions` lists those questions right after the blocking ones (each has `completeness`;
+`record_completeness.answers` is how many answers they take, and one beamtime-wide question asks the potential
+scale). `export` lists a held record under `refused` with `verdict: held_by_record_completeness` and
+`official_validation: passed`: say "it passes validation but would be written without its potential" (or "these N
+records would be indistinguishable"), ask the question it names, and pass `--allow-indistinguishable` only when the
+scientist says to export anyway.
+
 `validation/<group>.json` also has a `website_schema` result and a `schema_drift` block: how the
 record fares against the website's vendored schema beside the pinned portal schema. The website now
 vendors the same document the portal pins (`website_schema.same_as_local_export_target: true`), so
