@@ -713,7 +713,7 @@ def test_a_suggestions_file_in_a_reading_audits_shape(base, exported, tmp_path):
         {"field": FORM, "applies_to": {"group_ids": groups[form2["covers"][0]["question_id"]] + ["rg-more"]}, "question_ids": [],
          "suggested_value": "pressed disc", "alternatives": [], "confidence": "medium", "evidence": quote, "reasoning": "SYN."},
         {"field": MATERIAL, "applies_to": {"group_ids": []}, "question_ids": material["covers"][0]["questions"],
-         "suggested_value": "SYN oxide (ZZ3)", "alternatives": ["SYN oxide, 5 wt.% on SYN carbon"], "confidence": "high",
+         "suggested_value": "SYN oxide (ZZ3)", "alternatives": ["SYN pellet", "drop the question: SYN prose"], "confidence": "high",
          "evidence": quote, "reasoning": "It fills sample.material.name for these runs. More."},
         {"field": "system.domain", "applies_to": "beamtime (all groups)", "question_ids": [], "suggested_value": "experimental",
          "alternatives": [], "confidence": "high", "evidence": quote, "reasoning": "SYN measured files."},
@@ -1173,6 +1173,45 @@ def test_files_that_are_not_this_bundles_are_refused_whole(work, tmp_path):
     with pytest.raises(S.SiteRefused) as exc:
         SI.import_answers(tmp_path / "no-bundle", good, site_data=site_data)
     assert exc.value.code == S.EXIT_NOT_FOUND and _digest(bdir) == before
+
+
+def test_alternatives_are_values_the_quotes_hold_and_a_per_file_card_takes_only_its_files_quotes():
+    """Review I5: reader prose ("drop the question …") is never shown as something the files write, and a value
+    keyed by file name is shown with that file's quotes only, never another file's header."""
+    def card(item):
+        return {"field": {"path": MATERIAL}, "_questions": [{"question_id": "Q-syn0000001"}], "_groups": ["rg-a"],
+                "applies_to": {"count": 1, "summary": item, "items": [item]}, "suggestion": None, "detail": "", "_lead": "",
+                "answer": {"kind": "text", "options": []}, "covers": [{"on_value": {"decision": "correct"}, "on_accept": None}]}
+
+    def keep(answer, path, sug):
+        return answer
+
+    quotes = [{"quote": "SYN oxide film, also called SYN layer", "file": "syn.txt", "locator": "line 1"}]
+    prose = H.normalise({"field": MATERIAL, "applies_to": "beamtime", "question_ids": [], "suggested_value": "SYN oxide film",
+                         "alternatives": ["SYN layer", "drop the question: reclassify the SYN files"], "confidence": "high",
+                         "evidence": quotes, "reasoning": "SYN."}, 0)
+    c = card("syn_a")
+    H.apply([c], [prose], keep)
+    public = {k: v for k, v in c.items() if not k.startswith("_") or k == "_alt"}  # what the site is sent
+    assert c["_alt"] == "Your files also write “SYN layer”." and "drop the question" not in json.dumps(public)
+    per_file = H.normalise({"field": MATERIAL, "applies_to": "beamtime", "question_ids": [], "confidence": "medium",
+                            "suggested_value": {"SYNDIR/syn_a.mca": "SYN oxide", "SYNDIR/syn_b.mca": "SYN standard"},
+                            "alternatives": ["drop the question"], "reasoning": "About both files. Recommended: drop it.",
+                            "evidence": [{"quote": "#F SYNDIR/syn_b.mca header", "file": "SYNDIR/syn_b.mca", "locator": "line 1"},
+                                         {"quote": "SYN oxide average", "file": "SYNDIR/syn_a.mca", "locator": "line 4"}]}, 0)
+    a, b, other = card("syn_a"), card("syn_b"), card("syn_c")
+    H.apply([a, b, other], [per_file], keep)
+    assert a["suggestion"]["value"] == "SYN oxide" and [x["file"] for x in a["suggestion"]["evidence"]] == ["SYNDIR/syn_a.mca"]
+    assert a["suggestion"]["reason"] == H.GENERIC_REASON and "_alt" not in a
+    assert b["suggestion"]["value"] == "SYN standard" and [x["file"] for x in b["suggestion"]["evidence"]] == ["SYNDIR/syn_b.mca"]
+    assert other["suggestion"] is None
+    lone = H.normalise({**{k: v for k, v in per_file.items() if k != "n"}, "field": MATERIAL, "applies_to": "beamtime",
+                        "question_ids": [], "confidence": "medium", "reasoning": "SYN.",
+                        "suggested_value": {"SYNDIR/syn_a.mca": "SYN oxide"},
+                        "evidence": [{"quote": "#F SYNDIR/syn_b.mca header", "file": "SYNDIR/syn_b.mca", "locator": "line 1"}]}, 0)
+    c = card("syn_a")
+    H.apply([c], [lone], keep)
+    assert c["suggestion"] is None  # no quote from this file: nothing offered, nothing shown as its evidence
 
 
 def test_a_yes_no_card_shows_every_value_one_yes_confirms():
