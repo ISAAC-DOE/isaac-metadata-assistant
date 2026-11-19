@@ -424,9 +424,11 @@ _HEADINGS = (
 
 
 def _answer_said(r: Mapping) -> str:
-    action = r.get("action")
-    return ("I don't know" if action == "dont_know" else f"accepted {r.get('value')!r}" if action == "accept"
-            else f"{'typed' if r.get('typed') else 'picked'} {r.get('value')!r}")
+    action, value = r.get("action"), r.get("value")
+    if action == "value" and isinstance(value, bool):
+        return "said yes" if value else "said no"
+    return ("I don't know" if action == "dont_know" else f"accepted {value!r}" if action == "accept"
+            else f"{'typed' if r.get('typed') else 'picked'} {value!r}")
 
 
 def render_report(rep: Mapping) -> str:
@@ -442,10 +444,13 @@ def render_report(rep: Mapping) -> str:
             out.append(f"  {r.get('card_id')} \"{W._clip(r.get('title') or '', 90)}\": {_answer_said(r)}{who}")
             if r.get("reason"):
                 out.append(f"      {W._clip(r['reason'], 400)}")
-            for d in r.get("decisions") or ():
+            decisions = list(r.get("decisions") or ())
+            for d in decisions[:3]:
                 out.append(f"      {d['command']}")
                 if d.get("statement"):
                     out.append(f"      -> {W._clip(d['statement'], 300)}")
+            if len(decisions) > 3:  # a card answered question by question: the same answer through each call
+                out.append(f"      … and {len(decisions) - 3} more call(s) with the same answer (--json lists each)")
     if rep["notes"]:
         out += ["", f"Notes to read ({len(rep['notes'])}); none is turned into a decision:"]
         out += [f"  {n.get('card_id')} \"{W._clip(n.get('title') or '', 70)}\" ({n.get('by')}, {n.get('at')}): {n['note']}"
