@@ -289,6 +289,9 @@ def quoted(literals: Sequence[Any], *, limit: int = 3) -> str:
     return shown[0] if len(shown) == 1 else f"{', '.join(shown[:-1])} and {shown[-1]}" if shown else ""
 
 
+#: What a card says of a value no parser found (the local website's words for a missing value).
+NONE_SAY = "None of your files say."
+
 #: What must never be in a card's title or detail: a dotted field path, a command-line flag, a decision or kind name
 #: with an underscore, an id, the tool's own command.
 _NOT_PLAIN = (
