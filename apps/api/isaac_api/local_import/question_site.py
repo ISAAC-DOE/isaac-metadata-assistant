@@ -255,6 +255,8 @@ def _why_not(q: Mapping, include: Sequence[str]) -> str | None:
         return "answered at once by a beamtime-wide question the site does not ask yet"
     if kind in VALUE_KINDS and not isinstance(path, str):
         return "about something no record field holds"
+    if kind in VALUE_KINDS and "[]" in path:
+        return "about how the data files are laid out, not something a scientist is asked"
     if kind in VALUE_KINDS and "correct" not in q["allowed_decisions"]:
         return "takes no value now"
     if kind == "condition_label" and (q.get("label") not in LABEL_ASKS or "confirm" not in q["allowed_decisions"]
@@ -555,9 +557,12 @@ def _value_card(view: _View, unit: Mapping) -> dict:
         detail = f"Your files write {written}, read differently from one file to the next." if written else ""
     elif kind == "confirm_value":
         title = ask
-        detail = (f"Your files only write {written}. Please give the {noun_} itself." if written and shape == "no_value"
-                  else "The value read from your files does not fit here." if shape == "unfit"
-                  else "Your files mention it, but not as a value a record can hold.")
+        detail = ("The value read from your files does not fit here." if shape == "unfit"
+                  else "Your files mention it, but not as a value a record can hold." if not written
+                  else f"Your files write {written}, a clock time with no time zone. Please give it in UTC."
+                  if path.startswith("timestamps.")
+                  else f"Your files only write {written}. Please pick the {noun_} from the list." if allowed
+                  else f"Your files only write {written}. Please give the {noun_} itself.")
     elif kind == "resolve_conflict" and options:
         title = P.disagree(path, subject=subject)
         detail = ""
@@ -569,8 +574,7 @@ def _value_card(view: _View, unit: Mapping) -> dict:
                   else f"{said}. Please give the right {noun_}.")
     else:
         title = ask
-        detail = ("" if suggestion else P.NONE_SAY) + (" Not needed to export." if not any(m.get("blocking") for m in qs) else "")
-        detail = detail.strip()
+        detail = "" if suggestion else P.NONE_SAY
     n = len(groups)
     if n > 1 and subject is None and len(_scopes(q)) > 1:
         detail = f"{detail} One answer covers all {n} measurements; if some differ, say which in the note.".strip()

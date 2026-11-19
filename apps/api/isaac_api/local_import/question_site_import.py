@@ -120,6 +120,12 @@ class _Ctx:
         return any(r.get("term") == plan.get("value") and (r.get("requested_by") or {}).get("name") == by
                    and r.get("note") == note for r in self.bundle.get("vocabulary_requests") or ())
 
+    def applied_before(self, by: str, note: str) -> bool:
+        """A decision this very answer left on an earlier import: the same name, and the card-and-time note in its
+        note (a label's decision wraps the note it was given in its own)."""
+        return any(note in str(d.get("note") or "") and (d.get("decided_by") or {}).get("name") == by
+                   for d in self.bundle.get("scientist_decisions") or ())
+
     def answered_target(self, target: Mapping) -> Mapping | None:
         """The latest scientist decision that already answers what a target card asks (same family), or ``None``."""
         fam = next((f for f in _TARGET_FAMILIES if target.get("decision") in f), frozenset({target.get("decision")}))
@@ -238,6 +244,8 @@ def _judge(plan: Mapping, ctx: _Ctx, tmp: Path, *, by: str, note: str) -> dict:
             return {"outcome": "already_recorded", "statement": "This word is already kept as a vocabulary request."}
         return got
     # answered since (or gone): the same answer again records nothing; another answer is never put over it here
+    if ctx.applied_before(by, note):
+        return {"outcome": "already_recorded", "statement": "This answer was recorded by an earlier import."}
     alone = {**plan, "same_reading": False}
     got = _outcome(alone, tmp, by=by, note=note, dry_run=True)
     if got["outcome"] == "already_recorded":
