@@ -98,7 +98,8 @@ def _sample_name(group: Mapping) -> Any:
                  and v.get("value") is not None), None)
 
 
-def distinguishing_conditions(group: Mapping, live_ids: Iterable[str], peers: Sequence[Mapping] = ()) -> dict[str, dict]:
+def distinguishing_conditions(group: Mapping, live_ids: Iterable[str],
+                             peers: "Sequence[Mapping] | Materials" = ()) -> dict[str, dict]:
     """``{condition: {"condition", "value", "other_group_ids"}}``: what keeps THIS group's record apart from another
     live group's record of the same material.
 
@@ -111,7 +112,7 @@ def distinguishing_conditions(group: Mapping, live_ids: Iterable[str], peers: Se
     * with ``peers``: a condition this group's own files read two ways (its care flag, ``conflicting_condition``)
       while another group reads the same material name: the record has to say which reading it is, or leave it out
       on purpose."""
-    live = set(live_ids)
+    live = live_ids if isinstance(live_ids, (set, frozenset)) else set(live_ids)
     stated = dict(_basis_entries(group))
     out: dict[str, dict] = {}
     for sr in group.get("split_reasons") or ():
@@ -124,25 +125,65 @@ def distinguishing_conditions(group: Mapping, live_ids: Iterable[str], peers: Se
             row = out.setdefault(key, {"condition": key, "value": d.get("this"), "other_group_ids": []})
             if sr["other_group_id"] not in row["other_group_ids"]:
                 row["other_group_ids"].append(sr["other_group_id"])
+    materials = peers if isinstance(peers, Materials) else Materials(peers, live)
     name = _sample_name(group)
-    same_material = [p for p in peers if p.get("group_id") != group.get("group_id") and p.get("group_id") in live
-                     and name is not None and _sample_name(p) == name]
+    same_material = materials.others(name, group.get("group_id"))
     if not same_material:
         return out
     mine = dict(_basis_entries(group, _ALL))
     for key in SAMPLE_INSTANCE_KEYS:
         value = (mine.get(key) or {}).get("value")
-        others = [p["group_id"] for p in same_material
-                  if (theirs := (dict(_basis_entries(p, ("sample",))).get(key) or {}).get("value")) is not None
-                  and theirs != value]
-        if value is not None and others and key not in out:
-            out[key] = {"condition": key, "value": value, "other_group_ids": others}
+        others = materials.with_another(name, key, value) if value is not None else 0
+        if others and key not in out:
+            out[key] = {"condition": key, "value": value, "other_group_ids": [], "others": others}
     for sr in group.get("split_reasons") or ():
         key = sr.get("condition")
         if sr.get("code") == "conflicting_condition" and key in mine and key not in out:
             out[key] = {"condition": key, "value": {"its files read": list(sr.get("readings") or ())},
-                        "other_group_ids": [p["group_id"] for p in same_material], "own_files_disagree": True}
+                        "other_group_ids": [], "others": same_material, "own_files_disagree": True}
     return out
+
+
+class Materials:
+    """The live groups by the material name they read, counted ONCE for a whole bundle (a beamtime can hold thousands
+    of groups of one material): how many groups read each name, and how many read each specimen number under it."""
+
+    def __init__(self, groups: Sequence[Mapping], live_ids: Iterable[str] | None = None):
+        live = set(live_ids) if live_ids is not None else None
+        self.count: dict[str, int] = {}
+        self.values: dict[tuple[str, str], dict[str, int]] = {}
+        self.member: dict[Any, str] = {}
+        for g in groups:
+            if live is not None and g.get("group_id") not in live:
+                continue
+            name = _sample_name(g)
+            if name is None:
+                continue
+            name = _key(name)
+            self.member[g.get("group_id")] = name
+            self.count[name] = self.count.get(name, 0) + 1
+            sample = dict(_basis_entries(g, ("sample",)))
+            for key in SAMPLE_INSTANCE_KEYS:
+                value = (sample.get(key) or {}).get("value")
+                if value is not None:
+                    seen = self.values.setdefault((name, key), {})
+                    seen[_key(value)] = seen.get(_key(value), 0) + 1
+
+    def others(self, name: Any, group_id: Any) -> int:
+        """How many OTHER live groups read material ``name``."""
+        if name is None:
+            return 0
+        n = self.count.get(_key(name), 0)
+        return n - 1 if self.member.get(group_id) == _key(name) else n
+
+    def with_another(self, name: Any, key: str, value: Any) -> int:
+        """How many live groups of material ``name`` read ANOTHER value of ``key`` than ``value``."""
+        seen = self.values.get((_key(name), key)) or {}
+        return sum(n for v, n in seen.items() if v != _key(value))
+
+
+def _key(value: Any) -> str:
+    return value if isinstance(value, str) else json.dumps(value, sort_keys=True, default=str)
 
 
 class _Index:
@@ -181,7 +222,7 @@ class _Index:
 
 
 def group_gate(index: _Index, group: Mapping, report: Mapping, live_ids: Iterable[str],
-               peers: Sequence[Mapping] = ()) -> dict:
+               peers: "Sequence[Mapping] | Materials" = ()) -> dict:
     """The gate for one group: ``{"gate", "ready", "conditions": [...], "held_by": [...], "needs": [paths]}``.
     ``report``: the composer's report for the group (``records.compose_group``): what it FILLED is what is in the
     record."""
@@ -205,7 +246,7 @@ def group_gate(index: _Index, group: Mapping, report: Mapping, live_ids: Iterabl
                     if x not in filled and x not in needs:
                         needs.append(x)
         rows.append({"condition": key, "words": words(key), "value": d["value"], "paths": paths, "state": state,
-                     "keeps_apart_from": len(d["other_group_ids"])})
+                     "keeps_apart_from": d.get("others", len(d["other_group_ids"]))})
     open_rows = [r for r in rows if r["state"] == OPEN]
     return {"gate": GATE_ID, "group_id": group["group_id"], "ready": not open_rows, "conditions": rows,
             "held_by": [HELD_CONDITION] if open_rows else [], "needs": needs}
@@ -228,8 +269,9 @@ def gates(bundle: Mapping, reports: Mapping[str, Mapping], decisions: Mapping | 
     live = list(live_ids) if live_ids is not None else live_record_group_ids(bundle)
     index = _Index(bundle, decisions)
     by_id = {g["group_id"]: g for g in bundle.get("record_groups") or ()}
-    peers = [by_id[g] for g in live if g in by_id]
-    return {gid: group_gate(index, by_id[gid], reports[gid], live, peers) for gid in live if gid in reports and gid in by_id}
+    peers = Materials([by_id[g] for g in live if g in by_id])  # counted once, never once per group
+    live_set = set(live)
+    return {gid: group_gate(index, by_id[gid], reports[gid], live_set, peers) for gid in live if gid in reports and gid in by_id}
 
 
 # --- the questions' tier --------------------------------------------------------------------------------------------

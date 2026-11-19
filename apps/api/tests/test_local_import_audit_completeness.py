@@ -83,7 +83,7 @@ def test_two_specimens_of_one_material_are_told_apart_by_which_specimen_it_is():
     other["basis"]["sample"]["sample_name"]["value"] = "zz9"
     live = ["g-02", "g-03", "g-x"]
     found = CP.distinguishing_conditions(a, live, [a, b, other])
-    assert list(found) == ["sample_or_electrode_number"] and found["sample_or_electrode_number"]["other_group_ids"] == ["g-03"]
+    assert list(found) == ["sample_or_electrode_number"] and found["sample_or_electrode_number"]["others"] == 1
     assert CP.distinguishing_conditions(other, live, [a, b, other]) == {}   # the only group of its material
     assert CP.distinguishing_conditions(a, live) == {}                        # without the peers: split reasons only
 
