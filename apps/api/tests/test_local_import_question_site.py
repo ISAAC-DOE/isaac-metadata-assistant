@@ -681,7 +681,8 @@ def test_a_suggestions_file_in_the_contracts_shape(base, exported, tmp_path):
         {"field": ENVIRONMENT, "suggestion": {**hint, "value": "in_situ", "basis": "general_knowledge", "confidence": "high"}},
         {"field": "system.domain", "suggestion": {**hint, "value": "experimental", "basis": "general_knowledge",
                                                   "confidence": "low", "reason": "Use --decision correct here."}},
-        {"field": GROUP, "suggestion": {"value": "SYN group", "confidence": "certain", "basis": "rule", "reason": "SYN."}},
+        {"field": GROUP, "suggestion": {"value": "SYN group", "confidence": "certain", "basis": "rule", "reason": "SYN.",
+                                        "evidence": hint["evidence"]}},
         {"field": "no.such.field", "suggestion": hint},
     ]}
     _bdir, report, data = _suggest(base, tmp_path, entries)
@@ -704,7 +705,7 @@ def test_a_suggestions_file_in_a_reading_audits_shape(base, exported, tmp_path):
     form1, form2 = _card(plain, FORM, title_has="ZZ1"), _card(plain, FORM, title_has="ZZ2")
     material = _card(plain, MATERIAL, title_has="ZZ3")
     groups = {q["question_id"]: [s[6:] for s in q["per_scope_targets"]] for q in _open(bdir0)}
-    quote = [{"quote": "SYN quoted line", "file": "syn-logbook.txt", "locator": "line 9"}]
+    quote = [{"quote": "SYN quoted line: a pressed pellet", "file": "syn-logbook.txt", "locator": "line 9"}]
     entries = [
         {"field": FORM, "applies_to": {"sample_token": "ZZ1", "group_ids": ["rg-none"]}, "confidence": "high",
          "question_ids": [form1["covers"][0]["question_id"]], "suggested_value": "pellet", "alternatives": ["film", "SYN remark"],
@@ -781,6 +782,38 @@ def test_an_entry_for_some_of_a_cards_questions_is_never_the_whole_cards_suggest
     assert one["suggestion"]["confidence"] == "medium"
 
 
+def test_a_high_suggestion_needs_a_quote_that_holds_the_value_and_none_without_evidence_is_offered():
+    """Review I2: "high" is earned by a quote that holds the value (or a synonym the entry states). Without one the
+    card says "medium"; an entry that quotes nothing is not used at all (a hint is shown with its line)."""
+    def card():
+        return {"field": {"path": ENVIRONMENT}, "_questions": [{"question_id": "Q-syn0000001"}], "_groups": ["rg-a"],
+                "applies_to": {"count": 1, "summary": "SYN", "items": ["a"]}, "suggestion": None, "detail": "", "_lead": "",
+                "answer": {"kind": "choice", "options": [{"value": "in_situ", "label": "in situ"}, {"value": "operando", "label": "operando"}]},
+                "covers": [{"on_value": {"decision": "correct"}, "on_accept": None}]}
+
+    def entry(quote, **kw):
+        return H.normalise({"field": ENVIRONMENT, "applies_to": "beamtime", "question_ids": [], "suggested_value": "in_situ",
+                            "alternatives": [], "confidence": "high", "reasoning": "SYN.",
+                            "evidence": [{"quote": quote, "file": "syn.txt", "locator": "line 1"}] if quote else [], **kw}, 0)
+
+    def keep(answer, path, sug):
+        return answer
+
+    results = {}
+    for name, e in (("value", entry("SYN measured in situ in the cell")), ("raw", entry("SYN in_situ")),
+                    ("other", entry("SYN measured in the cell")), ("synonym", entry("SYN measured in the cell", synonyms=["in the cell"]))):
+        c = card()
+        H.apply([c], [e], keep)
+        results[name] = c["suggestion"]["confidence"]
+    assert results == {"value": "high", "raw": "high", "other": "medium", "synonym": "high"}
+    bare, c = entry(None), card()
+    rows = H.apply([c], [bare], keep)
+    assert c["suggestion"] is None and rows[0]["problem"].startswith("it quotes no evidence")
+    contract = H.normalise({"field": ENVIRONMENT, "suggestion": {"value": "operando", "confidence": "high", "basis": "logbook",
+                                                                 "reason": "SYN logbook."}}, 0)
+    assert H.entry_problem(contract).startswith("it quotes no evidence")
+
+
 def test_a_file_suggestion_the_decide_path_refuses_is_shown_as_context(base, exported, tmp_path):
     _b, _o, _r, plain = exported
     domain = _card(plain, "system.domain")
@@ -788,7 +821,8 @@ def test_a_file_suggestion_the_decide_path_refuses_is_shown_as_context(base, exp
                 "suggested_value": "the SYN local clock plus seven hours", "alternatives": [], "confidence": "medium",
                 "evidence": [{"quote": "SYN #D line", "file": "syn.dat", "locator": "line 3"}], "reasoning": "SYN."},
                {"question_id": domain["covers"][0]["question_id"],
-                "suggestion": {"value": "experimental", "confidence": "low", "basis": "rule", "reason": "SYN rule."}}]
+                "suggestion": {"value": "experimental", "confidence": "low", "basis": "rule", "reason": "SYN rule.",
+                               "evidence": [{"quote": "SYN experimental run", "file": "syn.txt", "locator": "line 1"}]}}]
     _bdir, report, data = _suggest(base, tmp_path, entries, include=("optional",))
     starts = [c for c in data["cards"] if (c["field"] or {}).get("path") == "timestamps.acquired_start_utc"]
     assert starts and all(c["suggestion"] is None and c["covers"][0]["on_accept"] is None for c in starts)
@@ -1025,7 +1059,8 @@ def test_a_typed_word_off_the_list_is_kept_as_a_vocabulary_request_and_a_picked_
 def test_accept_is_refused_when_the_card_has_no_suggestion_or_another_one(base, exported, tmp_path):
     _b, _o, _r, plain = exported
     form = _card(plain, FORM, title_has="ZZ1")
-    hint = {"value": "pellet", "confidence": "medium", "basis": "logbook", "reason": "The SYN logbook says so."}
+    hint = {"value": "pellet", "confidence": "medium", "basis": "logbook", "reason": "The SYN logbook says so.",
+            "evidence": [{"quote": "SYN pellet", "file": "syn.txt", "locator": "line 1"}]}
     bdir, _report, data = _suggest(base, tmp_path, [{"question_id": form["covers"][0]["question_id"], "suggestion": hint}])
     site_data = tmp_path / "site" / "data" / "site-data.json"
     card = _card(data, FORM, title_has="ZZ1")

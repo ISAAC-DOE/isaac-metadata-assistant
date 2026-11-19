@@ -106,7 +106,7 @@ def normalise(e: Mapping, n: int) -> dict:
                 "fields": [str(e["field"])] if e.get("field") else [], "group_ids": None, "files": None,
                 "applies_to": applies, "beamtime": applies in (None, "", "all", "*"), "note_only": False,
                 "topic": str(e.get("field") or ""), "suggestion": s, "alternatives": list(e.get("alternatives") or ()),
-                "shape": "contract"}
+                "synonyms": list(e.get("synonyms") or ()), "shape": "contract"}
     topic = str(e.get("field") or "").strip()
     note_only = topic.casefold().startswith(NOTE_PREFIXES)
     fields: list[str] = []
@@ -128,7 +128,7 @@ def normalise(e: Mapping, n: int) -> dict:
             "note_only": note_only, "topic": topic,
             "suggestion": {"value": e.get("suggested_value"), "confidence": e.get("confidence"), "basis": "reading",
                            "reason": reason, "evidence": list(e.get("evidence") or ())},
-            "alternatives": list(e.get("alternatives") or ()), "shape": "reading"}
+            "alternatives": list(e.get("alternatives") or ()), "synonyms": list(e.get("synonyms") or ()), "shape": "reading"}
 
 
 def entry_problem(entry: Mapping) -> str | None:
@@ -149,6 +149,8 @@ def entry_problem(entry: Mapping) -> str | None:
             return f"its reason is not plain words: {why}"
     if not isinstance(s.get("evidence") or [], list):
         return "its evidence is not a list"
+    if not any(isinstance(x, Mapping) and str(x.get("quote") or "").strip() for x in s.get("evidence") or ()):
+        return "it quotes no evidence from the files (a hint is shown with the line it rests on)"
     if not entry["question_ids"] and not entry["fields"] and not entry["note_only"]:
         return "it names no question and no field"
     return None
@@ -236,6 +238,16 @@ def _option_value(card: Mapping, value: Any) -> Any:
         head = value.split(" (")[0].strip()
         return head if head in options else None
     return None
+
+
+def _quotes_value(entry: Mapping, value: Any, card: Mapping) -> bool:
+    """Whether one of the entry's quotes holds ``value`` (as written, in words, as the card's option label, or as
+    one of the entry's ``synonyms``), case-insensitive."""
+    said = {str(value), P.value_words(value)} | {str(x) for x in entry.get("synonyms") or ()}
+    said |= {str(o.get("label")) for o in card["answer"].get("options") or () if o.get("value") == value}
+    said = {x.casefold().strip() for x in said if str(x).strip()}
+    quotes = [str(x.get("quote") or "").casefold() for x in entry["suggestion"].get("evidence") or () if isinstance(x, Mapping)]
+    return any(w in q for w in said for q in quotes)
 
 
 def _quotes(entry: Mapping, label: str) -> dict | None:
@@ -332,6 +344,10 @@ def apply(cards: Sequence[dict], entries: Sequence[Mapping], with_common) -> lis
             continue
         # every entry that offers the value stands behind it: the card says the least sure of them
         low = max((CONFIDENCES.index(e["suggestion"]["confidence"]) for e, _ in offered), default=0)
+        # review I2: "high" only when a quote holds the value itself (or a synonym the entry states), as a loaded
+        # reading is "medium" at most unless the line states it; else it is at most "medium"
+        if low == 0 and not any(_quotes_value(e, v, card) for e, v in offered):
+            low = 1
         offered.sort(key=lambda ev: -CONFIDENCES.index(ev[0]["suggestion"]["confidence"]))
         for e, v in offered:
             if card.get("_suggestion_entry") is not None:  # a second entry with the same value: its quotes too
