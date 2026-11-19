@@ -2118,12 +2118,17 @@ def is_xdc_comment_line(key: Any, locator: Any) -> bool:
 
 
 def _xdc_comment_candidates(g, run_scans: Sequence[Mapping], run_id: str, first_n: int, sid_of: Mapping,
-                            writable) -> list[dict]:
+                            writable, *, stale: Sequence[Mapping] | None = None) -> list[dict]:
     """The :data:`XDC_COMMENT_RULE_ID` candidates of ONE ``ssrl_xdc_v1`` run (ids ``cand-<first_n>`` on), one per
     field its scans' comment lines state, in :data:`XDC_COMMENT_KEYS` order. Every scan stating it is evidence;
     scans that state DIFFERENT values give a candidate with no value (it says which). Built through the engine's
-    own candidate type and :func:`_candidate_record`, so its shape is every other candidate's."""
+    own candidate type and :func:`_candidate_record`, so its shape is every other candidate's.
+
+    ``stale`` (``suggestions.stale_comment_flags``): the run's comment lines flagged as possibly left over from an
+    earlier run. A potential (set-point, scale) read ONLY from such lines is not offered: the candidate has no value
+    and says why. Every other field is read as before."""
     from .. import historical_import as hist
+    from . import suggestions as _suggest
     from .questions import header_comment_readings, header_unread_text
 
     scans = {sc.get("relative_path") for sc in run_scans}
@@ -2141,6 +2146,10 @@ def _xdc_comment_candidates(g, run_scans: Sequence[Mapping], run_id: str, first_
             continue
         values = list(dict.fromkeys(json.dumps(h[4]["value"]) for h in hits))
         value = hits[0][4]["value"] if len(values) == 1 and not any(h[4].get("ambiguous") for h in hits) else None
+        left_over = (_suggest.stale_comment_reason(stale, [h[3] for h in hits])
+                     if stale and value is not None and path in _suggest.STALE_FIELDS else None)
+        if left_over is not None:
+            value = None
         bundle_cid = f"cand-{first_n + len(out):04d}"
         evidence = []
         for index, rel, loc, literal, reading in hits[:MAX_EVIDENCE_PER_CANDIDATE]:
@@ -2160,7 +2169,9 @@ def _xdc_comment_candidates(g, run_scans: Sequence[Mapping], run_id: str, first_
                                    "to": reading["value"], "unit": reading["unit"]}],
             })
         ambiguous = [h for h in hits if h[4].get("ambiguous")]
-        if ambiguous:
+        if left_over is not None:
+            reason = left_over
+        elif ambiguous:
             # r1d: the line mentions the field in no form the whitelist reads: it is quoted, and the scientist says
             _i, a_rel, a_loc, a_line, _reading = ambiguous[0]
             said = header_unread_text(path, a_line, a_loc, a_rel)
@@ -4593,6 +4604,14 @@ def build_bundle(
     # NAME.NNN series), so a candidate an import by the earlier build gave keeps its id and a late run's only ADD ids.
     late_keys = set(getattr(generic, "late_run_keys", None) or ()) if generic is not None else set()
     not_read: set[str] = set()  # runs whose header comment lines are not read into candidates (c16-r M1)
+    # suggestions.STALE_COMMENT_RULE_ID: a comment line identical to an earlier run's under another name potential is
+    # flagged on the run, and the potential it states is not offered
+    from . import suggestions as _suggest
+
+    stale_comments = _suggest.stale_comment_flags(xdc_runs)
+    for run_id, flags in stale_comments.items():
+        runs_by_id[run_id]["other_relationships"]["anomalies"] = (
+            runs_by_id[run_id]["other_relationships"]["anomalies"] + flags)[:50]
     for late in (False, True):
         phase = [t for t in xdc_runs if (t[1].run_key in late_keys) is late]
         for run_id, g, run_scans in phase:
@@ -4615,7 +4634,8 @@ def build_bundle(
             if not_read:
                 not_read.add(run_id)  # in run order: once one run is left out, every later one is too
                 continue
-            cands = _xdc_comment_candidates(g, run_scans, run_id, len(out_candidates) + 1, sid_of, writable)
+            cands = _xdc_comment_candidates(g, run_scans, run_id, len(out_candidates) + 1, sid_of, writable,
+                                            stale=stale_comments.get(run_id))
             if len(out_candidates) + len(cands) > MAX_CANDIDATES:
                 not_read.add(run_id)
                 continue

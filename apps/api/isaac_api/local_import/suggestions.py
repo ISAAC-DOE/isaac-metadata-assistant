@@ -522,6 +522,7 @@ def readings_to_interpretations(bundle: Mapping, findings: Mapping, *, model_id:
         if c["target_field_path"]:
             cands.setdefault((c["run_id"], c["target_field_path"]), []).append(c["candidate_id"])
     paths = {p for (_, p) in missing} | {p for (_, p) in cands}
+    stale_lines = stale_comment_index(bundle)
 
     planned: list[tuple[dict, dict]] = []
     scan_notes: list[dict] = []
@@ -656,6 +657,13 @@ def readings_to_interpretations(bundle: Mapping, findings: Mapping, *, model_id:
             continue
         source_id = src_by_path.get(rel)
         strength = f.get("strength") if f.get("strength") in ("stated", "inferred") else None
+        # STALE_COMMENT_RULE_ID: a reading of the potential from a comment line flagged as possibly left over from an
+        # earlier run is never loaded as "stated": it is an inference, and the suggestion says why
+        cited = re.search(r"\d+", str(source["locator"]))
+        stale = stale_lines.get((rel, int(cited.group(0)))) if path in STALE_FIELDS and cited else None
+        if stale is not None:
+            strength = "inferred"
+            path_note = f"The line cited is possibly stale: {stale} Loaded as an inference, never as stated. " + path_note
         fields = {
             "proposed_value": f["value"],
             "rationale": (path_note + str(f.get("reasoning") or ""))[:1000],
@@ -962,3 +970,100 @@ def asks_field(path: str, text: str | None) -> bool:
     field, which is asked only where the text mentions it."""
     words = MENTION_GATED_FIELDS.get(path)
     return words is None or bool(words.search(text or ""))
+
+# --- a comment line left over from an earlier run (rule 8, the safety half) -------------------------------------------
+
+STALE_COMMENT_RULE_ID = "isaac.import.comment_possibly_stale.v1"
+STALE_COMMENT_KIND = "comment_possibly_stale"
+SETPOINT_PATH = "context.electrochemistry.potential_setpoint_V"
+POTENTIAL_SCALE_PATH = "context.electrochemistry.potential_scale"
+#: the fields a possibly stale comment line is not offered for: what it says about the POTENTIAL (the name's own
+#: potential token is what changed); what the same header says about the electrolyte is read as before
+STALE_FIELDS = frozenset({SETPOINT_PATH, POTENTIAL_SCALE_PATH})
+
+
+def xdc_comment_lines(g: Any, run_scans: Sequence[Mapping]) -> list[tuple]:
+    """``(scan_index, relative_path, locator, literal)`` for every comment line (``bundle.XDC_COMMENT_LINES``) of ONE
+    ``ssrl_xdc_v1`` run's scans: the lines rule ``bundle.XDC_COMMENT_RULE_ID`` reads."""
+    scans = {sc.get("relative_path") for sc in run_scans}
+    return [(st.get("scan_index"), st.get("source_relative_path"), str(st.get("locator") or ""), st["literal"])
+            for st in g.statements
+            if st.get("source_relative_path") in scans and isinstance(st.get("literal"), str)
+            and B.is_xdc_comment_line(st.get("key"), st.get("locator"))]
+
+
+def _name_potential_key(stem: str) -> tuple | None:
+    """What a run's name says about the potential, to COMPARE two names: ``None`` when it says nothing."""
+    from ..bl15 import filenames as fn
+
+    reading = fn.name_potential(str(stem).split("_"))
+    if reading.kind is None:
+        return None
+    said = reading.token if reading.kind != fn.NAME_PULSED else "_".join(lv.token for lv in reading.levels)
+    value = (None if reading.volts is None else float(reading.volts) + 0.0,
+             tuple(float(lv.volts) + 0.0 for lv in reading.levels))
+    return (reading.kind, value, said)
+
+
+def stale_comment_flags(xdc_runs: Sequence[tuple]) -> dict[str, list[dict]]:
+    """``{run_id: [flag]}`` (rule :data:`STALE_COMMENT_RULE_ID`): a comment line that mentions a potential and is
+    IDENTICAL to the line the run before it was acquired with (an unbroken chain back to the run the line first
+    appeared on), while the potential the run's own name writes differs from that first run's. The comment lines of
+    an SSRL XDC scan are typed once and stay until retyped, so such a line is possibly the earlier run's. Runs are
+    taken in acquisition order (each run's earliest scan time, when every run states one; else as listed). A name
+    that states no potential is compared with nothing; a name back at the first run's potential is not flagged."""
+    from .questions import header_potential_mentions
+
+    rows = []
+    for position, (run_id, g, run_scans) in enumerate(xdc_runs):
+        times = [sc.get("timestamp_naive") for sc in run_scans if sc.get("timestamp_naive")]
+        lines: dict[str, tuple] = {}
+        for index, rel, locator, literal in sorted(xdc_comment_lines(g, run_scans), key=lambda l: (l[0] is None, l[0] or 0, l[2])):
+            if literal not in lines and header_potential_mentions(literal):
+                lines[literal] = (index, rel, locator)
+        rows.append({"run_id": run_id, "label": g.label, "start": min(times) if times else None, "position": position,
+                     "lines": lines, "name": _name_potential_key(g.label)})
+    if rows and all(r["start"] for r in rows):
+        rows.sort(key=lambda r: (r["start"], r["position"]))
+    out: dict[str, list[dict]] = {}
+    origin: dict[str, dict] = {}  # line text -> the run it first appeared on, while every run since has carried it
+    for row in rows:
+        origin = {text: first for text, first in origin.items() if text in row["lines"]}
+        for text, (index, rel, locator) in row["lines"].items():
+            first = origin.setdefault(text, row)
+            if first is row or row["name"] is None or first["name"] is None or row["name"][:2] == first["name"][:2]:
+                continue
+            out.setdefault(row["run_id"], []).append({
+                "kind": STALE_COMMENT_KIND, "rule_id": STALE_COMMENT_RULE_ID, "locator": locator, "severity": "flag",
+                "source_relative_path": rel, "scan_index": index, "line": text, "first_run": first["label"],
+                "detail": (f"The comment line {text!r} is identical to the one run {first['label']} was acquired with, "
+                           f"while the potential in the file name changed ({first['name'][2]} there, {row['name'][2]} "
+                           "here): it is possibly left over from that run, not a statement about this one."),
+            })
+    return out
+
+
+def stale_comment_reason(flags: Sequence[Mapping] | None, lines: Iterable[str]) -> str | None:
+    """Why NO potential is offered from comment lines ``lines`` of a run flagged ``flags``: every one of them is a
+    possibly stale line (``None`` when one is not, or the run has no flag)."""
+    by_line = {f["line"]: f for f in flags or ()}
+    lines = list(dict.fromkeys(lines))
+    if not lines or not all(line in by_line for line in lines):
+        return None
+    return (f"{by_line[lines[0]]['detail']} The potential it states is not offered as this run's: tell me the potential "
+            "held during this scan (the file name's own token is the fresher statement).")
+
+
+def stale_comment_index(bundle: Mapping) -> dict[tuple[str, int], str]:
+    """``{(scan file, line number): detail}`` for every possibly stale comment line of the bundle's runs
+    (their ``comment_possibly_stale`` anomalies), under each scan file of the run: an AI reading may cite any."""
+    out: dict[tuple[str, int], str] = {}
+    for run in bundle.get("runs") or ():
+        for a in (run.get("other_relationships") or {}).get("anomalies") or ():
+            if a.get("kind") != STALE_COMMENT_KIND:
+                continue
+            number = re.search(r"\d+", str(a.get("locator") or ""))
+            for sc in run.get("scans") or ():
+                if number and sc.get("relative_path"):
+                    out[(sc["relative_path"], int(number.group(0)))] = str(a.get("detail") or "")
+    return out
