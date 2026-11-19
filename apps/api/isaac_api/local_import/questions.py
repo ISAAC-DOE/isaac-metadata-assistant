@@ -2457,7 +2457,10 @@ _CANNOT_EXPORT_WORDS = {"no_scans": "none of its runs lists a scan",
                         "processing_not_applicable:no_xas_channel": (
                             "no energy axis or absorption signal was found in its columns; re-processing with the "
                             "channels named (`isaac process --params-file`, channels.*) can make it exportable"),
-                        "not_a_measurement_run": "every run is a reference standard, an alignment or a calibration scan"}
+                        "not_a_measurement_run": "every run is a reference standard, an alignment or a calibration scan",
+                        "processing_result_has_no_curve": (
+                            "every processing result it has made no curve, so there is nothing to approve; `bundle "
+                            "show <bundle_dir> group <id>` says why, and a result with a curve lifts it")}
 
 
 def _reasons_said(gids: Iterable[str], reasons: Mapping[str, str]) -> str:
@@ -3928,16 +3931,38 @@ def not_a_measurement_groups(bundle: Mapping, groups: Sequence[Mapping] | None =
     return out
 
 
+#: finding 11: the ``cannot_export_reason`` of a live group whose every processing result has no curve
+NO_CURVE_REASON = "processing_result_has_no_curve"
+
+
+def groups_with_no_curve(bundle: Mapping) -> dict[str, str]:
+    """``{group_id: why}`` for each record group that HAS processing results (ones the protocol applied to) and every
+    one of them FAILED with no curve (a ``failure`` and no output file), however many times processed. ``why`` is the
+    latest result's own cause (``mutations.no_curve_cause``). A group with no result yet is not one (it is simply not
+    processed), nor is one with any curve, even a rejected one (a curve is possible)."""
+    from .mutations import no_curve_cause
+
+    by_group: dict[str, list[Mapping]] = {}
+    for r in bundle.get("processing_results") or ():
+        if isinstance(r, Mapping) and not B.processing_not_applicable(r):
+            by_group.setdefault(r.get("group_id"), []).append(r)
+    return {gid: no_curve_cause(rs[-1]) for gid, rs in by_group.items()
+            if rs and all(r.get("failure") and not (r.get("outputs") or {}).get("files") for r in rs)}
+
+
 def cannot_export_reasons(bundle: Mapping, not_measured: Mapping[str, Sequence[str]] | None = None) -> dict[str, str]:
     """r6 I2: ``{group_id: cannot_export_reason}`` for every record group that can never export as it stands, in the ONE
     order ``bundle list <dir> groups`` and ``bundle group`` both say it: ``processing_not_applicable:<code>`` (no ISAAC
     processing protocol covers its data), else ``no_scans`` (none of its runs lists a scan; r7 J8: also once
     ``isaac process`` has recorded it as not applicable for that reason, so the code is the same before and after), else
-    ``not_a_measurement_run`` (:func:`not_a_measurement_groups`). ``not_measured``: that map, when the caller has it."""
+    ``not_a_measurement_run`` (:func:`not_a_measurement_groups`), else :data:`NO_CURVE_REASON` (finding 11 of the
+    18 Nov 2026 audit: every processing result it has made no curve). ``not_measured``: that map, when the caller has
+    it."""
     runs = {r["run_key"]: r for r in bundle.get("runs") or ()}
     blocked = B.processing_blocked_groups(bundle)
     if not_measured is None:
         not_measured = not_a_measurement_groups(bundle)
+    no_curve = groups_with_no_curve(bundle)
     out: dict[str, str] = {}
     for g in bundle.get("record_groups") or ():
         members = [runs[k] for k in g.get("member_run_keys") or () if k in runs]
@@ -3951,6 +3976,10 @@ def cannot_export_reasons(bundle: Mapping, not_measured: Mapping[str, Sequence[s
             out[g["group_id"]] = "no_scans"
         elif g["group_id"] in not_measured:
             out[g["group_id"]] = "not_a_measurement_run"
+        elif g["group_id"] in no_curve:
+            # finding 11 (audit of 18 Nov 2026): every processing result the group has made NO CURVE (a failure, such
+            # as a file with no energy axis): no record can be built from it as it stands, so nothing blocks for it
+            out[g["group_id"]] = NO_CURVE_REASON
     return out
 
 
