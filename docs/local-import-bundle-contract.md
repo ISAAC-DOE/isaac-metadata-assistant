@@ -1258,6 +1258,16 @@ sample form and formula). The template lets a scientist answer them in one sitti
   decision, unless `--supersede`. A "confirms the value the files give" proposal is only ever a confirm of the
   files' current value; placeholders (`-`, `none`, `TBD` …) record nothing; a blank Folder on an id row is no
   bundle's; a per-record answer overrides its collapsed row.
+- **The question site** (a small hosted site where a scientist answers a few questions at a time):
+  `isaac bundle site export <dir> --out <folder> [--suggestions <file>] [--include optional|deferred|approvals]
+  [--site-template <folder>] [--json]` writes `<folder>/data/site-data.json` and the images its cards show
+  (`question_site.py`), one plain-words card per real ask, each card's decide calls dry-run on a temporary copy
+  of `bundle.json`; `--out` must be outside every git working tree and the bundle folder (exit 4). It writes to
+  the bundle only `exposures` (command `bundle site export`). `isaac bundle site import <dir> <answers.json>
+  --site-data <folder>/data/site-data.json [--apply] [--remember] [--json]` (`question_site_import.py`) reads the
+  site's answers back: a preview by default, `--apply` through `mutations.decide_question` / `mutations.decide`
+  under `<name> (question site)` with a note naming the card and its time, the `_runs…` refusal, and nothing new
+  on a second run. The two files, every rule and every addition are in `docs/question-site-contract.md`.
 
 ## 20. Suggestions: the absorber, facility hints, and a Claude reading pass
 

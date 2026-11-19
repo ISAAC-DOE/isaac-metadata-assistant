@@ -422,12 +422,14 @@ def test_the_site_template_is_copied_without_its_tests_sample_data_or_local_file
                       "lib/data/kept.js": "// a nested folder named data is the site's own code",
                       "data/site-data.json": "{\"SYN\": \"sample\"}", "data/img/sample.png": "x", "test/fixture.txt": "SYN",
                       "dev-server.js": "// SYN", ".env.example": "SYN=1", "README.md": "SYN", ".vercel/project.json": "{}",
+                      ".env.local": "SYN_PASSWORD=syn", ".dev-store.json": "{}", ".impeccable/notes.md": "SYN", "vercel.json": "{}",
                       "node_modules/pkg/index.js": "// SYN", "api/node_modules/x.js": "// SYN"}.items():
         (template / rel).parent.mkdir(parents=True, exist_ok=True)
         (template / rel).write_text(text)
     report = S.export_site(bdir, tmp_path / "site", site_template=template)
     got = sorted(str(p.relative_to(tmp_path / "site")) for p in (tmp_path / "site").rglob("*") if p.is_file())
-    assert got == [".vercelignore", "api/answers.js", "app.js", "data/site-data.json", "index.html", "lib/data/kept.js"]
+    assert got == [".vercelignore", "api/answers.js", "app.js", "data/site-data.json", "index.html", "lib/data/kept.js",
+                   "vercel.json"]
     assert json.loads((tmp_path / "site" / "data" / "site-data.json").read_text())["format"] == "isaac.question_site"
     assert report["site_template"] == str(template) and "deploys as it is" in report["site_template_note"]
 

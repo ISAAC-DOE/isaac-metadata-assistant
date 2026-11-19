@@ -53,6 +53,12 @@ never above needs_review; ``--blind`` honoured only before exposure), ``decide``
 ``export`` and ``upload --dry-run``. Every mutation re-derives, re-validates and writes
 atomically under a lock, or writes nothing.
 
+``isaac bundle site export <dir> --out <folder> [--suggestions FILE] [--include optional|deferred|approvals] [--site-template <folder>]``
+and ``isaac bundle site import <dir> <answers.json> --site-data <site-data.json> [--apply] [--remember]``: the question
+site (``question_site``, ``question_site_import``; ``docs/question-site-contract.md``). The export writes the open
+questions as plain cards outside every git working tree; the import reads the site's answers back as ``bundle decide``
+calls, a preview unless ``--apply``.
+
 ``isaac bundle annotate <dir> --from-readings <findings.json> --model M [--root <folder>] [--apply]`` and
 ``isaac bundle check-readings <dir> <findings.json> [--root <folder>]``: every finding's quote is checked against
 the file it cites under the imported folder (``reading_check``); a finding whose quote is not found, whose run

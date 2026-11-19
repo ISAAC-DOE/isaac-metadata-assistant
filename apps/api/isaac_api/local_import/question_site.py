@@ -111,11 +111,13 @@ DOSE_LABELS = {
 PROBE_BY = "site export check (dry run, nothing recorded)"
 PROBE_TEXT = "site export check"
 _HASH_NAME = re.compile(r"^[0-9a-f]{64}\.(png|jpg|jpeg)$")
-#: never copied from the site template, at any depth: installed packages, a deployment's own state, version control
-_TEMPLATE_SKIP = shutil.ignore_patterns("node_modules", ".vercel", ".git", ".DS_Store", "__pycache__", "*.pyc")
+#: never copied from the site template, at any depth: installed packages, a deployment's own state, version control,
+#: and every environment file (``.env``, ``.env.local``, ``.env.example``: one can hold the site's password)
+_TEMPLATE_SKIP = shutil.ignore_patterns("node_modules", ".vercel", ".git", ".DS_Store", "__pycache__", "*.pyc", ".env*")
 #: not copied from the template's top folder: its sample data (the export writes the real data/), its tests and
-#: fixtures, its local dev server, its example environment file and its read-me (none is part of a deployment)
-TEMPLATE_ROOT_SKIP = ("data", "test", "dev-server.js", ".env.example", "README.md")
+#: fixtures, its local dev server and that server's answer store, its design notes and its read-me (none is part of
+#: a deployment)
+TEMPLATE_ROOT_SKIP = ("data", "test", "dev-server.js", ".dev-store.json", ".impeccable", "README.md")
 
 
 class SiteRefused(ValueError):
@@ -1182,8 +1184,9 @@ def render_export(rep: Mapping) -> str:
     if hints:
         out += ["", f"--suggestions: {len(hints)} entr{'y' if len(hints) == 1 else 'ies'}; "
                     f"{sum(1 for h in hints if h['suggested_on'])} became a suggestion, "
-                    f"{sum(1 for h in hints if h['context_on'] and not h['suggested_on'])} are shown as context only, "
-                    f"{sum(1 for h in hints if h.get('problem'))} not used."]
+                    f"{sum(1 for h in hints if h['context_on'] and not h['suggested_on'])} shown as context only, "
+                    f"{sum(1 for h in hints if h.get('agrees_on') and not h['suggested_on'] and not h['context_on'])} "
+                    f"saying what the files already give, {sum(1 for h in hints if h.get('problem'))} not used."]
         problems: dict[str, list[int]] = {}
         for h in hints:
             if h.get("problem"):
