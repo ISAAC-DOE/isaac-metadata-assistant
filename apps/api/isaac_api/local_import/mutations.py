@@ -3007,6 +3007,7 @@ def plain_statement(bundle: Mapping, planned: Sequence[tuple[str, Mapping]], tar
         "set_counter_positions": _counter_positions_words(positions),
         B.CLOCK_ZONE_DECISION: f"instrument clock time zone {value} recorded",
         B.ROLE_DECISION: f"role {value!r} recorded (the scientist's word on what the group is; its status is unchanged)",
+        B.DOSE_READING_DECISION: f"dose reading {value!r} recorded",
     }.get(decision, f"{decision} recorded")
     cand_path = {c["candidate_id"]: c.get("target_field_path") for c in bundle.get("candidates") or ()}
     context = B.context_run_ids(bundle)  # r2-a L4: a run kept as context (an exported file) is no measurement run
@@ -3057,6 +3058,16 @@ def plain_statement(bundle: Mapping, planned: Sequence[tuple[str, Mapping]], tar
     out = f"{what} for {who}" + (f": {fields}" if fields else "") + "."
     if rest:
         out += f" {subject(rest)[0]} already had it (nothing new recorded for them)."
+    if decision == B.DOSE_READING_DECISION:
+        # finding 4: the curves follow the reading only once processed again; say how many still carry the question
+        from . import questions as Q
+
+        stale = [r for r in bundle.get("processing_results") or ()
+                 if Q.DOSE_QUESTION_FLAG in (r.get("review_flags") or ()) and r.get("state") in B.PROCESSING_UNDECIDED_STATES]
+        if stale:
+            out += (f" {count(len(stale), 'processing result')} made before this answer still "
+                    f"carr{'ies' if len(stale) == 1 else 'y'} the open question: run `isaac process <bundle_dir> --source "
+                    "<the beamtime folder you imported>` again so the curves follow it.")
     return out
 
 
