@@ -1509,6 +1509,7 @@ def decide(
                                                "question_id": None, "as_said": True}) from None
         if not nothing_to_save(bundle, result):
             save_bundle(bundle_dir, bundle)
+        result = _with_defer_cost(result, bundle, decision, target_ids)
         return _with_same_ruling_left(_said_on_list(_with_answered(result, bundle, before), as_said), bundle, peers)
 
 
@@ -1805,6 +1806,68 @@ def _propose_terms_entries(bundle: Mapping) -> dict | None:
         return None
     report = P.propose_terms(bundle, sources)
     return {(f["field_path"], t["term"]): t for f in report["fields"] for t in f["terms"]}
+
+
+def defer_cost(bundle: Mapping, target_ids: Sequence[str]) -> dict | None:
+    """Finding 14 (audit of 18 Nov 2026): what "I don't know" costs. For the targets a ``defer`` named:
+    ``{"records_blocked", "records_held", "fields", "statement"}`` when they belong to a question that still BLOCKS
+    record groups (a required field: no record of those groups can be exported until it is answered) or that the local
+    completeness gate needs; ``None`` when deferring costs nothing (an optional value)."""
+    from . import questions as Q
+
+    named = set(target_ids)
+    blocked: set[str] = set()
+    held: set[str] = set()
+    blocked_count = 0
+    fields: list[str] = []
+    for q in Q.consolidate(bundle)["questions"]:
+        if not ({t["id"] for t in q.get("targets") or ()} & named):
+            continue
+        path = q.get("target_field_path")
+        if q.get("blocking"):
+            ids = q.get("blocks_group_ids")
+            if ids is None and str(q.get("scope") or "").startswith("group:"):
+                ids = [q["scope"][len("group:"):]]
+            if ids is not None:
+                blocked |= set(ids)
+            else:
+                applies = q.get("applies_to") or {}
+                blocked_count = max(blocked_count, int(applies.get("groups_that_can_export", applies.get("groups") or 0)))
+            if path and path not in fields:
+                fields.append(path)
+        if isinstance(q.get("completeness"), Mapping):
+            held |= set(q["completeness"].get("group_ids") or ())
+            if path and path not in fields:
+                fields.append(path)
+    n = max(len(blocked), blocked_count)
+    m = len(held - blocked)
+    if not n and not m:
+        return None
+    parts = []
+    if n:
+        parts.append(f"{_count(n, 'record')} cannot be exported until this is answered: the field is required and "
+                     "takes no \"unknown\"")
+    if m:
+        parts.append(f"{_count(m, 'record')} stay{'s' if m == 1 else ''} held by the record-completeness gate until it "
+                     "is answered or declined (reject)")
+    return {"records_blocked": n, "records_held": m, "fields": fields,
+            "statement": ("Recorded as \"I don't know\". " + "; ".join(parts) + ". It is asked again, last in its "
+                          "tier; a colleague, the logbook or the answer template (`isaac bundle template export`) can "
+                          "supply it.")}
+
+
+def _with_defer_cost(result: Mapping, bundle: Mapping, decision: str, target_ids: Sequence[str]) -> Mapping:
+    """``result`` with :func:`defer_cost` said (``deferral_cost`` and a sentence), for a ``defer`` only."""
+    if decision != "defer" or not isinstance(result, Mapping):
+        return result
+    try:
+        cost = defer_cost(bundle, target_ids)
+    except Exception:  # noqa: BLE001 - the cost is said when it can be derived; a deferral is never refused for it
+        cost = None
+    if cost is None:
+        return result
+    return {**result, "deferral_cost": {k: v for k, v in cost.items() if k != "statement"},
+            "statement": " ".join(x for x in (result.get("statement"), cost["statement"]) if x)}
 
 
 def _with_answered(result: Mapping, bundle: Mapping, before: set[str]) -> Mapping:
@@ -2596,6 +2659,7 @@ def decide_question(
                           **({"labels_recorded": fed["recorded"]} if fed["recorded"] else {})}
         if not nothing_to_save(bundle, recorded):
             save_bundle(bundle_dir, bundle)
+        result = _with_defer_cost(result, bundle, decision, params["target_ids"])
         return (result, bundle_version(bundle_dir)) if with_version else result
 
 
