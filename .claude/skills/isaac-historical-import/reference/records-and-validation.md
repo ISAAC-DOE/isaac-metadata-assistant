@@ -114,6 +114,8 @@ for exportable drafts only.
 - Do not read the `outcome` string out; it is long. Say: how many are ready, how many were refused and why
   (`refused_by_reason`, `missing_required_by_field`; `refused_every_summary_says` holds what every refused row repeats),
   then each warning kind with its record count ("87 records are written without their potential").
+- Warnings by kind: `warnings_by_code` says each warning code once (records, variants, one example, the question to
+  answer); relay those. `upload --dry-run` does the same in `notes_by_code`.
 - Warnings: `warnings_by_text` and `portal_warnings` say each one once with its record count; a warning on SOME of the
   ready records lists every one of their `group_ids`. `exported[].warnings` lists a record's own;
   `records_written_with_warnings` counts those written now, `records_ready_with_warnings` every ready one.
