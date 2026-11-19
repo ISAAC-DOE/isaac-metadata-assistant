@@ -16,7 +16,7 @@ What these pin (``suggestions.TECHNIQUE_RULE_ID``):
   motor, no experiment file: processed or averaged files) are counted apart and named in the reason;
 * runs whose configurations suggest different techniques give no value: both are shown, and the reason points only
   at the question it sits on;
-* nothing is confirmed, every bundle is schema-valid, and the snapshot table equals xraydb where it is installed.
+* nothing is confirmed and every bundle is schema-valid (the table itself: test_local_import_xray_tables.py).
 
 SYNTHETIC files only: invented names and counts; the only real numbers are tabulated X-ray line and edge energies.
 """
@@ -266,12 +266,7 @@ def test_an_experiment_type_that_is_no_schema_technique_suggests_nothing(tmp_pat
     assert [e for e in data["extended_context"] if e["concept"] == "exp_expt_type" and e["raw_literal"] == "SYNSCAN"]
 
 
-# --- the table: a snapshot of xraydb, never typed by hand -----------------------------------------------------------
-
-
-def test_the_snapshot_equals_xraydb():
-    pytest.importorskip("xraydb")
-    assert X.snapshot_from_xraydb() == json.loads(X.TABLE_FILE.read_text())
+# --- the lookup the suggestion uses (the table itself: test_local_import_xray_tables.py) ---------------------------
 
 
 def test_the_lookup_reads_a_line_and_the_edge_it_fills():

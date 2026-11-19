@@ -12,8 +12,10 @@ SOURCE. Every number in ``xray_tables.json`` is ``xraydb.xray_edge(element, edge
 the xraydb version the file names; xraydb's edge and line energies are the Elam, Ravel & Sieber (2002) compilation
 (Radiation Physics and Chemistry 63, 121-128). Nothing is typed by hand: ``python -m
 isaac_api.local_import.readers.xray_tables --write`` regenerates the file from an installed xraydb, and
-``test_local_import_xray_tables.py`` checks the snapshot against xraydb wherever it is installed. The snapshot exists so
-the lookup works, and is reviewable, without xraydb.
+``apps/api/tests/test_local_import_xray_tables.py`` checks the file's provenance and consistency everywhere, and, where
+xraydb of the same major version is installed (the ``processing`` extra), that the energies and lines the table lists
+agree with it to well under the line tolerance. The snapshot exists so the lookup works, and is reviewable, without
+xraydb.
 """
 
 from __future__ import annotations
