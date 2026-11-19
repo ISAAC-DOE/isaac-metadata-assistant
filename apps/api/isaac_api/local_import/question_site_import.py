@@ -16,6 +16,10 @@ Modelled on the question-workbook import (``workbook_answers.py``), and sharing 
 * ``dont_know`` records ``defer`` (a card that takes none records nothing, and says so).
 * A ``note`` is reported and never turned into a decision. A "no" to a yes / no card records nothing either: its
   note says what a person should do.
+* AN ANSWER WITH A NOTE ON A CARD FOR SEVERAL MEASUREMENTS IS HELD (review C1): the note may name exceptions
+  ("all but the pellet"), and one answer recorded for all of them would then be wrong for some. Nothing is
+  recorded for that card until a person has read the note: ``notes_read`` (``--note-read <card id>``) says they
+  have and that it names no exception.
 * A card the bundle no longer asks (answered since with another answer, or the bundle changed) is reported, not
   applied. A card answered since with the SAME answer is "already recorded", so a second run records nothing.
 * ``apply`` refuses a bundle inside a folder whose name starts with ``_runs`` (``workbook_answers.protected_part``).
@@ -32,7 +36,7 @@ import json
 import shutil
 import tempfile
 from pathlib import Path
-from typing import Any, Mapping
+from typing import Any, Mapping, Sequence
 
 from . import bundle as B
 from . import question_site as S
@@ -257,8 +261,12 @@ def _judge(plan: Mapping, ctx: _Ctx, tmp: Path, *, by: str, note: str) -> dict:
     return {"outcome": "no_longer_asked", "reason": "the bundle no longer asks it (export the site again)"}
 
 
+HELD_REASON = ("held: the note may name exceptions. This card's answer covers {n} measurements; read the note, then "
+               "record the answers yourself, or pass --note-read {card_id} to apply the answer as it was given")
+
+
 def import_answers(bundle_dir: Path, answers: Path, *, site_data: Path, apply: bool = False, remember: bool = False,
-                   bundle_arg: str | None = None) -> dict:
+                   bundle_arg: str | None = None, notes_read: Sequence[str] = ()) -> dict:
     """Read a question site's ``answers.json`` against one bundle. Preview (default) writes nothing."""
     from . import answer_memory as AM
     from . import mutations as M
@@ -329,6 +337,10 @@ def import_answers(bundle_dir: Path, answers: Path, *, site_data: Path, apply: b
         problem = B.decider_name_problem(e.get("by")) or B.decider_name_problem(by)
         if problem:
             row.update(outcome="refused", reason=f"the answer names no person to record it under (it {problem})")
+            continue
+        reach = int((card.get("applies_to") or {}).get("count") or 0)
+        if row.get("note") and reach > 1 and card["card_id"] not in set(notes_read):
+            row.update(outcome="held", reason=HELD_REASON.format(n=reach, card_id=card["card_id"]))
             continue
         plans, refused, nothing = _plans(e, card, ctx)
         if refused:
@@ -421,6 +433,7 @@ _HEADINGS = (
     ("would_keep_vocabulary_request", "Would be kept as a vocabulary request (the scientist's own word)"),
     ("already_recorded", "Already recorded (nothing new)"), ("refused", "Refused"),
     ("no_longer_asked", "Cards no longer asked (not applied)"),
+    ("held", "Held: the note may name exceptions (not applied)"),
     ("nothing_to_record", "Nothing to record"), ("superseded", "Earlier answers to a card answered again"),
 )
 

@@ -2931,7 +2931,8 @@ def cmd_bundle_site_import(args) -> int:
 
     try:
         report = SI.import_answers(Path(args.bundle_dir), Path(args.answers), site_data=Path(args.site_data),
-                                   apply=args.apply, remember=args.remember, bundle_arg=args.bundle_dir)
+                                   apply=args.apply, remember=args.remember, bundle_arg=args.bundle_dir,
+                                   notes_read=args.note_read or ())
     except S.SiteRefused as exc:
         _err(str(exc))
         return exc.code
@@ -3268,6 +3269,10 @@ def build_parser(prog: str = "isaac") -> argparse.ArgumentParser:
     i.add_argument("--remember", action="store_true",
                    help="with --apply: also keep the recorded answers in the answer memory, only when the scientist "
                         "has turned it on (isaac answer-memory on)")
+    i.add_argument("--note-read", action="append", metavar="CARD_ID",
+                   help="an answer with a note on a card for several measurements is held (the note may name "
+                        "exceptions); give the card's id here once the note has been read and names none, to apply "
+                        "the answer as it was given (once per card)")
     i.add_argument("--json", action="store_true", help="print the full report as JSON")
     i.set_defaults(func=cmd_bundle_site_import)
 

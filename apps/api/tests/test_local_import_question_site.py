@@ -47,6 +47,7 @@ AT = "2100-02-01T10:00:00Z"
 PNG = b"\x89PNG\r\n\x1a\n" + b"\x00" * 64
 ENVIRONMENT = "context.environment"
 MATERIAL = "sample.material.name"
+COVERS_3 = "One answer covers all 3 measurements; if any differs, add a note and nothing is recorded until it has been read."
 FORM = "sample.sample_form"
 GROUP = "attribution.produced_by.group"
 
@@ -177,6 +178,149 @@ def test_different_sample_tokens_are_never_one_card(exported):
         assert c["applies_to"]["summary"].startswith("3 measurements of sample ZZ")
 
 
+def test_a_question_asked_for_the_whole_beamtime_is_one_card_per_sample(exported, work, tmp_path):
+    """Review C1(a): "was this done operando …?" is asked of every measurement at once by the command line. One
+    click must not record it for samples whose honest answer differs, so the site asks it once per sample the
+    grouping states, each card answered for exactly that sample's groups."""
+    bdir, _out, _report, data = exported
+    q = next(x for x in _open(bdir) if x.get("target_field_path") == ENVIRONMENT)
+    assert q["scope"] == "experiment" and len(q["per_scope_targets"]) == 9
+    cards = [c for c in data["cards"] if (c["field"] or {}).get("path") == ENVIRONMENT]
+    assert sorted(c["title"] for c in cards) == [
+        f"Was sample ZZ{n} measured operando, in situ, ex situ or in silico?" for n in (1, 2, 3)]
+    scopes = [sc for c in cards for sc in c["covers"][0]["only_scopes"]]
+    assert sorted(scopes) == sorted(q["per_scope_targets"]) and len(set(scopes)) == 9  # every group once, none twice
+    for c in cards:
+        (cover,) = c["covers"]
+        assert cover["question_id"] == q["question_id"] and len(cover["only_scopes"]) == 3 and not cover["same_reading"]
+        assert c["applies_to"]["count"] == 3 and c["unblocks"] == 3 and c["section"] == "samples"
+        assert c["applies_to"]["summary"].startswith("3 measurements of sample ZZ") and len(c["applies_to"]["items"]) == 3
+        assert c["detail"] == f"{P.NONE_SAY} {COVERS_3}"
+        assert c["card_id"] == S.card_id(ENVIRONMENT, [f"{q['question_id']}@{sc}" for sc in cover["only_scopes"]])
+    assert len({c["card_id"] for c in cards}) == 3
+    # one card's answer is recorded for its own sample's three groups and no other
+    wdir, site_data, _ = work
+    one = next(c for c in cards if "ZZ2" in c["title"])
+    rep = SI.import_answers(wdir, _answers_file(tmp_path, data, [_answer(one, "value", "in_situ")]), site_data=site_data, apply=True)
+    assert rep["counts"]["recorded"] == 1 and len(_decisions(wdir)) == 3
+    still = Q.question(Q.consolidate(M.load(wdir)), q["question_id"])
+    assert sorted(still["per_scope_targets"]) == sorted(set(q["per_scope_targets"]) - set(one["covers"][0]["only_scopes"]))
+    again = SI.import_answers(wdir, _answers_file(tmp_path, data, [_answer(one, "value", "in_situ")]), site_data=site_data, apply=True)
+    assert again["counts"]["already_recorded"] == 1 and len(_decisions(wdir)) == 3
+
+
+def test_groups_with_no_stated_sample_are_cards_of_their_own():
+    def group(name=None):
+        return {"basis": {"sample": {"sample_name": {"value": name}} if name else {}}}
+
+    view = SimpleNamespace(groups={"rg-a": group("syn1"), "rg-b": group("syn1"), "rg-c": group("syn2"), "rg-d": group(),
+                                   "rg-e": group()}, cands={}, exportable=["rg-a", "rg-b", "rg-c", "rg-d"])
+    scopes = [f"group:{g}" for g in view.groups]
+    q = {"question_id": "Q-syn0000009", "kind": "missing_value", "scope": "experiment", "blocking": True, "partition": None,
+         "target_field_path": ENVIRONMENT, "allowed_decisions": ["correct", "defer"], "targets": [],
+         "per_scope_targets": {sc: [f"miss-{n}"] for n, sc in enumerate(scopes)}}
+    assert S._scope_parts(view, q, scopes) == [(["group:rg-a", "group:rg-b"], False), (["group:rg-c"], False),
+                                               (["group:rg-d"], True), (["group:rg-e"], True)]
+    units, left = S._units(view, [q], ())
+    assert [(u["only_scopes"], u["identified"], u["lone"]) for u in units] == [
+        (["group:rg-a", "group:rg-b"], True, False), (["group:rg-c"], True, False), (["group:rg-d"], False, True)]
+    assert left == {"about a measurement that cannot become a record": 1}  # rg-e can never export: not asked
+    assert S._scope_parts(view, q, scopes[:2]) == [(None, False)]  # one sample: the question as it is asked
+    assert S._scope_parts(view, {**q, "answers_differ": True}, scopes[:2]) == [(["group:rg-a"], True), (["group:rg-b"], True)]
+    # a same-reading group that asks for a value is split the same way; one that confirms each file's own value is not
+    def sr(n, gid, **kw):
+        return {"question_id": f"Q-syn000001{n}", "kind": "confirm_value", "scope": f"group:{gid}", "blocking": True,
+                "target_field_path": "context.electrochemistry.reaction", "allowed_decisions": ["confirm", "correct", "defer"],
+                "same_reading_group": "SR-syn", "per_scope_targets": {f"group:{gid}": [f"cand-{n}"]},
+                "targets": [{"kind": "candidate", "id": f"cand-{n}"}], **kw}
+    asks = [sr(1, "rg-a", no_value=True), sr(2, "rg-c", no_value=True), sr(3, "rg-d", no_value=True)]
+    assert [len(u["questions"]) for u in S._units(view, asks, ())[0]] == [1, 1, 1]
+    confirms = [sr(1, "rg-a"), sr(2, "rg-c"), sr(3, "rg-d")]
+    (whole,) = S._units(view, confirms, ())[0]
+    assert whole["same_reading"] and len(whole["questions"]) == 3
+
+
+def test_a_card_never_hides_what_one_answer_reaches():
+    """Review C1(b): a card that reaches more measurements than it lists shows every sample with its count and an
+    example, and every measurement that names no sample, and states the total."""
+    def group(name=None):
+        return {"member_run_ids": [], "basis": {"sample": {"sample_name": {"value": name}} if name else {}}}
+
+    names = {f"rg-{n:02d}": ("syn1" if n < 30 else "syn2" if n < 43 else None) for n in range(45)}
+    view = SimpleNamespace(groups={g: group(v) for g, v in names.items()}, cands={}, runs={})
+    view.group_name = lambda gid: f"file_{gid}"
+    card = {"_groups": list(names), "applies_to": {"count": 45, "summary": "All 45 records", "items": ["x"] * 40, "more": 5}}
+    S._show_everything(view, card)
+    assert card["applies_to"]["breakdown"] == [
+        {"label": "sample syn1", "count": 30, "example": "file_rg-00"}, {"label": "sample syn2", "count": 13, "example": "file_rg-30"},
+        {"label": "no sample named in the files", "count": 1, "example": "file_rg-43"},
+        {"label": "no sample named in the files", "count": 1, "example": "file_rg-44"}]
+    (table,) = card["_first_context"]
+    assert table["label"] == "Everything one answer covers: 45 measurements" and len(table["rows"]) == 4
+    assert table["rows"][2] == ["no sample named in the files", "1", "file_rg-43"]
+    small = {"_groups": list(names)[:40], "applies_to": {"count": 40, "items": ["x"] * 40}}
+    S._show_everything(view, small)
+    assert "breakdown" not in small["applies_to"] and "_first_context" not in small
+
+
+def test_an_answer_with_a_note_on_a_card_for_several_measurements_is_held(base, tmp_path, capsys):
+    """Review C1(c): "operando, except the pellet" must never be recorded as operando for all. The answer is held
+    until a person has read the note; a card about one measurement has no exception to name and is applied."""
+    bdir = tmp_path / "bundle"
+    shutil.copytree(base, bdir)
+    S.export_site(bdir, tmp_path / "site", include=("optional",), site_template=tmp_path / "none")
+    site_data = tmp_path / "site" / "data" / "site-data.json"
+    data = json.loads(site_data.read_text())
+    env = _card(data, ENVIRONMENT, title_has="ZZ1")
+    single = next(c for c in data["cards"] if c["title"] == "Is the applied potential 0.1 V for this measurement?")
+    form = _card(data, FORM, title_has="ZZ3")
+    answers = _answers_file(tmp_path, data, [
+        _answer(env, "value", "operando", note="SYN: all but the first file"),
+        _answer(single, "accept", 0.1, note="SYN: checked against the logbook"),
+        _answer(form, "dont_know", note="SYN: ask the student"), _answer(_card(data, "system.domain"), "value", "experimental")])
+    before = _digest(bdir)
+    preview = SI.import_answers(bdir, answers, site_data=site_data)
+    assert [a["outcome"] for a in preview["answers"]] == ["held", "would_record", "held", "would_record"] and _digest(bdir) == before
+    rep = SI.import_answers(bdir, answers, site_data=site_data, apply=True)
+    assert [a["outcome"] for a in rep["answers"]] == ["held", "recorded", "held", "recorded"]
+    held = rep["answers"][0]
+    assert held["reason"] == SI.HELD_REASON.format(n=3, card_id=env["card_id"]) and "decisions" not in held
+    assert [n["note"] for n in rep["notes"]] == ["SYN: all but the first file", "SYN: checked against the logbook", "SYN: ask the student"]
+    assert {d["decision"] for d in _decisions(bdir)} == {"confirm", "correct"} and len(_decisions(bdir)) == 2
+    text = SI.render_report(rep)
+    assert "Held: the note may name exceptions (not applied) (2)" in text and f"--note-read {env['card_id']}" in text
+    # the note was read and names no exception: the answer is applied as it was given
+    args = ["bundle", "site", "import", str(bdir), str(answers), "--site-data", str(site_data), "--apply"]
+    assert cli.main([*args, "--note-read", env["card_id"], "--json"]) == 0
+    again = json.loads(capsys.readouterr().out)
+    assert [a["outcome"] for a in again["answers"]] == ["recorded", "already_recorded", "held", "already_recorded"]
+    assert sum(1 for d in _decisions(bdir) if d["value"] == "operando") == 3
+
+
+def test_a_reading_of_the_samples_is_not_offered_for_a_file_that_names_no_sample():
+    """Review C1: the suggestion "operando" was read for the samples in the cell. A card about a file that states
+    no sample (a pellet standard, an average) shows it as context, never as a one-click answer."""
+    def card(lone, groups):
+        return {"field": {"path": ENVIRONMENT}, "_questions": [{"question_id": "Q-syn0000001"}], "_groups": groups,
+                "_lone": lone, "applies_to": {"count": len(groups), "summary": "SYN", "items": list(groups)},
+                "answer": {"kind": "choice", "options": [{"value": v, "label": v} for v in ("operando", "ex_situ")]},
+                "suggestion": None, "detail": "", "_lead": "", "covers": [{"on_value": {"decision": "correct"}, "on_accept": None}]}
+
+    quote = [{"quote": "SYN: measured operando in the cell", "file": "syn.txt", "locator": "line 2"}]
+    entry = {"field": ENVIRONMENT, "applies_to": "beamtime: the SYN sample groups", "question_ids": ["Q-syn0000001"],
+             "suggested_value": "operando", "alternatives": [], "confidence": "high", "evidence": quote, "reasoning": "SYN."}
+    sample, odd = card(False, ["rg-a", "rg-b"]), card(True, ["rg-z"])
+    rows = H.apply([sample, odd], [H.normalise(entry, 0)], lambda answer, path, s: answer)
+    assert sample["suggestion"]["value"] == "operando" and sample["covers"][0]["on_accept"] == {"decision": "correct", "value": "operando"}
+    assert odd["suggestion"] is None and odd["covers"][0]["on_accept"] is None
+    assert odd["_extra_context"][0]["label"] == ("A reading of your files suggests “operando” "
+                                                 "(read for the samples in general, not for this file)")
+    assert rows == [{"entry": 0, "suggested_on": 1, "context_on": 1}]
+    named = card(True, ["rg-z"])  # an entry that names this very group is a reading of this file
+    H.apply([named], [H.normalise({**entry, "applies_to": {"group_ids": ["rg-z", "rg-y"]}}, 0)], lambda answer, path, s: answer)
+    assert named["suggestion"]["value"] == "operando"
+
+
 def test_a_question_asked_once_for_groups_that_may_differ_is_one_card_per_group():
     """``partition == "sample=unrecorded"``: the files name no sample, so each group gets its own card, answered
     with ``only_scopes`` = that group (never one answer for all of them)."""
@@ -292,8 +436,10 @@ def test_the_plain_words_are_the_local_websites(exported):
     assert f"{P.NONE_SAY}`" in ts  # the missing-value sentence, word for word
     _bdir, _out, _report, data = exported
     env = _card(data, ENVIRONMENT)
-    assert env["title"] == P.field_ask(ENVIRONMENT, [o["value"] for o in env["answer"]["options"]])
-    assert env["title"] == "Was this done operando, in situ, ex situ or in silico?" and env["detail"].startswith(P.NONE_SAY)
+    assert P.field_ask(ENVIRONMENT, [o["value"] for o in env["answer"]["options"]]) == (
+        "Was this done operando, in situ, ex situ or in silico?")
+    assert env["title"] == "Was sample ZZ1 measured operando, in situ, ex situ or in silico?"
+    assert env["detail"].startswith(P.NONE_SAY) and _card(data, "system.domain")["title"] == P.field_ask("system.domain")
     assert P.field_noun("context.temperature_K") == "temperature" and P.field_noun("sample.material.name") == "sample material"
     assert P.field_noun("a.b.widget_name") == "widget name" and P.field_noun("x.thing.name") == "thing name"
 
@@ -541,7 +687,7 @@ def test_a_suggestions_file_in_the_contracts_shape(base, exported, tmp_path):
     _bdir, report, data = _suggest(base, tmp_path, entries)
     got = _card(data, FORM, title_has="ZZ1")
     assert got["suggestion"] == {**hint, "label": "pellet"} and got["covers"][0]["on_accept"] == {"decision": "correct", "value": "pellet"}
-    assert got["answer"]["common"][0] == "pellet" and got["detail"] == ""  # a hint found what no parser did
+    assert got["answer"]["common"][0] == "pellet" and got["detail"] == COVERS_3  # a hint found what no parser did
     assert _card(data, FORM, title_has="ZZ2")["suggestion"] is None
     oxide = _card(data, MATERIAL, title_has="ZZ2")
     assert oxide["suggestion"]["value"] == "SYN oxide" and oxide["suggestion"]["basis"] == "reading"
@@ -588,13 +734,13 @@ def test_a_suggestions_file_in_a_reading_audits_shape(base, exported, tmp_path):
     # a text card: the value is the suggestion, the alternatives are named in the detail
     three = _card(data, MATERIAL, title_has="ZZ3")
     assert three["suggestion"]["value"] == "SYN oxide (ZZ3)" and three["suggestion"]["reason"] == H.GENERIC_REASON
-    assert three["detail"] == ("Your files only write 'ZZ3'. A reading of your files also names: "
-                               "“SYN oxide, 5 wt.% on SYN carbon”.")
+    assert three["detail"] == f"Your files only write 'ZZ3'. {COVERS_3}"  # what one answer covers comes first
     assert _card(data, "system.domain")["suggestion"]["value"] == "experimental"  # beamtime-wide, by field
     env = _card(data, ENVIRONMENT)
     assert env["suggestion"] is None and env["context"][0]["label"] == "From your files, found by a reading"
     rows = report["suggestions_file"]
-    assert [(r["suggested_on"], r["context_on"]) for r in rows] == [(1, 0), (0, 1), (1, 0), (1, 0), (0, 0), (0, 1)]
+    # the beamtime-wide environment entry with no value is context on each of the three per-sample cards
+    assert [(r["suggested_on"], r["context_on"]) for r in rows] == [(1, 0), (0, 1), (1, 0), (1, 0), (0, 0), (0, 3)]
     assert rows[4]["problem"] == "no card of this export matches it"  # no processing card in this export
     for c in data["cards"]:
         assert P.not_plain(c["title"]) is None and P.not_plain(S._without_quotes(c["detail"])) is None
@@ -665,7 +811,7 @@ def test_an_ai_reading_loaded_into_the_bundle_becomes_a_suggestion_with_its_quot
     s = card["suggestion"]
     assert (s["value"], s["basis"], s["confidence"]) == ("pellet", "reading", "low") and "AI reading" in s["reason"]
     assert card["covers"][0]["on_accept"] == {"decision": "correct", "value": "pellet"}
-    assert card["detail"] == "" and card["answer"]["common"][0] == "pellet"
+    assert card["detail"] == COVERS_3 and card["answer"]["common"][0] == "pellet"
     assert _card(data, FORM, title_has="ZZ2")["suggestion"] is None
     # a reading of only some of a card's measurements is not offered for all of them
     q3 = next(x for x in _open(bdir) if x.get("target_field_path") == FORM and "zz3" in (x.get("partition") or ""))
@@ -726,7 +872,9 @@ def test_the_dose_question_is_one_beamtime_wide_processing_card(dosed, tmp_path)
 
     site_data = tmp_path / "site" / "data" / "site-data.json"
     answers = _answers_file(tmp_path, data, [_answer(card, "value", "first_scan_settling", note="SYN: see the logbook"),])
-    rep = SI.import_answers(bdir, answers, site_data=site_data, apply=True)
+    rep = SI.import_answers(bdir, answers, site_data=site_data, apply=True)  # a note on a card for two measurements
+    assert rep["answers"][0]["outcome"] == "held" and not _decisions(bdir)
+    rep = SI.import_answers(bdir, answers, site_data=site_data, apply=True, notes_read=[card["card_id"]])
     assert rep["counts"]["recorded"] == 1 and rep["notes"][0]["note"] == "SYN: see the logbook"
     (d,) = [x for x in _decisions(bdir) if x["decision"] == "set_dose_reading"]
     assert d["target"] == {"kind": "experiment", "id": "experiment"} and d["value"] == "first_scan_settling"
@@ -751,7 +899,7 @@ def _mixed(data):
     """One answer of each kind: a picked value, a typed value, a typed off-list word, "I don't know", a note."""
     return [
         _answer(_card(data, "system.domain"), "value", "experimental"),
-        _answer(_card(data, GROUP), "value", "SYN Research Group", typed=True, note="SYN note: check the spelling"),
+        _answer(_card(data, GROUP), "value", "SYN Research Group", typed=True),
         _answer(_card(data, ENVIRONMENT), "value", "in a glovebox", typed=True),
         _answer(_card(data, MATERIAL, title_has="ZZ1"), "dont_know"),
         _answer(_card(data, FORM, title_has="ZZ2"), "value", "pellet", at="2100-02-01T11:30:00Z"),
@@ -769,7 +917,7 @@ def test_the_preview_writes_nothing(work, tmp_path, capsys):
     assert _digest(bdir) == before and sorted(p.name for p in bdir.iterdir()) == files and not _decisions(bdir)
     assert cli.main(["bundle", "site", "import", str(bdir), str(answers), "--site-data", str(site_data)]) == 0
     out = capsys.readouterr().out
-    assert "preview: nothing written" in out and "Would be applied (4)" in out and "Notes to read (1)" in out
+    assert "preview: nothing written" in out and "Would be applied (4)" in out and "Notes to read" not in out
     assert "--same-reading" in out and "--as-said" in out and _digest(bdir) == before
 
 
@@ -793,10 +941,7 @@ def test_apply_records_the_right_decisions_under_the_right_name_with_the_cards_n
     form = _card(data, FORM, title_has="ZZ2")
     assert {x["note"] for x in by_value[("correct", '"pellet"')]} == {
         f'question site card {form["card_id"]} "What form was sample ZZ2 (no. 02) in?", answered 2100-02-01T11:30:00Z'}
-    # the note the scientist typed is reported, and is in no decision
-    assert rep["notes"] == [{"card_id": _card(data, GROUP)["card_id"], "title": "Which research group produced this data?",
-                             "by": WHO, "at": AT, "note": "SYN note: check the spelling", "applies_to": "All 9 records"}]
-    assert not any("check the spelling" in json.dumps(d) for d in decisions)
+    assert rep["notes"] == []
     left = {q["question_id"] for q in _open(bdir) if q.get("blocking")}
     for card, gone in ((domain, True), (form, True), (_card(data, MATERIAL, title_has="ZZ1"), False)):
         assert all((qid not in left) == gone for qid in card["covers"][0]["questions"]), card["title"]
@@ -1025,8 +1170,8 @@ def test_the_commands_run_end_to_end(base, tmp_path, capsys):
     assert cli.main(["bundle", "site", "export", str(bdir), "--out", str(out), "--site-template", str(tmp_path / "none")]) == 0
     printed = capsys.readouterr()
     assert "Question site export: SYN_BL00_2100-01_Synthetic" in printed.out and "Cards by section:" in printed.out
-    assert "11 card(s), 11 blocking; they cover 17 of 129 open question(s) (17 of 17 blocking)." in printed.out
-    assert "checking card 1 of 11" in printed.err
+    assert "13 card(s), 13 blocking; they cover 17 of 129 open question(s) (17 of 17 blocking)." in printed.out
+    assert "checking card 1 of 13" in printed.err
     assert cli.main(["bundle", "site", "export", str(bdir), "--out", str(out), "--include", "optional", "--json",
                      "--site-template", str(tmp_path / "none")]) == 0
     printed = capsys.readouterr()
