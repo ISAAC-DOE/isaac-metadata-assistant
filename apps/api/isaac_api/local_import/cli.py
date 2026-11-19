@@ -860,7 +860,9 @@ CANNOT_EXPORT_NOTE = ("Such a group can never become an exportable record as it 
                       "protocol covers this data yet. not_a_measurement_run: every run is a reference standard, an "
                       "alignment or a calibration scan, so the import asks nothing about its sample or conditions and "
                       "the required fields in cannot_export_fields have nowhere to hold an answer; its curve can be "
-                      "approved, but it does not become a record.")
+                      "approved, but it does not become a record. processing_result_has_no_curve: every processing "
+                      "result it has made no curve (a failure, such as a file with no energy axis), so there is nothing "
+                      "to approve; a result with a curve lifts it.")
 
 
 def group_list_extras(bundle: Mapping) -> dict[str, dict]:
