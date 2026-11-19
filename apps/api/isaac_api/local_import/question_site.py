@@ -95,6 +95,8 @@ LABEL_ASKS = {
 CONFIDENCES = H.CONFIDENCES
 BASES = H.BASES
 MAX_ITEMS = 40
+#: the longest file literal a card's detail quotes
+MAX_QUOTED_CHARS = 40
 MAX_CONTEXT = 6
 MAX_EVIDENCE = 3
 #: ``processing.engine_xas.DOSE_QUESTION_FLAG`` (not imported: processing is an optional extra)
@@ -541,7 +543,8 @@ def _value_card(view: _View, unit: Mapping) -> dict:
         raise _LeftOut("its questions are not all asked the same way")
     suggestion, on_accept = _suggestion_from_bundle(view, unit, shape or "", path)
     literals = [h["literal"] for h in _file_hints(qs)]
-    written = P.quoted(literals)
+    # only short words are quoted in a card's detail (a whole logbook sentence is shown beside it, as context)
+    written = P.quoted(literals) if all(len(str(x)) <= MAX_QUOTED_CHARS for x in literals) else ""
     options = None
     if kind == "resolve_conflict" and not allowed and int(q.get("readings_that_fit_the_field") or 0) > 0:
         options = list(dict.fromkeys(h["literal"] for h in _file_hints(qs) if h.get("kind") == "reading"
