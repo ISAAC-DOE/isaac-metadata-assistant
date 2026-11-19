@@ -3,11 +3,14 @@
 The token reader read ``850mV`` and left ``m850mV`` and ``-850mV`` unread, so a run held at a negative potential
 had no potential at all. What these pin:
 
-* a leading ``m`` or ``-`` on a potential token is a minus sign (``m800mV`` -0.8 V, ``-500mV`` -0.5 V, ``m0V`` 0 V,
-  ``m0p15V`` -0.15 V), read under its own named rule; an unsigned token keeps the rule it always had;
-* ``OCV`` / ``OCP`` is open circuit: never a magnitude;
+* a leading lower-case ``m`` or a ``-`` on a potential token is a minus sign (``m800mV`` -0.8 V, ``-500mV`` -0.5 V,
+  ``m0V`` 0 V, ``m0p15V`` -0.15 V), read under its own named rule; an unsigned token keeps the rule it always had; a
+  capital ``M`` is no sign (``M800mV``, ``M2V``: a metal's name or a molarity is not a negative potential);
+* ``OCV`` / ``OCP`` is open circuit: never a magnitude; when it is the LAST potential word of a name, no potential
+  token before it is the set-point either (the measurement was at open circuit after that potential);
 * a name that writes two levels marked ``Pos`` / ``Neg`` is a pulsed step: NO token of it is one set-point;
-* when a name has several potential tokens the LAST is the condition; an earlier one is not read as a value;
+* a name with several DIFFERENT plain potential tokens (a range, a sweep window) states no single set-point: none
+  is read as a value and each is kept as an unread token that says why; the same value written twice is one value;
 * a potential inside another word (``after1200mVCycling``, ``300mVvsRHE``) is read as before.
 
 SYNTHETIC names only.
@@ -38,7 +41,7 @@ def _unknown(stem: str) -> dict[str, str | None]:
 
 
 @pytest.mark.parametrize("token, volts", [
-    ("m800mV", -0.8), ("-500mV", -0.5), ("m1000mV", -1.0), ("M250mv", -0.25), ("m0p15V", -0.15), ("m1V", -1),
+    ("m800mV", -0.8), ("-500mV", -0.5), ("m1000mV", -1.0), ("m250mv", -0.25), ("m0p15V", -0.15), ("m1V", -1),
     ("m0V", 0), ("m0mV", 0.0), ("-0mV", 0.0),
 ])
 def test_a_leading_m_or_minus_is_a_minus_sign(token, volts):
@@ -48,6 +51,12 @@ def test_a_leading_m_or_minus_is_a_minus_sign(token, volts):
     item = next(e for e in _read(f"11_02_SYNZZ_{token}").evidence if e.concept == CONCEPT_POTENTIAL_MAGNITUDE)
     assert item.unit == "V" and item.normalization_rule == filenames.RULE_SIGNED_POTENTIAL
     assert "minus" in filenames.RULE_SIGNED_POTENTIAL
+
+
+@pytest.mark.parametrize("stem", ["11_02_SYNZZ_M800mV", "SYNCo_M2V_x", "11_02_SYNZZ_M0p5V", "11_02_SYNZZ_Mm800mV"])
+def test_a_capital_m_is_no_minus_sign(stem):
+    assert _potentials(stem) == []
+    assert filenames.name_potential(stem.split("_")).kind is None
 
 
 @pytest.mark.parametrize("token, volts, rule", [
@@ -66,15 +75,43 @@ def test_open_circuit_is_never_a_magnitude(stem):
     assert filenames.name_potential(stem.split("_")).kind == filenames.NAME_OPEN_CIRCUIT
 
 
-def test_the_last_potential_token_is_the_condition():
-    # open circuit first, then a held potential: the held potential is the condition
+def test_open_circuit_before_a_held_potential_leaves_the_potential_as_the_condition():
     assert _potentials("SYNfilm_on_ZZ_OCV_5_m1000mV") == [("m1000mV", -1.0)]
     assert _potentials("SYNfilm_on_ZZ_OCV_1_1200mV") == [("1200mV", 1.2)]
-    # two plain tokens: only the last is read; the earlier one stays an unread token that says why
-    assert _potentials("SYNZZ_400mV_then_m300mV") == [("m300mV", -0.3)]
-    assert _unknown("SYNZZ_400mV_then_m300mV")["400mV"] == filenames.RULE_LAST_POTENTIAL_TOKEN
     reading = filenames.name_potential("SYNfilm_on_ZZ_OCV_5_m1000mV".split("_"))
     assert (reading.kind, reading.index, reading.volts) == (filenames.NAME_SETPOINT, 5, -1.0)
+
+
+@pytest.mark.parametrize("stem", ["SYNS1_1200mV_OCV", "SYNS1_m300mV_3_OCP", "SYNS1_400mV_800mV_ocv"])
+def test_a_trailing_open_circuit_gives_no_set_point(stem):
+    assert _potentials(stem) == []
+    reading = filenames.name_potential(stem.split("_"))
+    assert reading.kind == filenames.NAME_OPEN_CIRCUIT and reading.volts is None
+    assert reading.token.casefold() in ("ocv", "ocp") and reading.earlier  # the potential before it is kept, unread
+    for item in reading.earlier:
+        assert _unknown(stem)[item.token] == filenames.RULE_NO_SINGLE_SETPOINT
+
+
+@pytest.mark.parametrize("stem, written", [
+    ("SYNS1_100mV_to_1200mV", [("100mV", 0.1), ("1200mV", 1.2)]),           # a range
+    ("SYNCV_0p2V_1p4V_50mVs", [("0p2V", 0.2), ("1p4V", 1.4)]),               # a sweep window (50mVs is a rate: no token)
+    ("SYNZZ_400mV_then_m300mV", [("400mV", 0.4), ("m300mV", -0.3)]),
+])
+def test_several_different_potential_tokens_state_no_single_set_point(stem, written):
+    assert _potentials(stem) == []  # neither is THE potential
+    reading = filenames.name_potential(stem.split("_"))
+    assert reading.kind == filenames.NAME_SEVERAL and reading.volts is None
+    assert [(lv.token, lv.volts) for lv in reading.levels] == written  # both are shown
+    unknown = _unknown(stem)
+    for token, _ in written:
+        assert unknown[token] == filenames.RULE_NO_SINGLE_SETPOINT
+    assert "several" in filenames.RULE_NO_SINGLE_SETPOINT and "open circuit" in filenames.RULE_NO_SINGLE_SETPOINT
+
+
+def test_the_same_potential_written_twice_is_one_value():
+    assert _potentials("SYNZZ_400mV_spot2_400mV") == [("400mV", 0.4)]
+    assert _potentials("SYNZZ_m300mV_again_m300mV") == [("m300mV", -0.3)]
+    assert _potentials("SYNZZ_0p4V_x_400mV") == [("400mV", 0.4)]  # the same potential in two spellings
 
 
 @pytest.mark.parametrize("stem, levels", [

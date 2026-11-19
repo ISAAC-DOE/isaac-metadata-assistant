@@ -139,20 +139,24 @@ RULE_BARE_VOLT = (
     "which always writes either `<digits>mV` or the `p`-decimal form."
 )
 RULE_SIGNED_POTENTIAL = (
-    "bl15.filenames.signed_potential.v1: a potential token with a leading `m` or "
-    "`-` (`m800mV`, `-500mV`, `m0p15V`, `m0V`) states a NEGATIVE potential: the "
-    "letter stands in for a minus sign where a `-` would break the name, as `p` "
-    "stands in for a decimal point. The magnitude is read as for an unsigned "
+    "bl15.filenames.signed_potential.v1: a potential token with a leading "
+    "lower-case `m` or a `-` (`m800mV`, `-500mV`, `m0p15V`, `m0V`) states a "
+    "NEGATIVE potential: the letter stands in for a minus sign where a `-` would "
+    "break the name, as `p` stands in for a decimal point. A capital `M` is no "
+    "sign (a metal's name, a molarity). The magnitude is read as for an unsigned "
     "token (millivolts as digits/1000) and the sign applied; zero stays zero. "
     "Reading the digits and dropping the sign reports a potential the "
     "measurement was never held at. NO reference basis is implied."
 )
-RULE_LAST_POTENTIAL_TOKEN = (
-    "bl15.filenames.last_potential_token.v1: when one name carries several "
-    "potential tokens, the LAST one is the condition the measurement was held "
-    "at; an earlier one (a state the sample came from, an open-circuit rest "
-    "before the step) is kept as an unread token and is never a second value "
-    "for the same measurement."
+RULE_NO_SINGLE_SETPOINT = (
+    "bl15.filenames.no_single_setpoint.v1: a name whose potential words do not "
+    "state ONE potential held during the measurement gives no set-point. Two "
+    "cases: several DIFFERENT potential tokens (`100mV_to_1200mV`, a range; "
+    "`0p2V_1p4V`, a sweep window), where choosing one would be a guess; and a "
+    "name whose last potential word is `OCV` / `OCP` (`1200mV_OCV`), which was "
+    "measured at open circuit after that potential. Each such token is kept "
+    "as an unread token under this rule, so it is shown and never a value. "
+    "The same potential written twice is one potential."
 )
 RULE_PULSED_LEVELS = (
     "bl15.filenames.pulsed_levels.v1: a name that marks a potential token "
@@ -481,8 +485,8 @@ def _recognize_cycling(
 _MILLIVOLT = re.compile(r"^(\d+)mv$", re.IGNORECASE)
 _P_VOLT = re.compile(r"^(\d+)p(\d+)v$", re.IGNORECASE)
 _BARE_VOLT = re.compile(r"^(\d+)v$", re.IGNORECASE)
-#: a leading `m` or `-` on a potential token (:data:`RULE_SIGNED_POTENTIAL`)
-_SIGN = re.compile(r"^(?:m|-)(?=\d)", re.IGNORECASE)
+#: a leading lower-case `m` or a `-` on a potential token (:data:`RULE_SIGNED_POTENTIAL`); never a capital `M`
+_SIGN = re.compile(r"^(?:m|-)(?=\d)")
 #: a potential token marked as one level of a pulse (:data:`RULE_PULSED_LEVELS`)
 _PULSE_SIDE = re.compile(r"^(?P<level>.*\dm?v)(?:pos|neg)$", re.IGNORECASE)
 #: open circuit: no potential is applied, so there is no set-point to read
@@ -491,6 +495,7 @@ _OPEN_CIRCUIT = re.compile(r"^oc[vp]$", re.IGNORECASE)
 NAME_SETPOINT = "setpoint"
 NAME_OPEN_CIRCUIT = "open_circuit"
 NAME_PULSED = "pulsed"
+NAME_SEVERAL = "several"
 
 
 @dataclass(frozen=True)
@@ -507,12 +512,16 @@ class PotentialToken:
 class NamePotential:
     """What the potential tokens of ONE name state together.
 
-    ``kind`` is :data:`NAME_SETPOINT` (``index``/``token``/``volts``/``rule`` are
-    the LAST plain potential token's), :data:`NAME_OPEN_CIRCUIT` (an ``OCV`` /
-    ``OCP`` token and no potential token after it; ``index``/``token`` are its),
-    :data:`NAME_PULSED` (``levels`` are the two or more levels written) or
-    ``None`` (the name states no potential). ``earlier`` are the plain potential
-    tokens before the last one: read by no rule as a value.
+    ``kind`` is :data:`NAME_SETPOINT` (ONE potential: ``index``/``token``/
+    ``volts``/``rule`` are the last plain potential token's; ``earlier`` are the
+    tokens before it that write the same potential), :data:`NAME_OPEN_CIRCUIT`
+    (the name's last potential word is ``OCV`` / ``OCP``; ``index``/``token`` are
+    its, ``earlier`` the plain potential tokens before it, none of them the
+    set-point), :data:`NAME_PULSED` (``levels`` are the levels marked ``Pos`` /
+    ``Neg``, and any plain token beside them), :data:`NAME_SEVERAL` (several
+    DIFFERENT plain potential tokens, a range or a sweep window: ``levels`` are
+    all of them and none is the set-point) or ``None`` (the name states no
+    potential). Only a :data:`NAME_SETPOINT` name gives a value.
     """
 
     kind: str | None = None
@@ -551,11 +560,12 @@ def potential_token_volts(token: str) -> tuple[float | int, str] | None:
 def name_potential(tokens: tuple[str, ...] | list[str]) -> NamePotential:
     """What a name's potential tokens state TOGETHER (see :class:`NamePotential`).
 
-    One pass over the tokens, in order: a token marked ``Pos`` / ``Neg`` makes the
-    name a pulsed step and every potential token of it a level; otherwise the
-    last plain potential token is the set-point and the ones before it are
-    ``earlier``; with no potential token at all, an ``OCV`` / ``OCP`` token is
-    open circuit. Reads nothing but the tokens given."""
+    One pass over the tokens, in order. A token marked ``Pos`` / ``Neg`` makes the
+    name a pulsed step. Otherwise the LAST potential word decides: ``OCV`` /
+    ``OCP`` last is open circuit (no set-point, whatever came before); a plain
+    potential token last is the set-point only when every plain token of the
+    name writes the same potential, and several different ones state no single
+    set-point. Reads nothing but the tokens given."""
     plain: list[PotentialToken] = []
     marked: list[PotentialToken] = []
     every: list[PotentialToken] = []
@@ -571,13 +581,16 @@ def name_potential(tokens: tuple[str, ...] | list[str]) -> NamePotential:
             open_circuit = (index, token)
     if marked:
         return NamePotential(kind=NAME_PULSED, levels=tuple(every))
-    if plain:
-        last = plain[-1]
-        return NamePotential(kind=NAME_SETPOINT, index=last.index, token=last.token, volts=last.volts,
-                             rule=last.rule, earlier=tuple(plain[:-1]))
-    if open_circuit is not None:
-        return NamePotential(kind=NAME_OPEN_CIRCUIT, index=open_circuit[0], token=open_circuit[1])
-    return NamePotential()
+    if open_circuit is not None and (not plain or open_circuit[0] > plain[-1].index):
+        return NamePotential(kind=NAME_OPEN_CIRCUIT, index=open_circuit[0], token=open_circuit[1],
+                             earlier=tuple(p for p in plain if p.index < open_circuit[0]))
+    if not plain:
+        return NamePotential()
+    if len({round(float(p.volts), 9) for p in plain}) > 1:
+        return NamePotential(kind=NAME_SEVERAL, levels=tuple(plain))
+    last = plain[-1]
+    return NamePotential(kind=NAME_SETPOINT, index=last.index, token=last.token, volts=last.volts,
+                         rule=last.rule, earlier=tuple(plain[:-1]))
 
 
 def _recognize_potential(
@@ -587,21 +600,22 @@ def _recognize_potential(
         state.potential = name_potential(state.tokens or (token,))
     reading = state.potential
     index = state.index if state.tokens else 0
-    if reading.kind == NAME_PULSED:
+    if reading.kind in (NAME_PULSED, NAME_SEVERAL):
         if any(level.index == index for level in reading.levels):
             return TokenReading(
                 concept=CONCEPT_UNKNOWN_TOKEN,
                 determinism=DETERMINISM_NORMALIZED,
                 normalized_value=None,
-                normalization_rule=RULE_PULSED_LEVELS,
+                normalization_rule=RULE_PULSED_LEVELS if reading.kind == NAME_PULSED else RULE_NO_SINGLE_SETPOINT,
             )
         return None
     if any(item.index == index for item in reading.earlier):
+        # before an open circuit: not the set-point; the same potential written earlier: one value, read once
         return TokenReading(
             concept=CONCEPT_UNKNOWN_TOKEN,
             determinism=DETERMINISM_NORMALIZED,
             normalized_value=None,
-            normalization_rule=RULE_LAST_POTENTIAL_TOKEN,
+            normalization_rule=RULE_NO_SINGLE_SETPOINT,
         )
     if reading.kind == NAME_SETPOINT and reading.index == index:
         return TokenReading(
