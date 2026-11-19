@@ -110,6 +110,32 @@ def test_a_flagged_line_offers_no_set_point_and_no_scale_but_still_its_electroly
         assert _cand(bundle, stem, NAME)["value"] == "KOH"  # the electrolyte line is another line, read as before
 
 
+def test_the_flag_reaches_the_scientist_also_when_the_line_never_parsed_to_a_value(tmp_path, capsys):
+    """The line is free text the comment rule reads NO value from (a potential glued to its scale inside a sentence).
+    Its candidate asked for the value before; it must also say the line is possibly another run's."""
+    src = tmp_path / "src" / "SYN_BL43_2100-21_ZZ"
+    line = "SYN sample A in 1M KOH 0Vrhe"
+    make_scan(src / "14_SYNZZ_1MKOH_0V_095_A.001", timestamp=_stamp(0), free_text=("1x1 mm", line))
+    make_scan(src / "15_SYNZZ_1MKOH_m600mV_096_A.001", timestamp=_stamp(10), free_text=("1x1 mm", line))
+    assert cli.main(["import", str(src), "--out", str(tmp_path / "out")]) == 0
+    capsys.readouterr()
+    data = json.loads((tmp_path / "out" / "bundle.json").read_text())
+    assert B.validate_bundle(data) == []
+    first, copy = _cand(data, "14_SYNZZ_1MKOH_0V_095", SETPOINT), _cand(data, "15_SYNZZ_1MKOH_m600mV_096", SETPOINT)
+    assert first["value"] is None and copy["value"] is None  # as before: no value is read from such a line
+    assert "possibly" not in first["state_basis"]["not_proposable_reason"]
+    reason = copy["state_basis"]["not_proposable_reason"]
+    assert len(_flags(data, "15_SYNZZ_1MKOH_m600mV_096")) == 1
+    assert "possibly left over" in reason and "14_SYNZZ_1MKOH_0V_095" in reason and "m600mV" in reason
+    assert "mentions a potential" in reason  # and still what it said before: the value is asked
+    assert "neither is preferred" in reason and "fresher" not in reason
+
+
+def test_the_note_prefers_neither_the_line_nor_the_name(bundle):
+    reason = _cand(bundle, "13_SYNZZ_1MSYN_m150mV_041", SETPOINT)["state_basis"]["not_proposable_reason"]
+    assert "both shown" in reason and "neither is preferred" in reason and "fresher" not in reason
+
+
 def test_what_is_not_stale_is_read_as_before(bundle):
     for stem, volts in (("15_SYNZZ_1MSYN_m300mV_043", -0.3), ("16_SYNZZ_1MSYN_m600mV_044", -0.6), ("17_SYNZZ_dry_045", -0.6)):
         assert _flags(bundle, stem) == []

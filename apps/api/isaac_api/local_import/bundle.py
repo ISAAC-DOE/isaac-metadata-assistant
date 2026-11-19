@@ -2126,7 +2126,7 @@ def _xdc_comment_candidates(g, run_scans: Sequence[Mapping], run_id: str, first_
 
     ``stale`` (``suggestions.stale_comment_flags``): the run's comment lines flagged as possibly left over from an
     earlier run. A potential (set-point, scale) read ONLY from such lines is not offered: the candidate has no value
-    and says why. Every other field is read as before."""
+    and says why, also when the line was one the rule reads no value from anyway. Every other field is read as before."""
     from .. import historical_import as hist
     from . import suggestions as _suggest
     from .questions import header_comment_readings, header_unread_text
@@ -2146,8 +2146,9 @@ def _xdc_comment_candidates(g, run_scans: Sequence[Mapping], run_id: str, first_
             continue
         values = list(dict.fromkeys(json.dumps(h[4]["value"]) for h in hits))
         value = hits[0][4]["value"] if len(values) == 1 and not any(h[4].get("ambiguous") for h in hits) else None
+        # whatever the line parsed to: a line the rule reads no value from is flagged too (its reason said nothing)
         left_over = (_suggest.stale_comment_reason(stale, [h[3] for h in hits])
-                     if stale and value is not None and path in _suggest.STALE_FIELDS else None)
+                     if stale and path in _suggest.STALE_FIELDS else None)
         if left_over is not None:
             value = None
         bundle_cid = f"cand-{first_n + len(out):04d}"
@@ -2169,7 +2170,11 @@ def _xdc_comment_candidates(g, run_scans: Sequence[Mapping], run_id: str, first_
                                    "to": reading["value"], "unit": reading["unit"]}],
             })
         ambiguous = [h for h in hits if h[4].get("ambiguous")]
-        if left_over is not None:
+        if left_over is not None and ambiguous:
+            _i, a_rel, a_loc, a_line, _reading = ambiguous[0]
+            said = header_unread_text(path, a_line, a_loc, a_rel)
+            reason = f"{left_over} As before: {said}."
+        elif left_over is not None:
             reason = left_over
         elif ambiguous:
             # r1d: the line mentions the field in no form the whitelist reads: it is quoted, and the scientist says

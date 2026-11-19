@@ -1095,8 +1095,8 @@ def stale_comment_reason(flags: Sequence[Mapping] | None, lines: Iterable[str]) 
     lines = list(dict.fromkeys(lines))
     if not lines or not all(line in by_line for line in lines):
         return None
-    return (f"{by_line[lines[0]]['detail']} The potential it states is not offered as this run's: tell me the potential "
-            "held during this scan (the file name's own token is the fresher statement).")
+    return (f"{by_line[lines[0]]['detail']} The potential it states is not offered as this run's. The line and the "
+            "file name's own token are both shown and neither is preferred: tell me the potential held during this scan.")
 
 
 def stale_comment_index(bundle: Mapping) -> dict[tuple[str, int], str]:
