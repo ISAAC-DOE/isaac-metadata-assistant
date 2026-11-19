@@ -899,6 +899,12 @@ def group_list_extras(bundle: Mapping) -> dict[str, dict]:
                                  "note": ("it merges scans read at different " + ", ".join(sorted({str(c) for c in care}))
                                           + f": check it before a bulk confirm (`isaac bundle show <bundle_dir> group "
                                           f"{g['group_id']}` gives the readings)")}
+            # finding 12 (audit of 18 Nov 2026): a flag raised only by the NAME of the scientists' own merge file (an
+            # older import read it as a second reading of the run) says so; no reading is printed here
+            if any(r["only_a_processed_output_name"] for r in G.care_reasons(bundle, g)):
+                row["needs_care"]["from_a_merge_file_name"] = (
+                    "one of the two readings is only the name of the scientists' own merge file, which is no reading of "
+                    "the run: an older import took it as one; importing the folder again with this build drops it")
         basis = g.get("role_basis") if isinstance(g.get("role_basis"), Mapping) else {}
         if g.get("role") in (G.ROLE_REFERENCE, G.ROLE_ALIGNMENT) and basis.get("basis") in ("name_token", "element_name_token"):
             # a role a NAME proposes (SPEC or XDC) is a proposal: said as judged from the name, never as a fact
