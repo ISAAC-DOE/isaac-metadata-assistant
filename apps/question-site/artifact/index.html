@@ -1,0 +1,570 @@
+<title>Beamtime Questions</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap">
+<style>
+/* Layout: one reading column; a question at a time, the evidence under it. Colours follow the ISAAC site. */
+:root {
+  --canvas: #f4f6f9;
+  --surface: #ffffff;
+  --surface-subtle: #f8fafc;
+  --border: #e1e6ec;
+  --control-border: #808b97;
+  --heading: #111a24;
+  --text: #1b2430;
+  --text-2: #46515f;
+  --muted: #5b6570;
+  --action: #2c6ab0;
+  --action-hover: #21568f;
+  --action-tint: #e8f0f8;
+  --action-border: #cfe0f2;
+  --on-action: #ffffff;
+  --pass: #2f8557;
+  --pass-text: #256b46;
+  --pass-bg: #e9f4ee;
+  --pass-border: #bfe0cd;
+  --fail-text: #8f2c24;
+  --fail-bg: #fbece9;
+  --fail-border: #f0c5be;
+  --hint-text: #8a6420;
+  --hint-bg: #f9f1df;
+  --hint-border: #ecd8ac;
+  --quote-bg: #eef4fb;
+  --font-ui: 'IBM Plex Sans', system-ui, -apple-system, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
+  --font-mono: 'IBM Plex Mono', ui-monospace, 'SF Mono', Menlo, Consolas, monospace;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --canvas: #12171d; --surface: #1a2129; --surface-subtle: #1f2730; --border: #2b3540; --control-border: #74818e;
+    --heading: #f1f4f7; --text: #e3e8ed; --text-2: #bcc6d0; --muted: #a3aeb9;
+    --action: #6aa6e6; --action-hover: #86b8ee; --action-tint: #1d2c3d; --action-border: #2f4a68; --on-action: #0d1620;
+    --pass: #55b582; --pass-text: #7fd0a3; --pass-bg: #17281f; --pass-border: #2a4a39;
+    --fail-text: #f0a097; --fail-bg: #2c1a18; --fail-border: #5a2f2a;
+    --hint-text: #e2bd72; --hint-bg: #2a2416; --hint-border: #4d4226; --quote-bg: #1b2735;
+    color-scheme: dark;
+  }
+}
+:root[data-theme="dark"] {
+  --canvas: #12171d; --surface: #1a2129; --surface-subtle: #1f2730; --border: #2b3540; --control-border: #74818e;
+  --heading: #f1f4f7; --text: #e3e8ed; --text-2: #bcc6d0; --muted: #a3aeb9;
+  --action: #6aa6e6; --action-hover: #86b8ee; --action-tint: #1d2c3d; --action-border: #2f4a68; --on-action: #0d1620;
+  --pass: #55b582; --pass-text: #7fd0a3; --pass-bg: #17281f; --pass-border: #2a4a39;
+  --fail-text: #f0a097; --fail-bg: #2c1a18; --fail-border: #5a2f2a;
+  --hint-text: #e2bd72; --hint-bg: #2a2416; --hint-border: #4d4226; --quote-bg: #1b2735;
+  color-scheme: dark;
+}
+* { box-sizing: border-box; }
+body { background: var(--canvas); color: var(--text); font-family: var(--font-ui); font-size: 16px; line-height: 1.5; }
+h1, h2, h3, p { margin: 0; }
+button, input, textarea, select { font: inherit; color: inherit; }
+:focus-visible { outline: 3px solid var(--action); outline-offset: 2px; border-radius: 4px; }
+h1:focus { outline: none; }
+.shell { max-width: 760px; margin: 0 auto; padding-block: 20px 88px; padding-left: max(16px, env(safe-area-inset-left, 0px)); padding-right: max(16px, env(safe-area-inset-right, 0px)); display: grid; gap: 16px; }
+.topbar { display: flex; align-items: baseline; justify-content: space-between; gap: 8px 16px; flex-wrap: wrap; }
+.brand { font-size: 12.5px; font-weight: 600; letter-spacing: 0.07em; text-transform: uppercase; color: var(--muted); }
+.who { font-size: 14px; color: var(--muted); }
+.panel { background: var(--surface); border: 1px solid var(--border); border-radius: 12px; padding: 24px; display: grid; gap: 14px; min-width: 0; }
+.title { font-size: 25px; line-height: 1.25; font-weight: 600; color: var(--heading); text-wrap: balance; }
+.subtitle { color: var(--text-2); }
+.mono { font-family: var(--font-mono); font-size: 13px; color: var(--muted); overflow-wrap: anywhere; }
+.muted { color: var(--muted); font-size: 14px; }
+.notice { padding: 12px 14px; border-radius: 9px; border: 1px solid var(--hint-border); background: var(--hint-bg); color: var(--hint-text); }
+.error { padding: 10px 12px; border-radius: 9px; border: 1px solid var(--fail-border); background: var(--fail-bg); color: var(--fail-text); }
+.loading { color: var(--muted); padding: 48px 0; text-align: center; }
+
+.btn { display: inline-flex; align-items: center; justify-content: center; gap: 8px; min-height: 46px; padding: 10px 18px; border-radius: 9px; border: 1px solid var(--control-border); background: var(--surface); color: var(--text); font-weight: 600; cursor: pointer; text-align: center; }
+.btn:hover { border-color: var(--action); color: var(--action-hover); }
+.btn[disabled] { opacity: 0.55; cursor: default; }
+.btn-primary { background: var(--action); border-color: var(--action); color: var(--on-action); }
+.btn-primary:hover { background: var(--action-hover); border-color: var(--action-hover); color: var(--on-action); }
+.btn-quiet { border-color: transparent; background: transparent; color: var(--text-2); font-weight: 500; }
+.btn-wide { width: 100%; }
+.btn.is-chosen { background: var(--pass-bg); border-color: var(--pass); color: var(--pass-text); }
+.linklike { background: none; border: 0; padding: 0; color: var(--action); text-decoration: underline; cursor: pointer; }
+
+.progress { display: grid; gap: 6px; }
+.progress-line { display: flex; justify-content: space-between; gap: 12px; font-size: 15px; color: var(--text-2); }
+.progress-line strong { color: var(--heading); font-variant-numeric: tabular-nums; }
+.bar { height: 10px; background: var(--border); border-radius: 999px; overflow: hidden; }
+.bar > i { display: block; height: 100%; background: var(--pass); border-radius: 999px; transition: width 0.3s ease; }
+.start { display: flex; gap: 12px; flex-wrap: wrap; align-items: center; }
+.start .btn-primary { flex: 1 1 220px; min-height: 52px; font-size: 17px; }
+.start select { min-height: 46px; padding: 8px 10px; border: 1px solid var(--control-border); border-radius: 9px; background: var(--surface); }
+
+.section-head { padding: 12px 4px 0; display: grid; gap: 2px; }
+.section-head h2 { font-size: 17px; color: var(--heading); }
+.rows { list-style: none; margin: 0; padding: 0; background: var(--surface); border: 1px solid var(--border); border-radius: 12px; overflow: hidden; }
+.rows li + li { border-top: 1px solid var(--border); }
+.row { display: grid; grid-template-columns: 22px 1fr; gap: 2px 12px; width: 100%; padding: 14px 16px; background: none; border: 0; text-align: left; cursor: pointer; }
+.row:hover { background: var(--surface-subtle); }
+.dot { width: 14px; height: 14px; margin-top: 5px; border-radius: 50%; border: 2px solid var(--control-border); }
+.dot.done { background: var(--pass); border-color: var(--pass); }
+.dot.unsure { background: var(--hint-border); border-color: var(--hint-text); }
+.row-title { font-weight: 600; color: var(--heading); min-width: 0; }
+.row-meta { grid-column: 2; font-size: 14px; color: var(--muted); overflow-wrap: anywhere; min-width: 0; }
+.row-answer { color: var(--pass-text); font-weight: 600; }
+
+.runbar { display: flex; align-items: center; justify-content: space-between; gap: 12px; font-size: 14px; color: var(--muted); }
+.chips { display: flex; gap: 8px; flex-wrap: wrap; }
+.chip { font-size: 12.5px; font-weight: 600; padding: 3px 10px; border-radius: 999px; background: var(--action-tint); border: 1px solid var(--action-border); color: var(--action-hover); }
+.chip.quiet { background: var(--surface-subtle); border-color: var(--border); color: var(--muted); }
+.detail { color: var(--text-2); font-size: 17px; }
+.applies summary { cursor: pointer; color: var(--text-2); }
+.applies ul { margin: 8px 0 0; padding-left: 20px; font-family: var(--font-mono); font-size: 13px; color: var(--muted); overflow-wrap: anywhere; }
+.saved { padding: 12px 14px; background: var(--pass-bg); border: 1px solid var(--pass-border); border-radius: 9px; color: var(--pass-text); display: flex; gap: 6px 12px; flex-wrap: wrap; align-items: baseline; justify-content: space-between; }
+.saved.unsure { background: var(--hint-bg); border-color: var(--hint-border); color: var(--hint-text); }
+.saved-note { flex-basis: 100%; font-size: 14px; }
+.suggest { padding: 16px; background: var(--hint-bg); border: 1px solid var(--hint-border); border-radius: 12px; display: grid; gap: 8px; }
+.eyebrow { font-size: 12.5px; font-weight: 600; letter-spacing: 0.06em; text-transform: uppercase; color: var(--hint-text); }
+.suggest-value { font-size: 22px; font-weight: 600; color: var(--heading); overflow-wrap: anywhere; }
+.suggest-why { color: var(--text-2); }
+.group-label { display: block; font-size: 14px; font-weight: 600; color: var(--text-2); margin-top: 6px; }
+.options { display: grid; grid-template-columns: repeat(auto-fill, minmax(190px, 1fr)); gap: 8px; }
+.options.stack { grid-template-columns: 1fr; }
+.options .btn { justify-content: flex-start; text-align: left; font-weight: 500; }
+.more > summary { cursor: pointer; color: var(--action); font-size: 15px; padding: 4px 0; }
+.more .options { margin-top: 8px; }
+.typed { display: flex; gap: 8px; flex-wrap: wrap; }
+.input { flex: 1 1 220px; width: 100%; min-height: 46px; padding: 10px 12px; background: var(--surface); border: 1px solid var(--control-border); border-radius: 9px; }
+textarea.input { min-height: 84px; resize: vertical; }
+.unit { align-self: center; color: var(--muted); }
+.notebox > summary { cursor: pointer; color: var(--action); font-size: 15px; }
+.notebox > * + * { margin-top: 8px; }
+.secondary { display: flex; gap: 8px; flex-wrap: wrap; padding-top: 14px; border-top: 1px solid var(--border); }
+.context h2 { font-size: 16px; color: var(--heading); }
+.context h3 { font-size: 12.5px; font-weight: 600; letter-spacing: 0.05em; text-transform: uppercase; color: var(--muted); margin-top: 6px; }
+.quote { margin: 0; padding: 10px 12px; background: var(--quote-bg); border: 1px solid var(--action-border); border-radius: 8px; }
+.quote q { quotes: none; white-space: pre-wrap; overflow-wrap: anywhere; }
+.quote cite { display: block; margin-top: 4px; font-style: normal; font-family: var(--font-mono); font-size: 12.5px; color: var(--muted); overflow-wrap: anywhere; }
+.tablewrap { overflow-x: auto; border: 1px solid var(--border); border-radius: 8px; }
+table { border-collapse: collapse; width: 100%; font-size: 14px; font-variant-numeric: tabular-nums; }
+th, td { padding: 7px 10px; text-align: left; border-bottom: 1px solid var(--border); white-space: nowrap; }
+th { background: var(--surface-subtle); color: var(--text-2); font-weight: 600; }
+tr:last-child td { border-bottom: 0; }
+.figure { margin: 0; }
+.figure img { display: block; max-width: 100%; height: auto; border: 1px solid var(--border); border-radius: 8px; background: #ffffff; }
+.figure figcaption { font-size: 13px; color: var(--muted); margin-top: 4px; }
+.pager { display: flex; justify-content: space-between; gap: 12px; }
+.toast { position: fixed; left: 50%; bottom: calc(24px + env(safe-area-inset-bottom, 0px)); transform: translateX(-50%) translateY(20px); background: var(--heading); color: var(--canvas); padding: 10px 18px; border-radius: 999px; font-weight: 600; opacity: 0; pointer-events: none; transition: opacity 0.18s ease, transform 0.18s ease; max-width: calc(100vw - 32px); }
+.toast.show { opacity: 1; transform: translateX(-50%) translateY(0); }
+.toast.bad { background: var(--fail-bg); color: var(--fail-text); border: 1px solid var(--fail-border); }
+.sr-only { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
+@media (max-width: 520px) { .panel { padding: 18px 16px; } .title { font-size: 22px; } .options { grid-template-columns: 1fr; } }
+@media (prefers-reduced-motion: reduce) { * { transition: none !important; } }
+</style>
+
+<main id="main" class="shell"><p class="loading" role="status">Loading the questions…</p></main>
+<div id="toast" class="toast" role="status" aria-live="polite"></div>
+
+<script>
+(() => {
+  'use strict';
+  // ---- the shared store (claude.ai's db capability) ---------------------------------------------------------
+  //   cards/<card_id>    one question, written by the ISAAC team (read by everyone, written by the owner)
+  //   meta/site          the beamtime's title, sections and totals
+  //   answers/<card_id>  the current answer to a card
+  //   log/<auto>         every save and every clear, in order
+  // The answer format is the question site's (docs/question-site-contract.md), so `isaac bundle site import`
+  // reads it unchanged.
+
+  const root = document.getElementById('main');
+  const toastEl = document.getElementById('toast');
+  const state = {
+    db: null, user: null, me: null, name: '', canWrite: true,
+    meta: null, cards: [], answers: {}, loaded: { cards: false, answers: false, meta: false },
+    view: 'loading', run: null, runSize: 10, busy: false, drafts: {}, cardError: null, failure: null,
+  };
+  let lastRenderAt = 0;
+  let advanceTimer = null;
+
+  const pref = (k, d) => { try { const v = localStorage.getItem(k); return v === null ? d : v; } catch { return d; } };
+  const setPref = (k, v) => { try { localStorage.setItem(k, v); } catch { /* fine */ } };
+  { const n = Number(pref('qa_run_size', '10')); if ([5, 10, 15, 25].includes(n)) state.runSize = n; }
+
+  function h(tag, props = {}, ...children) {
+    const el = document.createElement(tag);
+    for (const [k, v] of Object.entries(props || {})) {
+      if (v === null || v === undefined || v === false) continue;
+      if (k === 'class') el.className = v;
+      else if (k === 'text') el.textContent = v;
+      else if (k.startsWith('on')) el.addEventListener(k.slice(2), v);
+      else if (v === true) el.setAttribute(k, '');
+      else el.setAttribute(k, String(v));
+    }
+    for (const c of children.flat()) {
+      if (c === null || c === undefined || c === false) continue;
+      el.append(c.nodeType ? c : document.createTextNode(String(c)));
+    }
+    return el;
+  }
+  const bdi = (t, cls) => h('bdi', { class: cls || null, text: String(t) });
+  let toastTimer = null;
+  function toast(msg, bad = false) {
+    toastEl.textContent = msg;
+    toastEl.className = `toast show${bad ? ' bad' : ''}`;
+    clearTimeout(toastTimer);
+    toastTimer = setTimeout(() => { toastEl.className = 'toast'; }, bad ? 6000 : 1400);
+  }
+  const day = (iso) => { const d = new Date(iso); return Number.isNaN(d.getTime()) ? '' : d.toLocaleDateString(undefined, { day: 'numeric', month: 'short' }); };
+  const same = (a, b) => JSON.stringify(a) === JSON.stringify(b);
+  const card = (id) => state.cards.find((c) => c.card_id === id) || null;
+
+  // ---- answer rules (the same as the hosted site's, so the import reads what is stored) ------------------
+  const INVISIBLE = /[​-‏‪-‮⁦-⁩؜﻿]/g;
+  const clean = (raw, max) => String(raw ?? '').replace(/[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f]/g, '').replace(INVISIBLE, '').trim().slice(0, max);
+  const NUMBER = /^[+-]?(?:\d+(?:[.,]\d*)?|[.,]\d+)(?:[eE][+-]?\d+)?$/;
+  const THOUSANDS = /^[+-]?[1-9]\d{0,2}(?:,\d{3})+$/;
+  function parseNumber(raw) {
+    const t = String(raw ?? '').trim().replace(/^−/, '-');
+    if (THOUSANDS.test(t)) throw new Error('Is that a thousands comma or a decimal comma? Please write it without the comma, or with a decimal point.');
+    if (!NUMBER.test(t)) throw new Error('Please give a number.');
+    const n = Number(t.replace(',', '.'));
+    if (!Number.isFinite(n)) throw new Error('Please give a number.');
+    return n;
+  }
+  const isStale = (c, a) => Boolean(a) && a.action === 'accept' && (!c.suggestion || !same(c.suggestion.value, a.value));
+  const standing = (c) => { const a = state.answers[c.card_id]; return a && !isStale(c, a) ? a : null; };
+  function describe(c, a) {
+    if (!a) return '';
+    if (a.action === 'dont_know') return 'Don’t know';
+    if (c.answer?.kind === 'yes_no' && typeof a.value === 'boolean') return a.value ? 'Yes' : 'No';
+    if (a.action === 'accept' && c.suggestion && same(c.suggestion.value, a.value)) return c.suggestion.label ?? String(a.value);
+    const o = (c.answer?.options || []).find((x) => same(x.value, a.value));
+    if (o) return o.label ?? String(o.value);
+    return c.answer?.unit ? `${a.value} ${c.answer.unit}` : String(a.value);
+  }
+  function tally() {
+    const needed = state.cards.filter((c) => c.blocking), optional = state.cards.filter((c) => !c.blocking);
+    const done = (l) => l.filter((c) => standing(c)).length;
+    const neededDone = done(needed), optionalDone = done(optional);
+    return { needed: needed.length, neededDone, neededOpen: needed.length - neededDone,
+      neededUnsure: needed.filter((c) => standing(c)?.action === 'dont_know').length,
+      optional: optional.length, optionalDone, open: state.cards.length - neededDone - optionalDone };
+  }
+  function pickRun(size) {
+    const open = state.cards.filter((c) => !standing(c));
+    return [...open.filter((c) => c.blocking), ...open.filter((c) => !c.blocking)].slice(0, Math.max(1, size)).map((c) => c.card_id);
+  }
+  function buildAnswer(c, body) {
+    const kind = c.answer?.kind;
+    const note = clean(body.note, 2000);
+    let value = null, typed = false;
+    if (body.action === 'accept') {
+      if (!c.suggestion) throw new Error('This question has no suggested answer to accept.');
+      value = c.suggestion.value;
+    } else if (body.action === 'value') {
+      if (kind === 'yes_no') { if (typeof body.value !== 'boolean') throw new Error('Please answer yes or no.'); value = body.value; }
+      else if (kind === 'number') { value = parseNumber(body.value); typed = true; }
+      else {
+        const picked = (c.answer?.options || []).find((o) => same(o.value, body.value));
+        if (picked && !body.typed) value = picked.value;
+        else {
+          if (kind === 'choice' && c.answer?.allow_text !== true) throw new Error('Please pick one of the listed answers.');
+          value = clean(body.value, 500);
+          if (!value) throw new Error('Please type an answer first.');
+          typed = true;
+        }
+      }
+    } else if (body.action !== 'dont_know') throw new Error('That is not an answer this page records.');
+    return { card_id: c.card_id, action: body.action, value, typed, note };
+  }
+
+  // ---- views ---------------------------------------------------------------------------------------------
+  function show(view) {
+    if (advanceTimer) { clearTimeout(advanceTimer); advanceTimer = null; state.busy = false; }
+    captureDraft();
+    state.cardError = null;
+    state.view = view;
+    render(false);
+    window.scrollTo(0, 0);
+    const hd = root.querySelector('h1');
+    if (hd) { hd.setAttribute('tabindex', '-1'); hd.focus({ preventScroll: true }); }
+  }
+  function captureDraft() {
+    const id = root.dataset.card;
+    if (!id) return;
+    const typed = document.getElementById('typed'), note = document.getElementById('note');
+    const changed = (el) => Boolean(el) && el.value !== (el.dataset.prefill || '');
+    if (changed(typed) || changed(note)) state.drafts[id] = { typed: typed ? typed.value : '', note: note ? note.value : '' };
+    else delete state.drafts[id];
+  }
+  function progress(label, done, total, unsure = 0) {
+    const pct = total ? Math.round((done / total) * 100) : 0;
+    const fill = h('i'); fill.style.width = `${pct}%`;
+    return h('div', { class: 'progress' },
+      h('div', { class: 'progress-line' }, h('span', {}, h('strong', { text: `${done} of ${total}` }), ` ${label}${unsure ? ` (${unsure} marked “don’t know”)` : ''}`), h('span', { text: `${pct}%` })),
+      h('div', { class: 'bar', role: 'progressbar', 'aria-valuemin': 0, 'aria-valuemax': total, 'aria-valuenow': done, 'aria-label': label }, fill));
+  }
+  function topbar() {
+    return h('div', { class: 'topbar' }, h('span', { class: 'brand', text: 'ISAAC questions' }),
+      state.name ? h('span', { class: 'who' }, 'Answering as ', bdi(state.name)) : null);
+  }
+
+  function viewMessage(title, text, extra) {
+    return [topbar(), h('section', { class: 'panel' }, h('h1', { class: 'title', text: title }), text ? h('p', { class: 'subtitle', text }) : null, extra || null)];
+  }
+
+  function viewName() {
+    const input = h('input', { class: 'input', id: 'name-input', autocomplete: 'name', maxlength: 60 });
+    input.value = pref('qa_name', '');
+    return viewMessage('Who is answering?', 'Your name is recorded with each answer you give, so the ISAAC team knows who said what.',
+      h('form', { class: 'typed', onsubmit: (ev) => {
+        ev.preventDefault();
+        const n = clean(input.value, 60).replace(/\s+/g, ' ');
+        if (!n) { input.focus(); return; }
+        state.name = n; setPref('qa_name', n); show('home');
+      } }, h('label', { class: 'sr-only', for: 'name-input', text: 'Your name' }), input, h('button', { class: 'btn btn-primary', type: 'submit', text: 'Continue' })));
+  }
+
+  function viewHome() {
+    if (!state.cards.length) {
+      return viewMessage('No questions yet', 'The ISAAC team has not loaded this beamtime’s questions. They will appear here as soon as they do.');
+    }
+    const t = tally(), next = pickRun(state.runSize), allDone = t.open === 0;
+    const size = h('select', { id: 'run-size', onchange: (ev) => { state.runSize = Number(ev.target.value); setPref('qa_run_size', String(state.runSize)); render(); } },
+      [5, 10, 15, 25].map((n) => h('option', { value: n, selected: n === state.runSize, text: String(n) })));
+    const headline = allDone ? 'Everything is answered. Thank you.'
+      : t.neededOpen ? `${t.neededOpen} question${t.neededOpen === 1 ? '' : 's'} left before these records can be exported.` : 'The needed questions are all answered.';
+    const first = state.name.split(' ')[0];
+    const hero = h('section', { class: 'panel' },
+      h('h1', { class: 'title' }, allDone ? null : ['Hello ', bdi(first), '. '], headline),
+      state.meta?.title ? h('p', { class: 'mono', text: state.meta.title }) : null,
+      t.needed ? progress('needed questions done', t.neededDone, t.needed, t.neededUnsure) : null,
+      t.optional ? progress('nice-to-have questions done', t.optionalDone, t.optional) : null,
+      !state.canWrite ? h('p', { class: 'notice', text: 'You can read these questions but not answer them: your access to this page is view-only. Ask whoever shared it to give you edit access.' }) : null,
+      allDone || !state.canWrite ? null : h('div', { class: 'start' },
+        h('button', { class: 'btn btn-primary', type: 'button', id: 'start', onclick: () => startRun(next), text: next.length === 1 ? 'Answer the next question' : `Answer the next ${next.length}` }),
+        h('label', { for: 'run-size', class: 'muted' }, 'Questions per sitting: ', size)),
+      h('p', { class: 'muted', text: 'Most answers are one click. Every answer saves as you go, so you can stop any time and come back later, on any device. You can change an answer whenever you like.' }));
+    const out = [topbar(), hero];
+    const sections = state.meta?.sections || [];
+    const known = new Set(sections.map((s) => s.id));
+    const order = [...sections, ...[...new Set(state.cards.map((c) => c.section))].filter((id) => !known.has(id)).map((id) => ({ id, title: 'Other questions', blurb: '' }))];
+    for (const s of order) {
+      const cs = state.cards.filter((c) => c.section === s.id);
+      if (!cs.length) continue;
+      out.push(h('div', { class: 'section-head' }, h('h2', { text: `${s.title} (${cs.filter((c) => standing(c)).length} of ${cs.length})` }), s.blurb ? h('p', { class: 'muted', text: s.blurb }) : null),
+        h('ul', { class: 'rows' }, cs.map((c) => {
+          const saved = state.answers[c.card_id], a = standing(c);
+          const meta = a ? [bdi(describe(c, a), a.action === 'dont_know' ? '' : 'row-answer'), ' · ', bdi(a.by || 'someone'), `, ${day(a.at)}`]
+            : saved ? ['The suggestion changed since it was accepted. Please look again.']
+            : ['Not answered yet', c.applies_to?.summary ? ` · ${c.applies_to.summary}` : ''];
+          return h('li', {}, h('button', { class: 'row', type: 'button', id: `row-${c.card_id}`, onclick: () => startRun([c.card_id], true) },
+            h('span', { class: !a ? 'dot' : a.action === 'dont_know' ? 'dot unsure' : 'dot done', 'aria-hidden': 'true' }),
+            h('span', { class: 'row-title', text: c.title }), h('span', { class: 'row-meta' }, meta)));
+        })));
+    }
+    return out;
+  }
+
+  function startRun(ids, single = false) { if (!ids.length) return; state.run = { ids, index: 0, answered: 0, single }; show('card'); }
+  function step(delta) {
+    if (advanceTimer) { clearTimeout(advanceTimer); advanceTimer = null; state.busy = false; }
+    const run = state.run; if (!run) return show('home');
+    const i = run.index + delta; if (i < 0) return;
+    if (i >= run.ids.length) return show(run.single ? 'home' : 'done');
+    captureDraft(); run.index = i; show('card');
+  }
+  const noteValue = () => document.getElementById('note')?.value || '';
+
+  async function save(c, body, advance = true) {
+    if (state.busy) return;
+    captureDraft();
+    const focusBefore = root.contains(document.activeElement) ? document.activeElement.id || null : null;
+    let entry = null;
+    try { if (body.action !== 'clear') entry = buildAnswer(c, body); }
+    catch (err) { state.cardError = err.message; return render(true, focusBefore); }
+    state.busy = true; state.cardError = null;
+    for (const el of root.querySelectorAll('button, input, textarea, select')) el.disabled = true;
+    const before = state.answers[c.card_id] || null;
+    try {
+      // overwrite nothing unseen: if someone else answered or cleared this card since this page last saw it, stop
+      const now = await state.db.doc(`answers/${c.card_id}`).get();
+      const there = now.exists ? now.data() : null;
+      if ((there ? there.at : null) !== (before ? before.at : null)) {
+        if (there) state.answers[c.card_id] = there; else delete state.answers[c.card_id];
+        throw new Error(there ? `${there.by || 'Someone'} answered this while you had the page open. Have a look at their answer first.` : 'This answer was cleared while you had the page open. Have a look and answer again.');
+      }
+      let t = Date.now();
+      const last = before ? Date.parse(before.at) : NaN;
+      if (Number.isFinite(last) && t <= last) t = last + 1;
+      const at = new Date(t).toISOString();
+      const byId = state.me?.id || null;
+      if (body.action === 'clear') {
+        await state.db.doc(`answers/${c.card_id}`).delete();
+        await state.db.collection('log').add({ card_id: c.card_id, action: 'clear', value: null, typed: false, note: '', by: state.name, by_id: byId, at });
+        delete state.answers[c.card_id];
+        state.busy = false; toast('Answer cleared'); return render(true, focusBefore);
+      }
+      const answer = { ...entry, by: state.name, by_id: byId, at };
+      await state.db.doc(`answers/${c.card_id}`).set(answer);
+      await state.db.collection('log').add(answer);
+      state.answers[c.card_id] = answer;
+      delete state.drafts[c.card_id];
+      const run = state.run;
+      if (run && !before) run.answered += 1;
+      toast('Saved');
+      if (!advance || !run) { state.busy = false; return render(true, focusBefore); }
+      render();
+      const idx = run.index;
+      advanceTimer = setTimeout(() => { advanceTimer = null; state.busy = false; if (state.view === 'card' && state.run === run && run.index === idx) step(1); else render(); }, 450);
+    } catch (err) {
+      state.busy = false;
+      if (err && err.code === 'invalid_argument') { state.canWrite = false; state.cardError = 'Your access to this page is view-only, so this answer was not saved. Ask whoever shared it to give you edit access.'; }
+      else state.cardError = (err && err.code) ? 'The answer could not be saved just now. Please try again in a moment.' : (err?.message || 'The answer could not be saved.');
+      render(true, focusBefore);
+    }
+  }
+
+  function quote(item) {
+    const where = [item.file, item.locator].filter(Boolean).join(' · ');
+    return h('blockquote', { class: 'quote' }, h('q', { text: item.quote }), where ? h('cite', { text: where }) : null);
+  }
+  function contextBlock(c) {
+    const items = (c.context || []).filter(Boolean);
+    const out = [];
+    for (const it of items) {
+      if (it.kind === 'quotes' && it.items?.length) out.push(h('h3', { text: it.label || 'From the files' }), ...it.items.map(quote));
+      else if (it.kind === 'values' && it.rows?.length) out.push(h('h3', { text: it.label || 'Values' }),
+        h('div', { class: 'tablewrap', tabindex: 0, role: 'region', 'aria-label': it.label || 'Values' }, h('table', {},
+          h('thead', {}, h('tr', {}, (it.columns || []).map((x) => h('th', { scope: 'col', text: x })))),
+          h('tbody', {}, it.rows.map((r) => h('tr', {}, r.map((x) => h('td', { text: x === null || x === undefined ? '' : String(x) }))))))));
+      else if (it.kind === 'image' && it.image_url) out.push(h('h3', { text: it.label || 'Picture' }),
+        h('figure', { class: 'figure' }, h('img', { src: it.image_url, alt: it.alt || it.label || '', loading: 'lazy' }), it.alt ? h('figcaption', { text: it.alt }) : null));
+    }
+    return out.length ? h('section', { class: 'panel context' }, h('h2', { text: 'What your files say' }), ...out) : null;
+  }
+
+  function viewCard() {
+    const run = state.run, c = card(run.ids[run.index]);
+    if (!c) return viewHome();
+    const saved = state.answers[c.card_id] || null, stale = isStale(c, saved), a = stale ? null : saved;
+    const busy = state.busy || !state.canWrite, draft = state.drafts[c.card_id] || null;
+    const kind = c.answer?.kind || 'text', options = c.answer?.options || [], sug = c.suggestion || null;
+    const chosen = (v) => a && a.action !== 'dont_know' && same(a.value, v);
+    const pick = (v, typed = false) => save(c, { action: 'value', value: v, typed, note: noteValue() });
+    const opt = (o, i) => h('button', { class: `btn${chosen(o.value) ? ' is-chosen' : ''}`, type: 'button', id: `opt-${i}`, disabled: busy, 'aria-pressed': chosen(o.value) ? 'true' : 'false', onclick: () => pick(o.value), text: o.label ?? String(o.value) });
+    const p = [];
+    p.push(h('div', { class: 'chips' },
+      h('span', { class: c.blocking ? 'chip' : 'chip quiet', text: c.blocking ? 'Needed before export' : 'Nice to have' }),
+      c.audience === 'processing' ? h('span', { class: 'chip quiet', text: 'About the data processing' }) : null,
+      c.unblocks ? h('span', { class: 'chip quiet', text: `Covers ${c.unblocks} record${c.unblocks === 1 ? '' : 's'}` }) : null),
+      h('h1', { class: 'title', text: c.title }), c.detail ? h('p', { class: 'detail', text: c.detail }) : null);
+    if (c.applies_to?.summary) {
+      const items = c.applies_to.items || [];
+      p.push(items.length ? h('details', { class: 'applies' }, h('summary', { text: `Applies to: ${c.applies_to.summary}` }),
+        h('ul', {}, items.map((x) => h('li', { text: x })), c.applies_to.count > items.length ? h('li', { text: `… and ${c.applies_to.count - items.length} more` }) : null))
+        : h('p', { class: 'muted', text: `Applies to: ${c.applies_to.summary}` }));
+    }
+    if (state.cardError) p.push(h('p', { class: 'error', role: 'alert', id: 'card-error', text: state.cardError }));
+    if (a) p.push(h('div', { class: `saved${a.action === 'dont_know' ? ' unsure' : ''}`, role: 'status' },
+      h('span', {}, h('strong', {}, a.action === 'dont_know' ? 'Marked as: don’t know' : ['Answer: ', bdi(describe(c, a))]), ' · saved by ', bdi(a.by || 'someone'), `, ${day(a.at)}`),
+      state.canWrite ? h('button', { class: 'linklike', type: 'button', id: 'clear', disabled: busy, onclick: () => save(c, { action: 'clear' }, false), text: 'Clear this answer' }) : null,
+      a.note ? h('span', { class: 'saved-note' }, 'Note: ', bdi(a.note)) : null));
+    else if (stale) p.push(h('div', { class: 'saved unsure', role: 'status' }, h('span', {}, h('strong', { text: 'The suggested answer has changed.' }), ' ', bdi(saved.by || 'Someone'), ` accepted an earlier suggestion on ${day(saved.at)}. Please look at the new one.`)));
+    if (sug) {
+      const accepted = a && a.action === 'accept';
+      const conf = { high: 'Well supported', medium: 'Likely, please check', low: 'A guess, please check' }[sug.confidence];
+      const basis = { files: 'from your files', logbook: 'from your logbook', reading: 'from a reading of your logbook', earlier_answer: 'from an answer given on an earlier beamtime', rule: 'from a stated rule', general_knowledge: 'from general knowledge, not from your files' }[sug.basis];
+      p.push(h('div', { class: 'suggest' }, h('p', { class: 'eyebrow', text: 'Suggested answer' }), h('p', { class: 'suggest-value', text: sug.label ?? String(sug.value) }),
+        sug.reason ? h('p', { class: 'suggest-why', text: sug.reason }) : null, h('p', { class: 'muted', text: [conf, basis].filter(Boolean).join(' · ') }),
+        ...(sug.evidence || []).slice(0, 3).map(quote),
+        h('button', { class: `btn btn-primary btn-wide${accepted ? ' is-chosen' : ''}`, type: 'button', id: 'accept', disabled: busy, onclick: () => save(c, { action: 'accept', note: noteValue() }) }, accepted ? 'Yes, that’s right (your current answer)' : 'Yes, that’s right')));
+    }
+    if (kind === 'yes_no') p.push(h('p', { class: 'group-label', text: 'Your answer' }), h('div', { class: 'options' }, opt({ value: true, label: 'Yes' }, 'y'), opt({ value: false, label: 'No' }, 'n')));
+    else if (kind === 'choice') {
+      const rest = options.filter((o) => !sug || !same(o.value, sug.value));
+      const common = c.answer.common?.length ? rest.filter((o) => c.answer.common.includes(o.value)) : rest.length <= 8 ? rest : [];
+      const others = rest.filter((o) => !common.includes(o));
+      const long = rest.some((o) => String(o.label ?? o.value).length > 28);
+      if (common.length) p.push(h('p', { class: 'group-label', text: sug ? 'Or pick a different answer' : 'Pick an answer' }), h('div', { class: `options${long ? ' stack' : ''}` }, common.map((o, i) => opt(o, `c${i}`))));
+      if (others.length) p.push(h('details', { class: 'more', open: !common.length || others.some((o) => chosen(o.value)) },
+        h('summary', { text: common.length ? `More options (${others.length})` : `Pick ${sug ? 'a different' : 'an'} answer (${others.length} options)` }),
+        h('div', { class: `options${long ? ' stack' : ''}` }, others.map((o, i) => opt(o, `o${i}`)))));
+    }
+    if (kind === 'text' || kind === 'number' || (kind === 'choice' && c.answer.allow_text)) {
+      const input = h('input', { class: 'input', id: 'typed', type: 'text', inputmode: kind === 'number' ? 'decimal' : null, placeholder: c.answer.placeholder || null, maxlength: 500, disabled: busy });
+      const prefill = a && a.typed && a.action === 'value' ? String(a.value) : '';
+      input.dataset.prefill = prefill; input.value = draft ? draft.typed : prefill;
+      p.push(h('label', { class: 'group-label', for: 'typed', text: kind === 'choice' ? 'None of these? Type it in your own words' : sug ? 'Or type a different answer' : 'Type your answer' }),
+        h('form', { class: 'typed', onsubmit: (ev) => { ev.preventDefault(); if (!input.value.trim()) { input.focus(); return; } pick(input.value, true); } },
+          input, c.answer.unit ? h('span', { class: 'unit', text: c.answer.unit }) : null, h('button', { class: 'btn', type: 'submit', id: 'save-typed', disabled: busy, text: 'Save answer' })));
+    }
+    const note = h('textarea', { class: 'input', id: 'note', maxlength: 2000, disabled: busy, placeholder: 'Anything we should know: who to ask, an exception, a correction…', 'aria-label': 'A note for the ISAAC team' });
+    note.dataset.prefill = a?.note || ''; note.value = draft ? draft.note : a?.note || '';
+    p.push(h('details', { class: 'notebox', id: 'notebox', open: Boolean(note.value) }, h('summary', { text: a ? 'Add or change a note (optional)' : 'Add a note (optional)' }), note,
+      a ? h('button', { class: 'btn', type: 'button', id: 'save-note', disabled: busy, onclick: () => save(c, { action: a.action, value: a.value, typed: a.typed, note: noteValue() }, false), text: 'Save note' })
+        : h('p', { class: 'muted', text: 'The note is saved together with your answer, or with “I don’t know”. If some of the measurements this covers are different, say which here.' })),
+      h('div', { class: 'secondary' },
+        h('button', { class: `btn${a && a.action === 'dont_know' ? ' is-chosen' : ''}`, type: 'button', id: 'dont-know', disabled: busy, onclick: () => save(c, { action: 'dont_know', note: noteValue() }), text: 'I don’t know' }),
+        h('button', { class: 'btn btn-quiet', type: 'button', id: 'skip', onclick: () => step(1), text: run.single ? 'Back to the list' : 'Skip for now' })));
+    const bar = h('div', { class: 'runbar' }, h('button', { class: 'linklike', type: 'button', id: 'to-list', onclick: () => show('home'), text: '← All questions' }),
+      run.single ? null : h('span', { text: `Question ${run.index + 1} of ${run.ids.length}` }));
+    const pager = run.single ? null : h('div', { class: 'pager' },
+      h('button', { class: 'btn btn-quiet', type: 'button', id: 'prev', disabled: run.index === 0, onclick: () => step(-1), text: '← Previous' }),
+      h('button', { class: 'btn btn-quiet', type: 'button', id: 'next', onclick: () => step(1), text: run.index + 1 === run.ids.length ? 'Finish' : 'Next →' }));
+    return [topbar(), bar, h('section', { class: 'panel' }, p), contextBlock(c), pager];
+  }
+
+  function viewDone() {
+    const run = state.run || { answered: 0 }, t = tally(), next = pickRun(state.runSize);
+    const left = t.neededOpen ? `${t.neededOpen} needed question${t.neededOpen === 1 ? '' : 's'} left.`
+      : t.open ? `All the needed questions are answered. ${t.open} nice-to-have question${t.open === 1 ? '' : 's'} left, only if you have time.` : 'Everything is answered.';
+    return viewMessage(run.answered ? `Thank you. ${run.answered} answer${run.answered === 1 ? '' : 's'} saved.` : 'Nothing new saved this time.', `${left} You can stop here and come back any time.`,
+      h('div', { class: 'start' }, next.length ? h('button', { class: 'btn btn-primary', type: 'button', id: 'start', onclick: () => startRun(next), text: next.length === 1 ? 'Answer one more' : `Keep going: the next ${next.length}` }) : null,
+        h('button', { class: 'btn', type: 'button', id: 'to-list', onclick: () => show('home'), text: 'Back to all questions' })));
+  }
+
+  function render(keepFocus = true, wanted = null) {
+    captureDraft();
+    const active = document.activeElement;
+    const here = keepFocus && active && active !== document.body && root.contains(active) ? active.id : null;
+    const focusId = wanted || here;
+    let nodes;
+    if (state.failure) nodes = viewMessage(state.failure.title, state.failure.text);
+    else if (state.view === 'loading' || !state.loaded.cards || !state.loaded.answers) nodes = [h('p', { class: 'loading', role: 'status', text: 'Loading the questions…' })];
+    else if (!state.name) nodes = viewName();
+    else if (state.view === 'card') nodes = viewCard();
+    else if (state.view === 'done') nodes = viewDone();
+    else nodes = viewHome();
+    root.replaceChildren(...nodes.flat().filter(Boolean));
+    root.dataset.card = state.view === 'card' && state.run ? state.run.ids[state.run.index] : '';
+    lastRenderAt = Date.now();
+    if (focusId) { const el = document.getElementById(focusId); if (el && !el.disabled) { el.closest('details')?.setAttribute('open', ''); el.focus({ preventScroll: true }); } }
+  }
+
+  // ---- start: reach the store, then follow it live ---------------------------------------------------------
+  async function start() {
+    const timer = setTimeout(() => {
+      if (!state.loaded.cards) { state.failure = { title: 'The questions did not load', text: 'This page could not reach its saved questions. Check that you are signed in to Claude, then reload the page.' }; render(); }
+    }, 10000);
+    const db = await window.claude?.use?.('db');
+    if (!db) { clearTimeout(timer); state.failure = { title: 'Sign in to answer', text: 'This page keeps its questions and your answers in your Claude account. Sign in to Claude and open the link again.' }; return render(); }
+    state.db = db;
+    state.user = await window.claude.use('user');
+    if (state.user) {
+      try { state.me = await state.user.me(); } catch { state.me = null; }
+      try { const w = await state.user.can('data.write'); if (w === false) state.canWrite = false; } catch { /* not told: keep the controls */ }
+    }
+    state.name = clean(pref('qa_name', '') || state.me?.name || '', 60);
+    const fail = () => { clearTimeout(timer); state.failure = { title: 'The questions did not load', text: 'This page could not read its saved questions. Reload the page to try again.' }; render(); };
+    db.doc('meta/site').onSnapshot((s) => { state.meta = s.exists ? s.data() : null; state.loaded.meta = true; render(); }, () => { state.loaded.meta = true; });
+    db.collection('cards').onSnapshot((snap) => {
+      clearTimeout(timer);
+      state.cards = snap.docs.map((d) => d.data()).sort((x, y) => (x.order ?? 0) - (y.order ?? 0));
+      state.loaded.cards = true;
+      if (state.view === 'loading') state.view = 'home';
+      if (!state.busy) render();
+    }, fail);
+    db.collection('answers').onSnapshot((snap) => {
+      const next = {};
+      for (const d of snap.docs) next[d.id] = d.data();
+      state.answers = next;
+      state.loaded.answers = true;
+      if (!state.busy) render();
+    }, fail);
+  }
+  render();
+  start().catch(() => { state.failure = { title: 'The questions did not load', text: 'Reload the page to try again.' }; render(); });
+})();
+</script>
