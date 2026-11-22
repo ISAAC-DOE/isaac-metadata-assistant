@@ -46,9 +46,18 @@ def _vendored_schema_basis(monkeypatch, tmp_path):
     ("03_ANATASE_1x1mm_081", "anatase"),
     ("10_ANATASE_LowCounts_1x1mm_opt_086", "anatase"),
     ("01_elemental_S_006", "elemental"),
-    ("29_0p8wtpc_TiO2_anatase_116", "0p8wtpc"),
-    ("08_SYNCoSO4_0p5wt_sucrose_029", "0p5wt"),
-    ("40_SYN_BN_pellet_200", "bn"),
+    ("29_0p8wtpc_TiO2_anatase_116", "anatase"),
+    ("30_0p7wtpc_Ti2O3_119", "0p7wtpc"),             # a dilution of a stoichiometric compound and nothing else
+    ("31_Na2S2O3_5wt_sugar_spot2_065", "5wt"),
+    # review of PR 346, I5: a dilution or a matrix alone is how any transmission pellet is made, samples included
+    ("08_ZZCoMOF_0p5wt_sucrose_029", None),
+    ("40_SYN_BN_pellet_200", None),
+    ("15_CoMOF_10wt_BN_016", None),
+    ("18_MOFCoTHT_5wt_cellulose_018", None),
+    ("26_CoTHT_sugar_026", None),
+    ("30_Sample_BN_030", None),
+    ("15_RuO2_rutile_film_015", None),               # a rutile-phase film: a sample
+    ("28_TiO2_brookite_postXAS_028", None),          # a history word
     ("15_SYNTiON_1x1mm_1MKOHAr_m600mV_096", None),   # a condition
     ("19_SYN_anatase_afterHER_100", None),           # a history word
     ("22_SYN_IrO2_5wt_1MKOH_1200mV_107", None),      # a potential beside the dilution

@@ -1032,13 +1032,21 @@ def xdc_name_role(stem: str) -> tuple[str, str] | None:
 #: 1.15.0 (audit of 18 Nov 2026, rule 13): an XDC run whose NAME says it is a reference STANDARD proposes the role
 #: ``reference`` (a proposal, said as judged from the name, as :data:`XDC_NAME_ROLE_RULE_ID`): a mineral name
 #: (``ANATASE``, ``rutile``), ``elemental`` before an element symbol (``elemental_S``), a weight-percent dilution
-#: (``0p8wtpc``, ``5wt``) or a dilution matrix (``sucrose``, ``sugar``, ``BN``, ``cellulose``) - and never beside a
-#: condition (a potential, a pH, an electrolyte), a support or history word, or a temperature. A formula token alone
+#: (``0p8wtpc``, ``5wt``) or a dilution matrix (``sucrose``, ``sugar``, ``BN``, ``cellulose``) ONLY where every other
+#: word is a stoichiometric formula (review of PR 346, I5) - and never beside a condition (a potential, a pH, an
+#: electrolyte), a support, form or history word (``film``, ``postXAS``), or a temperature. A formula token alone
 #: (``TiO2``) is not enough: ``IrTiO2`` is a sample.
 XDC_STANDARD_NAME_RULE_ID = "isaac.grouping.xdc_standard_name.v1"
 _STANDARD_MINERALS = frozenset({"anatase", "rutile", "brookite"})
 _STANDARD_MATRICES = frozenset({"sucrose", "sugar", "bn", "cellulose"})
 _STANDARD_DILUTION = re.compile(r"^\d+(?:[p.]\d+)?wt(?:pc|pct|%)?$")
+#: review of PR 346, I5: a form, support or history word makes a name a sample's (``RuO2_rutile_film``,
+#: ``TiO2_brookite_postXAS``)
+_STANDARD_NOT = re.compile(r"^(?:films?|layers?|coat\w*|deposit\w*|thin|post\w*|pre\w*|electrode\w*|cell)$")
+#: tokens that name no material (a counter, a size, a spot, a counting note)
+_STANDARD_NEUTRAL = re.compile(r"^(?:\d+|\d+(?:p\d+)?x\d+(?:p\d+)?(?:mm|um)?|spot\w*|k\d+|i\d+|opt|lowcounts|std)$")
+#: a stoichiometric formula as written (``Ti2O3``, ``CoSO4``, ``Na2S2O3``): element symbols with at least one count
+_FORMULA = re.compile(r"^(?:[A-Z][a-z]?\d*)+$")
 
 
 def xdc_standard_role(stem: str) -> tuple[str, str] | None:
@@ -1050,12 +1058,28 @@ def xdc_standard_role(stem: str) -> tuple[str, str] | None:
     if not tokens or any(_condition_shaped(t) for t in _stem_tokens(stem)) or any(
             _SAMPLE_BESIDE.match(t) or _TEMPERATURE_TOKEN.match(t) for t in tokens):
         return None
+    if any(_STANDARD_NOT.match(t) for t in tokens):
+        return None
     symbols = {e.casefold() for e in ELEMENT_SYMBOLS}
     for i, tok in enumerate(tokens):
-        if (tok in _STANDARD_MINERALS or tok in _STANDARD_MATRICES or _STANDARD_DILUTION.match(tok)
-                or (tok == "elemental" and i + 1 < len(tokens) and tokens[i + 1] in symbols)):
+        if tok in _STANDARD_MINERALS or (tok == "elemental" and i + 1 < len(tokens) and tokens[i + 1] in symbols):
             return ROLE_REFERENCE, tok
-    return None
+    # a dilution or a matrix is how ANY transmission pellet is made: it names a standard only when every other word of
+    # the name is a stoichiometric formula (``0p7wtpc_Ti2O3``), never beside a sample's own name (``CoMOF_10wt_BN``)
+    cue = next((t for t in tokens if t in _STANDARD_MATRICES or _STANDARD_DILUTION.match(t)), None)
+    if cue is None:
+        return None
+    rest = [t for t in _stem_tokens(stem) if t.casefold() not in _STANDARD_MATRICES
+            and not _STANDARD_DILUTION.match(t.casefold()) and not _STANDARD_NEUTRAL.match(t.casefold())]
+    formulas = [t for t in rest if _is_formula(t, ELEMENT_SYMBOLS)]
+    return (ROLE_REFERENCE, cue) if rest and len(formulas) == len(rest) else None
+
+
+def _is_formula(token: str, elements: Container[str]) -> bool:
+    """``Ti2O3`` / ``CoSO4``: element symbols, each with an optional count, at least one count written."""
+    if not _FORMULA.fullmatch(token) or not re.search(r"\d", token):
+        return False
+    return all(sym in elements for sym in re.findall(r"[A-Z][a-z]?", token))
 
 
 def _header_not_measurement(statement: Mapping) -> str | None:

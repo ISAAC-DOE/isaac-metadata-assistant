@@ -974,10 +974,11 @@ click; nothing scientific is filled in silently.
   instrument (the SPEC computer's clock, beside SSRL XDC start times, the only case this build asks about) are a
   labelled hint and suggest nothing; the question id is unchanged. (The question is asked only where a run states its start in local clock time alone, an SSRL XDC run.)
 - **A reference standard named as one at BL4-3** (`isaac.grouping.xdc_standard_name.v1`): an SSRL XDC run whose name
-  is a mineral (`ANATASE`, `rutile`), `elemental` before an element symbol, a weight-percent dilution (`0p8wtpc`,
-  `5wt`) or a dilution matrix (`sucrose`, `sugar`, `BN`, `cellulose`) proposes the role `reference`, said as judged
-  from the name (`set_role` overrides it); never beside a potential, a pH, an electrolyte, a support or history word,
-  or a temperature, and never from a formula alone.
+  is a mineral (`ANATASE`, `rutile`) or `elemental` before an element symbol, or a weight-percent dilution
+  (`0p7wtpc`, `5wt`) or dilution matrix (`sucrose`, `sugar`, `BN`, `cellulose`) beside nothing but stoichiometric
+  formulas (`0p7wtpc_Ti2O3`), proposes the role `reference`, said as judged from the name (`set_role` overrides
+  it); never beside a potential, a pH, an electrolyte, a support, form or history word (`film`, `postXAS`), a
+  sample's own name (`CoMOF_10wt_BN`), or a temperature, and never from a formula alone.
 - **The BL4-3 absorber from the scanned range** (`isaac.suggest.absorber_from_scanned_range.v1`): a scan whose
   `Requested Energy` grid has a finest-step window with a pre-edge and a post-edge region around it names the edge of
   1 keV or more that window brackets (`readers/xray_tables.json`; of several, the one K or L3 edge, else none). One
