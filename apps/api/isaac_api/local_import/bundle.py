@@ -4138,8 +4138,9 @@ def _account_key(account: str) -> str:
 # --- what is not a disagreement (1.15.0; audit of 18 Nov 2026, rules 2 and 5) ------------------------------------------
 
 #: A SPEC ``#C`` line is an EVENT LOG entry: ``#C <date>.  do run3.mac.`` (a macro started), ``#C <date>.  gap reset
-#: from A to B.`` (a motor redefined). Two such lines are two events, never two readings of one field; only the
-#: session line (``#C spec  User = <account>``) states a setting, and two different ones still disagree.
+#: from A to B.`` (a motor redefined). Two such lines are two events, never two readings of one field; the session
+#: line (``#C spec  User = <account>``) and any other line still state a reading, and two different ones still
+#: disagree.
 COMMENT_EVENT_RULE_ID = "isaac.import.comment_lines_are_events.v1"
 #: A position the header reads back and the macro commanded, equal within the motor's resolution (1e-3 of its unit:
 #: ``Sx -21.2782`` and ``Sx -21.27825``), is one position, not two. Positions further apart (another spot) still
@@ -4166,7 +4167,10 @@ def not_a_conflict_text(n: int) -> str:
     return (f"{n} disagreement(s) the engine found are not conflicts ({', '.join(NOT_A_CONFLICT_RULES)}): comment lines "
             "that are events, positions equal within motor resolution, macro-driven runs no macro still declares. "
             "Their readings stay evidence on their candidates.")
-_EVENT_LINE = re.compile(r"^\w{3}\s+\w{3}\s+\d{1,2}\s+\d{1,2}:\d{2}:\d{2}\s+\d{4}\.\s+\S")
+#: the event verbs, after the date: `do <macro>` and `<motor> reset from <a> to <b>` (review of PR 346, I2: any other
+#: dated line, `potential set to 1.2 V` or `changed sample to B`, is still a reading)
+_EVENT_LINE = re.compile(r"^\w{3}\s+\w{3}\s+\d{1,2}\s+\d{1,2}:\d{2}:\d{2}\s+\d{4}\.\s+"
+                         r"(?:do\s+\S+?\.?|\S+\s+reset\s+from\s+\S+\s+to\s+\S+?\.?)\s*$")
 _POSITION_READING = re.compile(r"^\s*(\S+)\s+([-+]?(?:\d+\.?\d*|\.\d+)(?:[eE][-+]?\d+)?)\s*$")
 _MACRO_RUN_LINE = re.compile(r"^\w{3}\s+\w{3}\s+\d{1,2}\s+\d{1,2}:\d{2}:\d{2}\s+\d{4}\.\s+do\s+\S+")
 

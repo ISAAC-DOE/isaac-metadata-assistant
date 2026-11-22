@@ -959,8 +959,9 @@ click; nothing scientific is filled in silently.
   import still declares it. Its candidate keeps its id, says why, and is no longer a disagreement;
   `counts.disagreements_not_conflicts` counts them, and the summary says so.
 - **SPEC `#C` lines are an event log** (`isaac.import.comment_lines_are_events.v1`): two comment lines of different
-  kinds, or two events (`do run3.mac`, `gap reset from A to B`), are not competing readings of one field; only two
-  different session lines (`spec User = ...`) still disagree. **A read-back position equal to the commanded one
+  kinds, or two events (only the verbs `do <macro>` and `<motor> reset from A to B`), are not competing readings of one
+  field; two different session lines (`spec User = ...`), or any other dated line (`potential set to 1.2 V`), still
+  disagree. **A read-back position equal to the commanded one
   within motor resolution** (1e-3 of the motor's unit: `Sx -21.2782` and `Sx -21.27825`) is one position
   (`isaac.import.position_within_motor_resolution.v1`); positions further apart (another spot) still disagree. Either
   way the candidate keeps its id and its readings as evidence and says why; no conflict and no question is made.

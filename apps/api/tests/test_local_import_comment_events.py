@@ -92,6 +92,11 @@ def test_comment_lines_are_events_and_positions_within_resolution_are_one(tmp_pa
     ("spec_user_string", ["Fri Apr 11 12:11:46 2025.  gap reset from 7.47 to 7.46.", "Fri Apr 11 12:12:00 2025.  do a.mac."],
      B.COMMENT_EVENT_RULE_ID),
     ("spec_user_string", ["spec  User = SYN", "spec  User = ZZ"], None),
+    # review of PR 346, I2: only the event verbs are events; any other dated line is still a reading
+    ("spec_user_string", ["Mon Sep  9 01:46:41 2001.  potential set to 1.2 V", "Mon Sep  9 02:46:41 2001.  potential set to 0.4 V"], None),
+    ("spec_user_string", ["Mon Sep  9 01:46:41 2001.  changed sample to SYN_B", "Mon Sep  9 02:46:41 2001.  changed sample to SYN_C"], None),
+    ("spec_user_string", ["Mon Sep  9 01:46:41 2001.  do run3.mac.", "Mon Sep  9 01:47:00 2001.  Sx reset from 1.2 to 1.25.",
+                          "spec  User = SYN"], B.COMMENT_EVENT_RULE_ID),
     ("sample_position", ["Sx -21.2782", "Sx -21.27825"], B.POSITION_RESOLUTION_RULE_ID),
     ("sample_position", ["Sx 21.1537", "Sx 21.15375", "Sz 30.4142", "Sz 30.41425"], B.POSITION_RESOLUTION_RULE_ID),
     ("sample_position", ["Sz 30.4142", "Sz 30.43925"], None),
