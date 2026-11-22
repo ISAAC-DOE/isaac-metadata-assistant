@@ -56,6 +56,7 @@ import {
   type LocalContextItem,
   type LocalQuestion,
   type LocalSuggestion,
+  type LocalValidationReport,
   type LocalValueRule,
   type QuestionSection,
   contextRowsText,
@@ -426,15 +427,17 @@ function AthenaMerges({ merges }: { merges: NonNullable<LocalProgress['athena_me
 function LastValidation({ reports }: { reports: LocalProgress['last_validation']['reports'] }) {
   const names = useGroupNames();
   const rows = new Map<string, { verdict: string; missing: string[]; groups: string[] }>();
+  // what export does with each: a record the local completeness gate holds is never shown as exportable
+  const shown = (r: LocalValidationReport) => r.export_verdict ?? r.verdict ?? 'no verdict';
   for (const r of reports) {
-    const verdict = r.verdict ?? 'no verdict';
+    const verdict = shown(r);
     const key = JSON.stringify([verdict, r.missing_required]);
     const row = rows.get(key) ?? { verdict, missing: r.missing_required, groups: [] };
     row.groups.push(r.group_id);
     rows.set(key, row);
   }
   const counts = new Map<string, number>();
-  for (const r of reports) counts.set(r.verdict ?? 'no verdict', (counts.get(r.verdict ?? 'no verdict') ?? 0) + 1);
+  for (const r of reports) counts.set(shown(r), (counts.get(shown(r)) ?? 0) + 1);
   const older = reports.filter((r) => r.older_than_bundle).length;
   const said = [...counts.entries()].map(([v, n]) => `${n} ${v.replace(/_/g, ' ')}`).join(', ');
   return (

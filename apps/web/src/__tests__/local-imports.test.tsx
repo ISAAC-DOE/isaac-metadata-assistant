@@ -1799,8 +1799,12 @@ describe('skill rounds 5–7 on the page', () => {
             { group_id: 'g1', verdict: 'incomplete', missing_required: ['sample.sample_form'], written_utc: '2099-01-01T00:00:00Z', older_than_bundle: true },
             { group_id: 'g2', verdict: 'incomplete', missing_required: ['sample.sample_form'], written_utc: '2099-01-01T00:00:00Z', older_than_bundle: false },
             { group_id: 'g3', verdict: 'exportable', missing_required: [], written_utc: '2099-01-01T00:00:00Z', older_than_bundle: false },
+            // review of PR 342, finding 7: validation passed, and the local completeness gate holds it
+            { group_id: 'g4', verdict: 'exportable', export_verdict: 'held_by_record_completeness', missing_required: [],
+              record_completeness: { gate: 'isaac.local.record_completeness.v1', ready: false, held_by: ['indistinguishable_from_another_record'] },
+              written_utc: '2099-01-01T00:00:00Z', older_than_bundle: false },
           ] },
-          group_names: { g1: 'SYN_run_A', g2: 'SYN_run_B', g3: 'SYN_run_C' },
+          group_names: { g1: 'SYN_run_A', g2: 'SYN_run_B', g3: 'SYN_run_C', g4: 'SYN_run_D' },
         } },
       },
     });
@@ -1819,10 +1823,10 @@ describe('skill rounds 5–7 on the page', () => {
     expect(within(merges).queryByRole('button')).toBeNull(); // read-only
     // the counts once; the two groups that share a verdict and a missing set are one row
     const validation = screen.getByTestId('li-last-validation');
-    expect(within(validation).getByText(`${COPY.lastValidation}: 2 incomplete, 1 exportable`)).toBeInTheDocument();
-    expect(within(validation).getAllByRole('listitem')).toHaveLength(2);
+    expect(within(validation).getByText(`${COPY.lastValidation}: 2 incomplete, 1 exportable, 1 held by record completeness`)).toBeInTheDocument();
+    expect(within(validation).getAllByRole('listitem')).toHaveLength(3);
     expect(validation).toHaveTextContent('2 groups: SYN_run_A, SYN_run_B');
-    expect(validation).toHaveTextContent('1 of 3 reports are older than the bundle');
+    expect(validation).toHaveTextContent('1 of 4 reports are older than the bundle');
   });
 });
 

@@ -67,6 +67,9 @@ export interface ApiLocalBundleList {
 export interface LocalValidationReport {
   group_id: string;
   verdict: string | null;
+  /** What `export` does with it: `held_by_record_completeness` when the local gate holds a record validation passes. */
+  export_verdict?: string | null;
+  record_completeness?: { gate: string | null; ready: boolean; held_by: string[] };
   missing_required: string[];
   written_utc: string;
   older_than_bundle: boolean;

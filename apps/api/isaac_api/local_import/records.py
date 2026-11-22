@@ -2917,6 +2917,7 @@ def validate_records(bundle_dir: Path, *, run_portal=None, full: bool = False) -
     # finding 1: the LOCAL record-completeness gate, per group (each condition, its state, what answers it); it is
     # reported under its own name and never moves a verdict
     holds_all, _, gate_of = completeness_holds(bundle, fresh, payload, [gid for gid, _, _ in fresh])
+    to_write: list[tuple[str, dict]] = []  # written once the gate is known for the groups that pass (finding 7)
     for group_id, draft, composition in fresh:
         if _on_disk_differs(bundle_dir, group_id, draft, composition):
             stale.append(group_id)
@@ -2925,13 +2926,7 @@ def validate_records(bundle_dir: Path, *, run_portal=None, full: bool = False) -
         report["composed_from"] = "the validated bundle, now (an on-disk draft is never trusted)"
         report["on_disk_draft_differs"] = group_id in stale
         report["warnings"] = [w for w in warned if w["group_id"] == group_id]
-        if group_id in gate_of:
-            h = holds_all.get(group_id) or {}
-            report["record_completeness"] = {**gate_of[group_id],
-                                             **({"questions": h["questions"]} if h.get("questions") else {}),
-                                             "note": "A local gate beside official validation: it never changes the "
-                                                     "verdict above; `export` holds a record it names."}
-        _atomic_write(out_dir / f"{group_id}.json", _json_bytes(report))
+        to_write.append((group_id, report))
         verdicts[group_id] = report["verdict"]
         if pw := portal_warnings_of(report):
             portal_warned[group_id] = pw
@@ -2961,6 +2956,20 @@ def validate_records(bundle_dir: Path, *, run_portal=None, full: bool = False) -
         holds, sets, _ = completeness_holds(bundle, fresh, payload, passing)
         out["record_completeness"] = completeness_summary(holds, sets, gate_of, passing)
         out["ready_to_export"] = len(passing) - sum(1 for g in passing if g in holds)
+    else:
+        holds = {}
+    for group_id, report in to_write:
+        # review of PR 342, finding 7: each report says whether export would write the record, and why not: the
+        # gate over the groups that pass, as `export` judges it (a condition held, or the same body as another)
+        if group_id in gate_of:
+            h = holds.get(group_id) if report.get("verdict") == "exportable" else holds_all.get(group_id)
+            report["record_completeness"] = {
+                **gate_of[group_id], "ready": h is None, "held_by": list((h or {}).get("held_by") or ()),
+                **({"text": h["text"]} if h and h.get("text") else {}),
+                **({"questions": h["questions"]} if h and h.get("questions") else {}),
+                "note": "A local gate beside official validation: it never changes the verdict above; `export` holds "
+                        "a record it names."}
+        _atomic_write(out_dir / f"{group_id}.json", _json_bytes(report))
     # r8: the condition labels' own warnings (two ready records ISAAC cannot tell apart; a label not proposed)
     warned = warned + L.record_warnings(bundle, fresh, [g for g, v in verdicts.items() if v == "exportable"])
     out.update(warning_summary(warned, first=[g for g, v in verdicts.items() if v == "exportable"], full=full,

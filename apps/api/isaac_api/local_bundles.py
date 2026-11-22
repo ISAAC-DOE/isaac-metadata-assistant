@@ -1210,9 +1210,16 @@ def progress(bundle_dir: Path, bundle: Mapping, check: Mapping) -> dict:
             continue
         if not isinstance(report, Mapping):
             continue
+        rc = report.get("record_completeness") if isinstance(report.get("record_completeness"), Mapping) else None
+        held = bool(rc) and rc.get("ready") is False
         reports.append({
             "group_id": g["group_id"],
             "verdict": report.get("verdict"),
+            # review of PR 342, finding 7: what `export` does with it. A record official validation passes that the
+            # local record-completeness gate holds is never shown as exportable; `verdict` stays what validate wrote
+            "export_verdict": (R.HELD_VERDICT if held and report.get("verdict") == "exportable" else report.get("verdict")),
+            **({"record_completeness": {"gate": rc.get("gate"), "ready": rc.get("ready") is not False,
+                                        "held_by": list(rc.get("held_by") or ())}} if rc else {}),
             "missing_required": list(report.get("missing_required") or ())[:20],
             "written_utc": datetime.fromtimestamp(mtime, timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
             "older_than_bundle": bundle_mtime is not None and mtime < bundle_mtime,

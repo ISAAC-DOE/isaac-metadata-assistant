@@ -255,7 +255,9 @@ def test_official_validation_is_untouched_and_the_local_gate_holds_the_records(b
     assert report["verdict"] == "exportable" and report["record_completeness"]["ready"] is False
     [row] = report["record_completeness"]["conditions"]
     assert row["condition"] == "potential_magnitude" and row["state"] == "open" and row["paths"] == [SETPOINT]
-    assert json.loads((bdir / "validation" / f"{gocv}.json").read_text())["record_completeness"]["ready"] is True
+    # no condition of its own is open, and export holds it all the same: it says what another record says (finding 7)
+    ocv = json.loads((bdir / "validation" / f"{gocv}.json").read_text())["record_completeness"]
+    assert ocv["conditions"] == [] and ocv["ready"] is False and ocv["held_by"] == [CP.HELD_IDENTICAL]
 
     out = R.export_records(bdir, tmp_path / "records", run_portal=_portal())
     assert out["exported"] == [] and not (tmp_path / "records").exists()
@@ -456,3 +458,29 @@ def test_the_keep_apart_advice_is_given_only_when_there_is_a_merge_candidate(bdi
     holds, _, _ = R.completeness_holds(raw, R.fresh_compositions(bdir, b), {"questions": []}, gids)
     assert all("--target mc-0123456789abcdef --decision keep_apart" in h["text"] for h in holds.values()
                if CP.HELD_IDENTICAL in h["held_by"])
+
+
+# --- review of PR 342, finding 7: the Local Imports page never calls a held record exportable ---------------------
+
+
+def test_each_validation_report_and_the_local_imports_row_say_a_held_record_is_held(bdir, fake_upstream_env):
+    from isaac_api import local_bundles as LB
+
+    R.validate_records(bdir, run_portal=_portal())
+    b = M.load(bdir)
+    gocv = _group_of(bdir, "03_")                                  # held only as indistinguishable from the other two
+    report = json.loads((bdir / "validation" / f"{gocv}.json").read_text())
+    assert report["verdict"] == "exportable"                       # official validation: unchanged
+    rc = report["record_completeness"]
+    assert rc["ready"] is False and rc["held_by"] == [CP.HELD_IDENTICAL] and rc["text"].startswith("Held (")
+    rows = {r["group_id"]: r for r in LB.progress(bdir, b, {"status": "OK"})["last_validation"]["reports"]}
+    assert rows[gocv]["verdict"] == "exportable" and rows[gocv]["export_verdict"] == R.HELD_VERDICT
+    assert rows[gocv]["record_completeness"] == {"gate": CP.GATE_ID, "ready": False, "held_by": [CP.HELD_IDENTICAL]}
+    # a group the gate does not hold reads as before
+    payload = Q.consolidate(b)
+    for gid in (_group_of(bdir, "01_"), _group_of(bdir, "02_")):
+        M.decide_question(bdir, question_id=_setpoint_question(payload, gid)["question_id"], decision="reject",
+                          value=None, **BY)
+    R.validate_records(bdir, run_portal=_portal())
+    rows = {r["group_id"]: r for r in LB.progress(bdir, M.load(bdir), {"status": "OK"})["last_validation"]["reports"]}
+    assert all(r["export_verdict"] == "exportable" and r["record_completeness"]["ready"] for r in rows.values())
