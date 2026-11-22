@@ -88,6 +88,13 @@ MAX_SHIFT_EV = {"glitch_I0": 1.0, "ref_foil": 2.0, "foil_timeline": 2.0, "none":
 #: normalisation window variants for the uncertainty note (normalization.md: "window choice: A spread 9-15 %")
 WINDOW_VARIANTS = {"pre_hi": (-10.0, 0.0), "post_lo": (0.0, 15.0, 25.0), "post_hi": (-50.0, 0.0)}
 WINDOW_SPREAD_WARN = 0.20
+#: THE WHITE-LINE SPREAD OVER WINDOW CHOICES (processing-science audit of 18 Nov 2026, findings 4 and 8): the 12
+#: variants above (the edge step's spread, which the QC warning reads, unchanged) understate how much the window
+#: choice moves the white line, the quantity people reuse. The white-line height (the normalised maximum within
+#: ``WL_RANGE_EV`` of the tabulated edge) is reported over a wider set: the pre-edge end -10..0 eV, the post-edge
+#: start 0..+50 eV and its end -100..0 eV from the window used (36 fits, the 12 above among them).
+WL_VARIANTS = {"pre_hi": (-10.0, -5.0, 0.0), "post_lo": (0.0, 15.0, 25.0, 50.0), "post_hi": (-100.0, -50.0, 0.0)}
+WL_RANGE_EV = (-5.0, 20.0)
 #: TENDER FLUORESCENCE (the engine's normalization.md, "Tender fluorescence (S K, BL4-3): background options"): below
 #: about 3-4 keV a gas I0 counts ~ E^-3, so IF/I0 rises as (E/E_edge)^p over the WHOLE signal, the pre-edge carries a
 #: falling scatter tail and a resonant-Raman foot about 25 eV before the edge. The documented options are used, with
@@ -1522,6 +1529,7 @@ def process_group_v1(group: Mapping, ctx) -> list[dict]:
                                    + (f"; and {len(excluded_points) - 20} more" if len(excluded_points) > 20 else "")
                                    + ". Each such point is left out of its scan's contribution to the average (the "
                                      "other scans cover that energy); it is never interpolated, and the scan is kept."}
+    res["acquisition"] = acquisition_block(kept, E_edge, transmission, np)
     nm = normalize_once(E, y, n, absorber, bt, np, transmission=transmission)
     res[NORMALIZATION_KEY] = {k: v for k, v in nm.items() if k not in ("norm", "mu", "bg")}
     if nm.get("error"):
@@ -1535,6 +1543,9 @@ def process_group_v1(group: Mapping, ctx) -> list[dict]:
         e0 = _f(ctx.xafs.find_e0(E, y))
     except Exception:  # noqa: BLE001
         e0 = None
+    if e0 is not None:
+        res["e0"] = e0_block(E, e0, absorber, np)
+        e0 = res["e0"]["e0_eV"]
     res["steps"].append({"step": "normalize", "params": nm["params"],
                          "outcome": {"e0_eV": e0, "edge_step": nm["A_edge"], "model": nm["model"],
                                      "convention": nm["convention"]}, "flags": []})
@@ -2934,19 +2945,28 @@ def normalize_once(E, y, n, absorber: Mapping, bt: Mapping, np, *, exclude_extra
                    bg=np.asarray(r.info["bg"], float), background=r.info.get("bg_params"),
                    pre_rms=_f(r.info.get("pre_rms")), post_rms=_f(r.info.get("post_rms")),
                    post_level=_post_level(r, np))
-        spread = []
-        for dp in WINDOW_VARIANTS["pre_hi"]:
-            for dl in WINDOW_VARIANTS["post_lo"]:
-                for dh in WINDOW_VARIANTS["post_hi"]:
+        spread, wl = [], []
+        Ev = np.asarray(E, float)
+        in_wl = (Ev >= float(E_edge) + WL_RANGE_EV[0]) & (Ev <= float(E_edge) + WL_RANGE_EV[1])
+        for dp in WL_VARIANTS["pre_hi"]:
+            for dl in WL_VARIANTS["post_lo"]:
+                for dh in WL_VARIANTS["post_hi"]:
                     w = [rng[0], rng[1] + dp, rng[2] + dl, rng[3] + dh]
                     if w[1] <= w[0] + 5 or w[3] <= w[2] + 30:
                         continue
                     try:
-                        a = _f(mback_xrs(el, E, y, w, ed, **opts).info["A_edge"])
+                        rv = mback_xrs(el, E, y, w, ed, **opts)
+                        a = _f(rv.info["A_edge"])
                     except Exception:  # noqa: BLE001
-                        a = None
-                    if a:
+                        a = rv = None
+                    if not a:
+                        continue
+                    if dp in WINDOW_VARIANTS["pre_hi"] and dl in WINDOW_VARIANTS["post_lo"] and dh in WINDOW_VARIANTS["post_hi"]:
                         spread.append((w, a))
+                    if in_wl.any():
+                        h = _f(np.nanmax(np.asarray(rv.norm_xas, float)[in_wl]))
+                        if h is not None:
+                            wl.append(h)
     if spread and A:
         vals = [a for _, a in spread]
         med = statistics.median(vals)
@@ -2957,6 +2977,71 @@ def normalize_once(E, y, n, absorber: Mapping, bt: Mapping, np, *, exclude_extra
                                             "(max - min over the median). The engine's own measurement (normalization.md): "
                                             "noise 1.7 % on A, window choice 9-15 % at normal loading and 16-20 % at about "
                                             "1 % Ir loading, the dominant systematic at low loading.")}
+        h0 = _f(np.nanmax(out["norm"][in_wl])) if in_wl.any() else None
+        if h0 is not None and len(wl) >= 3:
+            out["uncertainty"].update(
+                white_line_height=round(h0, 4), white_line_min=round(min(wl), 4), white_line_max=round(max(wl), 4),
+                white_line_windows_tried=len(wl), white_line_spread=round((max(wl) - min(wl)) / h0, 4),
+                white_line_statement=(
+                    f"The white-line height (the normalised maximum {WL_RANGE_EV[0]:+g} to {WL_RANGE_EV[1]:+g} eV from "
+                    f"the tabulated edge) is {h0:.3f}; over {len(wl)} window choices (pre-edge end -10..0 eV, post-edge "
+                    f"start 0..+50 eV, post-edge end -100..0 eV from the window used) it ranges {min(wl):.3f}-"
+                    f"{max(wl):.3f} ({100 * (max(wl) - min(wl)) / h0:.1f} % of it). That is the normalisation-window "
+                    "uncertainty only; another convention (a flattened post-edge, area normalisation) moves it more, "
+                    "and no self-absorption correction is applied."))
+    return out
+
+
+#: WHAT THE FILES STATE ABOUT THE COUNTS (processing-science audit of 18 Nov 2026, finding 8): the attenuator setting
+#: (the ``filter`` a SPEC #P line states as key=value) of each kept scan, and the counts per point in the post-edge
+#: (the median IF above E_edge + DOSE["post_eV"], as written), with what is NOT corrected.
+NOT_CORRECTED_SAID = ("No dead-time correction beyond the detector column as the beamline wrote it, and no self-"
+                      "absorption (over-absorption) correction is applied.")
+
+
+def acquisition_block(kept: Sequence[Mapping], E_edge: float | None, transmission: bool, np) -> dict:
+    from . import run as R
+
+    filt = [R._header_setup(r.get("header")).get("filter") for r in kept]
+    stated = sorted({v for v in filt if v is not None})
+    counts = [] if transmission or E_edge is None else [
+        float(np.median(r["IF"][m])) for r in kept if (m := np.isfinite(r["IF"]) & (r["E"] > E_edge + DOSE["post_eV"])).sum() >= 3]
+    out: dict = {"attenuator_filter": stated or None,
+                 "attenuator_stated_in": f"{sum(v is not None for v in filt)} of {len(kept)} kept scans",
+                 "post_edge_counts_per_point": ({"median": round(float(np.median(counts)), 1),
+                                                 "min": round(min(counts), 1), "max": round(max(counts), 1),
+                                                 "scans": len(counts)} if counts else None)}
+    parts = [("Attenuator (filter, as the #P line states it): " + ", ".join(f"{v:g}" for v in stated)
+              + f" ({out['attenuator_stated_in']})") if stated else "No attenuator (filter) setting was read from the files' #P key=value lines"]
+    if counts:
+        parts.append(f"counts per point in the post-edge (median IF above E_edge + {DOSE['post_eV']:g} eV, as written): "
+                     f"median {np.median(counts):.0f}, {min(counts):.0f}-{max(counts):.0f} over {len(counts)} kept scans")
+    elif transmission:
+        parts.append("counts per point are not given for transmission (ln(I0/I1) is not a count)")
+    out["statement"] = "; ".join(parts) + ". " + NOT_CORRECTED_SAID
+    return out
+
+
+#: E0 AS REPORTED (processing-science audit of 18 Nov 2026, finding 5): larch find_e0 returns a GRID POINT (the
+#: maximum of the first derivative, no sub-grid interpolation), so it is reported to 0.01 eV with the grid step there
+#: as its resolution, and said apart from the tabulated edge the normalisation locks its step to.
+E0_DEFINITION = ("larch find_e0 on the merged raw IF/I0: the grid point of the maximum first derivative (no sub-grid "
+                 "interpolation; on a rising white line competing maxima can move it by about a grid step or more)")
+
+
+def e0_block(E, e0: float, absorber: Mapping, np) -> dict:
+    E = np.asarray(E, float)
+    k = int(np.argmin(np.abs(E - e0)))
+    steps = np.diff(E[max(0, k - 2):k + 3])
+    step = float(np.median(steps)) if steps.size else None
+    tab = absorber.get("E_edge_eV")
+    out = {"e0_eV": round(float(e0), 2), "definition": E0_DEFINITION, "grid_step_eV": round(step, 3) if step else None,
+           "tabulated_edge_eV": tab}
+    out["statement"] = (f"E0 {out['e0_eV']:.2f} eV: {E0_DEFINITION}; the grid step there is "
+                        + (f"{step:.2f} eV, its resolution" if step else "unknown")
+                        + (f". The normalisation locks its step at the tabulated {absorber.get('element')} "
+                           f"{absorber.get('edge')} edge, {tab:g} eV, a different definition"
+                           if isinstance(tab, (int, float)) else "") + ".")
     return out
 
 

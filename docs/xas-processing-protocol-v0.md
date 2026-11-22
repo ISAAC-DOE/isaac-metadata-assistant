@@ -111,8 +111,12 @@ contributing scans' sum over the sum of their levels relative to the merge, fitt
 is the raw scans' spread, edge-step differences included); normalise the average ONCE (`mback_xrs`, Victoreen + McMaster, constrained background, the step
 locked at the tabulated edge; element and edge from the scientist's `set_absorber`, else the files' agreeing absorber
 evidence, else the edge the survey identified from the scan range, said as unconfirmed); E0 = larch `find_e0` on the
-average. Uncertainty note: the edge step over 12 windows around the one used (max - min over the median; warn above
-20 %). QC: `no_edge`, `edge_step_implausible`, `post_edge_not_at_1` fail (never offered for approval, as v0); warns
+average (a grid point of the maximum first derivative: reported to 0.01 eV with the grid step there as its resolution,
+said apart from the tabulated edge the step is locked to). Uncertainty note: the edge step over 12 windows around the
+one used (max - min over the median; warn above 20 %), and the white-line height (normalised maximum -5..+20 eV from
+the tabulated edge) over 36 windows (pre-edge end -10..0, post-edge start 0..+50, post-edge end -100..0 eV). The result's
+`acquisition` block states the attenuator (`filter` on the #P line) and the post-edge counts per point, and that no
+dead-time beyond the beamline's column and no self-absorption correction is applied. QC: `no_edge`, `edge_step_implausible`, `post_edge_not_at_1` fail (never offered for approval, as v0); warns
 `normalization_window_sensitive`, `most_scans_dropped`, `logbook_inferred_note_applied`, `anchor_fallback_route_used`,
 `normalization_window_group_own`, `single_scan`, `no_energy_reference` (also a review flag: a bulk approval refuses
 it), `kept_scan_not_merged`, `override_not_applied`, `measurement_mode_unknown` (the engine's `measurement_mode` read

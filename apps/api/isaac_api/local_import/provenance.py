@@ -190,6 +190,13 @@ def summary(result: Mapping, *, merged_series_id: str | None = None, merged_stde
         + "; the post-edge follows the McMaster cross-section (not flattened to 1)"
         + (f"; edge step {step} in raw IF/I0 units" + (f", spread {spread} over nearby windows" if spread else "")
            + f" ({EDGE_STEP_NOT_A_DESCRIPTOR})" if step else "") + ".")
+    wl = (nm.get("uncertainty") or {}).get("white_line_statement")
+    if wl:
+        parts.append(wl)
+    if (result.get("e0") or {}).get("statement"):
+        parts.append(result["e0"]["statement"])
+    if (result.get("acquisition") or {}).get("statement"):
+        parts.append(result["acquisition"]["statement"])
     pts = ((result.get("point_exclusions") or {}).get("points")) or []
     if pts:
         scans = sorted({str(p.get("scan_id")) for p in pts})

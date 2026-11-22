@@ -1597,3 +1597,23 @@ def test_a_scan_ending_early_leaves_no_step_in_the_merge_and_full_coverage_is_th
     assert "Scale-matched where coverage differs" in said["statement"] and "Nothing is interpolated" in said["statement"]
     avg2, _ = average_scans(scans[::2], "uniform", 1, True, True)
     assert EX.coverage_matched_mean(scans[::2], avg2, np) is None     # full coverage: nothing to say, nothing changed
+
+
+# --- E0, the white-line spread and the counts, disclosed (audit 18 Nov, findings 4, 5, 8) ----------------------------
+
+
+def test_e0_the_white_line_spread_and_the_counts_are_disclosed(tmp_path):
+    bdir, _ = imported(tmp_path, _two_groups())
+    r = by_run(v1_results(bdir), "02_SYN_ZZ2")
+    e0 = r["e0"]
+    assert e0["e0_eV"] == round(e0["e0_eV"], 2) and r["outputs"]["e0_eV"] == e0["e0_eV"]
+    assert e0["grid_step_eV"] == pytest.approx(0.25) and "grid point of the maximum first derivative" in e0["statement"]
+    assert e0["tabulated_edge_eV"] == pytest.approx(E_EDGE, abs=1) and "a different definition" in e0["statement"]
+    u = r[EX.NORMALIZATION_KEY]["uncertainty"]
+    assert u["white_line_windows_tried"] > u["windows_tried"] >= 6
+    assert u["white_line_min"] <= u["white_line_height"] <= u["white_line_max"]
+    assert "white-line height" in u["white_line_statement"] and "no self-absorption correction" in u["white_line_statement"]
+    acq = r["acquisition"]
+    assert acq["attenuator_filter"] == [10.0] and acq["post_edge_counts_per_point"]["median"] > 0
+    assert "Attenuator (filter, as the #P line states it): 10" in acq["statement"]
+    assert EX.NOT_CORRECTED_SAID in acq["statement"]
