@@ -25,7 +25,7 @@ from __future__ import annotations
 
 import re
 from collections import Counter
-from typing import Any, Iterable, Mapping
+from typing import Any, Iterable, Mapping, Sequence
 
 from . import bundle as B
 from . import scan_notes as SN
@@ -522,6 +522,7 @@ def readings_to_interpretations(bundle: Mapping, findings: Mapping, *, model_id:
         if c["target_field_path"]:
             cands.setdefault((c["run_id"], c["target_field_path"]), []).append(c["candidate_id"])
     paths = {p for (_, p) in missing} | {p for (_, p) in cands}
+    stale_lines = stale_comment_index(bundle)
 
     planned: list[tuple[dict, dict]] = []
     scan_notes: list[dict] = []
@@ -656,6 +657,13 @@ def readings_to_interpretations(bundle: Mapping, findings: Mapping, *, model_id:
             continue
         source_id = src_by_path.get(rel)
         strength = f.get("strength") if f.get("strength") in ("stated", "inferred") else None
+        # STALE_COMMENT_RULE_ID: a reading of the potential from a comment line flagged as possibly left over from an
+        # earlier run is never loaded as "stated": it is an inference, and the suggestion says why
+        cited = re.search(r"\d+", str(source["locator"]))
+        stale = stale_lines.get((rel, int(cited.group(0)))) if path in STALE_FIELDS and cited else None
+        if stale is not None:
+            strength = "inferred"
+            path_note = f"The line cited is possibly stale: {stale} Loaded as an inference, never as stated. " + path_note
         fields = {
             "proposed_value": f["value"],
             "rationale": (path_note + str(f.get("reasoning") or ""))[:1000],
@@ -703,3 +711,404 @@ def ai_hints(bundle: Mapping, target_ids: Iterable[str], *, limit: int = 5) -> l
             }
         h["targets"] += 1
     return sorted(by_value.values(), key=lambda h: -h["targets"])[:limit]
+
+
+# --- suggestions the IMPORT reads from the files themselves (audit of 18 Nov 2026) ------------------------------------
+#
+# A value the files state is read; a value that needs one step of interpretation is a SUGGESTION: a candidate that
+# NEEDS REVIEW, with the evidence it rests on and a reason that says what was read and why it is only a suggestion. A
+# scientist confirms it (one decision) or corrects it; no record carries it before that. Each is built through the
+# engine's own candidate type and ``bundle._candidate_record``, so its shape is every other candidate's and the
+# existing questions ask it. Nothing here writes a value silently.
+
+
+def suggested_candidate(*, engine_id: str, bundle_cid: str, run_id: str | None, key: str, path: str, value: Any,
+                        rule_id: str, rule: str, reason: str, witnesses: Sequence[Mapping], writable) -> dict:
+    """ONE candidate that needs review (``value`` may be ``None``: the reason then says what the files write and
+    why no value is offered). ``witnesses``: ``{relative_path, source_id, locator, literal, supports, normalization}``
+    in the order they are shown; the first ``supports`` one carries the value."""
+    from .. import historical_import as hist
+
+    evidence = []
+    for w in list(witnesses)[:B.MAX_EVIDENCE_PER_CANDIDATE]:
+        rel = w.get("relative_path")
+        evidence.append({
+            "evidence_id": f"{bundle_cid}.e{len(evidence) + 1:03d}",
+            "source_id": w.get("source_id"),
+            "relative_path": rel if w.get("source_id") else None,
+            "locator_kind": "source_file" if w.get("source_id") else "described",
+            "locator": str(w.get("locator") or ""),
+            "statement_key": key,
+            "literal_value": w.get("literal"),
+            "method": "deterministic_parser",
+            "method_id": rule_id,
+            "relation": "supports" if value is not None and w.get("supports") else "context",
+            "reading_index": None,
+            "normalization": list(w.get("normalization") or ()),
+        })
+    sources = tuple(dict.fromkeys(str(w.get("relative_path")) for w in witnesses if w.get("relative_path")))
+    engine = hist.SemanticCandidate(
+        candidate_id=engine_id,
+        kind=hist.CANDIDATE_KIND_FIELD,
+        determinism=hist.DETERMINISM_DETERMINISTIC,
+        rule=rule,
+        supporting_source_ids=sources,
+        target_field_path=path,
+        proposed_value=value,
+        not_proposable_reason=reason,
+        supporting_statement_total=len(witnesses),
+        distinct_sources=len(sources),
+    )
+    return B._candidate_record(engine, bundle_cid=bundle_cid, run_id=run_id, key=key, evidence=evidence,
+                               total=len(witnesses), writable=writable)
+
+
+CONFIRM_OR_CORRECT = "A scientist confirms it, or corrects it, before any record carries it."
+
+# --- the technique, from the instrument configuration (rule 7) --------------------------------------------------------
+
+TECHNIQUE_RULE_ID = "isaac.suggest.technique_from_configuration.v1"
+TECHNIQUE_RULE = (
+    f"{TECHNIQUE_RULE_ID}: the technique is suggested from what the INSTRUMENT recorded, never from a macro's, a "
+    "script's or a function's name. (a) A SPEC acquisition whose emission motor (`emiss` / `emission` in #O / #P) is "
+    "held, during an energy scan of the monochromator (gscan mono / energy), within the table's tolerance of an "
+    "emission line of an element whose absorption edge that scan crosses is high-energy-resolution "
+    "fluorescence-detected absorption: HERFD-XAS. (b) An SSRL XDC run whose own experiment file states EXPT_TYPE with "
+    "a word that is one of the schema's techniques (XAS) is that technique. Line and edge energies: "
+    "readers.xray_tables (a snapshot of xraydb). One suggestion for the beamtime, VALUED only when every run that "
+    "records anything about the technique states the same one: a run whose emission motor is held off the line, or "
+    "whose experiment file states another word, leaves no value and is named, and the runs' own technique readings "
+    "then stay as they were. Runs that record nothing are counted apart and named. It needs review: a scientist "
+    "confirms or corrects it."
+)
+TECHNIQUE_KEY = "technique_from_configuration"
+HERFD = "HERFD-XAS"
+#: the engine's macro reader: a technique candidate whose every witness it read carries a macro's or a script's NAME
+MACRO_READER_ID = "bl15_macro_v1"
+NOT_A_TECHNIQUE_REASON = (
+    "A macro's, a script's or a function's name is not a statement of the technique, and the instrument "
+    f"configuration of this beamtime states one for every run that records it (rule {TECHNIQUE_RULE_ID}: see the "
+    "technique suggestion). The names "
+    "are kept here as evidence of what was run; they no longer ask for the technique of each run."
+)
+_EMISSION_MOTORS = ("emiss", "emission")
+_ENERGY_SCAN_MOTORS = ("mono", "energy")
+_MAX_TECHNIQUE_WITNESS_RUNS = 6
+
+
+def is_code_named_technique(candidate: Mapping) -> bool:
+    """A technique candidate that rests ONLY on what the macro reader read (a ``qdo`` include, a ``def`` symbol, a
+    helper script's function): a name, not a statement of the technique."""
+    witnesses = [e for e in candidate.get("evidence") or () if e.get("method") != "ai_interpretation"]
+    return (candidate.get("target_field_path") == TECHNIQUE_PATH and bool(witnesses)
+            and all(e.get("method_id") == MACRO_READER_ID for e in witnesses))
+
+
+def energy_scan_range(command: Any) -> tuple[float, float] | None:
+    """``(low, high)`` eV of a SPEC ``gscan`` of the monochromator (``gscan mono|energy E0 E1 step E2 step ... time``):
+    the start and every region end. ``None`` for any other scan (a stage or optics scan is no energy scan)."""
+    tokens = str(command or "").split()
+    if len(tokens) < 5 or tokens[0] != "gscan" or tokens[1] not in _ENERGY_SCAN_MOTORS:
+        return None
+    try:
+        numbers = [float(t) for t in tokens[2:-1]]
+    except ValueError:
+        return None
+    energies = [numbers[0], *numbers[1::2]]
+    return (min(energies), max(energies)) if len(energies) >= 2 else None
+
+
+def _herfd_reading(emission: Mapping | None, command: Mapping | None) -> dict | None:
+    """What ONE SPEC run's header records about the technique, or ``None`` when it records nothing (no emission
+    motor, or no energy scan of the monochromator). ``state`` ``states``: the emission motor is held on ONE emission
+    line of an element whose absorption edge the scan crosses (HERFD-XAS). ``state`` ``blocks``: the motor is there
+    during an energy scan but not so (off every such line, on several energies, on more than one line): the run
+    states something else, so no technique is offered for the beamtime."""
+    from .readers import xray_tables as X
+
+    if emission is None or command is None:
+        return None
+    held = [e for e in emission.get("evidence") or ()
+            if any(f"`{m}`" in str(e.get("locator") or "") for m in _EMISSION_MOTORS)]
+    scans = [(e, r) for e in command.get("evidence") or () if (r := energy_scan_range(e.get("literal_value"))) is not None]
+    if not held or not scans:
+        return None
+    # the HEADER's own positions only (every scan's, as far as the evidence window holds them): a macro call's
+    # argument is what was asked for, not what the instrument recorded
+    low, high = min(r[0] for _, r in scans), max(r[1] for _, r in scans)
+    base = {"held": held[0], "scan": scans[0][0], "low": low, "high": high}
+    try:
+        energies = sorted({float(e.get("literal_value")) for e in held})
+    except (TypeError, ValueError):
+        return {**base, "state": "blocks", "energies": [], "why": "its emission motor position does not read as a number"}
+    if len(energies) != 1:
+        return {**base, "state": "blocks", "energies": energies, "why": "its emission motor is held at several energies"}
+    energy = energies[0]
+    hits = [h for h in X.lines_near(energy)
+            if (edge := X.edge_energy(h["element"], h["edge"])) is not None and low <= edge <= high]
+    if len(hits) != 1:
+        return {**base, "state": "blocks", "energies": energies,
+                "why": ("that is no emission line of an element whose absorption edge the scan crosses" if not hits
+                        else "that is within reach of more than one emission line")}
+    hit = hits[0]
+    return {**base, "state": "states", "technique": HERFD, "energy": energy,
+            "element": hit["element"], "line": hit["line"], "line_eV": hit["energy_eV"], "edge": hit["edge"],
+            "edge_eV": X.edge_energy(hit["element"], hit["edge"])}
+
+
+def technique_readings(runs: Sequence[Mapping], candidates: Sequence[Mapping], xdc_runs: Sequence[tuple]) -> dict[str, dict]:
+    """``{run_id: reading}`` for every measurement run whose instrument files record something about the technique
+    (``state`` ``states`` with a ``technique``, or ``blocks``): a SPEC run's emission motor (:func:`_herfd_reading`),
+    an XDC run's ``EXPT_TYPE`` (``states`` when the word is on the schema's technique list, ``blocks`` when it is
+    another word). A run with neither is not listed: it records nothing."""
+    by_run: dict[str, dict[str, Mapping]] = {}
+    for c in candidates:
+        if c.get("run_id") and c.get("statement_key") in ("emission_energy", "scan_command"):
+            by_run.setdefault(c["run_id"], {}).setdefault(c["statement_key"], c)
+    allowed = set(B.allowed_values(TECHNIQUE_PATH) or ())
+    stated = {run_id: st for run_id, g, _scans in xdc_runs for st in g.statements if st.get("key") == "exp_expt_type"}
+    out: dict[str, dict] = {}
+    for run in runs:
+        if not run.get("run_candidate"):
+            continue
+        rid = run["run_id"]
+        if run.get("source_type") == B.SPEC_ACQUISITION_SOURCE_TYPE:
+            got = _herfd_reading(by_run.get(rid, {}).get("emission_energy"), by_run.get(rid, {}).get("scan_command"))
+            if got is not None:
+                out[rid] = got
+        elif run.get("source_type") == B.XDC_RUN_SOURCE_TYPE and rid in stated:
+            st = stated[rid]
+            out[rid] = ({"state": "states", "technique": st["literal"], "expt": st} if st.get("literal") in allowed else
+                        {"state": "blocks", "expt": st,
+                         "why": f"its experiment file states EXPT_TYPE {st.get('literal')}, which is not one of the record's techniques"})
+    return out
+
+
+def _named(runs: Sequence[Mapping], limit: int = 5) -> str:
+    names = [str(r.get("stem") or r.get("label")) for r in runs]
+    return ", ".join(names[:limit]) + (f" and {len(names) - limit} more" if len(names) > limit else "")
+
+
+def technique_candidate(runs: Sequence[Mapping], readings: Mapping[str, Mapping], sources: Mapping[str, str],
+                        bundle_cid: str, writable) -> dict | None:
+    """ONE beamtime-level candidate for ``system.technique`` from :func:`technique_readings`, or ``None`` when no run
+    states one. VALUED only when every run that records anything about the technique states the same one: a run that
+    states another, or records something else (``blocks``), leaves NO value, and it is named. Runs that record nothing
+    (a processed or averaged file with no emission motor, a run with no experiment file) are counted apart and named:
+    the suggestion does not rest on them."""
+    from .readers import xray_tables as X
+
+    measured = [r for r in runs if r.get("run_candidate")
+                and r.get("source_type") in (B.SPEC_ACQUISITION_SOURCE_TYPE, B.XDC_RUN_SOURCE_TYPE)]
+    stating = [r for r in measured if (readings.get(r["run_id"]) or {}).get("state") == "states"]
+    blocking = [r for r in measured if (readings.get(r["run_id"]) or {}).get("state") == "blocks"]
+    silent = [r for r in measured if r["run_id"] not in readings]
+    if not stating:
+        return None
+    recording = len(stating) + len(blocking)
+    by_technique: dict[str, list[Mapping]] = {}
+    for r in stating:
+        by_technique.setdefault(readings[r["run_id"]]["technique"], []).append(r)
+    id_of = {p: s for s, p in sources.items()}
+    witnesses: list[dict] = []
+    said: list[str] = []
+    value = next(iter(by_technique)) if len(by_technique) == 1 and not blocking else None
+
+    def witness(got: Mapping, technique: str | None) -> list[dict]:
+        if "held" in got:
+            h, sc = got["held"], got["scan"]
+            literal = str(h.get("literal_value"))
+            derive = ([{"step": "derive", "rule_id": TECHNIQUE_RULE_ID, "from": literal, "to": technique, "unit": None}]
+                      if technique else [])
+            return [{"relative_path": h.get("relative_path"), "source_id": h.get("source_id"), "locator": h.get("locator"),
+                     "literal": literal, "supports": bool(technique), "normalization": derive},
+                    {"relative_path": sc.get("relative_path"), "source_id": sc.get("source_id"), "locator": sc.get("locator"),
+                     "literal": sc.get("literal_value"), "supports": False, "normalization": []}]
+        st = got["expt"]
+        rel = st.get("source_relative_path")
+        return [{"relative_path": rel, "source_id": id_of.get(rel), "locator": st.get("locator"), "literal": st["literal"],
+                 "supports": bool(technique), "normalization": []}]
+
+    for technique, members in by_technique.items():
+        of = f"{len(members)} of the {recording} measurement runs that record it"
+        first = readings[members[0]["run_id"]]
+        if "held" in first:
+            lines = sorted({(readings[r["run_id"]]["element"], readings[r["run_id"]]["line"]) for r in members})
+            energies = sorted({readings[r["run_id"]]["energy"] for r in members})
+            said.append(
+                f"{technique}: the emission spectrometer is held at {', '.join(f'{e:g}' for e in energies[:4])} eV during "
+                f"an energy scan from {first['low']:g} to {first['high']:g} eV in {of} (the emission motor's position in "
+                f"the scan header, e.g. {first['held'].get('locator')} of {first['held'].get('relative_path')}). That is "
+                f"the {' / '.join(f'{el} {line}' for el, line in lines)} emission line ({first['line_eV']:g} eV, within "
+                f"{X.LINE_TOLERANCE_EV:g} eV), and the scan crosses the {first['element']} {first['edge']} absorption "
+                f"edge ({first['edge_eV']:g} eV): an absorption scan recorded at one emission line with a crystal "
+                f"analyser, HERFD-XAS. Energies: {X.source()}.")
+        else:
+            st = first["expt"]
+            said.append(f"{technique}: the run's own experiment file states EXPT_TYPE {st['literal']} in {of} "
+                        f"(e.g. {str(st.get('locator')).replace('line:', 'line ')} of {st.get('source_relative_path')}).")
+        for r in members[:_MAX_TECHNIQUE_WITNESS_RUNS]:
+            witnesses += witness(readings[r["run_id"]], technique if value is not None else None)
+    for r in blocking[:_MAX_TECHNIQUE_WITNESS_RUNS]:
+        witnesses += witness(readings[r["run_id"]], None)
+    apart = ""
+    if silent:
+        apart = (f" {len(silent)} other measurement run{'s record' if len(silent) != 1 else ' records'} nothing about the "
+                 f"technique (no emission motor in an energy scan, or no experiment file; a processed or averaged file is "
+                 f"one such): {_named(silent)}. The suggestion does not rest on "
+                 f"{'them' if len(silent) != 1 else 'it'}: confirm it for the beamtime only if it holds there too.")
+    if value is not None:
+        reason = (f"Suggested from the instrument configuration, never from a macro or script name. {said[0]}{apart} "
+                  f"{CONFIRM_OR_CORRECT}")
+    else:
+        counts = "; ".join(f"{t} ({len(m)} run{'s' if len(m) != 1 else ''})" for t, m in by_technique.items())
+        other = ""
+        if blocking:
+            whys: dict[str, list[Mapping]] = {}
+            for r in blocking:
+                got = readings[r["run_id"]]
+                at = (f"its emission motor is held at {', '.join(f'{e:g}' for e in got['energies'][:4])} eV during an energy "
+                      f"scan, and {got['why']}" if got.get("energies") and "several" not in got["why"] else got["why"])
+                whys.setdefault(at, []).append(r)
+            other = (" " + " ".join(f"{len(rs)} run{'s record' if len(rs) != 1 else ' records'} something else ({why}): "
+                                    f"{_named(rs)}." for why, rs in whys.items()))
+        reason = (f"No technique is offered for the beamtime: the instrument configurations of its runs do not all state "
+                  f"one. Stated: {counts}. " + " ".join(said) + other + apart
+                  + " Tell me the technique in answer to this question; where the record groups differ, answer this "
+                  "question for each group in turn. Nothing was taken from a macro or script name, and the runs' own "
+                  "technique readings are left as they were.")
+    return suggested_candidate(
+        engine_id=f"shared::{TECHNIQUE_RULE_ID}", bundle_cid=bundle_cid, run_id=None, key=TECHNIQUE_KEY, path=TECHNIQUE_PATH,
+        value=value, rule_id=TECHNIQUE_RULE_ID, rule=TECHNIQUE_RULE, reason=reason, witnesses=witnesses, writable=writable)
+
+# --- a field of one beamtime's standard is asked only where a source mentions it (audit item 9) -----------------------
+
+#: Optional fields that describe ONE kind of sample (a diluted pellet standard): asked of a run only when a source of
+#: that run mentions it: ``path -> the words that mention it`` (matched without case, anywhere in the run's name, its
+#: scan-header comment lines and what its candidates read). Asking them of every sample of every beamtime put three
+#: questions about a pellet on each electrode, film and foil.
+MENTION_GATED_FIELDS: Mapping[str, re.Pattern] = {
+    "sample.composition.CuO2_mass_fraction": re.compile(r"cuo2", re.IGNORECASE),
+    "sample.composition.sucrose_mass_fraction": re.compile(r"sucrose|sugar", re.IGNORECASE),
+    "sample.geometry.pellet_diameter_mm": re.compile(r"pellet", re.IGNORECASE),
+}
+#: the gate as shipped (a test turns :data:`MENTION_GATED_FIELDS` off to show every other value id is unchanged)
+MENTION_GATED_FIELDS_DEFAULT = tuple(MENTION_GATED_FIELDS)
+MENTION_GATE_RULE_ID = "isaac.import.optional_field_asked_where_mentioned.v1"
+
+
+def run_source_texts(runs: Sequence[Mapping], candidates: Sequence[Mapping], statements: Sequence[Mapping]) -> dict[str, str]:
+    """``{run_id: text}``: what each run's own sources say, for :func:`asks_field` — its name, every literal its
+    candidates observed, and its scan-header comment lines (``statements``: the generic readers' kept statements)."""
+    parts: dict[str, list[str]] = {r["run_id"]: [str(r.get("stem") or ""), str(r.get("label") or "")] for r in runs}
+    for c in candidates:
+        if c.get("run_id") in parts:
+            parts[c["run_id"]] += [str(x) for x in c.get("observed_literals") or ()]
+    for st in statements:
+        if st.get("run_id") in parts and st.get("concept") == B.XDC_COMMENT_STATEMENT_KEY and isinstance(st.get("raw_literal"), str):
+            parts[st["run_id"]].append(st["raw_literal"])
+    return {rid: "\n".join(p) for rid, p in parts.items()}
+
+
+def asks_field(path: str, text: str | None) -> bool:
+    """Whether ``path`` is asked of a run whose sources say ``text``: always, except a :data:`MENTION_GATED_FIELDS`
+    field, which is asked only where the text mentions it."""
+    words = MENTION_GATED_FIELDS.get(path)
+    return words is None or bool(words.search(text or ""))
+
+# --- a comment line left over from an earlier run (rule 8, the safety half) -------------------------------------------
+
+STALE_COMMENT_RULE_ID = "isaac.import.comment_possibly_stale.v1"
+STALE_COMMENT_KIND = "comment_possibly_stale"
+SETPOINT_PATH = "context.electrochemistry.potential_setpoint_V"
+POTENTIAL_SCALE_PATH = "context.electrochemistry.potential_scale"
+#: the fields a possibly stale comment line is not offered for: what it says about the POTENTIAL (the name's own
+#: potential token is what changed); what the same header says about the electrolyte is read as before
+STALE_FIELDS = frozenset({SETPOINT_PATH, POTENTIAL_SCALE_PATH})
+
+
+def xdc_comment_lines(g: Any, run_scans: Sequence[Mapping]) -> list[tuple]:
+    """``(scan_index, relative_path, locator, literal)`` for every comment line (``bundle.XDC_COMMENT_LINES``) of ONE
+    ``ssrl_xdc_v1`` run's scans: the lines rule ``bundle.XDC_COMMENT_RULE_ID`` reads."""
+    scans = {sc.get("relative_path") for sc in run_scans}
+    return [(st.get("scan_index"), st.get("source_relative_path"), str(st.get("locator") or ""), st["literal"])
+            for st in g.statements
+            if st.get("source_relative_path") in scans and isinstance(st.get("literal"), str)
+            and B.is_xdc_comment_line(st.get("key"), st.get("locator"))]
+
+
+def _name_potential_key(stem: str) -> tuple | None:
+    """What a run's name says about the potential, to COMPARE two names: ``None`` when it says nothing."""
+    from ..bl15 import filenames as fn
+
+    reading = fn.name_potential(str(stem).split("_"))
+    if reading.kind is None:
+        return None
+    said = reading.token if reading.kind != fn.NAME_PULSED else "_".join(lv.token for lv in reading.levels)
+    value = (None if reading.volts is None else float(reading.volts) + 0.0,
+             tuple(float(lv.volts) + 0.0 for lv in reading.levels))
+    return (reading.kind, value, said)
+
+
+def stale_comment_flags(xdc_runs: Sequence[tuple]) -> dict[str, list[dict]]:
+    """``{run_id: [flag]}`` (rule :data:`STALE_COMMENT_RULE_ID`): a comment line that mentions a potential and is
+    IDENTICAL to the line the run before it was acquired with (an unbroken chain back to the run the line first
+    appeared on), while the potential the run's own name writes differs from that first run's. The comment lines of
+    an SSRL XDC scan are typed once and stay until retyped, so such a line is possibly the earlier run's. Runs are
+    taken in acquisition order (each run's earliest scan time, when every run states one; else as listed). A name
+    that states no potential is compared with nothing; a name back at the first run's potential is not flagged."""
+    from .questions import header_potential_mentions
+
+    rows = []
+    for position, (run_id, g, run_scans) in enumerate(xdc_runs):
+        times = [sc.get("timestamp_naive") for sc in run_scans if sc.get("timestamp_naive")]
+        lines: dict[str, tuple] = {}
+        for index, rel, locator, literal in sorted(xdc_comment_lines(g, run_scans), key=lambda l: (l[0] is None, l[0] or 0, l[2])):
+            if literal not in lines and header_potential_mentions(literal):
+                lines[literal] = (index, rel, locator)
+        rows.append({"run_id": run_id, "label": g.label, "start": min(times) if times else None, "position": position,
+                     "lines": lines, "name": _name_potential_key(g.label)})
+    if rows and all(r["start"] for r in rows):
+        rows.sort(key=lambda r: (r["start"], r["position"]))
+    out: dict[str, list[dict]] = {}
+    origin: dict[str, dict] = {}  # line text -> the run it first appeared on, while every run since has carried it
+    for row in rows:
+        origin = {text: first for text, first in origin.items() if text in row["lines"]}
+        for text, (index, rel, locator) in row["lines"].items():
+            first = origin.setdefault(text, row)
+            if first is row or row["name"] is None or first["name"] is None or row["name"][:2] == first["name"][:2]:
+                continue
+            out.setdefault(row["run_id"], []).append({
+                "kind": STALE_COMMENT_KIND, "rule_id": STALE_COMMENT_RULE_ID, "locator": locator, "severity": "flag",
+                "source_relative_path": rel, "scan_index": index, "line": text, "first_run": first["label"],
+                "detail": (f"The comment line {text!r} is identical to the one run {first['label']} was acquired with, "
+                           f"while the potential in the file name changed ({first['name'][2]} there, {row['name'][2]} "
+                           "here): it is possibly left over from that run, not a statement about this one."),
+            })
+    return out
+
+
+def stale_comment_reason(flags: Sequence[Mapping] | None, lines: Iterable[str]) -> str | None:
+    """Why NO potential is offered from comment lines ``lines`` of a run flagged ``flags``: every one of them is a
+    possibly stale line (``None`` when one is not, or the run has no flag)."""
+    by_line = {f["line"]: f for f in flags or ()}
+    lines = list(dict.fromkeys(lines))
+    if not lines or not all(line in by_line for line in lines):
+        return None
+    return (f"{by_line[lines[0]]['detail']} The potential it states is not offered as this run's. The line and the "
+            "file name's own token are both shown and neither is preferred: tell me the potential held during this scan.")
+
+
+def stale_comment_index(bundle: Mapping) -> dict[tuple[str, int], str]:
+    """``{(scan file, line number): detail}`` for every possibly stale comment line of the bundle's runs
+    (their ``comment_possibly_stale`` anomalies), under each scan file of the run: an AI reading may cite any."""
+    out: dict[tuple[str, int], str] = {}
+    for run in bundle.get("runs") or ():
+        for a in (run.get("other_relationships") or {}).get("anomalies") or ():
+            if a.get("kind") != STALE_COMMENT_KIND:
+                continue
+            number = re.search(r"\d+", str(a.get("locator") or ""))
+            for sc in run.get("scans") or ():
+                if number and sc.get("relative_path"):
+                    out[(sc["relative_path"], int(number.group(0)))] = str(a.get("detail") or "")
+    return out

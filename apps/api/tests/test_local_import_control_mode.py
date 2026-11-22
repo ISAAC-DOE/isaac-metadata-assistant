@@ -272,7 +272,8 @@ def test_control_mode_value_ids_come_after_every_older_fields_ids(grouped):
     nums = [int(m["value_id"].split("-")[1]) for m in ms]
     older = [n for n, m in zip(nums, ms) if m["target_field_path"] not in (CM, CURRENT)]  # CURRENT: 1.7.0, after CM
     newer = [n for n, m in zip(nums, ms) if m["target_field_path"] == CM]
-    assert older == list(range(1, len(older) + 1)) and min(newer) > max(older)
+    # in order, each once (a value that is not asked keeps its number, so there may be gaps: MENTION_GATE_RULE_ID)
+    assert older == sorted(set(older)) and older[0] == 1 and min(newer) > max(older)
 
 
 # --- a 1.4.0 bundle --------------------------------------------------------------------------------

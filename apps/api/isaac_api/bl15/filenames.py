@@ -138,6 +138,32 @@ RULE_BARE_VOLT = (
     "potential magnitude already in volts. UNEXERCISED by the measured corpus, "
     "which always writes either `<digits>mV` or the `p`-decimal form."
 )
+RULE_SIGNED_POTENTIAL = (
+    "bl15.filenames.signed_potential.v1: a potential token with a leading "
+    "lower-case `m` or a `-` (`m800mV`, `-500mV`, `m0p15V`, `m0V`) states a "
+    "NEGATIVE potential: the letter stands in for a minus sign where a `-` would "
+    "break the name, as `p` stands in for a decimal point. A capital `M` is no "
+    "sign (a metal's name, a molarity). The magnitude is read as for an unsigned "
+    "token (millivolts as digits/1000) and the sign applied; zero stays zero. "
+    "Reading the digits and dropping the sign reports a potential the "
+    "measurement was never held at. NO reference basis is implied."
+)
+RULE_NO_SINGLE_SETPOINT = (
+    "bl15.filenames.no_single_setpoint.v1: a name whose potential words do not "
+    "state ONE potential held during the measurement gives no set-point. Two "
+    "cases: several DIFFERENT potential tokens (`100mV_to_1200mV`, a range; "
+    "`0p2V_1p4V`, a sweep window), where choosing one would be a guess; and a "
+    "name whose last potential word is `OCV` / `OCP` (`1200mV_OCV`), which was "
+    "measured at open circuit after that potential. Each such token is kept "
+    "as an unread token under this rule, so it is shown and never a value. "
+    "The same potential written twice is one potential."
+)
+RULE_PULSED_LEVELS = (
+    "bl15.filenames.pulsed_levels.v1: a name that marks a potential token "
+    "`Pos` or `Neg` (`1200mVPos_m400mVNeg`, `1200mVpos_m700mV`) writes the two "
+    "levels of a PULSED step. Neither level is the potential the measurement "
+    "was held at, so no token of such a name is read as a set-point."
+)
 RULE_FILTER_COUNT = (
     "bl15.filenames.filter_count.v1: `filter<n>`, `f<n>` and `Filter<n>` all "
     "state the same filter number; the short `f<n>` form is what the MERGE "
@@ -300,6 +326,11 @@ class _ScanState:
     """Carried across the tokens of ONE stem. Holds no cross-file state."""
 
     bare_integers_seen: int = 0
+    #: every token of the stem and the index of the one being read: a potential
+    #: token means what it means only beside the name's other potential tokens
+    tokens: tuple[str, ...] = ()
+    index: int = 0
+    potential: "NamePotential | None" = None
 
 
 Recognizer = Callable[[str, NamingProfile, _ScanState], TokenReading | None]
@@ -454,37 +485,145 @@ def _recognize_cycling(
 _MILLIVOLT = re.compile(r"^(\d+)mv$", re.IGNORECASE)
 _P_VOLT = re.compile(r"^(\d+)p(\d+)v$", re.IGNORECASE)
 _BARE_VOLT = re.compile(r"^(\d+)v$", re.IGNORECASE)
+#: a leading lower-case `m` or a `-` on a potential token (:data:`RULE_SIGNED_POTENTIAL`); never a capital `M`
+_SIGN = re.compile(r"^(?:m|-)(?=\d)")
+#: a potential token marked as one level of a pulse (:data:`RULE_PULSED_LEVELS`)
+_PULSE_SIDE = re.compile(r"^(?P<level>.*\dm?v)(?:pos|neg)$", re.IGNORECASE)
+#: open circuit: no potential is applied, so there is no set-point to read
+_OPEN_CIRCUIT = re.compile(r"^oc[vp]$", re.IGNORECASE)
+
+NAME_SETPOINT = "setpoint"
+NAME_OPEN_CIRCUIT = "open_circuit"
+NAME_PULSED = "pulsed"
+NAME_SEVERAL = "several"
+
+
+@dataclass(frozen=True)
+class PotentialToken:
+    """One potential token of a name: where it is, what it writes, and the rule that read it."""
+
+    index: int
+    token: str
+    volts: float | int
+    rule: str
+
+
+@dataclass(frozen=True)
+class NamePotential:
+    """What the potential tokens of ONE name state together.
+
+    ``kind`` is :data:`NAME_SETPOINT` (ONE potential: ``index``/``token``/
+    ``volts``/``rule`` are the last plain potential token's; ``earlier`` are the
+    tokens before it that write the same potential), :data:`NAME_OPEN_CIRCUIT`
+    (the name's last potential word is ``OCV`` / ``OCP``; ``index``/``token`` are
+    its, ``earlier`` the plain potential tokens before it, none of them the
+    set-point), :data:`NAME_PULSED` (``levels`` are the levels marked ``Pos`` /
+    ``Neg``, and any plain token beside them), :data:`NAME_SEVERAL` (several
+    DIFFERENT plain potential tokens, a range or a sweep window: ``levels`` are
+    all of them and none is the set-point) or ``None`` (the name states no
+    potential). Only a :data:`NAME_SETPOINT` name gives a value.
+    """
+
+    kind: str | None = None
+    index: int | None = None
+    token: str | None = None
+    volts: float | int | None = None
+    rule: str | None = None
+    levels: tuple[PotentialToken, ...] = ()
+    earlier: tuple[PotentialToken, ...] = ()
+
+
+def potential_token_volts(token: str) -> tuple[float | int, str] | None:
+    """``(volts, rule)`` for a token that is, as a whole, a potential (``850mV``,
+    ``m800mV``, ``-500mV``, ``1p2V``, ``m0V``), else ``None``. An unsigned token
+    is read under the rule it always was; a signed one under
+    :data:`RULE_SIGNED_POTENTIAL`. Zero is never returned as minus zero."""
+    sign = _SIGN.match(token)
+    body = token[sign.end():] if sign else token
+    match = _MILLIVOLT.match(body)
+    if match:
+        value, rule = int(match.group(1)) / 1000, RULE_MILLIVOLT_TO_VOLT
+    else:
+        match = _P_VOLT.match(body)
+        if match:
+            value, rule = float(f"{match.group(1)}.{match.group(2)}"), RULE_P_DECIMAL_VOLT
+        else:
+            match = _BARE_VOLT.match(body)
+            if not match:
+                return None
+            value, rule = int(match.group(1)), RULE_BARE_VOLT
+    if sign:
+        return (-value if value else value), RULE_SIGNED_POTENTIAL
+    return value, rule
+
+
+def name_potential(tokens: tuple[str, ...] | list[str]) -> NamePotential:
+    """What a name's potential tokens state TOGETHER (see :class:`NamePotential`).
+
+    One pass over the tokens, in order. A token marked ``Pos`` / ``Neg`` makes the
+    name a pulsed step. Otherwise the LAST potential word decides: ``OCV`` /
+    ``OCP`` last is open circuit (no set-point, whatever came before); a plain
+    potential token last is the set-point only when every plain token of the
+    name writes the same potential, and several different ones state no single
+    set-point. Reads nothing but the tokens given."""
+    plain: list[PotentialToken] = []
+    marked: list[PotentialToken] = []
+    every: list[PotentialToken] = []
+    open_circuit: tuple[int, str] | None = None
+    for index, token in enumerate(tokens):
+        side = _PULSE_SIDE.match(token)
+        got = potential_token_volts(side.group("level") if side else token)
+        if got is not None:
+            item = PotentialToken(index=index, token=token, volts=got[0], rule=got[1])
+            every.append(item)
+            (marked if side else plain).append(item)
+        elif _OPEN_CIRCUIT.match(token):
+            open_circuit = (index, token)
+    if marked:
+        return NamePotential(kind=NAME_PULSED, levels=tuple(every))
+    if open_circuit is not None and (not plain or open_circuit[0] > plain[-1].index):
+        return NamePotential(kind=NAME_OPEN_CIRCUIT, index=open_circuit[0], token=open_circuit[1],
+                             earlier=tuple(p for p in plain if p.index < open_circuit[0]))
+    if not plain:
+        return NamePotential()
+    if len({round(float(p.volts), 9) for p in plain}) > 1:
+        return NamePotential(kind=NAME_SEVERAL, levels=tuple(plain))
+    last = plain[-1]
+    return NamePotential(kind=NAME_SETPOINT, index=last.index, token=last.token, volts=last.volts,
+                         rule=last.rule, earlier=tuple(plain[:-1]))
 
 
 def _recognize_potential(
     token: str, profile: NamingProfile, state: _ScanState
 ) -> TokenReading | None:
-    match = _MILLIVOLT.match(token)
-    if match:
+    if state.potential is None:
+        state.potential = name_potential(state.tokens or (token,))
+    reading = state.potential
+    index = state.index if state.tokens else 0
+    if reading.kind in (NAME_PULSED, NAME_SEVERAL):
+        if any(level.index == index for level in reading.levels):
+            return TokenReading(
+                concept=CONCEPT_UNKNOWN_TOKEN,
+                determinism=DETERMINISM_NORMALIZED,
+                normalized_value=None,
+                normalization_rule=RULE_PULSED_LEVELS if reading.kind == NAME_PULSED else RULE_NO_SINGLE_SETPOINT,
+            )
+        return None
+    if any(item.index == index for item in reading.earlier):
+        # before an open circuit: not the set-point; the same potential written earlier: one value, read once
         return TokenReading(
-            concept=CONCEPT_POTENTIAL_MAGNITUDE,
+            concept=CONCEPT_UNKNOWN_TOKEN,
             determinism=DETERMINISM_NORMALIZED,
-            normalized_value=int(match.group(1)) / 1000,
-            unit="V",
-            normalization_rule=RULE_MILLIVOLT_TO_VOLT,
+            normalized_value=None,
+            normalization_rule=RULE_NO_SINGLE_SETPOINT,
         )
-    match = _P_VOLT.match(token)
-    if match:
+    if reading.kind == NAME_SETPOINT and reading.index == index:
         return TokenReading(
             concept=CONCEPT_POTENTIAL_MAGNITUDE,
             determinism=DETERMINISM_NORMALIZED,
-            normalized_value=float(f"{match.group(1)}.{match.group(2)}"),
+            normalized_value=reading.volts,
             unit="V",
-            normalization_rule=RULE_P_DECIMAL_VOLT,
-        )
-    match = _BARE_VOLT.match(token)
-    if match:
-        return TokenReading(
-            concept=CONCEPT_POTENTIAL_MAGNITUDE,
-            determinism=DETERMINISM_NORMALIZED,
-            normalized_value=int(match.group(1)),
-            unit="V",
-            normalization_rule=RULE_BARE_VOLT,
+            normalization_rule=reading.rule,
         )
     return None
 
@@ -754,11 +893,11 @@ def read_filename(
         for name in profile.token_recognizers
         if name in _RECOGNIZERS
     )
-    state = _ScanState()
-
     cursor = 0
     tokens = text.split("_")
+    state = _ScanState(tokens=tuple(tokens))
     for index, token in enumerate(tokens):
+        state.index = index
         start = cursor
         cursor += len(token) + 1  # the separator that followed it
         if index >= MAX_TOKENS:

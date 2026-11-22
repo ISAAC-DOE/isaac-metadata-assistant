@@ -28,7 +28,8 @@ POT = "context.electrochemistry.potential_setpoint_V"
 PH = "context.electrochemistry.pH"
 BEAMLINE = "system.facility.beamline"
 THEIRS = "SYN_their_metadata.xlsx"
-#: the synthetic corpus renamed so one run's name says -0.8 V (``m800mV``, no parsed value) and one pH 12
+#: the synthetic corpus renamed so one run's name says -0.8 V (``m800mV``: read as -0.8 V, a value that needs review,
+#: since the file-name reader reads a leading ``m`` as a minus sign) and one pH 12
 RENAMES = {"05_02_ZZ2_base_after400Cycling_filter20_800mV": "05_02_ZZ2_base_after400Cycling_filter20_m800mV",
            "06_03_ZZ3_alk_fresh_f30_900mV": "06_03_ZZ3_alk_pH12_f30_900mV"}
 #: their File List, in the shape a filled copy has (renamed columns, extra columns, folder names)
@@ -228,7 +229,7 @@ def test_a_value_a_file_reading_contradicts_goes_to_disagreements_and_its_answer
     wb = openpyxl.load_workbook(out)
     fl = wb["File List"]
 
-    # the minus sign dropped: the parser reads no value from m800mV, its file name token says -0.8
+    # the minus sign dropped: the file name token m800mV says -0.8 (read as a value that needs review)
     minus = _d(a, "Potential (V)", run_id="run-005")
     assert minus["their_value"] == 0.8 and minus["their_cells"] == ["'File List'!I6"]
     assert any("-0.8" in r and "m800mV" in r for r in minus["readings"])
@@ -320,11 +321,12 @@ def test_importing_the_adopted_file_records_no_disagreeing_value(grouped, tmp_pa
     assert {x["id"] for x in rep["awaiting_ruling"]} == {d["id"] for d in a["disagreements"]}
     b = M.load(grouped)
     latest = B._decisions_by_target(b["scientist_decisions"])
-    assert _miss(b, POT, "run-005")["value_state"] == B.STATE_MISSING
+    # the sheet's 0.8 is never recorded on the run whose name says -0.8: its candidate still needs review, as read
+    assert (_cand(b, POT, "run-005")["value_state"], _cand(b, POT, "run-005")["value"]) == (B.STATE_NEEDS_REVIEW, -0.8)
     assert ("candidate", _cand(b, PH, "run-007")["candidate_id"]) not in latest
     assert not any(k == ("missing_value", m["value_id"]) for k in latest for m in b["missing_values"] if m["target_field_path"] == BEAMLINE)
     assert not [d for d in b["scientist_decisions"] if d.get("value") in ("aqueous_electrochemistry", "0.1 M KOH", "62b")]
-    assert ("missing_value", _miss(b, POT, "run-005")["value_id"]) not in latest  # 0.8 is confirmed only where a file says 800mV
+    assert ("candidate", _cand(b, POT, "run-005")["candidate_id"]) not in latest  # 0.8 is confirmed only where a file says 800mV
     # what WAS recorded cites their sheet's cell, through the adopted file
     pot1 = latest[("candidate", _cand(b, POT, "run-001")["candidate_id"])]
     assert pot1["decision"] == "confirm" and f"adopted from {THEIRS} 'File List'!I2" in pot1["note"]
@@ -349,8 +351,8 @@ def test_a_ruling_typed_in_the_disagreements_sheet_is_imported_for_exactly_its_t
     assert code == 0, err
     b = M.load(grouped)
     latest = B._decisions_by_target(b["scientist_decisions"])
-    d = latest[("missing_value", _miss(b, POT, "run-005")["value_id"])]
-    assert d["value"] == -0.8 and f"'Disagreements'!H{rows[minus['id']]}" in d["note"] and minus["id"] in d["note"]
+    d = latest[("candidate", _cand(b, POT, "run-005")["candidate_id"])]  # the ruling lands on the name's own reading
+    assert B.final_value(_cand(b, POT, "run-005")["value"], d) == -0.8 and f"'Disagreements'!H{rows[minus['id']]}" in d["note"] and minus["id"] in d["note"]
     envs = {m["run_id"]: latest.get(("missing_value", m["value_id"])) for m in b["missing_values"]
             if m["target_field_path"] == "context.environment"}
     assert {r for r, dd in envs.items() if dd and dd["value"] == "in_situ"} == set(env["runs"])

@@ -83,8 +83,10 @@ def test_the_reader_reads_only_the_data_file_line_of_the_runs_own_exp(tmp_path):
     assert (st["literal"], st["locator"], st["source_relative_path"]) == ("01_SYNelS", "line:2", "01_SYNelS_015.exp")
     assert [c["parsed"] for c in runs["01_SYNelS_015"].companions if c["role"] == "experiment"] == [True]
     assert not [s for s in runs["04_SYNmofA_wet_019"].statements if s["key"] == "exp_data_file"]
-    # nothing else of the .exp is a statement (EXPT_TYPE and COMMENTS are not read here)
-    assert not [s for s in runs["01_SYNelS_015"].statements if s["source_relative_path"].endswith(".exp") and s["key"] != "exp_data_file"]
+    # of the rest of the .exp only EXPT_TYPE is a statement (audit rule 7: the technique suggestion's evidence; a file
+    # that states none gives none); COMMENTS are not read here
+    others = [s for s in runs["01_SYNelS_015"].statements if s["source_relative_path"].endswith(".exp") and s["key"] != "exp_data_file"]
+    assert {s["key"] for s in others} <= {"exp_expt_type"} and len(others) <= 1
 
 
 def test_the_default_groups_are_unchanged_one_run_each(grouped):
