@@ -2077,7 +2077,8 @@ ENERGY_SCAN_MOTORS = ("energy", "mono", "absev")
 
 #: NOT AN ENERGY AXIS (processing-science audit of 18 Nov 2026, finding 7): a scan with no ``#S`` line (an XDAC
 #: alignment file) is taken as an energy scan by :func:`_is_energy_scan`; its energy column must also READ as one: a
-#: median inside ``channels.energy_value_range_eV`` and a span of at least :data:`ENERGY_AXIS_MIN_SPAN_EV`. A motor or
+#: median inside ``channels.energy_value_range_eV`` and a span of at least :data:`ENERGY_AXIS_MIN_SPAN_EV` (the span
+#: only for a scan of at least ``merge.min_points`` points: a shorter one is a stopped fragment, its own rule). A motor or
 #: alignment scan whose "Achieved Energy" holds motor positions (tens of units) never comes out as a spectrum.
 ENERGY_AXIS_MIN_SPAN_EV = 25.0
 NOT_ENERGY_SCAN = "not_an_energy_scan"
@@ -2096,7 +2097,7 @@ def not_an_energy_axis(E, params: Mapping) -> str | None:
     if not lo <= med <= hi:
         return (f"the energy column reads {float(E.min()):.4g} to {float(E.max()):.4g} (median {med:.4g}), outside "
                 f"{lo:g}-{hi:g} eV: a motor or alignment scan, not an energy scan")
-    if span < ENERGY_AXIS_MIN_SPAN_EV:
+    if span < ENERGY_AXIS_MIN_SPAN_EV and E.size >= int((params.get("merge") or {}).get("min_points") or 20):
         return (f"the energy column spans only {span:.3g} eV (under {ENERGY_AXIS_MIN_SPAN_EV:g} eV): a motor or "
                 "alignment scan, not an energy scan")
     return None
