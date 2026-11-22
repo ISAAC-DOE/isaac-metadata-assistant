@@ -47,6 +47,35 @@ def _element(literal: Any) -> str | None:
     return text if _ELEMENT.fullmatch(text) else None
 
 
+#: 1.15.0 (audit of 18 Nov 2026, rule 14): an SSRL XDC scan whose "Requested Energy" grid has a finest-step window
+#: strictly inside its range (a pre-edge region before it and a post-edge region after it: the XANES region) names the
+#: absorption edge that window brackets (``readers.xray_tables``, edges of 1 keV and up); where it brackets several, a
+#: K or L3 edge (the edges one scans) is taken when exactly one is; otherwise nothing. A run's scans that name
+#: different edges name none. A witness for the absorber SUGGESTION only (confirm_absorber), never a value.
+SCANNED_EDGE_RULE_ID = "isaac.suggest.absorber_from_scanned_range.v1"
+SCANNED_EDGE_MIN_EV = 1000.0
+#: ``experiment.element_evidence[].role`` of a witness this rule gives (one per run, with its ``run_key``)
+SCANNED_EDGE_ROLE = "scanned_range"
+
+
+def scanned_edge(check: Mapping | None) -> dict | None:
+    """``{element, edge, energy_eV, window_eV, range_eV, step_eV}`` the reader's energy check of ONE scan names
+    (:data:`SCANNED_EDGE_RULE_ID`), or ``None``."""
+    from .readers import xray_tables as X
+
+    if not isinstance(check, Mapping) or not check.get("finest_window_eV") or not check.get("range_eV"):
+        return None
+    (lo, hi), (start, stop) = check["finest_window_eV"], check["range_eV"]
+    if not (start < lo and hi < stop):
+        return None  # a scan sampled uniformly (an alignment, a check): no XANES region, no edge named
+    edges = [e for e in X.edges_between(lo, hi) if e["energy_eV"] >= SCANNED_EDGE_MIN_EV]
+    if len(edges) > 1:
+        edges = [e for e in edges if e["edge"] in ("K", "L3")]
+    if len(edges) != 1:
+        return None
+    return {**edges[0], "window_eV": [lo, hi], "range_eV": [start, stop], "step_eV": check.get("finest_step_eV")}
+
+
 def absorber_for_group(bundle: Mapping, group: Mapping) -> dict:
     """``{element, edge, status, readings, witnesses, rule_id}`` for ONE record group.
 
@@ -64,7 +93,7 @@ def absorber_for_group(bundle: Mapping, group: Mapping) -> dict:
 
     def note(kind: str, element: str | None, edge: str | None, source_id, locator, extra: dict, literal: str | None = None):
         if element or edge:
-            (group_specific if kind == "processed_output_header" else beamtime_wide)[0] += 1
+            (group_specific if kind in ("processed_output_header", "scanned_range") else beamtime_wide)[0] += 1
         if element:
             elements[element] += 1
         if edge:
@@ -91,6 +120,13 @@ def absorber_for_group(bundle: Mapping, group: Mapping) -> dict:
         for st in states.get("element_edge") or ():
             note("processed_output_header", None, _edge(st.get("literal")), st.get("source_id"), st.get("locator"), extra, st.get("literal"))
     for ev in (bundle.get("experiment") or {}).get("element_evidence") or ():
+        if ev.get("role") == SCANNED_EDGE_ROLE:
+            # 1.15.0: the edge a run's OWN scans bracket, a witness for that run's group only
+            if ev.get("run_key") in keys:
+                note("scanned_range", _element(ev.get("element")), _edge(ev.get("edge")), ev.get("source_id"),
+                     ev.get("locator"), {"role": ev.get("role"), "rule_id": SCANNED_EDGE_RULE_ID},
+                     ev.get("literal"))
+            continue
         note("beamtime_element_evidence", _element(ev.get("element")), _edge(ev.get("edge")),
              ev.get("source_id"), ev.get("locator"), {"role": ev.get("role")})
 

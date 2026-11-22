@@ -168,19 +168,15 @@ CHANGES_ADDED_IN: Mapping[str, str] = {
                "instrument (isaac.suggest.technique_from_configuration.v1), pellet fields only where mentioned "
                "(isaac.import.optional_field_asked_where_mentioned.v1), stale comment lines "
                "(isaac.import.comment_possibly_stale.v1); a re-import keeps every id the earlier build gave"),
-    "1.15.0": ("1.15.0 reads at import, only on a re-import: the potential an SSRL XDC run's name writes, as a "
-               "suggestion that needs review compared with its comment lines (isaac.suggest.name_potential.v1; "
-               "open circuit suggests the control mode, isaac.suggest.name_open_circuit.v1); a SPEC-format file whose "
-               "scan title names the scans it was computed from is a processed output, never a run "
-               "(bl15.classify.processed_scan_title.v1; linked by isaac.processed_output.link_by_title_scans.v0; a "
-               "bundle imported before holds such files as runs until re-imported, and run, candidate and value ids "
-               "after one renumber); a run its own comment line says a macro ran is no acquired-never-declared "
-               "conflict (isaac.import.macro_run_line.v1), nor are two SPEC comment lines that are events "
-               "(isaac.import.comment_lines_are_events.v1) or positions equal within motor resolution "
-               "(isaac.import.position_within_motor_resolution.v1): their conflict ids stay unused; the clock zone "
-               "the SPEC #E / #D pairs give is suggested for the clock-zone question, never applied "
-               "(isaac.suggest.clock_zone_from_epoch_pair.v1); new candidates are "
-               "numbered last"),
+    "1.15.0": ("1.15.0 reads at import, only on a re-import: an SSRL XDC run's name potential, a suggestion "
+               "(isaac.suggest.name_potential.v1, isaac.suggest.name_open_circuit.v1); a SPEC-format file whose scan "
+               "title names other scans is a processed output, never a run (bl15.classify.processed_scan_title.v1, "
+               "isaac.processed_output.link_by_title_scans.v0; later run, candidate and value ids renumber); no "
+               "conflict (its id kept, unused) for comment-line events (isaac.import.comment_lines_are_events.v1), "
+               "positions within motor resolution (isaac.import.position_within_motor_resolution.v1) or an "
+               "overwritten macro (isaac.import.macro_run_line.v1); suggestions only: the clock zone from #E/#D (isaac.suggest.clock_zone_from_epoch_pair.v1), a "
+               "BL4-3 standard's role (isaac.grouping.xdc_standard_name.v1), the scanned edge "
+               "(isaac.suggest.absorber_from_scanned_range.v1)"),
 }
 #: A field composed into a draft only beside another of the SAME run (interim decision for the
 #: set-point, pending domain-owner review; ``records.compose_group`` applies it). The CURRENT
@@ -2395,6 +2391,35 @@ def _xdc_comment_candidates(g, run_scans: Sequence[Mapping], run_id: str, first_
         )
         out.append(_candidate_record(engine, bundle_cid=bundle_cid, run_id=run_id, key=key, evidence=evidence,
                                      total=len(hits), writable=writable))
+    return out
+
+
+def scanned_edge_evidence(xdc_runs: Sequence[tuple], runs_by_id: Mapping[str, Mapping], sid_of: Mapping) -> list[dict]:
+    """``experiment.element_evidence`` entries of ``suggestions.SCANNED_EDGE_RULE_ID``: ONE per SSRL XDC run whose
+    scans that name an edge all name the same one (role ``scanned_range``, with the run's ``run_key`` and its first
+    such scan as the place)."""
+    from . import suggestions as _suggest
+
+    out = []
+    for run_id, g, run_scans in xdc_runs:
+        named = [(sc, e) for sc in g.scans if (e := _suggest.scanned_edge(sc.get("energy_check"))) is not None
+                 and sc.get("relative_path") in {s.get("relative_path") for s in run_scans}]
+        pairs = {(e["element"], e["edge"]) for _, e in named}
+        if len(pairs) != 1 or run_id not in runs_by_id:
+            continue
+        sc, e = named[0]
+        rows = (sc.get("energy_check") or {}).get("finest_window_rows") or [None, None]
+        out.append({
+            "element": e["element"], "edge": e["edge"], "source_path": sc["relative_path"],
+            "source_id": sid_of.get(sc["relative_path"]), "run_key": runs_by_id[run_id]["run_key"],
+            "locator": f"'Requested Energy' column, data rows {rows[0]}..{rows[1]}",
+            "literal": (f"finest steps ({e['step_eV']:g} eV) from {e['window_eV'][0]:g} to {e['window_eV'][1]:g} eV, "
+                        f"inside a scan from {e['range_eV'][0]:g} to {e['range_eV'][1]:g} eV"),
+            "role": _suggest.SCANNED_EDGE_ROLE, "scans_naming_it": len(named),
+            "rule": (f"{_suggest.SCANNED_EDGE_RULE_ID}: the finest-step window of the scan's energy grid brackets the "
+                     f"{e['element']} {e['edge']} edge ({e['energy_eV']:g} eV, readers.xray_tables), with a pre-edge "
+                     "and a post-edge region around it. A suggestion for the scientist to confirm, never a value."),
+        })
     return out
 
 
@@ -5494,7 +5519,7 @@ def build_bundle(
             "element_evidence": [
                 {**dict(e), "source_id": sid_of.get(e.get("source_path"))}
                 for e in reading.element_evidence
-            ],
+            ] + scanned_edge_evidence(xdc_runs, runs_by_id, sid_of),
             "temperature_statements": [
                 {**dict(t), "source_id": sid_of.get(t.get("source_path"))}
                 for t in reading.temperature_statements

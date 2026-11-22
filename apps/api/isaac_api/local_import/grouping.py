@@ -1029,6 +1029,35 @@ def xdc_name_role(stem: str) -> tuple[str, str] | None:
     return None
 
 
+#: 1.15.0 (audit of 18 Nov 2026, rule 13): an XDC run whose NAME says it is a reference STANDARD proposes the role
+#: ``reference`` (a proposal, said as judged from the name, as :data:`XDC_NAME_ROLE_RULE_ID`): a mineral name
+#: (``ANATASE``, ``rutile``), ``elemental`` before an element symbol (``elemental_S``), a weight-percent dilution
+#: (``0p8wtpc``, ``5wt``) or a dilution matrix (``sucrose``, ``sugar``, ``BN``, ``cellulose``) - and never beside a
+#: condition (a potential, a pH, an electrolyte), a support or history word, or a temperature. A formula token alone
+#: (``TiO2``) is not enough: ``IrTiO2`` is a sample.
+XDC_STANDARD_NAME_RULE_ID = "isaac.grouping.xdc_standard_name.v1"
+_STANDARD_MINERALS = frozenset({"anatase", "rutile", "brookite"})
+_STANDARD_MATRICES = frozenset({"sucrose", "sugar", "bn", "cellulose"})
+_STANDARD_DILUTION = re.compile(r"^\d+(?:[p.]\d+)?wt(?:pc|pct|%)?$")
+
+
+def xdc_standard_role(stem: str) -> tuple[str, str] | None:
+    """:data:`XDC_STANDARD_NAME_RULE_ID`: ``(reference, token)`` when an XDC run's name says it is a reference
+    standard, or ``None``."""
+    from .template import ELEMENT_SYMBOLS
+
+    tokens = _name_tokens(stem)
+    if not tokens or any(_condition_shaped(t) for t in _stem_tokens(stem)) or any(
+            _SAMPLE_BESIDE.match(t) or _TEMPERATURE_TOKEN.match(t) for t in tokens):
+        return None
+    symbols = {e.casefold() for e in ELEMENT_SYMBOLS}
+    for i, tok in enumerate(tokens):
+        if (tok in _STANDARD_MINERALS or tok in _STANDARD_MATRICES or _STANDARD_DILUTION.match(tok)
+                or (tok == "elemental" and i + 1 < len(tokens) and tokens[i + 1] in symbols)):
+            return ROLE_REFERENCE, tok
+    return None
+
+
 def _header_not_measurement(statement: Mapping) -> str | None:
     """The role ONE header statement of an XDC scan states (:data:`XDC_NOT_MEASUREMENT_RULE_ID`), or ``None``."""
     key, lit = statement.get("key"), str(statement.get("literal") or "").strip()
@@ -1112,6 +1141,10 @@ def run_role(run: Mapping, sources_by_id: Mapping[str, Mapping] | None = None) -
                 return named[0], {**shared[1], "name": run.get("stem"), "source_id": run.get("acquisition_source_id")}
             return named[0], {"rule_id": XDC_NAME_ROLE_RULE_ID, "basis": "name_token", "token": named[1],
                               "name": run.get("stem"), "source_id": run.get("acquisition_source_id")}
+        standard = xdc_standard_role(name)
+        if standard:
+            return standard[0], {"rule_id": XDC_STANDARD_NAME_RULE_ID, "basis": "name_token", "token": standard[1],
+                                 "name": run.get("stem"), "source_id": run.get("acquisition_source_id")}
         return ROLE_SAMPLE, {"rule_id": ROLE_RULE_ID, "basis": "default_sample", "source_type": stype}
     named = name_role(str(run.get("stem") or run.get("label") or ""))
     if named:

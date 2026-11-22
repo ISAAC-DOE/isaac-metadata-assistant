@@ -3273,6 +3273,14 @@ def _absorber_hints(items: Sequence[tuple[Mapping, dict]]) -> list[dict]:
         hints.append({"kind": "processed_output_header", "literal": f"{el or '?'} {ed or '?'}",
                       "locator": po[0].get("locator"), "relative_path": po[0].get("relative_path"), "source_id": po[0].get("source_id"),
                       "note": f"from {n} linked processed output(s) (e.g. this one; an output can be linked to runs of several groups); links are proposed by name, not confirmed"})
+    scanned = [w for _, s in items for w in s["witnesses"] if w["kind"] == "scanned_range"]
+    if scanned:
+        w = scanned[0]
+        hints.append({"kind": "scanned_range", "literal": f"{w.get('element') or '?'} {w.get('edge') or '?'}",
+                      "locator": w.get("locator"), "relative_path": w.get("relative_path"), "source_id": w.get("source_id"),
+                      "rule_id": w.get("rule_id"),
+                      "note": (f"from the energy grid of {len(scanned)} run(s)' own scans (e.g. this one: "
+                               f"{w.get('literal')}): the finest steps bracket this edge")})
     seen = set()
     for _, s in items:
         for w in s["witnesses"]:
@@ -3395,7 +3403,9 @@ def _absorber_questions(bundle: Mapping, groups: Sequence[Mapping], *, include_a
             statements = items[0][1]['beamtime_wide_statements']
             # r4-b L3: the rest counted in groups, the statements apart ("the rest (2, …)" read as two groups of eight)
             text = (f"The files state element {element}, edge {edge} for {len(items)} group(s), and no file disagrees: "
-                    f"{own} of them from processed outputs linked to their runs, "
+                    f"{own} of them from processed outputs linked to their runs"
+                    + (" or from their own scans' energy grid" if any(w["kind"] == "scanned_range" for _, s in items for w in s["witnesses"]) else "")
+                    + ", "
                     f"the rest only from beamtime-wide statements: {len(items) - own} group(s), from {statements} "
                     "statement(s) (e.g. an acquisition macro's name). "
                     "Is that the absorber? Answer once, or per group (a reference foil or blank cell may differ).")

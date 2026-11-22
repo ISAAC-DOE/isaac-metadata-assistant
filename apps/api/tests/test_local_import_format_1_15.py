@@ -22,6 +22,7 @@ import pytest
 from isaac_api.bl15 import classify as C
 from isaac_api.local_import import bundle as B
 from isaac_api.local_import import cli
+from isaac_api.local_import import grouping as G
 from isaac_api.local_import import mutations as M
 from isaac_api.local_import import suggestions as S
 
@@ -36,7 +37,7 @@ def _vendored_schema_basis(monkeypatch, tmp_path):
 
 
 RULES = (S.NAME_POTENTIAL_RULE_ID, S.OPEN_CIRCUIT_RULE_ID, C.PROCESSED_TITLE_RULE_ID, B.TITLE_LINK_RULE_ID, *B.NOT_A_CONFLICT_RULES,
-         B.CLOCK_OFFSET_RULE_ID)
+         B.CLOCK_OFFSET_RULE_ID, G.XDC_STANDARD_NAME_RULE_ID, S.SCANNED_EDGE_RULE_ID)
 
 
 def test_the_version_is_bumped_by_the_existing_mechanism():
