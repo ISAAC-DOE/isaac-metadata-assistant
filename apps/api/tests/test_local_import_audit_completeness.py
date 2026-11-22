@@ -385,3 +385,46 @@ def test_settling_the_disagreement_leads_to_the_label_question_for_this_group(fi
     M.decide_question(bdir, question_id=label["question_id"], only=f"group:{gid}", decision="confirm", value=None, **BY)
     _, hold, gate = _hold(bdir, gid)
     assert [r["state"] for r in gate["conditions"] if r["condition"] == "filter"] == ["in_record"]
+
+
+# --- review of PR 342, finding 4: records that differ only in a declined or unrecordable condition --------------
+
+
+def test_declining_both_potentials_frees_both_records(bdir, fake_upstream_env):
+    payload = Q.consolidate(M.load(bdir))
+    for gid in (_group_of(bdir, "01_"), _group_of(bdir, "02_")):
+        M.decide_question(bdir, question_id=_setpoint_question(payload, gid)["question_id"], decision="reject",
+                          value=None, **BY)
+    v = R.validate_records(bdir, run_portal=_portal())
+    rc = v["record_completeness"]
+    assert v["ready_to_export"] == 3 and rc["held"] == 0 and rc["indistinguishable_sets_total"] == 0
+
+
+def test_a_set_is_split_by_the_conditions_that_were_declined_or_have_no_record_field():
+    groups = [{"group_id": g, "basis": {"conditions": {"potential_magnitude": {"value": v}, "emission_energy": {"value": e}}}}
+              for g, v, e in (("g1", 0.06, "9175"), ("g2", 0.12, "9175"), ("g3", 0.06, "9175"), ("g4", 0.06, "9176"))]
+    bundle = {"record_groups": groups}
+    same = {"sample.material.name": "ZZ1 synthetic"}
+    drafts = [(g["group_id"], _draft(**same)) for g in groups]
+    row = lambda c, st: {"condition": c, "state": st}  # noqa: E731
+    gate_of = {g: {"conditions": [row("potential_magnitude", "declined"), row("emission_energy", "no_record_field")]}
+               for g in ("g1", "g2", "g3", "g4")}
+    # g1 and g3 say the same thing AND agree on everything left out: still one set; g2 and g4 differ in what was left out
+    assert CP.identical_sets(bundle, drafts, gate_of) == [["g1", "g3"]]
+    assert CP.identical_sets(bundle, drafts) == [["g1", "g2", "g3", "g4"]]   # without the gate: as before
+
+
+def test_the_keep_apart_advice_is_given_only_when_there_is_a_merge_candidate(bdir, fake_upstream_env, monkeypatch):
+    monkeypatch.setattr(CP, "questions_for", lambda payload: {})     # a set no open question tells apart
+    b = M.load(bdir)
+    assert not b.get("merge_candidates")
+    out = R.export_records(bdir, bdir.parent / "records", run_portal=_portal())
+    said = [r["summary"][0] for r in out["refused"] if CP.HELD_IDENTICAL in r["held_by"]]
+    assert said and all("No open question tells them apart" in t and "keep_apart" not in t for t in said)
+    # with a merge candidate over the set, its keep_apart command is offered
+    gids = [g["group_id"] for g in b["record_groups"]]
+    raw = json.loads((bdir / "bundle.json").read_text())
+    raw["merge_candidates"] = [{"merge_candidate_id": "mc-0123456789abcdef", "group_ids": gids}]
+    holds, _, _ = R.completeness_holds(raw, R.fresh_compositions(bdir, b), {"questions": []}, gids)
+    assert all("--target mc-0123456789abcdef --decision keep_apart" in h["text"] for h in holds.values()
+               if CP.HELD_IDENTICAL in h["held_by"])

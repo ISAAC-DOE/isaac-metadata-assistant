@@ -452,16 +452,36 @@ def metadata_key(draft: Mapping) -> str:
                        if p.split(".", 1)[0] in BODY_SECTIONS}, sort_keys=True, default=str)
 
 
-def identical_sets(bundle: Mapping, drafts: Sequence[tuple[str, Mapping]]) -> list[list[str]]:
+def identical_sets(bundle: Mapping, drafts: Sequence[tuple[str, Mapping]],
+                   gate_of: Mapping[str, Mapping] | None = None) -> list[list[str]]:
     """Group ids whose drafts say the same thing (:func:`metadata_key`), two or more per set, in the order given.
     Groups a scientist kept apart on purpose (``keep_apart`` on their merge candidate: declared repeats) are not a
-    set."""
+    set.
+
+    With ``gate_of`` (review of PR 342, finding 4): records that differ in a condition the scientist DECLINED, or that
+    no record field carries, are told apart by that difference and are no set: each set is split by those conditions'
+    readings (its members' basis values), and only members that agree on them too stay together."""
     by_key: dict[str, list[str]] = {}
     for gid, draft in drafts:
         by_key.setdefault(metadata_key(draft), []).append(gid)
     kept = [set(mc.get("group_ids") or ()) for mc in bundle.get("merge_candidates") or ()
-            if (mc.get("merge_candidate_id") or mc.get("id")) in B.kept_apart(bundle)]
-    return [gids for gids in by_key.values() if len(gids) > 1 and not any(set(gids) <= k for k in kept)]
+            if (mc.get("merge_candidate_id") or mc.get("id")) in B.kept_apart(bundle)] if bundle.get("merge_candidates") else []
+    groups = {g.get("group_id"): g for g in bundle.get("record_groups") or () if isinstance(g, Mapping)}
+    out = []
+    for gids in by_key.values():
+        if len(gids) < 2 or any(set(gids) <= k for k in kept):
+            continue
+        if not gate_of:
+            out.append(gids)
+            continue
+        left_out = sorted({r["condition"] for g in gids for r in (gate_of.get(g) or {}).get("conditions") or ()
+                           if r.get("state") in (DECLINED, NO_RECORD_FIELD)})
+        parts: dict[str, list[str]] = {}
+        for g in gids:
+            basis = dict(_basis_entries(groups.get(g) or {}, _ALL))
+            parts.setdefault(json.dumps([(basis.get(k) or {}).get("value") for k in left_out], default=str), []).append(g)
+        out += [p for p in parts.values() if len(p) > 1]
+    return out
 
 
 def questions_for(payload: Mapping) -> dict[str, dict[str, list[str]]]:

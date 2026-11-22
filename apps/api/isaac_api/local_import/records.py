@@ -3028,7 +3028,7 @@ def completeness_holds(bundle: Mapping, fresh: Sequence[tuple[str, Mapping, Mapp
                           "conditions": [r["condition"] for r in gate["conditions"] if r["state"] == CP.OPEN],
                           "text": CP.hold_text(gate, questions_of.get(gid))}
     first = first_member_runs(bundle)
-    sets = CP.identical_sets(bundle, [(gid, draft) for gid, draft, _ in fresh if gid in wanted])
+    sets = CP.identical_sets(bundle, [(gid, draft) for gid, draft, _ in fresh if gid in wanted], gate_of)
     for same in sets:
         names = [str((first.get(g) or {}).get("stem") or g) for g in same]
         shown = ", ".join(names[:CP.NAMED]) + (f" and {len(names) - CP.NAMED} more" if len(names) > CP.NAMED else "")
@@ -3039,11 +3039,16 @@ def completeness_holds(bundle: Mapping, fresh: Sequence[tuple[str, Mapping, Mapp
                 for q in ids:
                     reach[q] = reach.get(q, 0) + 1
         qs = [q for q, _ in sorted(reach.items(), key=lambda kv: (-kv[1], kv[0]))]
+        # review of PR 342, finding 4: keep_apart is offered only when a merge candidate over the set exists
+        mc = next((m.get("merge_candidate_id") for m in bundle.get("merge_candidates") or ()
+                   if isinstance(m, Mapping) and set(same) <= set(m.get("group_ids") or ())), None)
+        repeats = (f"keep them apart (`isaac bundle decide <bundle_dir> --target {mc} --decision keep_apart --by "
+                   '"<your name>"`), or give each its own sample id or history label' if mc else
+                   "give each its own sample id or history label, or export them anyway")
         how = (f"Answer question {', '.join(qs[:3])}" + (f" (and {len(qs) - 3} more)" if len(qs) > 3 else "")
                + " to say what differs" if qs else
                "No open question tells them apart: if they are one measurement, merge their groups; if they are "
-               "intended repeats, keep them apart on their merge candidate (keep_apart) or give each its own sample id "
-               "or history label")
+               f"intended repeats, {repeats}")
         said = (f"Held ({CP.GATE_ID}): these {len(same)} records would be indistinguishable (the same sample, system "
                 f"and context in every field): {shown}. {how}; `export {CP.ALLOW_FLAG}` writes them anyway.")
         for gid in same:
