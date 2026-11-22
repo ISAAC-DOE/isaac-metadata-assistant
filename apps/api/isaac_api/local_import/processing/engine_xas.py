@@ -2238,7 +2238,8 @@ def apply_spots(table: dict, recs: Sequence[Mapping], stability: Mapping, np) ->
 #: trend (a residual bias is second order in the window means' relative error, about 1e-4 of the step for a 1 % error,
 #: and cancels between scans of equal counts). Fitting both scans onto the group's merge was the other option; it
 #: still regresses on a noisy curve (the merge contains the two scans) and its bias depends on how many scans merge. The noise of the difference: the point-to-point scatter of the difference over the window, / sqrt(n),
-#: combined with each scan's edge-step error (its window means' scatter / sqrt(n), times the window's mean level);
+#: combined with each scan's edge-step error (its window means' scatter / sqrt(n), times the window's mean level), times
+#: ``resample_factor`` for the correlation the one interpolation onto the grid adds;
 #: "beyond the noise" is max(``floor``, ``noise_mult`` x that noise). COUNTS FLOOR: a spot whose scans have under
 #: ``min_counts`` counts per point in the post-edge (the median IF above E_edge + ``post_eV``, the lower of the scans
 #: compared, IF read as the counts the beamline wrote) is NOT JUDGED; when at least half of the spots measured more
@@ -2261,7 +2262,7 @@ def apply_spots(table: dict, recs: Sequence[Mapping], stability: Mapping, np) ->
 #: always wins (this rule then decides nothing); an existing shape-screen drop is never cleared; a scientist's
 #: set_dose_reading (the group's, else the beamtime's) decides the reading; set_scan_decision still wins per scan.
 DOSE = {"wl_half_eV": 4.0, "floor": 0.01, "noise_mult": 3.0, "pre_eV": -10.0, "post_eV": 30.0, "recovery_frac": 0.5,
-        "min_counts": 150.0}
+        "min_counts": 150.0, "resample_factor": 1.2}
 DOSE_RULE_ID = "isaac.xas.dose_damage.v3"
 DOSE_LOW_COUNTS = "cannot_judge_low_counts"
 DOSE_NO_CHANGE = "no_change_at_judged_spots"
@@ -2320,7 +2321,11 @@ def _norm_difference(f: Mapping, s: Mapping, E_edge: float, win: Sequence[float]
             e_lo, e_hi = (float(np.std(np.diff(y[m])) / np.sqrt(2.0) / np.sqrt(m.sum())) for m in (pre, post))
             step_var += (float(np.mean(nrm[w])) * np.hypot(e_lo, e_hi) / step) ** 2
         d = normed[1][w] - normed[0][w]
-        noise = np.hypot(float(np.std(np.diff(d)) / np.sqrt(2.0) / np.sqrt(w.sum())), np.sqrt(step_var))
+        # x resample_factor (review of PR 345, M4): the one linear interpolation onto the group's grid correlates
+        # neighbouring points, which a point-to-point scatter does not see (the spread seen over the noise said was
+        # 1.16-1.18 on resampled synthetic scans); the noise is inflated, not re-estimated before resampling
+        noise = DOSE["resample_factor"] * np.hypot(float(np.std(np.diff(d)) / np.sqrt(2.0) / np.sqrt(w.sum())),
+                                                   np.sqrt(step_var))
         return float(np.mean(d)), float(noise)
 
 

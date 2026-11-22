@@ -1405,6 +1405,28 @@ def test_the_v3_difference_has_no_noise_bias_where_v2_had_one():
     assert np.median([x[1] for x in ds]) == pytest.approx(m.std(), rel=0.5)      # the noise said is the scatter seen
 
 
+def test_the_noise_said_covers_the_resampling():
+    """Review of PR 345, M4: scans shifted by up to 0.1 eV and interpolated once onto the grid (as aligned scans are):
+    the spread of the difference over 400 draws matches the noise said (it was about 1.17 x without the factor)."""
+    from xas_analysis.average import AlignedScan
+
+    rng = np.random.default_rng(11)
+    E = GRID
+    I0 = np.full(E.size, 1e5)
+    win = [11214.0, 11222.0]
+
+    def scan():
+        sh = rng.uniform(-0.1, 0.1)
+        t = E + sh
+        mu = 0.05 + 1.0 / (1 + np.exp(-(t - E_EDGE) / 1.2)) + 3.0 * np.exp(-((t - 11218) / 1.5) ** 2)
+        y = rng.poisson(mu * 500 / 1.05).astype(float)
+        return AlignedScan(1, E, np.interp(E, t, y), I0, np.ones(E.size), 0, 0, True, True)
+
+    ds = [EX._norm_difference({"aligned": scan()}, {"aligned": scan()}, E_EDGE, win, np) for _ in range(400)]
+    m = np.array([x[0] for x in ds])
+    assert m.std() / np.median([x[1] for x in ds]) == pytest.approx(1.0, abs=0.15)
+
+
 def test_a_seven_percent_white_line_drop_with_dose_at_high_counts_is_still_beam_damage(tmp_path):
     """A real change: the white-line peak falls 3.5 % per scan at a spot (7 % by scan 3), recovering at a fresh spot,
     Poisson noise at 5000 counts per point: beam damage, the first scan per spot kept."""
