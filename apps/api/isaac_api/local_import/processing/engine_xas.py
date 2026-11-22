@@ -1433,13 +1433,16 @@ def process_group_v1(group: Mapping, ctx) -> list[dict]:
     with warnings.catch_warnings(), np.errstate(all="ignore"):
         warnings.simplefilter("ignore")
         avg, ainfo = average_scans([r["aligned"] for r in kept], "uniform", 1, True, True)
+        matched = coverage_matched_mean([r["aligned"] for r in kept], avg, np)
     ok = np.isfinite(avg["IF_over_I0"]) & (avg["n_kept"] > 0)
     E, y, err, n = target[ok], avg["IF_over_I0"][ok], avg["err"][ok], avg["n_kept"][ok]
     res["steps"].append({"step": "merge", "params": {"statistic": "uniform mean of raw IF/I0 over the kept scans "
                                                                   "(xas_analysis.average.average_scans; err = its standard "
-                                                                  "error)",
+                                                                  "error)" + (", scale-matched where coverage differs "
+                                                                              f"({COVERAGE_RULE_ID})" if matched else ""),
                                                      "grid": grid_said or "the group's modal scan grid (a kept scan's), shifted"},
-                         "outcome": {"n_scans": len(kept), "points": int(E.size), "grid_from_scan": grid_rec["scan_id"]},
+                         "outcome": {"n_scans": len(kept), "points": int(E.size), "grid_from_scan": grid_rec["scan_id"],
+                                     **({"coverage_matched": matched} if matched else {})},
                          "flags": [] if len(kept) > 1 else ["single_scan_no_merge"]})
     short = _incomplete(E, complete, E_edge, absorber, len(kept))
     if short is not None:
@@ -2466,6 +2469,51 @@ def apply_dose_damage(table: dict, recs: Sequence[Mapping], stability: Mapping, 
     block.update(outcome=outcome, dropped=dropped, spots=sorted(changed, key=lambda v: int(v.split()[-1])),
                  statement=what[:1].upper() + what[1:] + ".", **({"reading": reading} if reading_of else {}))
     return block
+
+
+#: WHERE COVERAGE DIFFERS, A SCALE-MATCHED MEAN (processing-science audit of 18 Nov 2026, finding 6). The kept scans'
+#: raw IF/I0 differ in level (spot, loading, filter); where only some of them contribute (an I0-dropout point left
+#: out, a scan that ends early) the plain mean steps by the missing scans' level. Each scan's level relative to the
+#: merge, r_j = sum(y_j m) / sum(m^2) over the points ALL kept scans cover (m: the plain mean there; the r_j average
+#: exactly 1), then at every point the mean is sum(y_j) / sum(r_j) over the scans that contribute there: the plain mean
+#: where all contribute (uniform weights, unchanged), free of the step where some do not. Nothing is interpolated.
+COVERAGE_RULE_ID = "isaac.xas.coverage_matched_mean.v1"
+COVERAGE_MIN_COMMON = 20
+
+
+def coverage_matched_mean(aligned: Sequence, avg: dict, np) -> dict | None:
+    """Rewrite ``avg["IF_over_I0"]`` in place at the points where only some kept scans contribute
+    (:data:`COVERAGE_RULE_ID`); the disclosure block, or None when every point has every scan (or too few in common)."""
+    if len(aligned) < 2:
+        return None
+    Y = np.array([np.ravel(a.IF) / np.ravel(a.I0) for a in aligned]).T
+    fin = np.isfinite(Y)
+    nfin = fin.sum(axis=1)
+    partial = (nfin > 0) & (nfin < len(aligned))
+    if not partial.any():
+        return None
+    full = nfin == len(aligned)
+    if full.sum() < COVERAGE_MIN_COMMON:
+        return {"rule_id": COVERAGE_RULE_ID, "applied": False, "partial_points": int(partial.sum()),
+                "statement": (f"At {int(partial.sum())} points only some of the kept scans contribute, and the scans "
+                              f"share under {COVERAGE_MIN_COMMON} points to match their levels on: the plain mean is "
+                              "kept there and may step where coverage changes.")}
+    m = Y[full].mean(axis=1)
+    r = (Y[full] * m[:, None]).sum(axis=0) / float((m * m).sum())
+    if not np.all(np.isfinite(r) & (r > 0)):
+        return None
+    num = np.where(fin, Y, 0.0).sum(axis=1)
+    den = np.where(fin, r[None, :], 0.0).sum(axis=1)
+    avg["IF_over_I0"] = np.where(partial, num / np.where(den > 0, den, np.nan), avg["IF_over_I0"])
+    keys = [getattr(a, "ident", getattr(a, "num", None)) for a in aligned]
+    return {"rule_id": COVERAGE_RULE_ID, "applied": True, "partial_points": int(partial.sum()),
+            "common_points": int(full.sum()), "scan_levels": {str(k): round(float(v), 4) for k, v in zip(keys, r)},
+            "statement": (f"Scale-matched where coverage differs: at {int(partial.sum())} points only some of the "
+                          f"{len(aligned)} kept scans contribute (a point left out, a scan that ends early); there "
+                          "the mean is the sum of the contributing scans over the sum of their levels relative to the "
+                          f"merge (levels {min(r):.3f}-{max(r):.3f}, fitted over the {int(full.sum())} points all "
+                          "scans cover), so a missing scan's level leaves no step. Where all scans contribute it is "
+                          "the plain mean. Nothing is interpolated.")}
 
 
 def _earliest(flagged: Sequence[str], recs: Sequence[Mapping], rows: Mapping) -> bool:

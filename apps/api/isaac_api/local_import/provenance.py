@@ -142,6 +142,12 @@ def _steps(result: Mapping) -> dict[str, Mapping]:
     return {s.get("step"): s for s in result.get("steps") or () if isinstance(s, Mapping)}
 
 
+#: what the merged series' standard error is (processing-science audit of 18 Nov 2026, finding 3): disclosed, unchanged
+MERGE_STDERR_SAID = ("The standard error is the scan-to-scan spread of the raw IF/I0 at each energy (over the square "
+                     "root of the scans merged): it includes the scans' edge-step differences (spot, loading, filter), "
+                     "not only counting noise, and from two scans it is indicative only.")
+
+
 def summary(result: Mapping, *, merged_series_id: str | None = None, merged_stderr: str | None = None) -> str:
     """The compact plain-English story of the curve, for ``generated_by.notes``."""
     from .processing import engine_xas as EX
@@ -162,6 +168,11 @@ def summary(result: Mapping, *, merged_series_id: str | None = None, merged_stde
                                                                   "contribute"}.get(merged_stderr, "") + ")"
                     if merged_series_id else "")
                  + "; normalised once afterwards (normalised curves are never merged).")
+    cov = merge.get("coverage_matched") or {}
+    if cov.get("statement"):
+        parts.append(cov["statement"])
+    if merged_stderr in ("all", "partial"):
+        parts.append(MERGE_STDERR_SAID)
     w = nm.get("window_eV")
     windows = (f"pre-edge {w[0]:g}-{w[1]:g} eV, post-edge {w[2]:g}-{w[3]:g} eV"
                if isinstance(w, (list, tuple)) and len(w) == 4 else "windows not recorded")

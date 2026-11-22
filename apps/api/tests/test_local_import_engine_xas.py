@@ -1509,3 +1509,33 @@ def test_the_absolute_energy_statement_states_the_set_point_and_never_says_none_
     assert story["traced_across_beamtimes"] is False and story["set_points"][0]["to"] == 11563.5
     bare = EX.energy_story({EX.REFERENCE_KEY: {"routes": ref["routes"]}})["absolute_calibration"]
     assert EX.SET_POINT_NONE in bare["statement"] and bare["set_points"] == []
+
+
+# --- a scale-matched mean where coverage differs (audit 18 Nov, finding 6) -------------------------------------------
+
+
+def test_a_scan_ending_early_leaves_no_step_in_the_merge_and_full_coverage_is_the_plain_mean():
+    from xas_analysis.average import AlignedScan, average_scans
+
+    E = GRID
+    mu = 0.05 + 1.0 / (1 + np.exp(-(E - E_EDGE) / 1.2)) + 3.0 * np.exp(-((E - 11218) / 1.5) ** 2)
+    I0 = np.full(E.size, 1e5)
+    scans = []
+    for k, level in enumerate((1.0, 1.4, 0.7)):
+        IF = level * mu * I0 * 1e-3
+        if k == 1:
+            IF = np.where(E > 11440, np.nan, IF)              # the high scan ends early, inside the post-edge
+        scans.append(AlignedScan(k + 1, E, IF, I0, np.ones(E.size), 0, 0, True, True))
+    avg, _ = average_scans(scans, "uniform", 1, True, True)
+    plain = avg["IF_over_I0"].copy()
+    said = EX.coverage_matched_mean(scans, avg, np)
+    y = avg["IF_over_I0"]
+    full = E <= 11440
+    assert np.allclose(y[full], plain[full])                       # unchanged where all scans contribute
+    truth = mu * 1e-3 * (1.0 + 1.4 + 0.7) / 3
+    assert np.allclose(y, truth, rtol=1e-9)                        # no step at 11440 eV
+    assert not np.allclose(plain[~full], truth[~full], rtol=0.05)  # the plain mean stepped there
+    assert said["applied"] and said["partial_points"] == int((~full).sum())
+    assert "Scale-matched where coverage differs" in said["statement"] and "Nothing is interpolated" in said["statement"]
+    avg2, _ = average_scans(scans[::2], "uniform", 1, True, True)
+    assert EX.coverage_matched_mean(scans[::2], avg2, np) is None     # full coverage: nothing to say, nothing changed

@@ -98,7 +98,10 @@ model fit; else the foil timeline; else none, said loudly), each anchor validate
 shift = reference anchor - scan anchor (a shift beyond 1 eV for a glitch, 2 eV for a foil, is a failed anchor), ONE
 interpolation onto the group's modal grid; screen
 (`screen_report`, report-only); decide (below); average the kept scans' raw IF/I0 (`average_scans`, points no kept
-scan covers dropped); normalise the average ONCE (`mback_xrs`, Victoreen + McMaster, constrained background, the step
+scan covers dropped; where only some kept scans contribute, a dropout point or a scan ending early, the mean is the
+contributing scans' sum over the sum of their levels relative to the merge, fitted over the points all scans cover,
+`isaac.xas.coverage_matched_mean.v1`: the plain mean where all contribute, no step where coverage changes; the stderr
+is the raw scans' spread, edge-step differences included); normalise the average ONCE (`mback_xrs`, Victoreen + McMaster, constrained background, the step
 locked at the tabulated edge; element and edge from the scientist's `set_absorber`, else the files' agreeing absorber
 evidence, else the edge the survey identified from the scan range, said as unconfirmed); E0 = larch `find_e0` on the
 average. Uncertainty note: the edge step over 12 windows around the one used (max - min over the median; warn above
