@@ -265,6 +265,7 @@ def test_a_potential_in_a_scan_header_is_labelled_the_headers(grouped):
     [w] = _warnings_of(grouped, b, "SYN_cat_500mV_101")
     text = w["text"]
     # c16b: the header's set-point is read (it needs review), and still said to be the header's
-    assert text.startswith("the file names and scan headers state a potential (500mV in SYN_cat_500mV_101_A.001; "
+    # 1.15.0: the name's 500mV is read too (a suggestion that needs review: suggestions.NAME_POTENTIAL_RULE_ID)
+    assert text.startswith("the file names and scan headers state a potential (500mV, read as 0.5 V; "
                            "'SYN sample in 1M KOH, 0.5 V vs RHE' in the scan header of SYN_cat_500mV_101_A.001, read as 0.5 V)")
     assert "'SYN sample in 1M KOH, 0.5 V vs RHE' is written in the scan header" in text

@@ -108,7 +108,13 @@ FORMAT_ID = "isaac.local-import-bundle"
 #: re-import keeps every id the earlier build gave (new candidates are numbered last; a newly filled slot keeps its
 #: number). Nothing becomes newly writable; the upgrade is disclosed (:data:`CHANGES_ADDED_IN`). The version is bumped
 #: so a bundle says which readings it was imported with.
-FORMAT_VERSION = "1.14.0"
+#: 1.15.0 (import rules only; the bundle's shape is unchanged): readings a 1.14.0 build did not make at import — the
+#: potential an SSRL XDC run's NAME writes (``suggestions.NAME_POTENTIAL_RULE_ID``, a suggestion that needs review,
+#: compared with the run's comment lines; open circuit, ``suggestions.OPEN_CIRCUIT_RULE_ID``, suggests the control
+#: mode). Only a re-import applies them; new candidates are numbered after every other, and a comment-line candidate
+#: the name now answers keeps its id and targets no field. Nothing becomes newly writable; the upgrade is disclosed
+#: (:data:`CHANGES_ADDED_IN`).
+FORMAT_VERSION = "1.15.0"
 #: The electrochemical control mode. Its allowed values are the official schema's enum (read at
 #: runtime by :func:`value_problem`); the schema's conditional rules key the set-point a record
 #: requires on it (:func:`required_record_paths`). Never defaulted, never derived.
@@ -134,7 +140,7 @@ VALUE_IDS_APPEND_FROM = "1.5.0"
 IMPORT_RULES_ADDED_IN: Mapping[str, tuple] = {
     "1.4.0": (("generic:ssrl_xdc_v1", "ssrl_xdc_scan_start_v1"),),
 }
-_VERSION_ORDER = ("1.0.0", "1.1.0", "1.2.0", "1.3.0", "1.4.0", "1.5.0", "1.6.0", "1.7.0", "1.8.0", "1.9.0", "1.10.0", "1.11.0", "1.12.0", "1.13.0", "1.14.0")
+_VERSION_ORDER = ("1.0.0", "1.1.0", "1.2.0", "1.3.0", "1.4.0", "1.5.0", "1.6.0", "1.7.0", "1.8.0", "1.9.0", "1.10.0", "1.11.0", "1.12.0", "1.13.0", "1.14.0", "1.15.0")
 #: A change a format version made that moves no eligibility and adds no import rule, but that the
 #: first save by a newer build still DISCLOSES in its ``format_upgrades`` entry (never silently).
 CHANGES_ADDED_IN: Mapping[str, str] = {
@@ -157,6 +163,10 @@ CHANGES_ADDED_IN: Mapping[str, str] = {
                "instrument (isaac.suggest.technique_from_configuration.v1), pellet fields only where mentioned "
                "(isaac.import.optional_field_asked_where_mentioned.v1), stale comment lines "
                "(isaac.import.comment_possibly_stale.v1); a re-import keeps every id the earlier build gave"),
+    "1.15.0": ("1.15.0 reads at import, only on a re-import: the potential an SSRL XDC run's name writes, as a "
+               "suggestion that needs review compared with its comment lines (isaac.suggest.name_potential.v1; "
+               "open circuit suggests the control mode, isaac.suggest.name_open_circuit.v1); new candidates are "
+               "numbered last"),
 }
 #: A field composed into a draft only beside another of the SAME run (interim decision for the
 #: set-point, pending domain-owner review; ``records.compose_group`` applies it). The CURRENT
@@ -2130,8 +2140,15 @@ def is_xdc_comment_line(key: Any, locator: Any) -> bool:
         return False
 
 
+#: why a comment line's value-less set-point candidate targets no field once the run's NAME offers the set-point
+SETPOINT_IN_NAME_REASON = (
+    "The comment line mentions a potential in no form the reader takes a value from, and the file name of the same run "
+    "states the set-point (see that suggestion, where this line is shown too): this line no longer asks for it.")
+
+
 def _xdc_comment_candidates(g, run_scans: Sequence[Mapping], run_id: str, first_n: int, sid_of: Mapping,
-                            writable, *, stale: Sequence[Mapping] | None = None) -> list[dict]:
+                            writable, *, stale: Sequence[Mapping] | None = None,
+                            setpoint_withheld: str | None = None, setpoint_in_name: bool = False) -> list[dict]:
     """The :data:`XDC_COMMENT_RULE_ID` candidates of ONE ``ssrl_xdc_v1`` run (ids ``cand-<first_n>`` on), one per
     field its scans' comment lines state, in :data:`XDC_COMMENT_KEYS` order. Every scan stating it is evidence;
     scans that state DIFFERENT values give a candidate with no value (it says which). Built through the engine's
@@ -2139,7 +2156,14 @@ def _xdc_comment_candidates(g, run_scans: Sequence[Mapping], run_id: str, first_
 
     ``stale`` (``suggestions.stale_comment_flags``): the run's comment lines flagged as possibly left over from an
     earlier run. A potential (set-point, scale) read ONLY from such lines is not offered: the candidate has no value
-    and says why, also when the line was one the rule reads no value from anyway. Every other field is read as before."""
+    and says why, also when the line was one the rule reads no value from anyway. Every other field is read as before.
+
+
+    ``setpoint_withheld`` (``suggestions.comment_differs_reason``): the run's NAME writes another potential than its
+    comment line, so the line's set-point is not offered either; the reason names both and the scientist says which.
+    ``setpoint_in_name`` (``suggestions.name_setpoint_value``): the run's name offers the set-point, so a comment line
+    that only MENTIONS a potential (no value read from it) no longer asks for the same number: its candidate keeps its
+    id but targets no field (:data:`SETPOINT_IN_NAME_REASON`), and the line is evidence on the name's candidate."""
     from .. import historical_import as hist
     from . import suggestions as _suggest
     from .questions import header_comment_readings, header_unread_text
@@ -2164,6 +2188,11 @@ def _xdc_comment_candidates(g, run_scans: Sequence[Mapping], run_id: str, first_
                      if stale and path in _suggest.STALE_FIELDS else None)
         if left_over is not None:
             value = None
+        withheld = setpoint_withheld if path == SETPOINT_FIELD else None
+        if withheld is not None:
+            value = None
+        # the name's candidate holds the set-point: this value-less one stays (its id stands) as evidence only
+        named = path == SETPOINT_FIELD and value is None and setpoint_in_name and left_over is None and withheld is None
         bundle_cid = f"cand-{first_n + len(out):04d}"
         evidence = []
         for index, rel, loc, literal, reading in hits[:MAX_EVIDENCE_PER_CANDIDATE]:
@@ -2183,12 +2212,16 @@ def _xdc_comment_candidates(g, run_scans: Sequence[Mapping], run_id: str, first_
                                    "to": reading["value"], "unit": reading["unit"]}],
             })
         ambiguous = [h for h in hits if h[4].get("ambiguous")]
-        if left_over is not None and ambiguous:
+        if left_over is not None and ambiguous:  # a stale line's own reason names both potentials already
             _i, a_rel, a_loc, a_line, _reading = ambiguous[0]
             said = header_unread_text(path, a_line, a_loc, a_rel)
             reason = f"{left_over} As before: {said}."
         elif left_over is not None:
             reason = left_over
+        elif withheld is not None:
+            reason = withheld
+        elif named:
+            reason = SETPOINT_IN_NAME_REASON
         elif ambiguous:
             # r1d: the line mentions the field in no form the whitelist reads: it is quoted, and the scientist says
             _i, a_rel, a_loc, a_line, _reading = ambiguous[0]
@@ -2205,7 +2238,7 @@ def _xdc_comment_candidates(g, run_scans: Sequence[Mapping], run_id: str, first_
             determinism=hist.DETERMINISM_DETERMINISTIC,
             rule=XDC_COMMENT_RULE,
             supporting_source_ids=tuple(dict.fromkeys(h[1] for h in hits)),
-            target_field_path=path,
+            target_field_path=None if named else path,
             proposed_value=value,
             not_proposable_reason=reason,
             supporting_statement_total=len(hits),
@@ -4648,6 +4681,7 @@ def build_bundle(
     # NAME.NNN series), so a candidate an import by the earlier build gave keeps its id and a late run's only ADD ids.
     late_keys = set(getattr(generic, "late_run_keys", None) or ()) if generic is not None else set()
     not_read: set[str] = set()  # runs whose header comment lines are not read into candidates (c16-r M1)
+    comment_args: dict[str, tuple] = {}  # run_id -> how its comment-line candidates were built (first id, arguments)
     # suggestions.STALE_COMMENT_RULE_ID: a comment line identical to an earlier run's under another name potential is
     # flagged on the run, and the potential it states is not offered
     from . import suggestions as _suggest
@@ -4656,6 +4690,9 @@ def build_bundle(
     for run_id, flags in stale_comments.items():
         runs_by_id[run_id]["other_relationships"]["anomalies"] = (
             runs_by_id[run_id]["other_relationships"]["anomalies"] + flags)[:50]
+    # suggestions.NAME_POTENTIAL_RULE_ID: what each run's NAME states about the potential, beside its comment lines
+    name_reviews = _suggest.name_potential_review(
+        runs, {run_id: _suggest.xdc_comment_lines(g, run_scans) for run_id, g, run_scans in xdc_runs})
     for late in (False, True):
         phase = [t for t in xdc_runs if (t[1].run_key in late_keys) is late]
         for run_id, g, run_scans in phase:
@@ -4678,8 +4715,11 @@ def build_bundle(
             if not_read:
                 not_read.add(run_id)  # in run order: once one run is left out, every later one is too
                 continue
+            comment_args[run_id] = (g, run_scans, len(out_candidates) + 1, dict(
+                stale=stale_comments.get(run_id),
+                setpoint_withheld=_suggest.comment_differs_reason(name_reviews.get(run_id) or {})))
             cands = _xdc_comment_candidates(g, run_scans, run_id, len(out_candidates) + 1, sid_of, writable,
-                                            stale=stale_comments.get(run_id))
+                                            **comment_args[run_id][3])
             if len(out_candidates) + len(cands) > MAX_CANDIDATES:
                 not_read.add(run_id)
                 continue
@@ -4707,17 +4747,35 @@ def build_bundle(
         runs, _suggest.technique_readings(runs, out_candidates, xdc_runs),
         {s["source_id"]: s["relative_path"] for s in sources}, f"cand-{len(out_candidates) + 1:04d}", writable)
         if len(out_candidates) < MAX_CANDIDATES else None)
-    detargeted_ids: set[str] = set()  # macro-name candidates that targeted the technique for the build before
+    # candidate id -> the field it targeted for the build before and no longer does (macro-name candidates of the
+    # technique; a comment line's value-less set-point once the run's name offers one)
+    detargeted_ids: dict[str, str] = {}
     if technique is not None:
         out_candidates.append(technique)
         shared_bundle_ids.append(technique["candidate_id"])
         newly_read_ids.add(technique["candidate_id"])
         for ci, c, bundle_cid, run_id, key, evidence, total in named_techniques:
             if technique["value"] is not None and _suggest.is_code_named_technique(out_candidates[ci]):
-                detargeted_ids.add(bundle_cid)
+                detargeted_ids[bundle_cid] = "system.technique"
                 out_candidates[ci] = _candidate_record(
                     dataclasses.replace(c, target_field_path=None, not_proposable_reason=_suggest.NOT_A_TECHNIQUE_REASON),
                     bundle_cid=bundle_cid, run_id=run_id, key=key, evidence=evidence, total=total, writable=writable)
+    # after every other candidate, so each keeps its id; never past the bound (a name's reading is then not offered)
+    for cand in _suggest.name_potential_candidates(
+            runs, out_candidates, name_reviews, {s["source_id"]: s["relative_path"] for s in sources},
+            len(out_candidates) + 1, writable, room=max(0, MAX_CANDIDATES - len(out_candidates))):
+        out_candidates.append(cand)
+        newly_read_ids.add(cand["candidate_id"])
+        runs_by_id[cand["run_id"]]["candidate_ids"].append(cand["candidate_id"])
+        if cand["target_field_path"] == SETPOINT_FIELD and cand["value"] is not None and cand["run_id"] in comment_args:
+            # the run's comment candidates again, from the same first id: the same list, the set-point one detargeted
+            g, run_scans, first_n, kwargs = comment_args[cand["run_id"]]
+            for again in _xdc_comment_candidates(g, run_scans, cand["run_id"], first_n, sid_of, writable,
+                                                 setpoint_in_name=True, **kwargs):
+                at = int(again["candidate_id"].split("-")[1]) - 1
+                if out_candidates[at]["target_field_path"] != again["target_field_path"]:
+                    detargeted_ids[again["candidate_id"]] = out_candidates[at]["target_field_path"]
+                out_candidates[at] = again
     if len(out_candidates) > MAX_CANDIDATES:
         raise BundleBoundsExceeded(f"{len(out_candidates)} candidates exceeds the bound of {MAX_CANDIDATES}.")
 
@@ -4869,7 +4927,7 @@ def build_bundle(
     # candidate that build gave and this one does not target there: `detargeted_ids`) is numbered after every other.
     before_by_run: dict[str | None, set[str]] = {}
     for cand in out_candidates:
-        was = "system.technique" if cand["candidate_id"] in detargeted_ids else cand["target_field_path"]
+        was = detargeted_ids.get(cand["candidate_id"], cand["target_field_path"])
         if was and cand["candidate_id"] not in newly_read_ids:
             before_by_run.setdefault(cand["run_id"], set()).add(was)
     any_before = set().union(*before_by_run.values()) if before_by_run else set()

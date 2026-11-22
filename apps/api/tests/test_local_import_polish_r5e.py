@@ -238,7 +238,10 @@ def test_scale_and_mode_stay_per_group_and_agreeing_groups_share_a_batch_for_the
     p = Q.consolidate(b)
     assert not Q._is_shared(SCALE) and not Q._is_shared(MODE)  # DEC-90: never asked once for the beamtime
     qs = _per_group(p, SCALE)
-    assert len(qs) == 6 and all(MODE in q["fields"] for q in qs)
+    # 1.15.0: the open-circuit run's name suggests its control mode (suggestions.OPEN_CIRCUIT_RULE_ID), so its mode
+    # is a value to confirm, not an optional one; every other group is asked its mode with its scale
+    assert len(qs) == 6 and all(MODE in q["fields"] for q in qs if not _stem_of_group(b, q).startswith("Q4_03"))
+    assert any(q["kind"] == "confirm_value" and q["target_field_path"] == MODE for q in p["questions"])
     batch = {}
     for q in qs:
         batch.setdefault(((q.get("same_reading_by_field") or {}).get(SCALE) or {}).get("same_reading_group"), []).append(

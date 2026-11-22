@@ -29,6 +29,7 @@ from pathlib import Path
 import pytest
 
 from isaac_api.local_import import bundle as B
+from isaac_api.local_import import suggestions as S
 from isaac_api.local_import import cli
 from isaac_api.local_import import grouping as G
 from isaac_api.local_import import mutations as M
@@ -228,6 +229,8 @@ LABEL = "05_SYNmof_m150mV_021"
 def old_bundle(tmp_path, monkeypatch) -> Path:
     """What a build before the comment rule made: no candidate holds the scan header's reading."""
     monkeypatch.setattr(B, "_xdc_comment_candidates", lambda *a, **k: [])
+    # nor the name's (1.15.0, suggestions.NAME_POTENTIAL_RULE_ID): that build read nothing from an XDC run's name
+    monkeypatch.setattr(S, "name_potential_candidates", lambda *a, **k: [])
     src = tmp_path / "SYN_bt43"
     for i in (1, 2):
         make_scan(src / f"{LABEL}_A.{i:03d}", free_text=("100mM NaClO4 pH1.3", "-300mV vs RHE"))

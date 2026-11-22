@@ -1303,6 +1303,10 @@ def compose_group(bundle: Mapping, group: Mapping, bundle_dir: Path, index: dict
     return draft, report
 
 
+#: ``suggestions.NAME_POTENTIAL_RULE_ID`` (not imported: suggestions imports this module's neighbours)
+NAME_POTENTIAL_RULE_ID = "isaac.suggest.name_potential.v1"
+
+
 def _stated_potentials(bundle: Mapping, member_ids: set) -> list[dict]:
     """Each potential a member run's FILE NAME states, as the import already holds it: a set-point candidate read
     from a file-name token (its literal and the volts it was read as), or an unmapped file-name token shaped like a
@@ -1327,6 +1331,9 @@ def _stated_potentials(bundle: Mapping, member_ids: set) -> list[dict]:
                                "read_as_V": value, "value_state": c.get("value_state"), "stated_in": "scan header",
                                "locator": e.get("locator"), "run_id": c["run_id"], "runs": [c["run_id"]],
                                "volts": got.get("value"), **({"scale": got["scale"]} if got.get("scale") else {}),
+                               # 1.15.0: a plain line whose value is NOT offered (another potential in the run's name,
+                               # or a stale line): said so, never "not written in a plain form"
+                               **({"withheld": True} if got.get("value") is not None and value is None else {}),
                                # r3a H2: what a line read with no value mentions, to compare only
                                **({"mentions": Q.header_potential_mentions(lit)} if got.get("value") is None else {})})
             continue
@@ -1343,8 +1350,15 @@ def _stated_potentials(bundle: Mapping, member_ids: set) -> list[dict]:
             key = (lit, value)  # one statement however many of the run's files repeat it
             if key not in seen:
                 seen.add(key)
+                named = {}
+                if B._rule_id(c.get("rule")) == NAME_POTENTIAL_RULE_ID:
+                    # an SSRL XDC run's name (suggestions.NAME_POTENTIAL_RULE_ID): said as the file name's, with the
+                    # volts its token writes, so a header line that writes another number is still named beside it
+                    to = next((n.get("to") for n in e.get("normalization") or () if n.get("unit") == "V"), None)
+                    named = {"stated_in": "file name", "run_id": c["run_id"], "runs": [c["run_id"]],
+                             **({"volts": to} if isinstance(to, (int, float)) and not isinstance(to, bool) else {})}
                 out.append({"literal": lit, "relative_path": e.get("relative_path"), "candidate_id": c["candidate_id"],
-                            "read_as_V": value, "value_state": c.get("value_state")})
+                            "read_as_V": value, "value_state": c.get("value_state"), **named})
     return out + Q.stated_potentials_beyond_candidates(bundle, member_ids) + header  # the names first, as before
 
 

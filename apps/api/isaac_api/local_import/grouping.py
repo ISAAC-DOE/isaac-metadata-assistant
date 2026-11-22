@@ -102,6 +102,8 @@ CONDITION_KEYS: Mapping[str, str] = {
     "scan_header_ph": "condition: pH changes the state",
     "scan_header_potential": "condition: the applied potential sets the electrochemical state",
     "scan_header_potential_scale": "condition: a potential means nothing without its reference scale",
+    # a run name's OCV / OCP token (suggestions.OPEN_CIRCUIT_RULE_ID): a value that needs review
+    "control_mode_statement": "condition: open circuit and a held potential are different electrochemical states",
     # pq-003 (beamline scientist answers relayed by Krish, 17 Nov 2026; STEP_RULE_ID)
     "step_number": ("condition: stepNN is the order of potential steps in one sequence; different steps are NEVER "
                     "merged, even at the same potential (step05 and step08 at 850 mV: after the 1st and the 2nd cycling)"),

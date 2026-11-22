@@ -32,6 +32,7 @@ from pathlib import Path
 import pytest
 
 from isaac_api.local_import import bundle as B
+from isaac_api.local_import import suggestions as S
 from isaac_api.local_import import cli
 from isaac_api.local_import import mutations as M
 from isaac_api.local_import import questions as Q
@@ -322,7 +323,9 @@ def test_a_potential_in_the_name_and_the_header_names_both_steps_and_the_headers
     assert [(s["literal"], s["stated_in"]) for s in w["stated"]] == [("500mV", "file name"),
                                                                     ("SYN sample in 1M KOH, 0.5 V vs RHE", "scan header")]
     name, header = w["stated"]
-    assert name["read_as_V"] is None and name["candidate_id"] is None  # nothing is read from a file name here
+    # 1.15.0: the name's potential is a suggestion that needs review (the scientists' rule: inferable from the
+    # experiment; the round-one reader reads a SPEC name the same way), so a candidate holds it
+    assert name["read_as_V"] == 0.5 and name["candidate_id"] and name["value_state"] == B.STATE_NEEDS_REVIEW
     # c16b: the header's comment line is read into candidates that need review (rule ssrl_xdc_header_comment_v1)
     assert header["read_as_V"] == 0.5 and header["value_state"] == B.STATE_NEEDS_REVIEW and header["scale"] == "RHE"
     text = w["text"]
@@ -368,13 +371,20 @@ def test_validate_and_the_minimum_carry_the_warnings(grouped, capsys):
     assert all("0 V vs RHE" in r["why"] for r in minimum["recommended"])
 
 
-def test_no_candidate_is_added_for_a_file_name_potential(grouped):
-    # c16b: what the header's comment lines state is a candidate that needs review; a file name gives none
+def test_a_file_name_potential_is_a_candidate_that_needs_review_after_every_other(grouped):
+    # c16b: what the header's comment lines state is a candidate that needs review. 1.15.0 reverses "a file name gives
+    # none": the scientists' rule is that the potential is inferable from the experiment, and the round-one reader
+    # already reads a SPEC name the same way, so the name's potential (or open circuit) is one too, numbered last
     b = _confirm_groups(grouped)
     rest = [c for c in b["candidates"] if c["target_field_path"] != START]
     assert len(b["candidates"]) - len(rest) == len(RUNS)
-    assert rest and all(B.is_header_comment_candidate(c) and c["value_state"] == B.STATE_NEEDS_REVIEW for c in rest)
-    assert all(e["locator"].startswith("line:") for c in rest for e in c["evidence"])
+    named = [c for c in rest if not B.is_header_comment_candidate(c)]
+    header = [c for c in rest if B.is_header_comment_candidate(c)]
+    assert header and all(c["value_state"] == B.STATE_NEEDS_REVIEW for c in rest)
+    assert all(e["locator"].startswith("line:") for c in header for e in c["evidence"])
+    assert {c["statement_key"] for c in named} == {S.NAME_POTENTIAL_KEY, S.OPEN_CIRCUIT_KEY}
+    assert all(c["evidence"][0]["locator"].startswith("filename token") for c in named)
+    assert min(int(c["candidate_id"][5:]) for c in named) > max(int(c["candidate_id"][5:]) for c in header)
 
 
 def test_token_volts_reads_only_the_spelling():
