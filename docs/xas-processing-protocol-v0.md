@@ -81,7 +81,14 @@ the adapter `apps/api/isaac_api/local_import/processing/engine_xas.py` (protocol
 the engine's own scope (`src/xas_analysis/skill/scope.md`) covers: SSRL hard-XAS fluorescence / HERFD read from SPEC
 or SSRL EXAFS Data Collector files. Everything else stays on v0 (this document) and its result says why
 (`engine.reason`): transmission samples (the channel choice is ln(I0/I1), or the engine's `measurement_mode` reads the
-data as transmission), alignment groups, other formats. `ISAAC_PROCESSING_ENGINE=v0` keeps every group on v0.
+data as transmission), alignment groups, other formats. A STANDARD (role reference) whose channel choice is transmission
+is on v1 (`isaac.xas.transmission_standard_on_v1.v1`, audit of 18 Nov 2026): mu = ln(I0/I1), aligned per scan to the
+samples' beamtime reference, merged and normalised as the samples are (Victoreen + McMaster); one constant per group is
+added while it is normalised (the Victoreen background is non-negative; ln(I0/I1) carries the chambers' gain ratio) and
+taken out of merged.csv; no thickness, pinhole or harmonic correction; no dose rule (the signal is not a count). A scan
+whose energy column does not read as an energy axis (median outside `channels.energy_value_range_eV`, or a span under
+25 eV: a motor or alignment scan, e.g. an XDAC `align_data` file) is `not_an_energy_scan`; a group of only such scans
+fails with that reason, on v0 as on v1, and never comes out as a spectrum. `ISAAC_PROCESSING_ENGINE=v0` keeps every group on v0.
 
 **Once per beamtime** (`engine_beamtime` in `processing_results.json`): every group is read with v0's own reader,
 channel choice and BL15-2 absev rule (hash-checked); the engine's survey (`survey_files`, one entry per record group,

@@ -528,9 +528,63 @@ def test_a_transmission_sample_falls_back_to_v0(tmp_path):
         stem = (r.get("inputs") or [{}])[0].get("relative_path", "").split("/")[0]
         by[stem[:2]] = r
     assert by["01"]["protocol_id"] == by["02"]["protocol_id"] == "isaac.xas.v1"
-    for k in ("03", "04"):
-        assert by[k]["protocol_id"] == "isaac.xas.v0", k
-        assert "transmission" in by[k][EX.ENGINE_KEY]["reason"] and "NOT SUPPORTED" in by[k][EX.ENGINE_KEY]["reason"]
+    # a transmission SAMPLE stays on v0; a transmission STANDARD (the pellet) is reduced on v1 (audit 18 Nov, finding 7)
+    assert by["04"]["protocol_id"] == "isaac.xas.v0"
+    assert "transmission" in by["04"][EX.ENGINE_KEY]["reason"] and "NOT SUPPORTED" in by["04"][EX.ENGINE_KEY]["reason"]
+    assert by["03"]["protocol_id"] == "isaac.xas.v1" and by["03"]["measurement_mode"]["mode"] == "transmission"
+
+
+def _std_cols(seed, d, *, gain=1.0, step=0.6):
+    """A transmission standard scan: mu = ln(I0/I1) with an edge step ``step`` at the true edge, a mono offset ``d``
+    (features at true energy + d), the I0 glitch, and I1 on a chamber ``gain`` (gain 3: ln(I0/I1) is negative)."""
+    c = scan_cols(seed, d=d, fluo=False, trans_step=step)
+    c["I1"] = c["I1"] * gain
+    return c
+
+
+@pytest.mark.parametrize("gain", [1.0, 3.0])
+def test_a_transmission_standard_is_aligned_per_scan_and_normalised_as_the_samples(tmp_path, gain):
+    """Audit 18 Nov, finding 7: a standard in transmission is aligned per scan to the samples' beamtime reference (the
+    I0 glitch here) and normalised with the samples' model (Victoreen + McMaster), never left unaligned on v0; a
+    negative ln(I0/I1) (a chamber gain) is carried by a constant that merged.csv takes out again."""
+    ds = [0.04, -0.03, 0.06]
+    runs = _two_groups() + [("03_SYN_IrO2_std_005", 13, [_std_cols(70 + k, d, gain=gain) for k, d in enumerate(ds)])]
+    bdir, _ = imported(tmp_path, runs)
+    r = by_run(v1_results(bdir), "03_SYN_IrO2_std")
+    assert r["protocol_id"] == "isaac.xas.v1" and r["qc"]["verdict"] != "fail", r["qc"]
+    assert r["measurement_mode"]["mode"] == "transmission"
+    assert "no thickness, pinhole or harmonic correction" in r["measurement_mode"]["statement"]
+    assert "measurement_mode_unknown" not in r["review_flags"] and "dose_damage" not in r
+    rows = {x["scan_id"]: x for x in r[EX.SHIFTS_KEY]["rows"]}
+    ref_mean = float(np.mean(REF_D))
+    for k, d in enumerate(ds):
+        assert abs(1000 * (rows[f"03_SYN_IrO2_std_005#{k + 1}"]["shift_eV"] - (ref_mean - d))) < 10.0, rows
+    assert r[EX.NORMALIZATION_KEY]["model"] == "victoreen" and r[EX.NORMALIZATION_KEY]["tender"]["tender"] is False
+    assert r["outputs"]["edge_step"] == pytest.approx(0.6, rel=0.1)
+    merged = next(f for f in r["outputs"]["files"] if f["role"] == "merged")["relative_path"]
+    m = np.genfromtxt(bdir / merged, delimiter=",", names=True, skip_header=1)
+    pre = m["energy_eV"] < 11200
+    assert np.median(m["mu_mean"][pre]) == pytest.approx(0.5 - np.log(gain), abs=0.02)   # ln(I0/I1) as measured
+
+
+def test_a_motor_scan_never_comes_out_as_a_spectrum(tmp_path):
+    """Audit 18 Nov, finding 7: an alignment file whose energy column holds motor positions (here 10-60) fails with the
+    reason, on v0 as on v1."""
+    def motor(seed):
+        c = scan_cols(seed, fluo=True)
+        x = np.linspace(10.0, 60.0, c["energy"].size)
+        c["energy"], c["absev"] = x, x
+        return c
+
+    runs = _two_groups() + [("03_SYN_ZZ3_060mV", 13, [motor(80 + k) for k in range(2)])]
+    bdir, _ = imported(tmp_path, runs)
+    from isaac_api.local_import import mutations as M
+
+    r = next(x for x in M.load(bdir)["processing_results"] if x["source"] == "isaac_protocol"
+             and str((x.get("inputs") or [{}])[0].get("relative_path", "")).startswith("03_"))
+    assert r["qc"]["verdict"] == "fail" and r["qc"]["reasons"] == ["not_an_energy_scan"], r["qc"]
+    assert "a motor or alignment scan, not an energy scan" in r["qc"]["statements"]["not_an_energy_scan"]
+    assert not any(f.get("role") == "merged" for f in (r.get("outputs") or {}).get("files") or ())
 
 
 def test_the_v0_pin_keeps_every_group_on_v0(tmp_path, monkeypatch):
@@ -1040,8 +1094,12 @@ def test_separate_foil_scans_give_a_foil_timeline_on_the_package_rules(tmp_path)
     route = bt["routes"][0]
     assert route["reference_name"] == "01_SYN_Irfoil_calib_b" and route["method"] == "shape"
     assert [x["foil"] for x in route["timeline"]] == used
-    res = v1_results(bdir)
+    allv1 = v1_results(bdir)
+    res = [r for r in allv1 if r["measurement_mode"]["mode"] != "transmission"]
     assert len(res) == 3
+    # the foils are standards in transmission: on v1 too, aligned on the same timeline (audit 18 Nov, finding 7)
+    foils = [r for r in allv1 if r["measurement_mode"]["mode"] == "transmission"]
+    assert foils and all(x["route"] == "foil_timeline" for r in foils for x in r[EX.SHIFTS_KEY]["rows"] if x.get("ok"))
     for stem, hour in (("02_SYN_ZZ2", 9), ("03_SYN_ZZ3", 12), ("05_SYN_ZZ5", 14)):
         rows = by_run(res, stem)[EX.SHIFTS_KEY]["rows"]
         want = _drift(8) - _drift(hour)                       # linear in time between the foils, on the reference foil

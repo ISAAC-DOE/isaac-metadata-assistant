@@ -2075,6 +2075,33 @@ def _scan_template(header_lines: Sequence[str] | None) -> tuple[str, str] | None
 ENERGY_SCAN_MOTORS = ("energy", "mono", "absev")
 
 
+#: NOT AN ENERGY AXIS (processing-science audit of 18 Nov 2026, finding 7): a scan with no ``#S`` line (an XDAC
+#: alignment file) is taken as an energy scan by :func:`_is_energy_scan`; its energy column must also READ as one: a
+#: median inside ``channels.energy_value_range_eV`` and a span of at least :data:`ENERGY_AXIS_MIN_SPAN_EV`. A motor or
+#: alignment scan whose "Achieved Energy" holds motor positions (tens of units) never comes out as a spectrum.
+ENERGY_AXIS_MIN_SPAN_EV = 25.0
+NOT_ENERGY_SCAN = "not_an_energy_scan"
+
+
+def not_an_energy_axis(E, params: Mapping) -> str | None:
+    """Why this energy column is not an energy scan's axis, or None (:data:`ENERGY_AXIS_MIN_SPAN_EV`)."""
+    import numpy as np
+
+    E = np.asarray(E, float)
+    E = E[np.isfinite(E)]
+    if not E.size:
+        return "the energy column has no finite value"
+    lo, hi = (params.get("channels") or {}).get("energy_value_range_eV") or (1000.0, 100000.0)
+    med, span = float(np.median(E)), float(np.ptp(E))
+    if not lo <= med <= hi:
+        return (f"the energy column reads {float(E.min()):.4g} to {float(E.max()):.4g} (median {med:.4g}), outside "
+                f"{lo:g}-{hi:g} eV: a motor or alignment scan, not an energy scan")
+    if span < ENERGY_AXIS_MIN_SPAN_EV:
+        return (f"the energy column spans only {span:.3g} eV (under {ENERGY_AXIS_MIN_SPAN_EV:g} eV): a motor or "
+                "alignment scan, not an energy scan")
+    return None
+
+
 def _is_energy_scan(template: tuple[str, str] | None, energy_column: str | None = None) -> bool:
     """A scan whose ``#S`` line scans ``energy`` (``gscan energy``, ``ascan energy``), a ``gscan`` of an energy motor
     (:data:`ENERGY_SCAN_MOTORS`: ``gscan mono`` on BL6-2c 2018 and BL15-2 2019), or scans the motor that IS the chosen
@@ -2605,6 +2632,10 @@ def process_group(group: Mapping, ctx: _Ctx, athena_entry: Mapping | None = None
     motors_of: dict[int, Sequence[str]] = {id(entry): getattr(table, "motor_lines", ()) for entry, table, _, _ in attempts}
     for entry, table, sa, code in attempts:
         code = code or C.unusable_reason(sa)
+        axis_said = not_an_energy_axis(sa["energy"], params) if not code and sa is not None else None
+        if axis_said:
+            code = NOT_ENERGY_SCAN
+            entry[NOT_ENERGY_SCAN] = axis_said
         if code:
             entry["skip_reason"] = code
             if code == "too_few_points" and sa is not None:
@@ -2627,6 +2658,14 @@ def process_group(group: Mapping, ctx: _Ctx, athena_entry: Mapping | None = None
         scans_data.append(sa)
         used_entries.append(entry)
         headers.extend(table.header_lines)
+    skipped = [e for e in res["inputs"] if e.get("skip_reason")]
+    if not scans_data and skipped and all(e.get("skip_reason") == NOT_ENERGY_SCAN for e in skipped):
+        said = next(e[NOT_ENERGY_SCAN] for e in res["inputs"] if e.get(NOT_ENERGY_SCAN))
+        out = _fail(res, NOT_ENERGY_SCAN, said)
+        out["qc"]["statements"] = {NOT_ENERGY_SCAN: (f"Not an energy scan, so no spectrum is made: {said}"
+                                                     + (f" ({len(skipped)} scans)" if len(skipped) > 1 else "")
+                                                     + ".")}
+        return [out]
     if not scans_data:
         causes = sorted({e.get("skip_reason") or "?" for e in res["inputs"]})
         nonfinite = [e["diagnostics"] for e in res["inputs"] if e.get("skip_reason") == C.SIGNAL_NOT_FINITE]

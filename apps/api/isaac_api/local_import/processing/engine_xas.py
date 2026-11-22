@@ -45,7 +45,7 @@ from typing import Any, Mapping, Sequence
 
 from .. import bundle as B
 from . import core as C
-from .channels import MODE_FLUORESCENCE
+from .channels import MODE_FLUORESCENCE, MODE_TRANSMISSION
 
 PROTOCOL_ID = "isaac.xas.v1"
 PROTOCOL_VERSION = "1.0.0"
@@ -316,18 +316,27 @@ def read_group(g: Mapping, ctx) -> dict:
         choice = fallback
         attempts = R._bl15_2_missing(R._scan_attempts(tables, choice, np), ctx, params)
     out["choice"] = choice
+    standard_in_transmission = False
     if choice.mode != MODE_FLUORESCENCE:
         out["scope"] = (f"measured in {choice.mode} (mu = {choice.signal_name}): the engine reduces fluorescence / "
                         "HERFD (IF/I0) only; transmission-mode samples are NOT SUPPORTED in its scope")
-        # a foil (or any transmission group) is never a v1 record, but the survey sees its scans: the foil timeline
+        # a transmission group is never part of the beamtime survey as a sample, but the survey sees its scans (the
+        # foil timeline); a STANDARD in transmission is still reduced on v1 (TRANSMISSION_STANDARD), its own recs apart
         out["recs"] = _survey_recs(tables, role, sel, ctx, num_of, stem_of, choice=choice)
-        return out
+        if role != "reference" or choice.mode != MODE_TRANSMISSION:
+            return out
+        if R._reference_channel_fallback(attempts, choice, tables, role, stems, ctx) is not None:
+            return out                     # a foil on I2 read on v0's reference channel: stays on v0, said there
+        standard_in_transmission = True
+        out["scope"] = (f"a standard measured in transmission (mu = {choice.signal_name}): not part of the beamtime "
+                        f"reference survey as a sample; reduced on v1 ({TRANSMISSION_RULE_ID})")
+    v1_recs: list[dict] = []
     for k, (entry, table, sa, code) in enumerate(attempts):
         code = code or C.unusable_reason(sa)
         if code:
             entry["skip_reason"] = code
             continue
-        rec = _arrays(table, choice, np)
+        rec = _arrays(table, choice, np, transmission=standard_in_transmission)
         if rec is None:
             entry["skip_reason"] = "too_few_points"
             continue
@@ -338,10 +347,17 @@ def read_group(g: Mapping, ctx) -> dict:
                    run_key=entry.get("run_key"), header=table.header_lines, time=_scan_time(table.header_lines),
                    motor_lines=tuple(getattr(table, "motor_lines", ()) or ()),
                    template=R._scan_template(table.header_lines))
-        if not R._is_energy_scan(rec["template"], choice.energy):
+        if not R._is_energy_scan(rec["template"], choice.energy) or R.not_an_energy_axis(rec["E"], params):
             entry["skip_reason"] = "not_an_energy_scan"
             continue
-        out["recs"].append(rec)
+        v1_recs.append(rec)
+    if standard_in_transmission:
+        if v1_recs:
+            out["transmission_v1"] = True
+            out["v1_recs"] = v1_recs
+            out["transmission_offset"] = _transmission_offset(v1_recs, np)
+        return out
+    out["recs"] = v1_recs
     if not out["recs"]:
         out["scope"] = "no usable energy scan (v0 says why)"
         return out
@@ -386,12 +402,18 @@ def _survey_recs(tables, role: str, sel, ctx, num_of: Mapping, stem_of: Mapping,
     return out
 
 
-def _arrays(table, choice, np, *, signal: bool = True) -> dict | None:
+def _arrays(table, choice, np, *, signal: bool = True, transmission: bool = False) -> dict | None:
     """Sorted, duplicate-averaged E, IF, I0, I1, I2, sec of one scan (finite E, I0 > 0, finite IF). ``signal=False``
-    (a foil or alignment scan the survey reads): no fluorescence signal, ``IF`` is None."""
+    (a foil or alignment scan the survey reads): no fluorescence signal, ``IF`` is None. ``transmission``: ``IF`` is
+    ln(I0/I1) x I0, so IF/I0 is the transmission mu (:data:`TRANSMISSION_RULE_ID`; the group's constant offset is
+    added by :func:`_transmission_offset`)."""
     cols = table.columns
     E = np.asarray(cols[choice.energy], float)
-    if signal:
+    if transmission:
+        with np.errstate(all="ignore"):
+            I0_, I1_ = np.asarray(cols[choice.i0], float), np.asarray(cols[choice.transmission_after], float)
+            IF = np.where((I0_ > 0) & (I1_ > 0), np.log(I0_ / I1_), np.nan) * I0_
+    elif signal:
         IF = np.sum([np.asarray(cols[c], float) for c in choice.signal_columns], axis=0)
     else:
         IF = np.zeros(E.size)
@@ -434,6 +456,40 @@ def _arrays(table, choice, np, *, signal: bool = True) -> dict | None:
     if not signal:
         arr["IF"] = None
     return {"E": E, **arr, "i0_dropouts": dropouts}
+
+
+#: A STANDARD MEASURED IN TRANSMISSION ON v1 (processing-science audit of 18 Nov 2026, finding 7; the scientists' rule:
+#: every scan of all samples is aligned on its in-scan reference). v0 reduced transmission standards without per-scan
+#: alignment and with another normalisation (larch pre_edge, flattened) than the samples'. On v1 a standard (role
+#: reference) whose channel choice is transmission is read as mu = ln(I0/I1), aligned per scan to the SAME beamtime
+#: reference as the samples (the foil on I1/I2, else the I0 glitch), merged and normalised exactly as they are
+#: (Victoreen + McMaster). It is never part of the beamtime survey as a sample (the reference group stays a sample's).
+#: ln(I0/I1) carries the ion chambers' gain ratio as a constant and may be negative; one constant per group
+#: (``offset``: the curve's span minus its minimum, so it starts at its own span above zero) is added while it is
+#: processed, because the Victoreen background is non-negative, and subtracted again in merged.csv and the
+#: background column; the normalised curve does not depend on a constant. The dose rule is not applied (IF is not a
+#: count). No thickness, pinhole or harmonic correction. Transmission SAMPLES stay on v0 (not in the engine's scope), and
+#: so does a foil on I2 that v0 reads on its reference channel (run._reference_channel_fallback).
+TRANSMISSION_RULE_ID = "isaac.xas.transmission_standard_on_v1.v1"
+TRANSMISSION_SAID = ("Measured in transmission: mu = ln(I0/I1), aligned per scan to the beamtime reference and "
+                     "normalised as the samples are ({rule}); a constant {offset:.4g} is added while it is "
+                     "normalised (the Victoreen background is non-negative) and subtracted in merged.csv; no "
+                     "thickness, pinhole or harmonic correction; the beam-damage rule is not applied (the signal is "
+                     "not a count).")
+
+
+def _transmission_offset(recs: Sequence[dict], np) -> float:
+    """Add the group's one constant to every transmission rec's IF/I0 (:data:`TRANSMISSION_RULE_ID`); returns it."""
+    with np.errstate(all="ignore"):
+        mus = np.concatenate([r["IF"] / r["I0"] for r in recs])
+    mus = mus[np.isfinite(mus)]
+    if not mus.size:
+        return 0.0
+    lo, hi = float(np.min(mus)), float(np.max(mus))
+    offset = (hi - lo) - lo
+    for r in recs:
+        r["IF"] = r["IF"] + offset * r["I0"]
+    return offset
 
 
 #: I0 DROPOUTS AND BEAM LOSSES: a point, or a contiguous run of points, whose I0 falls under ``frac`` of the scan's own
@@ -1139,9 +1195,8 @@ def _anchor_all(bt: dict, reads: Mapping, ctx) -> None:
         bt["_fits"] = {}
     fits = bt.get("_fits") or {}
     for gr in reads.values():
-        if gr.get("scope") is not None:
-            continue
-        for r in gr["recs"]:
+        recs = gr.get("v1_recs") if gr.get("transmission_v1") else (gr["recs"] if gr.get("scope") is None else ())
+        for r in recs or ():
             r["alignment"] = _align_rec(r, routes, fns, fits, ctx.np)
 
 
@@ -1249,11 +1304,17 @@ def covers(group: Mapping, ctx) -> tuple[bool, str | None]:
     gr = (bt.get("reads") or {}).get(group["group_id"])
     if gr is None:
         return False, "the group was not read by the engine"
-    if gr.get("scope") is not None:
+    transmission = bool(gr.get("transmission_v1") and gr.get("v1_recs"))
+    if gr.get("scope") is not None and not transmission:
         return False, gr["scope"]
     if not bt.get("calibration"):
         return False, bt.get("statement") or "no beamtime calibration"
     absorber = absorber_of(group, ctx, bt)
+    if transmission:
+        gr["recs"] = gr["v1_recs"]          # its own v1 recs (the survey's recs carry no signal)
+        gr["mode_check"] = {"mode": "transmission", "basis": "the channel choice: a standard in transmission",
+                            "offset": gr.get("transmission_offset")}
+        return True, None
     tr = _transmission_check(gr, absorber.get("E_edge_eV"))
     gr["mode_check"] = tr
     if tr and tr.get("mode") == "transmission":
@@ -1310,7 +1371,7 @@ def process_group_v1(group: Mapping, ctx) -> list[dict]:
         (max(float(r["E"][-1]) for r in gr["recs"]), float(E_edge0), absorber, len(gr["recs"])) if below else None))
     if res["measurement_mode"]["mode"] == BELOW_EDGE:
         res["review_flags"].append(BELOW_EDGE_FLAG)
-    elif res["measurement_mode"]["mode"] != "fluorescence":
+    elif res["measurement_mode"]["mode"] not in ("fluorescence", "transmission"):
         res["review_flags"].append("measurement_mode_unknown")
     if R.FALLBACK_FLAG in (gr["choice"].flags or ()):
         res["review_flags"].append(R.FALLBACK_FLAG)        # v0's own fallback, never silent
@@ -1376,8 +1437,10 @@ def process_group_v1(group: Mapping, ctx) -> list[dict]:
     table = decide_scans(recs, by_scan, stability, notes, scientist_scan_decisions(ctx.bundle, group["group_id"]),
                          inputs, target, win, np, complete_eV=complete, E_edge=E_edge,
                          ratio_win=rs.get("window_eV"), ratio_exclude=rs.get("exclude_eV") or ())
-    dose = apply_dose_damage(table, recs, stability, np, E_edge, absorber=absorber, notes_said=notes_said,
-                             reading=dose_reading_of(ctx.bundle, group["group_id"]))
+    transmission = res["measurement_mode"]["mode"] == "transmission"
+    dose = None if transmission else apply_dose_damage(table, recs, stability, np, E_edge, absorber=absorber,
+                                                       notes_said=notes_said,
+                                                       reading=dose_reading_of(ctx.bundle, group["group_id"]))
     if dose:
         res["dose_damage"] = dose
         if dose.get("outcome") == "question":
@@ -1459,7 +1522,7 @@ def process_group_v1(group: Mapping, ctx) -> list[dict]:
                                    + (f"; and {len(excluded_points) - 20} more" if len(excluded_points) > 20 else "")
                                    + ". Each such point is left out of its scan's contribution to the average (the "
                                      "other scans cover that energy); it is never interpolated, and the scan is kept."}
-    nm = normalize_once(E, y, n, absorber, bt, np)
+    nm = normalize_once(E, y, n, absorber, bt, np, transmission=transmission)
     res[NORMALIZATION_KEY] = {k: v for k, v in nm.items() if k not in ("norm", "mu", "bg")}
     if nm.get("error"):
         res["steps"].append({"step": "normalize", "params": nm.get("params") or {}, "outcome": {"error": nm["error"]},
@@ -1483,8 +1546,10 @@ def process_group_v1(group: Mapping, ctx) -> list[dict]:
     group_dir = ctx.out_dir / group["group_id"]
     group_dir.mkdir(parents=True, exist_ok=True)
     gdir = Path(tempfile.mkdtemp(prefix=".staging-", dir=group_dir))
-    _csv(gdir / "merged.csv", ["energy_eV", "mu_mean", "mu_stderr", "n_scans"], [E, y, err, n.astype(float)], np)
-    _csv(gdir / "normalized.csv", ["energy_eV", "norm", "mcmaster_mu", "background"], [E, nm["norm"], nm["mu"], nm["bg"]], np)
+    off = float(res["measurement_mode"].get("offset") or 0.0) if transmission else 0.0   # TRANSMISSION_RULE_ID
+    _csv(gdir / "merged.csv", ["energy_eV", "mu_mean", "mu_stderr", "n_scans"], [E, y - off, err, n.astype(float)], np)
+    _csv(gdir / "normalized.csv", ["energy_eV", "norm", "mcmaster_mu", "background"],
+         [E, nm["norm"], nm["mu"], nm["bg"] - off], np)
     R._write(gdir / "scan_decisions.json", R._json_bytes({"group_id": group["group_id"], "rule": DECISION_RULE,
                                                           "scan_decisions": res[DECISIONS_KEY]["rows"],
                                                           "scan_shifts": res[SHIFTS_KEY]}))
@@ -1629,6 +1694,9 @@ def measurement_mode_block(mc: Mapping | None, below_edge: tuple | None = None) 
                                   "name_says_transmission", "scans", "thresholds")}
     if mc.get("mode") == "fluorescence":
         out["statement"] = f"Measured in fluorescence / HERFD: {mc.get('basis')}."
+    elif mc.get("mode") == "transmission" and mc.get("offset") is not None:
+        out.update(rule_id=TRANSMISSION_RULE_ID, offset=mc["offset"])
+        out["statement"] = TRANSMISSION_SAID.format(rule=TRANSMISSION_RULE_ID, offset=float(mc["offset"]))
     else:
         out["statement"] = (f"The measurement mode is UNKNOWN ({mc.get('basis')}; fluorescence contrast "
                             f"{mc.get('fluorescence_contrast')}, ln(I0/I1) step {mc.get('transmission_step')}): v1 "
@@ -2788,7 +2856,8 @@ def tender_window(rng: Sequence[float], E_edge: float) -> list[float]:
     return [rng[0], round(min(float(rng[1]), E_edge - TENDER["pre_hi_below_edge_eV"]), 1), rng[2], rng[3]]
 
 
-def normalize_once(E, y, n, absorber: Mapping, bt: Mapping, np, *, exclude_extra: Sequence = ()) -> dict:
+def normalize_once(E, y, n, absorber: Mapping, bt: Mapping, np, *, exclude_extra: Sequence = (),
+                   transmission: bool = False) -> dict:
     """The kept scans' raw average, normalised ONCE: Victoreen + McMaster (``mback_xrs``, bg_decreasing default),
     with the tender-fluorescence options when :func:`tender_choice` says so, and the glitch windows kept out of the
     fit windows (:func:`glitch_exclusions`)."""
@@ -2818,6 +2887,8 @@ def normalize_once(E, y, n, absorber: Mapping, bt: Mapping, np, *, exclude_extra
         if lo <= fixed[1] - 10 and hi >= fixed[2] + 50:
             rng, basis = [lo, fixed[1], fixed[2], hi], ("beamtime" if [lo, hi] == [fixed[0], fixed[3]] else "beamtime_clipped")
     tender = tender_choice(E, y, float(E_edge), rng, np)
+    if transmission:                       # the tender options model a fluorescence detector's response, not ln(I0/I1)
+        tender = {**tender, "tender": False, "why": "transmission: the tender-fluorescence options do not apply"}
     opts: dict = {}
     if tender["tender"]:
         opts = dict(TENDER["options"])
