@@ -95,6 +95,30 @@ def two_sentences(text: Any) -> str:
     return one if len(one) <= MAX_REASON_CHARS else ""
 
 
+def in_import(file: Any) -> bool:
+    """Whether an evidence item's ``file`` names a file of the imported folder: a relative path that stays inside it.
+    An absolute path, a ``..`` step or a home folder (a repository document, a shared template, someone's own
+    machine) is not the scientist's file and is never shown as one."""
+    if not isinstance(file, str) or not file.strip():
+        return True  # a quote with no file (a file name token, say) is shown without one
+    f = file.strip().replace("\\", "/")
+    return not (f.startswith(("/", "~")) or re.match(r"^[A-Za-z]:", f) or f == ".." or f.startswith("../") or "/../" in f)
+
+
+def clean_evidence(items: Any) -> list[dict]:
+    """The evidence items worth showing: quoted, from the import, each (quote, file, locator) once, in order."""
+    out, seen = [], set()
+    for x in items or ():
+        if not isinstance(x, Mapping) or not str(x.get("quote") or "").strip() or not in_import(x.get("file")):
+            continue
+        key = (str(x.get("quote")).strip(), str(x.get("file") or ""), str(x.get("locator") or ""))
+        if key in seen:
+            continue
+        seen.add(key)
+        out.append(dict(x))
+    return out
+
+
 def normalise(e: Mapping, n: int) -> dict:
     """One entry of either shape as ``{n, question_ids, fields, group_ids, files, applies_to, beamtime, note_only,
     topic, suggestion, alternatives}``."""
@@ -104,7 +128,8 @@ def normalise(e: Mapping, n: int) -> dict:
         return {"n": n, "question_ids": [e["question_id"]] if e.get("question_id") else list(e.get("question_ids") or ()),
                 "fields": [str(e["field"])] if e.get("field") else [], "group_ids": None, "files": None,
                 "applies_to": applies, "beamtime": applies in (None, "", "all", "*"), "note_only": False,
-                "topic": str(e.get("field") or ""), "suggestion": s, "alternatives": list(e.get("alternatives") or ()),
+                "topic": str(e.get("field") or ""), "suggestion": {**s, "evidence": clean_evidence(s.get("evidence"))},
+                "alternatives": list(e.get("alternatives") or ()),
                 "synonyms": list(e.get("synonyms") or ()), "shape": "contract"}
     topic = str(e.get("field") or "").strip()
     note_only = topic.casefold().startswith(NOTE_PREFIXES)
@@ -126,7 +151,7 @@ def normalise(e: Mapping, n: int) -> dict:
             "beamtime": isinstance(applies, str) and applies.strip().casefold().startswith("beamtime"),
             "note_only": note_only, "topic": topic,
             "suggestion": {"value": e.get("suggested_value"), "confidence": e.get("confidence"), "basis": "reading",
-                           "reason": reason, "evidence": list(e.get("evidence") or ())},
+                           "reason": reason, "evidence": clean_evidence(e.get("evidence"))},
             "alternatives": list(e.get("alternatives") or ()), "synonyms": list(e.get("synonyms") or ()), "shape": "reading"}
 
 
@@ -270,13 +295,15 @@ def _quotes_value(entry: Mapping, value: Any, card: Mapping) -> bool:
     said = {str(value), P.value_words(value)} | {str(x) for x in entry.get("synonyms") or ()}
     said |= {str(o.get("label")) for o in card["answer"].get("options") or () if o.get("value") == value}
     said = {x.casefold().strip() for x in said if str(x).strip()}
-    quotes = [str(x.get("quote") or "").casefold() for x in entry["suggestion"].get("evidence") or () if isinstance(x, Mapping)]
+    # only the quotes the card shows count, and only ones from the import (clean_evidence already dropped the rest)
+    shown = clean_evidence(entry["suggestion"].get("evidence"))[:MAX_EVIDENCE]
+    quotes = [str(x.get("quote") or "").casefold() for x in shown]
     return any(w in q for w in said for q in quotes)
 
 
 def _quotes(entry: Mapping, label: str) -> dict | None:
     items = [{"quote": str(e.get("quote")), "file": e.get("file"), "locator": e.get("locator")}
-             for e in entry["suggestion"].get("evidence") or () if isinstance(e, Mapping) and e.get("quote")]
+             for e in clean_evidence(entry["suggestion"].get("evidence"))]
     if not items:
         return None
     return {"kind": "quotes", "label": label, "source": READING_SOURCE, "items": items[:MAX_CONTEXT_QUOTES]}
@@ -379,7 +406,7 @@ def apply(cards: Sequence[dict], entries: Sequence[Mapping], with_common) -> lis
         for e, v in offered:
             if card.get("_suggestion_entry") is not None:  # a second entry with the same value: its quotes too
                 more = [x for x in e["suggestion"].get("evidence") or () if isinstance(x, Mapping)]
-                card["suggestion"]["evidence"] = (card["suggestion"]["evidence"] + more)[:MAX_EVIDENCE]
+                card["suggestion"]["evidence"] = clean_evidence(card["suggestion"]["evidence"] + more)[:MAX_EVIDENCE]
                 rows[e["n"]]["suggested_on"] += 1
                 continue
             s = e["suggestion"]
@@ -395,7 +422,7 @@ def apply(cards: Sequence[dict], entries: Sequence[Mapping], with_common) -> lis
                 given.casefold() in (str(value).casefold(), str(own).casefold())) else own
             card["suggestion"] = {"value": value, "label": str(label), "confidence": CONFIDENCES[low], "basis": s["basis"],
                                   "reason": reason,
-                                  "evidence": [dict(x) for x in s.get("evidence") or () if isinstance(x, Mapping)][:MAX_EVIDENCE]}
+                                  "evidence": clean_evidence(s.get("evidence"))[:MAX_EVIDENCE]}
             for c in card["covers"]:
                 c["on_accept"] = {"decision": c["on_value"]["decision"], "value": value}
             card["_suggestion_entry"] = e["n"]

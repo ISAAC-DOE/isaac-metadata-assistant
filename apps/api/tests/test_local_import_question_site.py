@@ -1348,3 +1348,47 @@ def test_the_commands_run_end_to_end(base, tmp_path, capsys):
     (tmp_path / "bad.json").write_text("SYN")
     assert cli.main(["bundle", "site", "export", str(bdir), "--out", str(out), "--suggestions", str(tmp_path / "bad.json")]) == 3
     assert "is not JSON" in capsys.readouterr().err
+
+
+# --- review of #343: no path outside the import reaches the site; "high" rests only on a shown quote ---------------
+
+def test_evidence_from_outside_the_import_is_never_shown_or_counted():
+    from isaac_api.local_import import question_site_hints as SH
+
+    assert SH.in_import("logbook.txt") and SH.in_import("sub/dir/run01.dat") and SH.in_import(None)
+    for outside in ("/Users/someone/repo/docs/notes.md", "../Shared_Template.xlsx", "a/../../b.txt", "~/x.txt", "C:/x.txt"):
+        assert not SH.in_import(outside), outside
+    items = [
+        {"quote": "held at 1.0 V", "file": "notes.txt", "locator": "line 3"},
+        {"quote": "held at 1.0 V", "file": "notes.txt", "locator": "line 3"},  # the same quote twice
+        {"quote": "operando", "file": "/Users/someone/repo/docs/answers.md", "locator": "line 55"},
+        {"quote": "Example Lab", "file": "../Template.xlsx", "locator": "row 4"},
+        {"quote": "", "file": "notes.txt"},
+    ]
+    assert SH.clean_evidence(items) == [{"quote": "held at 1.0 V", "file": "notes.txt", "locator": "line 3"}]
+
+
+def test_high_needs_a_shown_quote_that_holds_the_value():
+    from isaac_api.local_import import question_site_hints as SH
+
+    card = {"answer": {"options": [{"value": "operando", "label": "operando"}]}}
+    shown_elsewhere = {"synonyms": [], "suggestion": {"evidence": [
+        {"quote": "spectra taken during the hold", "file": "notes.txt"},
+        {"quote": "operando", "file": "/Users/someone/repo/docs/answers.md"}]}}
+    assert not SH._quotes_value(shown_elsewhere, "operando", card), "a quote from outside the import never counts"
+    hidden = {"synonyms": [], "suggestion": {"evidence": [{"quote": f"line {i}", "file": "n.txt"} for i in range(SH.MAX_EVIDENCE)]
+                                              + [{"quote": "operando", "file": "n.txt"}]}}
+    assert not SH._quotes_value(hidden, "operando", card), "a quote the card does not show never counts"
+    shown = {"synonyms": [], "suggestion": {"evidence": [{"quote": "measured operando", "file": "n.txt"}]}}
+    assert SH._quotes_value(shown, "operando", card)
+
+
+def test_the_export_drops_any_quote_citing_a_path_outside_the_import():
+    from isaac_api.local_import import question_site as S
+
+    cards = [{"context": [{"kind": "quotes", "items": [{"quote": "q", "file": "/Users/someone/x.md"}]},
+                          {"kind": "quotes", "items": [{"quote": "kept", "file": "run01.dat"}]}],
+              "suggestion": {"evidence": [{"quote": "e", "file": "../T.xlsx"}, {"quote": "f", "file": "log.txt"}]}}]
+    assert S._no_outside_paths(cards) == 2
+    assert cards[0]["context"] == [{"kind": "quotes", "items": [{"quote": "kept", "file": "run01.dat"}]}]
+    assert cards[0]["suggestion"]["evidence"] == [{"quote": "f", "file": "log.txt"}]

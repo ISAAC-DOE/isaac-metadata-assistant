@@ -1124,6 +1124,34 @@ def _progress(text: str, quiet: bool) -> None:
         print(text, file=sys.stderr, flush=True)
 
 
+def _no_outside_paths(cards: list[dict]) -> int:
+    """Drop, in place, every quote whose ``file`` is not a file of the import (an absolute path, a ``..`` step, a
+    home folder); returns how many. A last guard, whatever the source: a card goes to a hosted page, and a path on
+    the operator's own machine (their user name included) must never reach it, nor be shown as the scientist's file."""
+    from . import question_site_hints as SH
+
+    dropped = 0
+
+    def walk(node):
+        nonlocal dropped
+        if isinstance(node, dict):
+            for key in ("evidence", "items"):
+                if isinstance(node.get(key), list):
+                    kept = [x for x in node[key] if not (isinstance(x, dict) and "quote" in x and not SH.in_import(x.get("file")))]
+                    dropped += len(node[key]) - len(kept)
+                    node[key] = kept
+            for v in node.values():
+                walk(v)
+        elif isinstance(node, list):
+            for v in node:
+                walk(v)
+
+    walk(cards)
+    for c in cards:  # a quotes block left empty is not shown at all
+        c["context"] = [x for x in c.get("context") or () if not (x.get("kind") == "quotes" and not x.get("items"))]
+    return dropped
+
+
 def export_site(bundle_dir: Path, out: Path, *, suggestions: Path | None = None, include: Sequence[str] = (),
                 site_template: Path | None = None, quiet: bool = True) -> dict:
     """``isaac bundle site export``: write ``<out>/data/site-data.json`` and its images; returns the report."""
@@ -1254,6 +1282,7 @@ def export_site(bundle_dir: Path, out: Path, *, suggestions: Path | None = None,
                               "exported.", code=exc.code) from exc
 
     public = [{k: v for k, v in c.items() if not k.startswith("_")} for c in cards]
+    leaked = _no_outside_paths(public)
     used_sections = {c["section"] for c in public}
     site_data = {
         "format": FORMAT_ID, "format_version": FORMAT_VERSION, "bundle_id": bundle.get("bundle_id"),
@@ -1290,7 +1319,7 @@ def export_site(bundle_dir: Path, out: Path, *, suggestions: Path | None = None,
     return {
         "format": "isaac.question_site_export", "format_version": FORMAT_VERSION, "out": str(out),
         "site_data": str(data_dir / "site-data.json"), "bundle_id": bundle.get("bundle_id"),
-        "title": site_data["title"], "include": list(include),
+        "title": site_data["title"], "include": list(include), "quotes_from_outside_the_import_dropped": leaked,
         "cards": len(public), "blocking_cards": site_data["totals"]["blocking_cards"],
         "cards_by_section": {s["id"]: by_section[s["id"]] for s in SECTIONS if by_section.get(s["id"])},
         "questions_open": len(payload["questions"]), "questions_blocking": blocking_total,
