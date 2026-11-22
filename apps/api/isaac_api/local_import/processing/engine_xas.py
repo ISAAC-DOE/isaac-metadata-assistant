@@ -3267,8 +3267,11 @@ def _reference_view(bt, recs) -> dict:
             + (f" ({first.get('method')} fit, window {first.get('window_eV')})" if first.get("window_eV") else "")
             + (f", anchored on the earliest group {first.get('reference_name')} (median of {first.get('reference_scans')} "
                f"scans with a good anchor, {first.get('reference_anchor_eV'):.4f} eV)" if first.get("reference_anchor_eV") else "")
-            + ". The mono was foil-calibrated by the beamline staff at the start of the beamtime; every scan of every "
-              "sample is aligned to this one reference, never to its own sample's edge.")
+            + ". " + ({0: "The files hold no mono reset line (no calibration record). ",
+                      1: "The mono was foil-calibrated by the beamline staff at the start of the beamtime (one mono "
+                         "reset line). "}.get(len(sv.get("calibration_log") or ()),
+                                             f"The files state {len(sv.get('calibration_log') or ())} mono resets. "))
+            + "Every scan of every sample is aligned to this one reference, never to its own sample's edge.")
     if len(routes) > 1:
         stmt += " A scan whose foil edge is not usable is aligned on the I0 glitch instead."
     if mode == "none":
@@ -3288,12 +3291,11 @@ def _reference_view(bt, recs) -> dict:
 #: what ``applied_shift_eV`` 0.0 on a v1 result means: no ABSOLUTE calibration was applied. The absolute scale is the
 #: staff's foil calibration of the mono, not traced to a tabulated energy nor across beamtimes (processing-science
 #: audit of 18 Nov 2026, finding 2: v1 said none "is needed", which overclaims).
-ABSOLUTE_CALIBRATION_SAID = ("No absolute energy calibration was applied (shift 0 eV). Every scan is aligned to one "
-                             "beamtime reference; the absolute scale rests on the beamline staff's foil calibration of "
-                             "the monochromator at the start of the beamtime ({set_point}). It is not traced to a "
-                             "tabulated energy, and not across beamtimes: energies from two beamtimes may differ by a "
-                             "constant offset.")
-SET_POINT_NONE = "the files state no mono reset line, so the set-point is not recorded here"
+ABSOLUTE_CALIBRATION_SAID = ("No absolute energy calibration was applied (shift 0 eV).{alignment}{scale} It is not "
+                             "traced to a tabulated energy, and not across beamtimes: energies from two beamtimes may "
+                             "differ by a constant offset.")
+SET_POINT_NONE = ("The files hold no calibration record (no mono reset line): the absolute scale is the monochromator's "
+                  "as the beamline set it, undocumented here.")
 
 
 def calibration_set_points(ref: Mapping) -> list[dict]:
@@ -3302,13 +3304,27 @@ def calibration_set_points(ref: Mapping) -> list[dict]:
             if isinstance(x, Mapping) and isinstance(x.get("to"), (int, float))]
 
 
-def absolute_calibration_said(ref: Mapping) -> str:
-    pts = calibration_set_points(ref)
+def _set_points_said(pts: Sequence[Mapping]) -> str:
     said = "; ".join(f"`{x.get('axis') or 'mono'} reset from {x['from']:g} to {x['to']:g}`"
                      + (f" at {x['time']}" if x.get("time") else "") for x in pts[:3])
-    if len(pts) > 3:
-        said += f"; and {len(pts) - 3} more"
-    return ABSOLUTE_CALIBRATION_SAID.format(set_point=(f"as the files state it: {said}" if pts else SET_POINT_NONE))
+    return said + (f"; and {len(pts) - 3} more" if len(pts) > 3 else "")
+
+
+def absolute_calibration_said(ref: Mapping, mode: str | None = None) -> str:
+    """Review of PR 345, I3: the alignment clause follows the route; no reset line is no calibration record; "at the
+    start of the beamtime" only when the files state one reset."""
+    pts = calibration_set_points(ref)
+    alignment = (" No scan is aligned: the beamtime has no energy reference." if mode in ("none", None) else
+                 " The scans are aligned to one beamtime reference (the alignment says how many).")
+    if not pts:
+        scale = " " + SET_POINT_NONE
+    elif len(pts) == 1:
+        scale = (" The absolute scale rests on the beamline staff's foil calibration of the monochromator at the start "
+                 f"of the beamtime, as the files state it: {_set_points_said(pts)}.")
+    else:
+        scale = (" The absolute scale rests on the beamline staff's foil calibration of the monochromator; the files "
+                 f"state {len(pts)} mono resets: {_set_points_said(pts)}.")
+    return ABSOLUTE_CALIBRATION_SAID.format(alignment=alignment, scale=scale)
 
 
 _ROUTE_SAID = {"ref_foil": "an in-scan reference foil in transmission", "glitch_I0": "the I0 glitch",
@@ -3358,7 +3374,7 @@ def energy_story(res: Mapping) -> dict:
                                      "basis": "staff_foil_calibrated_mono",
                                      "set_points": [{k: x.get(k) for k in ("time", "axis", "from", "to")}
                                                     for x in calibration_set_points(ref)],
-                                     "statement": absolute_calibration_said(ref)},
+                                     "statement": absolute_calibration_said(ref, mode if route else None)},
             "alignment": alignment}
 
 

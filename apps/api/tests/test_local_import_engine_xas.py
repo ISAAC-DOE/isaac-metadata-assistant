@@ -1613,17 +1613,23 @@ def test_before_the_stable_window_within_the_noise_is_kept():
 
 
 def test_the_absolute_energy_statement_states_the_set_point_and_never_says_none_is_needed():
-    ref = {"mono_reset_lines": [{"time": "Sat Apr 12 09:00:00 2025", "axis": "mono", "from": 11564.3, "to": 11563.5,
-                                 "file": "SYN_alignment"}],
-           "routes": [{"mode": "glitch_I0", "reference_anchor_eV": 11226.6, "reference_scans": 4}]}
-    story = EX.energy_story({EX.REFERENCE_KEY: ref})["absolute_calibration"]
+    one = {"time": "Sat Apr 12 09:00:00 2025", "axis": "mono", "from": 11564.3, "to": 11563.5, "file": "SYN_alignment"}
+    routes = [{"mode": "glitch_I0", "reference_anchor_eV": 11226.6, "reference_scans": 4}]
+    story = EX.energy_story({EX.REFERENCE_KEY: {"mono_reset_lines": [one], "routes": routes}})["absolute_calibration"]
     said = story["statement"]
     assert "none is needed" not in said and "calibrated energies" not in said
-    assert "`mono reset from 11564.3 to 11563.5` at Sat Apr 12 09:00:00 2025" in said
+    assert "at the start of the beamtime, as the files state it: `mono reset from 11564.3 to 11563.5` at Sat Apr 12" in said
     assert "aligned to one beamtime reference" in said and "not across beamtimes" in said
     assert story["traced_across_beamtimes"] is False and story["set_points"][0]["to"] == 11563.5
-    bare = EX.energy_story({EX.REFERENCE_KEY: {"routes": ref["routes"]}})["absolute_calibration"]
-    assert EX.SET_POINT_NONE in bare["statement"] and bare["set_points"] == []
+    # review of PR 345, I3: no reset line is no calibration record; several resets drop "at the start"; no route, no
+    # alignment claim
+    bare = EX.energy_story({EX.REFERENCE_KEY: {"routes": routes}})["absolute_calibration"]["statement"]
+    assert EX.SET_POINT_NONE in bare and "foil calibration" not in bare
+    two = EX.energy_story({EX.REFERENCE_KEY: {"mono_reset_lines": [one, {**one, "to": 11563.8}],
+                                              "routes": routes}})["absolute_calibration"]["statement"]
+    assert "state 2 mono resets" in two and "at the start" not in two
+    none = EX.energy_story({EX.REFERENCE_KEY: {"routes": [{"mode": "none"}]}})["absolute_calibration"]["statement"]
+    assert "No scan is aligned" in none and "aligned to one beamtime reference" not in none
 
 
 # --- a scale-matched mean where coverage differs (audit 18 Nov, finding 6) -------------------------------------------
