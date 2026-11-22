@@ -1754,3 +1754,18 @@ def test_one_stray_point_does_not_make_the_transmission_constant_large():
     IF[40] = -11.0 * I0[40]                                    # one point at ln(I0/I1) = -11
     off = EX._transmission_offset([{"IF": IF, "I0": I0}], np)
     assert off == pytest.approx(0.6 - 0.5, abs=0.05)
+
+
+def test_a_short_real_scan_is_too_short_not_a_motor_scan():
+    """Review of PR 345, M6: a 10 eV glitch check or a +-12 eV foil check is a real energy scan too short to process;
+    one fixed energy or motor positions are not energy scans; a stopped fragment is its own rule's."""
+    from isaac_api.local_import.processing import run as R
+
+    p = {"channels": {"energy_value_range_eV": (1000.0, 100000.0)}, "merge": {"min_points": 20}}
+    for E in (np.linspace(11222, 11232, 101), np.linspace(11552, 11576, 97)):
+        code, said = R.energy_axis_problem(E, p)
+        assert code == R.SHORT_SCAN and "too short to process as a spectrum" in said and "motor" not in said
+    assert R.energy_axis_problem(np.full(30, 11215.0), p)[0] == R.NOT_ENERGY_SCAN
+    assert R.energy_axis_problem(np.linspace(10, 60, 50), p)[0] == R.NOT_ENERGY_SCAN
+    assert R.energy_axis_problem(np.linspace(11200, 11201, 6), p) is None
+    assert R.energy_axis_problem(np.linspace(11150, 11400, 300), p) is None

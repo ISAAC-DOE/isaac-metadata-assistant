@@ -354,8 +354,9 @@ def read_group(g: Mapping, ctx) -> dict:
                    run_key=entry.get("run_key"), header=table.header_lines, time=_scan_time(table.header_lines),
                    motor_lines=tuple(getattr(table, "motor_lines", ()) or ()),
                    template=R._scan_template(table.header_lines))
-        if not R._is_energy_scan(rec["template"], choice.energy) or R.not_an_energy_axis(rec["E"], params):
-            entry["skip_reason"] = "not_an_energy_scan"
+        axis = R.energy_axis_problem(rec["E"], params)
+        if not R._is_energy_scan(rec["template"], choice.energy) or axis:
+            entry["skip_reason"] = axis[0] if axis else "not_an_energy_scan"
             continue
         v1_recs.append(rec)
     if standard_in_transmission:
