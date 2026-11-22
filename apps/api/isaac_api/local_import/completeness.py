@@ -444,6 +444,27 @@ def summary(gate_of: Mapping[str, Mapping], group_ids: Iterable[str] | None = No
 # --- indistinguishable records --------------------------------------------------------------------------------------
 
 
+#: 1.15.0 (review of PR 342, finding 5): the scientist's "export it anyway", kept in the bundle as a decision
+EXPORT_ANYWAY_DECISION = B.EXPORT_ANYWAY_DECISION
+
+
+def body_digest(draft: Mapping) -> str:
+    """The sha256 of what a record says was measured (:func:`metadata_key`): what an export-anyway decision binds to."""
+    import hashlib
+
+    return hashlib.sha256(metadata_key(draft).encode("utf-8")).hexdigest()
+
+
+def export_anyway_of(bundle: Mapping) -> dict[str, Mapping]:
+    """``{group id: the latest export_despite_completeness decision on it}``."""
+    out: dict[str, Mapping] = {}
+    for d in bundle.get("scientist_decisions") or ():
+        t = d.get("target") or {} if isinstance(d, Mapping) else {}
+        if isinstance(d, Mapping) and d.get("decision") == EXPORT_ANYWAY_DECISION and t.get("kind") == "record_group":
+            out[t.get("id")] = d
+    return out
+
+
 def metadata_key(draft: Mapping) -> str:
     """What a record says was measured, as one comparable string: every ``sample``, ``system`` and ``context`` field
     of its draft. Never the curve, the ids, the files or the timestamps."""

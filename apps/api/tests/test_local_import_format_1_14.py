@@ -41,9 +41,10 @@ RULES = (B._rule_id(filenames.RULE_SIGNED_POTENTIAL), S.TECHNIQUE_RULE_ID, S.MEN
 
 
 def test_the_version_is_bumped_by_the_existing_mechanism():
-    assert B.FORMAT_VERSION == "1.14.0" == B._VERSION_ORDER[-1] and B._VERSION_ORDER[-2] == "1.13.0"
+    assert B._VERSION_ORDER.index("1.14.0") == B._VERSION_ORDER.index("1.13.0") + 1  # later versions follow it (1.15.0)
     schema = B.bundle_schema()
-    assert schema["properties"]["format_version"]["enum"][-2:] == ["1.13.0", "1.14.0"]
+    enum = schema["properties"]["format_version"]["enum"]
+    assert enum.index("1.14.0") == enum.index("1.13.0") + 1
     assert "1.14.0" in schema["properties"]["format_version"]["description"]
     blocks = [b for b in schema.get("allOf") or () if (b.get("if") or {}).get("properties", {}).get("format_version", {}).get("const") == "1.14.0"]
     assert blocks and blocks[0]["then"]["required"] == ["processed_outputs"]
@@ -54,7 +55,7 @@ def test_the_change_note_names_each_rule_and_what_a_re_import_does():
     for rule in RULES:
         assert rule in note, rule
     assert "re-import" in note and "every id" in note
-    assert B.changes_since("1.13.0") == [note]
+    assert B.changes_since("1.13.0")[0] == note  # and each later version's, after it
 
 
 def test_an_older_bundle_is_told_on_its_first_write(tmp_path, capsys):
@@ -69,6 +70,6 @@ def test_an_older_bundle_is_told_on_its_first_write(tmp_path, capsys):
     assert B.validate_bundle(json.loads((out / "bundle.json").read_text())) == []  # a 1.13.0 bundle stays valid
     M.decide(out, target_ids=["experiment"], decision="defer", value=None, by="SYN Scientist", orcid=None)
     saved = json.loads((out / "bundle.json").read_text())
-    assert saved["format_version"] == "1.14.0" and B.validate_bundle(saved) == []
+    assert saved["format_version"] == B.FORMAT_VERSION and B.validate_bundle(saved) == []
     [u] = [u for u in saved.get("format_upgrades") or () if u.get("from_format_version") == "1.13.0"]
     assert B.CHANGES_ADDED_IN["1.14.0"] in u["statement"]

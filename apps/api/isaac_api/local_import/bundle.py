@@ -108,7 +108,13 @@ FORMAT_ID = "isaac.local-import-bundle"
 #: re-import keeps every id the earlier build gave (new candidates are numbered last; a newly filled slot keeps its
 #: number). Nothing becomes newly writable; the upgrade is disclosed (:data:`CHANGES_ADDED_IN`). The version is bumped
 #: so a bundle says which readings it was imported with.
-FORMAT_VERSION = "1.14.0"
+#: 1.15.0 (additive): the ``export_despite_completeness`` record-group decision. A scientist's word that a record the
+#: LOCAL record-completeness gate holds (``completeness.py``: a condition that keeps it apart from another record is
+#: not in it, or it says what another record says) is exported anyway, for that record body
+#: (``value``: ``{"body_sha256", "held_by"}``). Recorded by ``bundle export --allow-indistinguishable --by``; later
+#: exports honour it while the body is the same. A 1.14.0 validator refuses the new enum value, hence the version.
+#: Nothing becomes newly writable; the bundle's other shapes are unchanged.
+FORMAT_VERSION = "1.15.0"
 #: The electrochemical control mode. Its allowed values are the official schema's enum (read at
 #: runtime by :func:`value_problem`); the schema's conditional rules key the set-point a record
 #: requires on it (:func:`required_record_paths`). Never defaulted, never derived.
@@ -134,7 +140,7 @@ VALUE_IDS_APPEND_FROM = "1.5.0"
 IMPORT_RULES_ADDED_IN: Mapping[str, tuple] = {
     "1.4.0": (("generic:ssrl_xdc_v1", "ssrl_xdc_scan_start_v1"),),
 }
-_VERSION_ORDER = ("1.0.0", "1.1.0", "1.2.0", "1.3.0", "1.4.0", "1.5.0", "1.6.0", "1.7.0", "1.8.0", "1.9.0", "1.10.0", "1.11.0", "1.12.0", "1.13.0", "1.14.0")
+_VERSION_ORDER = ("1.0.0", "1.1.0", "1.2.0", "1.3.0", "1.4.0", "1.5.0", "1.6.0", "1.7.0", "1.8.0", "1.9.0", "1.10.0", "1.11.0", "1.12.0", "1.13.0", "1.14.0", "1.15.0")
 #: A change a format version made that moves no eligibility and adds no import rule, but that the
 #: first save by a newer build still DISCLOSES in its ``format_upgrades`` entry (never silently).
 CHANGES_ADDED_IN: Mapping[str, str] = {
@@ -157,6 +163,9 @@ CHANGES_ADDED_IN: Mapping[str, str] = {
                "instrument (isaac.suggest.technique_from_configuration.v1), pellet fields only where mentioned "
                "(isaac.import.optional_field_asked_where_mentioned.v1), stale comment lines "
                "(isaac.import.comment_possibly_stale.v1); a re-import keeps every id the earlier build gave"),
+    "1.15.0": ("1.15.0 keeps the scientist's export_despite_completeness decision on a record group: a record the local "
+               "record-completeness gate holds is exported anyway, for that record body, by `bundle export "
+               "--allow-indistinguishable --by`"),
 }
 #: A field composed into a draft only beside another of the SAME run (interim decision for the
 #: set-point, pending domain-owner review; ``records.compose_group`` applies it). The CURRENT
@@ -1190,7 +1199,7 @@ DECISIONS_BY_KIND: Mapping[str, frozenset[str]] = {
     "conflict": frozenset({"confirm", "correct", "reject", "defer"}),
     # set_scan_decision (isaac.xas.v1): a scientist's keep / drop of named scans, overriding the scan-decision rule
     "record_group": frozenset({"confirm", "split", "merge", "reject", "defer", "approve_calibration", "set_absorber",
-                               "set_scan_decision", "set_dose_reading", "set_role"}),
+                               "set_scan_decision", "set_dose_reading", "set_role", "export_despite_completeness"}),
     "processing_result": frozenset({"approve", "reject", "needs_changes", "defer", "select_athena_version"}),
     # `defer` (1.9.x polish): "I don't know" to the counter question — recorded, changes no grouping
     "experiment": frozenset({"set_counter_positions", "set_clock_time_zone", "set_not_counter_positions", "defer",
@@ -1217,6 +1226,19 @@ DOSE_READINGS = ("beam_damage", "not_beam_damage", "first_scan_settling")
 #: scan — over the role grouping proposed (a file name's ``foil`` / ``align`` token, a header, the engine's class).
 #: Latest wins; :func:`apply_derivations` sets the group's ``role`` and ``role_basis`` from it. It moves no status.
 ROLE_DECISION = "set_role"
+#: 1.15.0: "export it anyway" for a record the local record-completeness gate holds (``completeness.py``)
+EXPORT_ANYWAY_DECISION = "export_despite_completeness"
+
+
+def export_anyway_problem(value: Any) -> str | None:
+    """Why an export_despite_completeness value is malformed (None when it is ``{"body_sha256": <64 hex>,
+    "held_by": [<reason>, ...]}``)."""
+    if not isinstance(value, Mapping) or not re.fullmatch(r"[0-9a-f]{64}", str(value.get("body_sha256") or "")):
+        return "export_despite_completeness needs the record body it was decided for (body_sha256)"
+    held = value.get("held_by")
+    if not isinstance(held, list) or not held or not all(isinstance(h, str) and h for h in held):
+        return "export_despite_completeness needs the reasons the record was held for (held_by)"
+    return None
 ROLES = ("sample", "reference", "alignment")
 ROLE_DECISION_RULE_ID = "isaac.record_group.role.scientist_decision.v0"
 
@@ -6161,6 +6183,10 @@ def validate_bundle(bundle: Any, *, max_errors: int = 50, encoded: bytes | None 
             problem = scan_decision_problem(d.get("value"))
             if problem is not None or (d.get("target") or {}).get("kind") != "record_group":
                 errors.append(f"decision: {d['decision_id']} {problem or 'set_scan_decision is for a record group'}")
+        if d.get("decision") == EXPORT_ANYWAY_DECISION:
+            problem = export_anyway_problem(d.get("value"))
+            if problem is not None or (d.get("target") or {}).get("kind") != "record_group":
+                errors.append(f"decision: {d['decision_id']} {problem or 'export_despite_completeness is for a record group'}")
         if d.get("decision") == ROLE_DECISION:
             problem = role_problem(d.get("value"))
             if problem is not None or (d.get("target") or {}).get("kind") != "record_group":

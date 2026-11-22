@@ -20,6 +20,7 @@ import shutil
 
 import pytest
 
+from isaac_api.local_import import bundle as B
 from isaac_api.local_import import cli
 from isaac_api.local_import import completeness as CP
 from isaac_api.local_import import mutations as M
@@ -307,14 +308,41 @@ def test_the_flag_writes_held_records_anyway_and_every_row_says_so(bdir, tmp_pat
     code = cli.main(["bundle", "export", str(bdir), "--out", str(tmp_path / "records")])
     assert code == 1 and not (tmp_path / "records").exists()
     capsys.readouterr()
-    out = R.export_records(bdir, tmp_path / "records", run_portal=_portal(), allow_indistinguishable=True)
+    # the scientist's word is needed: the flag alone is refused, and nothing is written
+    assert cli.main(["bundle", "export", str(bdir), "--out", str(tmp_path / "records"), "--allow-indistinguishable"]) == 2
+    assert "--by" in capsys.readouterr().err and not (tmp_path / "records").exists()
+    out = R.export_records(bdir, tmp_path / "records", run_portal=_portal(), allow_indistinguishable=True,
+                           by="SYN Scientist")
     assert out["records_written"] == 3 and out["refused"] == [] and out["records_written_although_incomplete"] == 3
     for row in out["exported"]:
-        assert row["warnings"][0].startswith("Written although record completeness holds it (--allow-indistinguishable)")
-    assert "are written although" in out["record_completeness"]["statement"]
-    # without the flag the next export holds them again and withdraws what was written
+        assert row["warnings"][0].startswith("Written although record completeness holds it")
+        assert "SYN Scientist" in row["warnings"][0]
+    assert "are written although record completeness would hold them: SYN Scientist decided" in out["outcome"]
+    # REVIEW OF PR 342, FINDING 5: the decision is in the bundle (who, which groups), so a later plain export keeps
+    # the records instead of withdrawing them
+    said = [d for d in M.load(bdir)["scientist_decisions"] if d["decision"] == CP.EXPORT_ANYWAY_DECISION]
+    assert sorted(d["target"]["id"] for d in said) == sorted(r["group_id"] for r in out["exported"])
+    assert {d["decided_by"]["name"] for d in said} == {"SYN Scientist"}
+    assert B.validate_bundle(M.load(bdir)) == []
     again = R.export_records(bdir, tmp_path / "records", run_portal=_portal())
-    assert again["exported"] == [] and len(again["withdrawn"]) == 3
+    assert again["records_unchanged"] == 3 and again["refused"] == [] and again["withdrawn"] == []
+    v = R.validate_records(bdir, run_portal=_portal())
+    assert v["ready_to_export"] == 3 and v["record_completeness"]["exported_anyway"] == 3
+    # the flag again records nothing new
+    R.export_records(bdir, tmp_path / "records", run_portal=_portal(), allow_indistinguishable=True, by="SYN Scientist")
+    assert len([d for d in M.load(bdir)["scientist_decisions"] if d["decision"] == CP.EXPORT_ANYWAY_DECISION]) == 3
+
+
+def test_a_record_whose_body_changed_since_export_anyway_is_held_again_and_its_withdrawal_said(bdir, tmp_path,
+                                                                                               fake_upstream_env):
+    R.export_records(bdir, tmp_path / "records", run_portal=_portal(), allow_indistinguishable=True, by="SYN Scientist")
+    b = M.load(bdir)
+    names = [c["candidate_id"] for c in b["candidates"] if c.get("target_field_path") == "sample.material.name"]
+    M.decide(bdir, target_ids=names, decision="correct", value="ZZ1 synthetic, renamed", **BY)   # every body changes
+    out = R.export_records(bdir, tmp_path / "records", run_portal=_portal())
+    assert out["records_ready"] == 0 and len(out["withdrawn"]) == 3
+    assert "3 earlier record(s) were withdrawn because record completeness holds them now" in out["outcome"]
+    assert "another record body" in out["refused"][0]["summary"][0]
 
 
 # --- review of PR 342, finding 3: a group held for a condition is told the question that frees it ---------------

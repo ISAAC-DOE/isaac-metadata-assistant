@@ -277,7 +277,7 @@ HELD_OK="$(json "$WORK/export-held.json" "all(r.get('official_validation')=='pas
 HELD_WROTE="$(find "$WORK/held-records" -maxdepth 1 -name '*.json' ! -name '*.evidence.json' 2>/dev/null | wc -l | tr -d ' ')"
 ALLOW=()
 if [[ "${HELD:-0}" -gt 0 ]]; then
-  ALLOW=(--allow-indistinguishable)
+  ALLOW=(--allow-indistinguishable --by "$BY")
   if [[ "$HELD_OK" == "True" && "$HELD_RC" -eq 1 && $((HELD_WROTE + HELD)) -le "$EXPORTABLE" ]]; then
     report PASS "export: completeness gate holds" "$HELD record(s) held (a local gate; official validation passed for each), $HELD_WROTE written"
   else report FAIL "export: completeness gate holds" "held $HELD, wrote $HELD_WROTE, exit $HELD_RC, rows ok: $HELD_OK"; fi

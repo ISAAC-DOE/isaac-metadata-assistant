@@ -3059,6 +3059,24 @@ def completeness_holds(bundle: Mapping, fresh: Sequence[tuple[str, Mapping, Mapp
             if not row["questions"]:  # a member with no open condition of its own: the set's widest questions
                 row["questions"] = qs[:3]
             row["text"] = (row["text"] + " " if row["text"] else "") + said
+    # review of PR 342, finding 5: a hold the scientist decided to export anyway (export_despite_completeness, for THIS
+    # record body) is not a hold; the decision is said on the group's gate. A decision for another body is not.
+    anyway = CP.export_anyway_of(bundle)
+    draft_of = {gid: draft for gid, draft, _ in fresh}
+    for gid in list(holds):
+        d = anyway.get(gid)
+        if d is None or gid not in draft_of:
+            continue
+        if (d.get("value") or {}).get("body_sha256") == CP.body_digest(draft_of[gid]):
+            said = {"decision_id": d.get("decision_id"), "by": (d.get("decided_by") or {}).get("name"),
+                    "decided_utc": d.get("decided_utc"), "held_by": list(holds[gid]["held_by"]),
+                    "text": holds[gid]["text"]}
+            if gid in gate_of:
+                gate_of[gid]["exported_anyway"] = said
+            del holds[gid]
+        else:
+            holds[gid]["text"] += (f" (An earlier decision to export it anyway, {d.get('decision_id')}, was for another "
+                                   "record body: the record has changed since.)")
     return holds, sets, gate_of
 
 
@@ -3083,7 +3101,9 @@ def completeness_summary(holds: Mapping[str, Mapping], sets: Sequence[Sequence[s
         for q in (h.get("answers") or h.get("questions") or ()):
             asked[q] = asked.get(q, 0) + 1
     held = [g for g in wanted if g in holds]
+    anyway = [g for g in wanted if (gate_of.get(g) or {}).get("exported_anyway")]
     out: dict[str, Any] = {"gate": CP.GATE_ID, "checked": len(wanted), "ready": len(wanted) - len(held), "held": len(held),
+                           "exported_anyway": len(anyway),
                            "held_by_reason": by_reason,
                            "open_conditions": dict(sorted(by_condition.items(), key=lambda kv: (-kv[1], kv[0]))),
                            "indistinguishable_sets": [list(x) for x in sets][:REASONS_SHOWN * 4],
@@ -3097,7 +3117,9 @@ def completeness_summary(holds: Mapping[str, Mapping], sets: Sequence[Sequence[s
     if not held:
         out["statement"] = (f"Record completeness ({CP.GATE_ID}, a local gate beside official validation): all "
                             f"{len(wanted)} record(s) carry or decline every condition that keeps them apart from "
-                            "another record of their sample, and no two say the same thing.")
+                            "another record of their sample, and no two say the same thing"
+                            + (f", or the scientist decided to export them anyway ({len(anyway)}, "
+                               f"{CP.EXPORT_ANYWAY_DECISION})" if anyway else "") + ".")
         return out
     parts = []
     if by_condition:
@@ -3377,7 +3399,8 @@ def _withdrawal_statement(record_id: str, exported_utc: Any, moved: Sequence[str
             f"what the bundle composes; {where}. Do not upload it. If it was already uploaded, the portal still holds it.")
 
 
-def export_records(bundle_dir: Path, out: Path, *, run_portal=None, allow_indistinguishable: bool = False) -> dict:
+def export_records(bundle_dir: Path, out: Path, *, run_portal=None, allow_indistinguishable: bool = False,
+                   by: str | None = None, orcid: str | None = None) -> dict:
     """Write ONLY records that pass the portal-target official validation AND whose portal
     outcome is ``publish`` (DEC-76). Every gate is re-run here; a stale validation file is
     never trusted. The record is composed with ``export.transform`` and its sidecar with
@@ -3400,7 +3423,12 @@ def export_records(bundle_dir: Path, out: Path, *, run_portal=None, allow_indist
     validation passes is HELD (not written; listed under ``refused`` with ``verdict: held_by_record_completeness``
     and ``official_validation: passed``) while a condition grouping used to keep it apart from another record of its
     sample is neither in it nor declined, or while it would say exactly what another record says.
-    ``allow_indistinguishable`` writes such records anyway, each row saying so."""
+    ``allow_indistinguishable`` (with ``by``, the scientist's name) writes such records anyway and RECORDS that word in
+    the bundle (``export_despite_completeness``, per group and record body), so a later export keeps them; each row
+    says so. A record written before and held now is withdrawn, and the outcome says why."""
+    if allow_indistinguishable and not (by and str(by).strip()):
+        raise RecordsRefused('Exporting a held record anyway is the scientist\'s decision, kept in the bundle: give --by '
+                             '"<your name>" with --allow-indistinguishable. Nothing was written.', code=2)
     from isaac_records.export import build_sidecar
     from isaac_records.ids import new_record_id
     from isaac_records.official import validate_official
@@ -3443,7 +3471,18 @@ def export_records(bundle_dir: Path, out: Path, *, run_portal=None, allow_indist
     # finding 1: the local completeness gate over the groups whose draft is complete (the ones that can be written)
     writable = [gid for gid, _, comp in fresh if not comp.get("missing_required") and not comp.get("disagreements")]
     holds, identical, gate_of = completeness_holds(bundle, fresh, payload, writable)
+    if allow_indistinguishable and holds:
+        # the scientist's word, recorded BEFORE anything is written (review of PR 342, finding 5)
+        from . import mutations as M
+
+        draft_of = {gid: d for gid, d, _ in fresh}
+        M.record_export_anyway(bundle_dir, [(gid, {"body_sha256": CP.body_digest(draft_of[gid]),
+                                                   "held_by": list(h["held_by"])}) for gid, h in holds.items()],
+                               by=str(by), orcid=orcid)
+        bundle = load_validated(bundle_dir)
+        holds, identical, gate_of = completeness_holds(bundle, fresh, payload, writable)
     held_now: list[str] = []
+    withdrawn_held: list[str] = []
 
     def withdraw(earlier: dict, why: str) -> dict:
         """Move an earlier export's record to WITHDRAWN_DIR and mark its index entry; the row's keys."""
@@ -3482,7 +3521,7 @@ def export_records(bundle_dir: Path, out: Path, *, run_portal=None, allow_indist
                 row.update(withdraw(earlier, f"this export refused the group ({report['verdict']})"))
             refused.append(row)
             continue
-        if group_id in holds and not allow_indistinguishable:
+        if group_id in holds:
             # HELD by the local completeness gate: official validation passed, and the record is still not written
             h = holds[group_id]
             row = {"group_id": group_id, **_label(label_of, group_id), "verdict": HELD_VERDICT,
@@ -3493,6 +3532,8 @@ def export_records(bundle_dir: Path, out: Path, *, run_portal=None, allow_indist
             earlier = prior_of.get((bundle_id, group_id))
             if earlier is not None and earlier.get("record_id"):
                 row.update(withdraw(earlier, f"this export holds the group ({CP.GATE_ID})"))
+                if row.get("withdrawn"):
+                    withdrawn_held.append(group_id)
             refused.append(row)
             held_now.append(group_id)
             continue
@@ -3592,10 +3633,11 @@ def export_records(bundle_dir: Path, out: Path, *, run_portal=None, allow_indist
         if link_left_out:
             still.append(L.NOT_WRITTEN_FOLLOWS.format(why=link_left_out))
             codes.append(FOLLOWS_LEFT_OUT_CODE)
-        if group_id in holds:
-            # written although the completeness gate names it (--allow-indistinguishable): said on the row, first
-            still.insert(0, f"Written although record completeness holds it ({CP.ALLOW_FLAG}): "
-                         + holds[group_id]["text"].replace(f"Held ({CP.GATE_ID}): ", "", 1))
+        if (anyway := (gate_of.get(group_id) or {}).get("exported_anyway")):
+            # written although the completeness gate would hold it: the scientist's recorded decision, said first
+            still.insert(0, f"Written although record completeness holds it ({CP.ALLOW_FLAG}): {anyway['by']} decided "
+                         f"to export it anyway ({anyway['decision_id']}, {CP.EXPORT_ANYWAY_DECISION}): "
+                         + anyway["text"].replace(f"Held ({CP.GATE_ID}): ", "", 1))
             codes.insert(0, COMPLETENESS_CODE)
             held_now.append(group_id)
         if link is not None:
@@ -3694,13 +3736,26 @@ def export_records(bundle_dir: Path, out: Path, *, run_portal=None, allow_indist
     }
     if writable:
         # finding 1: the local gate by name, what it holds and what answers it; nothing about official validation
-        block = completeness_summary({g: holds[g] for g in held_now}, [x for x in identical if set(x) & set(held_now)],
-                                     gate_of, writable, allowed=allow_indistinguishable)
+        anyway_now = [g for g in held_now if (gate_of.get(g) or {}).get("exported_anyway")]
+        held_only = [g for g in held_now if g in holds]
+        block = completeness_summary({g: holds[g] for g in held_only}, [x for x in identical if set(x) & set(held_only)],
+                                     gate_of, writable)
         result["record_completeness"] = block
-        if held_now:
-            result["records_held_by_completeness" if not allow_indistinguishable
-                   else "records_written_although_incomplete"] = len(held_now)
+        if held_only:
+            result["records_held_by_completeness"] = len(held_only)
             result["outcome"] += " " + block["statement"]
+        if anyway_now:
+            who = sorted({str(gate_of[g]["exported_anyway"]["by"]) for g in anyway_now})
+            result["records_written_although_incomplete"] = len(anyway_now)
+            result["outcome"] += (f" {len(anyway_now)} record(s) are written although record completeness would hold them: "
+                                  f"{', '.join(who)} decided to export them anyway ({CP.EXPORT_ANYWAY_DECISION}, kept in "
+                                  "the bundle, so later exports keep them while each record stays the same).")
+        if withdrawn_held:
+            result["withdrawn_by_completeness"] = withdrawn_held
+            result["outcome"] += (f" {len(withdrawn_held)} earlier record(s) were withdrawn because record completeness "
+                                  "holds them now (their record changed, or no decision to export them anyway applies): "
+                                  "each `refused` row says why; `export --allow-indistinguishable --by \"<your name>\"` "
+                                  "writes them again.")
     if curve_older:
         # finding 2 (audit of 18 Nov 2026): said before every other warning, with the groups, never only on a row
         said = (f"{len(curve_older)} record(s) carry an approved curve older than its evidence (a logbook scan note "

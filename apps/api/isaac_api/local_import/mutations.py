@@ -28,6 +28,7 @@ import json
 import math
 import os
 import re
+import uuid
 import sys
 from contextlib import contextmanager
 from datetime import datetime, timezone
@@ -792,6 +793,10 @@ def _check_decision(bundle: Mapping, kind: str, obj: Mapping, decision: str, val
         raise MutationRefused(f"A {kind} cannot be decided.")
     if decision not in allowed:
         raise MutationRefused(f"`{decision}` is not a decision for a {kind}; allowed: {', '.join(sorted(allowed))}.")
+    if decision == B.EXPORT_ANYWAY_DECISION:
+        raise MutationRefused("export_despite_completeness is recorded by `isaac bundle export <bundle_dir> --out <dir> "
+                              '--allow-indistinguishable --by "<your name>"`, for the record bodies that export holds. '
+                              "Nothing was recorded.")
     if kind == "record_group" and decision == B.SCAN_DECISION:
         problem = scan_decision_target_problem(bundle, obj, value)
         if problem is not None:
@@ -5481,6 +5486,40 @@ def confirmed_with_care(bundle: Mapping, groups: Sequence[Mapping]) -> dict | No
           "(`isaac bundle show <bundle_dir> group <id>`).")
     return {"groups": len(items), "by_condition": by_cond, "items": shown,
             **({"items_omitted": len(items) - len(shown)} if len(items) > len(shown) else {}), "statement": statement}
+
+
+def record_export_anyway(bundle_dir: Path, items: Sequence[tuple[str, Mapping]], *, by: str,
+                         orcid: str | None = None) -> list[str]:
+    """Review of PR 342, finding 5: record the scientist's ``export_despite_completeness`` decision on each record
+    group of ``items`` (``(group id, {"body_sha256", "held_by"})``), in ONE write; a group whose latest such decision
+    already names the same body records nothing new. Returns the decision ids recorded."""
+    decided_by = _decider(by, orcid)
+    if decided_by is None:
+        raise MutationRefused('Exporting a held record anyway is the scientist\'s decision: give --by "<your name>". '
+                              "Nothing was written.", code=2)
+
+    def change(bundle):
+        from . import completeness as CP
+
+        latest = CP.export_anyway_of(bundle)
+        decisions = bundle.setdefault("scientist_decisions", [])
+        groups = {g.get("group_id") for g in bundle.get("record_groups") or ()}
+        recorded, batch = [], f"b-{uuid.uuid4().hex[:12]}"
+        for gid, value in items:
+            if gid not in groups:
+                raise MutationRefused(f"No record group {gid!r} in this bundle; nothing was recorded.", code=6)
+            prior = latest.get(gid)
+            if prior is not None and (prior.get("value") or {}).get("body_sha256") == value.get("body_sha256"):
+                continue
+            entry = {"decision_id": f"d-{len(decisions) + 1:05d}", "target": {"kind": "record_group", "id": gid},
+                     "decision": B.EXPORT_ANYWAY_DECISION, "value": dict(value), "chosen_reading_index": None,
+                     "decided_by": decided_by, "decided_utc": now_utc(), "method": "scientist_answer",
+                     "note": "export --allow-indistinguishable", "batch_id": batch}
+            decisions.append(entry)
+            recorded.append(entry["decision_id"])
+        return recorded
+
+    return mutate(Path(bundle_dir), change)
 
 
 def logbook_reading(bundle: Mapping) -> dict | None:

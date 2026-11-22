@@ -2661,7 +2661,8 @@ def cmd_bundle_export(args) -> int:
 
     def run():
         holder["r"] = R.export_records(Path(args.bundle_dir), Path(args.out),
-                                       allow_indistinguishable=getattr(args, "allow_indistinguishable", False))
+                                       allow_indistinguishable=getattr(args, "allow_indistinguishable", False),
+                                       by=getattr(args, "by", None), orcid=getattr(args, "orcid", None))
         return holder["r"] if args.full else compact_export(holder["r"])
 
     code = _mutation(run)
@@ -3143,7 +3144,9 @@ def build_parser(prog: str = "isaac") -> argparse.ArgumentParser:
     q.add_argument("--allow-indistinguishable", action="store_true",
                    help="write the records the local completeness gate holds anyway (a record without a condition that "
                         "keeps it apart from another record of its sample, or one that says exactly what another says); "
-                        "each row then says so")
+                        "needs --by: the decision is kept in the bundle, so later exports keep those records")
+    q.add_argument("--by", help="the scientist's name, for --allow-indistinguishable (a local, unverified statement)")
+    q.add_argument("--orcid", help="optional ORCID iD claimed with --by")
     q.set_defaults(func=cmd_bundle_export)
 
     q = bsub.add_parser("upload", help="DRY RUN ONLY: what would be sent to the portal")
