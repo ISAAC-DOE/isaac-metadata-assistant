@@ -53,12 +53,15 @@ def cards(site_data: Path, out_dir: Path, image_urls: Path | None) -> None:
         if len(body.encode()) > 250_000:
             raise SystemExit(f"card {card['card_id']} is {len(body.encode())} bytes, over the store's 256 KiB document limit")
         (out_dir / "cards" / f"{card['card_id']}.json").write_text(body)
-    missing = sorted(i for i in images if i not in urls)
+    ordered = sorted(images)
     print(f"{len(site.get('cards') or ())} cards, 1 meta document -> {out_dir}")
-    if missing:
-        print(f"{len(missing)} image(s) to upload first (then rerun with --image-urls):")
-        for i in missing:
-            print(f"  {site_data.parent / i}")
+    if ordered:
+        print(f"{len(ordered)} image file(s) to upload as artifact assets:")
+        for i in ordered:
+            print(f"  {site_data.parent / i}" + ("" if i in urls else "   (no URL yet: left out of the cards)"))
+        left = [i for i in ordered if i not in urls]
+        if left:
+            print(f"Upload them, put each URL in a json map {{\"img/<sha>.png\": \"<url>\"}}, and rerun with --image-urls.")
 
 
 def _docs(folder: Path) -> list[dict]:

@@ -504,7 +504,7 @@ tr:last-child td { border-bottom: 0; }
     note.dataset.prefill = a?.note || ''; note.value = draft ? draft.note : a?.note || '';
     p.push(h('details', { class: 'notebox', id: 'notebox', open: Boolean(note.value) }, h('summary', { text: a ? 'Add or change a note (optional)' : 'Add a note (optional)' }), note,
       a ? h('button', { class: 'btn', type: 'button', id: 'save-note', disabled: busy, onclick: () => save(c, { action: a.action, value: a.value, typed: a.typed, note: noteValue() }, false), text: 'Save note' })
-        : h('p', { class: 'muted', text: 'The note is saved together with your answer, or with “I don’t know”. If some of the measurements this covers are different, say which here.' })),
+        : h('p', { class: 'muted', text: 'The note is saved together with your answer, or with “I don’t know”. If some of the measurements this covers are different, say which here.' + (c.applies_to?.count > 1 ? ' If you add a note, the answer is held until the ISAAC team has read it, so a note naming exceptions is safe.' : '') })),
       h('div', { class: 'secondary' },
         h('button', { class: `btn${a && a.action === 'dont_know' ? ' is-chosen' : ''}`, type: 'button', id: 'dont-know', disabled: busy, onclick: () => save(c, { action: 'dont_know', note: noteValue() }), text: 'I don’t know' }),
         h('button', { class: 'btn btn-quiet', type: 'button', id: 'skip', onclick: () => step(1), text: run.single ? 'Back to the list' : 'Skip for now' })));
