@@ -175,7 +175,9 @@ CHANGES_ADDED_IN: Mapping[str, str] = {
                "(bl15.classify.processed_scan_title.v1; linked by isaac.processed_output.link_by_title_scans.v0; a "
                "bundle imported before holds such files as runs until re-imported, and run, candidate and value ids "
                "after one renumber); a run its own comment line says a macro ran is no acquired-never-declared "
-               "conflict (isaac.import.macro_run_line.v1; its conflict id stays unused); new candidates are "
+               "conflict (isaac.import.macro_run_line.v1), nor are two SPEC comment lines that are events "
+               "(isaac.import.comment_lines_are_events.v1) or positions equal within motor resolution "
+               "(isaac.import.position_within_motor_resolution.v1): their conflict ids stay unused; new candidates are "
                "numbered last"),
 }
 #: A field composed into a draft only beside another of the SAME run (interim decision for the
@@ -3978,11 +3980,24 @@ def _account_key(account: str) -> str:
 
 # --- what is not a disagreement (1.15.0; audit of 18 Nov 2026, rules 2 and 5) ------------------------------------------
 
+#: A SPEC ``#C`` line is an EVENT LOG entry: ``#C <date>.  do run3.mac.`` (a macro started), ``#C <date>.  gap reset
+#: from A to B.`` (a motor redefined). Two such lines are two events, never two readings of one field; only the
+#: session line (``#C spec  User = <account>``) states a setting, and two different ones still disagree.
+COMMENT_EVENT_RULE_ID = "isaac.import.comment_lines_are_events.v1"
+#: A position the header reads back and the macro commanded, equal within the motor's resolution (1e-3 of its unit:
+#: ``Sx -21.2782`` and ``Sx -21.27825``), is one position, not two. Positions further apart (another spot) still
+#: disagree, as before.
+POSITION_RESOLUTION_RULE_ID = "isaac.import.position_within_motor_resolution.v1"
 #: An acquisition whose own ``#C`` lines say a macro ran it (``do run3.mac``) was macro-driven, even when that macro's
 #: text was later overwritten and no longer declares it: no "acquired, never declared" conflict.
 MACRO_RUN_LINE_RULE_ID = "isaac.import.macro_run_line.v1"
-NOT_A_CONFLICT_RULES = (MACRO_RUN_LINE_RULE_ID,)
+NOT_A_CONFLICT_RULES = (COMMENT_EVENT_RULE_ID, POSITION_RESOLUTION_RULE_ID, MACRO_RUN_LINE_RULE_ID)
+POSITION_RESOLUTION = 1e-3
 NOT_A_CONFLICT_REASONS = {
+    COMMENT_EVENT_RULE_ID: (f"{COMMENT_EVENT_RULE_ID}: these SPEC comment lines are an event log (a macro started, a "
+                            "motor redefined), not competing readings of one value; they are kept as evidence."),
+    POSITION_RESOLUTION_RULE_ID: (f"{POSITION_RESOLUTION_RULE_ID}: the positions agree within the motor's resolution "
+                                  f"({POSITION_RESOLUTION:g} of its unit), so they are one position, kept as evidence."),
     MACRO_RUN_LINE_RULE_ID: (f"{MACRO_RUN_LINE_RULE_ID}: no macro in the import declares this measurement, but its own "
                              "comment line says a macro ran it (that macro was later overwritten): no conflict."),
 }
@@ -3991,8 +4006,11 @@ NOT_A_CONFLICT_COUNT = "disagreements_not_conflicts"
 
 
 def not_a_conflict_text(n: int) -> str:
-    return (f"{n} disagreement(s) the engine found are not conflicts ({', '.join(NOT_A_CONFLICT_RULES)}): "
-            "macro-driven runs no macro still declares. Their readings stay evidence on their candidates.")
+    return (f"{n} disagreement(s) the engine found are not conflicts ({', '.join(NOT_A_CONFLICT_RULES)}): comment lines "
+            "that are events, positions equal within motor resolution, macro-driven runs no macro still declares. "
+            "Their readings stay evidence on their candidates.")
+_EVENT_LINE = re.compile(r"^\w{3}\s+\w{3}\s+\d{1,2}\s+\d{1,2}:\d{2}:\d{2}\s+\d{4}\.\s+\S")
+_POSITION_READING = re.compile(r"^\s*(\S+)\s+([-+]?(?:\d+\.?\d*|\.\d+)(?:[eE][-+]?\d+)?)\s*$")
 _MACRO_RUN_LINE = re.compile(r"^\w{3}\s+\w{3}\s+\d{1,2}\s+\d{1,2}:\d{2}:\d{2}\s+\d{4}\.\s+do\s+\S+")
 
 
@@ -4003,12 +4021,30 @@ def macro_driven_paths(evidence_by_source: Mapping[str, Sequence]) -> set[str]:
                    for i in items)}
 
 
+def _clusters(numbers: Sequence[float]) -> int:
+    """How many groups ``numbers`` form when two closer than :data:`POSITION_RESOLUTION` are one."""
+    ordered = sorted(numbers)
+    return 1 + sum(1 for a, b in zip(ordered, ordered[1:]) if b - a >= POSITION_RESOLUTION - 1e-12)
+
+
 def not_a_conflict(key: Any, readings: Sequence[Any], engine_conflict: Mapping | None = None, *,
                    macro_driven: bool = False) -> str | None:
     """The rule (:data:`NOT_A_CONFLICT_RULES`) by which an engine disagreement is NOT a conflict, or ``None``. The
     readings stay evidence on their candidate; only the conflict (and its question) is not made."""
     if isinstance(engine_conflict, Mapping) and engine_conflict.get("kind") == "acquired_never_declared":
         return MACRO_RUN_LINE_RULE_ID if macro_driven else None
+    if key == "spec_user_string":
+        settings = {str(r) for r in readings if not _EVENT_LINE.match(str(r or ""))}
+        return COMMENT_EVENT_RULE_ID if len(settings) <= 1 else None
+    if key in ("sample_position", "motor_position"):
+        by_motor: dict[str, list[float]] = {}
+        for r in readings:
+            m = _POSITION_READING.match(str(r or ""))
+            if not m:
+                return None  # a reading that is not `<motor> <number>`: compared as the engine compared it
+            by_motor.setdefault(m.group(1), []).append(float(m.group(2)))
+        if by_motor and all(_clusters(v) == 1 for v in by_motor.values()):
+            return POSITION_RESOLUTION_RULE_ID
     return None
 
 
@@ -4827,8 +4863,8 @@ def build_bundle(
     out_candidates: list[dict] = []
     windows_truncated = [0]
     conflicts: list[dict] = []
-    # conflict ids are numbered by POSITION, counting a disagreement this build no longer reports (1.15.0: a
-    # macro-driven run with no declaring block), so every other
+    # conflict ids are numbered by POSITION, counting a disagreement this build no longer reports (1.15.0: an event-log
+    # comment line, a position within motor resolution, a macro-driven run with no declaring block), so every other
     # conflict keeps the id the build before gave it
     conflict_seq = [0]
 
@@ -4860,7 +4896,9 @@ def build_bundle(
             except (ValueError, IndexError):
                 engine_conflict = None
         dropped = None
-        if c.disagreement and c.unresolved_reason is not None and not c.resolved_by_rule:
+        # only where no record field is at stake (a comment line, a stage position, a macro relationship): a value a
+        # record could carry is never moved by these rules
+        if c.disagreement and c.target_field_path is None:
             run = runs_by_id.get(run_id) if run_id else None
             dropped = not_a_conflict(key, [r.get("value") for r in c.disagreement], engine_conflict,
                                      macro_driven=bool(run) and acq_path_of.get(run.get("acquisition_source_id")) in macro_driven)
