@@ -1692,6 +1692,10 @@ def test_a_scan_ending_early_leaves_no_step_in_the_merge_and_full_coverage_is_th
     assert "Scale-matched where coverage differs" in said["statement"] and "Nothing is interpolated" in said["statement"]
     avg2, _ = average_scans(scans[::2], "uniform", 1, True, True)
     assert EX.coverage_matched_mean(scans[::2], avg2, np) is None     # full coverage: nothing to say, nothing changed
+    assert "spread of the contributing scans around their plain mean" in said["statement"]       # review M7
+    avg3, _ = average_scans(scans, "uniform", 1, True, True)
+    tr = EX.coverage_matched_mean(scans, avg3, np, transmission=True)
+    assert tr["applied"] is False and np.allclose(avg3["IF_over_I0"], plain, equal_nan=True)
 
 
 # --- E0, the white-line spread and the counts, disclosed (audit 18 Nov, findings 4, 5, 8) ----------------------------

@@ -1507,7 +1507,8 @@ def process_group_v1(group: Mapping, ctx) -> list[dict]:
     with warnings.catch_warnings(), np.errstate(all="ignore"):
         warnings.simplefilter("ignore")
         avg, ainfo = average_scans([r["aligned"] for r in kept], "uniform", 1, True, True)
-        matched = coverage_matched_mean([r["aligned"] for r in kept], avg, np)
+        matched = coverage_matched_mean([r["aligned"] for r in kept], avg, np,
+                                        transmission=gr.get("transmission_v1", False))
     ok = np.isfinite(avg["IF_over_I0"]) & (avg["n_kept"] > 0)
     E, y, err, n = target[ok], avg["IF_over_I0"][ok], avg["err"][ok], avg["n_kept"][ok]
     res["steps"].append({"step": "merge", "params": {"statistic": "uniform mean of raw IF/I0 over the kept scans "
@@ -2625,7 +2626,7 @@ COVERAGE_RULE_ID = "isaac.xas.coverage_matched_mean.v1"
 COVERAGE_MIN_COMMON = 20
 
 
-def coverage_matched_mean(aligned: Sequence, avg: dict, np) -> dict | None:
+def coverage_matched_mean(aligned: Sequence, avg: dict, np, *, transmission: bool = False) -> dict | None:
     """Rewrite ``avg["IF_over_I0"]`` in place at the points where only some kept scans contribute
     (:data:`COVERAGE_RULE_ID`); the disclosure block, or None when every point has every scan (or too few in common)."""
     if len(aligned) < 2:
@@ -2637,6 +2638,13 @@ def coverage_matched_mean(aligned: Sequence, avg: dict, np) -> dict | None:
     if not partial.any():
         return None
     full = nfin == len(aligned)
+    if transmission:
+        # review of PR 345, M7: a scale model is the wrong model for ln(I0/I1) plus a constant (a thickness scales mu,
+        # a chamber gain adds to it): the plain mean is kept and said
+        return {"rule_id": COVERAGE_RULE_ID, "applied": False, "partial_points": int(partial.sum()),
+                "statement": (f"At {int(partial.sum())} points only some of the kept scans contribute; in "
+                              "transmission a level scale is not the right model for ln(I0/I1), so the plain mean "
+                              "is kept there and may step where coverage changes.")}
     if full.sum() < COVERAGE_MIN_COMMON:
         return {"rule_id": COVERAGE_RULE_ID, "applied": False, "partial_points": int(partial.sum()),
                 "statement": (f"At {int(partial.sum())} points only some of the kept scans contribute, and the scans "
@@ -2657,7 +2665,10 @@ def coverage_matched_mean(aligned: Sequence, avg: dict, np) -> dict | None:
                           "the mean is the sum of the contributing scans over the sum of their levels relative to the "
                           f"merge (levels {min(r):.3f}-{max(r):.3f}, fitted over the {int(full.sum())} points all "
                           "scans cover), so a missing scan's level leaves no step. Where all scans contribute it is "
-                          "the plain mean. Nothing is interpolated.")}
+                          "the plain mean. Nothing is interpolated. The levels are a pure scale fitted mostly on the "
+                          "white line, so a scan with its own background or white line is matched only "
+                          "approximately; at those points the standard error is still the spread of the contributing "
+                          "scans around their plain mean, not around the value reported.")}
 
 
 def _earliest(flagged: Sequence[str], recs: Sequence[Mapping], rows: Mapping) -> bool:
