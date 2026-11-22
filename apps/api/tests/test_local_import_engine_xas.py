@@ -1690,3 +1690,34 @@ def test_e0_the_white_line_spread_and_the_counts_are_disclosed(tmp_path):
     assert acq["attenuator_filter"] == [10.0] and acq["post_edge_counts_per_point"]["median"] > 0
     assert "Attenuator (filter, as the #P line states it): 10" in acq["statement"]
     assert EX.NOT_CORRECTED_SAID in acq["statement"]
+
+
+def test_the_quick_merge_comparison_and_the_plot_take_the_transmission_constant_out(monkeypatch, tmp_path):
+    """Review of PR 345, M1/M2: a standard's constant is subtracted from the curves compared with a scientist's MERGE
+    file and from the raw panel of the plot; the normaliser adds it back only to normalise."""
+    from types import SimpleNamespace
+
+    from isaac_api.local_import.processing import quick_merge as QM
+    from xas_analysis.average import AlignedScan
+
+    E = GRID
+    mu = 0.5 + 0.6 / (1 + np.exp(-(E - E_EDGE) / 1.2))
+    off = 0.7
+    a = AlignedScan(1, E, (mu + off) * 1e5, np.full(E.size, 1e5), np.ones(E.size), 0, 0, True, True)
+    rec = {"aligned": a, "entry": {}}
+    seen = {}
+
+    def fake(group, ctx, **kw):
+        seen.update(kw)
+        seen["sci"] = kw["normalizer"](E, mu)
+        return []
+
+    monkeypatch.setattr(QM, "compare_group", fake)
+    absorber = {"element": "Ir", "edge": "L3", "E_edge_eV": E_EDGE}
+    nm = EX.normalize_once(E, mu + off, np.ones(E.size), absorber, {"windows": {}}, np, transmission=True)
+    EX._quick_merges({}, SimpleNamespace(), [rec], [rec], E, mu + off, nm, E_EDGE, absorber, np, offset=off)
+    assert np.allclose(seen["mean"], mu) and np.allclose(seen["M"][0], mu)
+    assert np.allclose(seen["sci"][0], nm["norm"], atol=1e-6)          # the scientist's ln(I0/I1) normalised alike
+    table = {"by_id": {}, "counts": {"kept": 1}}
+    assert EX.plot(tmp_path / "p.png", {"group_id": "g"}, [], table, E, mu + off, nm, E_EDGE, absorber, np,
+                   offset=off, signal="ln(I0/I1)") in (True, False)

@@ -1573,7 +1573,8 @@ def process_group_v1(group: Mapping, ctx) -> list[dict]:
         "energy_reference": res[REFERENCE_KEY]}))
     plotted = False
     try:
-        plotted = plot(gdir / "plot.png", group, recs, table, E, y, nm, e0, absorber, np)
+        plotted = plot(gdir / "plot.png", group, recs, table, E, y, nm, e0, absorber, np, offset=off,
+                       signal="ln(I0/I1)" if transmission else "IF/I0")
     except Exception:  # noqa: BLE001 - a plot failure is a flag, never a processing failure
         plotted = False
     if not plotted:
@@ -1608,7 +1609,7 @@ def process_group_v1(group: Mapping, ctx) -> list[dict]:
                       "e0_eV": e0, "edge_step": nm["A_edge"], "points": int(E.size)}
     # the scientists' quick beamtime merges: a rough reference, as on v0 (outside every hashed file)
     try:
-        quick = _quick_merges(group, ctx, recs, kept, E, y, nm, e0, absorber, np)
+        quick = _quick_merges(group, ctx, recs, kept, E, y, nm, e0, absorber, np, offset=off)
         if quick:
             from . import quick_merge as QM
 
@@ -3379,8 +3380,10 @@ def energy_story(res: Mapping) -> dict:
             "alignment": alignment}
 
 
-def _quick_merges(group, ctx, recs, kept, E, y, nm, e0, absorber, np) -> list[dict]:
-    """The MERGE quick-merge comparison (quick_merge.py), with the quick merge normalised the way this result is."""
+def _quick_merges(group, ctx, recs, kept, E, y, nm, e0, absorber, np, *, offset: float = 0.0) -> list[dict]:
+    """The MERGE quick-merge comparison (quick_merge.py), with the quick merge normalised the way this result is.
+    ``offset``: a transmission standard's constant (TRANSMISSION_RULE_ID), taken out of the curves compared (review of
+    PR 345, M2); the quick merge's own ln(I0/I1) gets it back only while it is normalised."""
     from xas_analysis.model.mback_xrs import mback_xrs
 
     from . import quick_merge as QM
@@ -3390,11 +3393,12 @@ def _quick_merges(group, ctx, recs, kept, E, y, nm, e0, absorber, np) -> list[di
     rp = {"pre1": rng[0] - e0v, "pre2": rng[1] - e0v, "norm1": rng[2] - e0v, "norm2": rng[3] - e0v, "nnorm": None}
     nmv = {"resolved_params": rp, "e0_eV": e0v, "edge_step": nm["A_edge"], "norm": nm["norm"]}
     M = np.array([np.interp(E, r["aligned"].E, r["aligned"].IF / r["aligned"].I0, left=np.nan, right=np.nan) for r in kept])
+    M, y = M - offset, y - offset
 
     opts = nm.get("options") or {}
 
     def normalizer(e, yy):
-        r = mback_xrs(absorber["element"], e, yy, rng, absorber["edge"], **opts)
+        r = mback_xrs(absorber["element"], e, np.asarray(yy, float) + offset, rng, absorber["edge"], **opts)
         return np.asarray(r.norm_xas, float), float(r.info["A_edge"])
 
     return QM.compare_group(group, ctx, grid_ok=E, mean=y, nm=nmv, M=M, grid=E, used_entries=[r["entry"] for r in kept],
@@ -3404,7 +3408,9 @@ def _quick_merges(group, ctx, recs, kept, E, y, nm, e0, absorber, np) -> list[di
 # --- the plot ----------------------------------------------------------------------------------------------------
 
 
-def plot(path: Path, group, recs, table, E, y, nm, e0, absorber, np) -> bool:
+def plot(path: Path, group, recs, table, E, y, nm, e0, absorber, np, *, offset: float = 0.0, signal: str = "IF/I0"
+         ) -> bool:
+    """``offset``: a transmission standard's constant, taken out of the raw panel (review of PR 345, M1)."""
     from ._deps import require
 
     mpl = require().get("matplotlib")
@@ -3424,7 +3430,7 @@ def plot(path: Path, group, recs, table, E, y, nm, e0, absorber, np) -> bool:
         if a is None:
             continue
         with np.errstate(all="ignore"):
-            yy = a.IF / a.I0
+            yy = a.IF / a.I0 - offset
         # scans coloured by spot (the spot named in the legend) when the group has several
         sp = row.get("spot")
         color = spot_colors.get(sp) if sp else None
@@ -3438,13 +3444,13 @@ def plot(path: Path, group, recs, table, E, y, nm, e0, absorber, np) -> bool:
             ax1.plot(a.E, yy, lw=0.9, ls="--", alpha=0.8, color=color,
                      label=f"{r['stem'][:18]} #{r['num']}{tag} DROPPED: {why}"[:80] if shown < 14 else None)
         shown += 1
-    ax1.plot(E, y, color="k", lw=1.8, label=f"average of {table['counts']['kept']} kept (raw IF/I0)")
+    ax1.plot(E, y - offset, color="k", lw=1.8, label=f"average of {table['counts']['kept']} kept (raw {signal})")
     unaligned = [f"#{r['num']}" for r in recs if r.get("aligned") is None]
     if unaligned:
         # a scan with no energy anchor cannot be drawn on the aligned axis: named, never hidden
         ax1.plot([], [], ls="--", color="0.5", label=f"not drawn (no energy anchor, dropped): {', '.join(unaligned)}"[:70])
     ax1.set_xlim(lo, hi)
-    ax1.set_ylabel("raw IF/I0 (aligned)")
+    ax1.set_ylabel(f"raw {signal} (aligned)")
     ax1.legend(fontsize=6, loc="upper right", ncol=1)
     ax1.set_title(f"{group['group_id']} - aligned scans (kept solid, dropped dashed)", fontsize=9)
     ax2.plot(E, nm["norm"], color="k", lw=1.4, label="normalised average (Victoreen + McMaster)")
