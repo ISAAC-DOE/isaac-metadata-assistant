@@ -163,8 +163,10 @@ scientist still approves each curve before it goes into a record.
   screens run, glitch windows excluded; a flag drops only when, after a free scale and offset fitted over the pre-edge
   and post-edge, the smoothed residual still departs 5 % of the edge step and 5 x its noise (a within-scan step collapse
   is shape; a uniformly weaker scan, or one on a background, is not: `intensity_not_shape`). A WITHIN-SPOT
-  CHANGE (`isaac.xas.dose_damage.v2`; scans compared in normalised shape over the white-line window, after a free scale
-  and offset): BEAM DAMAGE only when, at most spots measured three or more times (at least two), the change GROWS with
+  CHANGE (`isaac.xas.dose_damage.v3`; each scan normalised on its own with the same fixed windows, mean below E_edge - 10
+  eV to 0 and mean above E_edge + 30 eV to 1, then compared over the white-line window; v2 fitted one noisy scan onto
+  the other, which made the later white line read low from counting noise alone; under 150 post-edge counts per point
+  at half or more of the repeated spots the rule says it cannot judge, `cannot_judge_low_counts`, and decides nothing): BEAM DAMAGE only when, at most spots measured three or more times (at least two), the change GROWS with
   dose (scan 3 differs from scan 1 more than scan 2 does), goes the way the edge expects (the white line falls at Ir and
   Pt L3; elsewhere the one direction every spot shares, said) and a fresh spot recovers: the later scans are dropped,
   "beam damage at each spot: later scans at the same spot change shape". A FIRST SCAN STILL SETTLING when the later

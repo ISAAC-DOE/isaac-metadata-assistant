@@ -34,7 +34,7 @@ def _engine_on(monkeypatch):
 
 
 def scan_cols(seed, *, d=0.0, chem=0.0, scale=1.0, noise=2e-3, foil=False, glitch=True, fluo=True, trans_step=0.0,
-              n_points=None, wl=3.0, bg=0.0, wl_shift=0.0):
+              n_points=None, wl=3.0, bg=0.0, wl_shift=0.0, counts=None):
     """One SYN scan. ``d``: the mono offset (the recorded absev reads ``d`` above the true energy, so every feature
     sits at its true energy + d); ``chem``: a true shift of the sample's own edge; ``scale``: the signal's intensity."""
     rng = np.random.default_rng(seed)
@@ -45,6 +45,8 @@ def scan_cols(seed, *, d=0.0, chem=0.0, scale=1.0, noise=2e-3, foil=False, glitc
         I0 = I0 * (1 - 0.06 * np.exp(-((t - GLITCH) / 0.22) ** 2))
     mu = 0.05 + 1.0 / (1 + np.exp(-(t - E_EDGE - chem) / 1.2)) + wl * np.exp(-((t - 11218 - chem - wl_shift) / 1.5) ** 2)
     IF = (scale * mu + bg) * I0 * 1e-3 * (1 + noise * rng.standard_normal(E.size))
+    if counts is not None:          # Poisson counting noise, ``counts`` per point in the post-edge (mu ~ 1.05 there)
+        IF = rng.poisson((scale * mu + bg) * I0 / 1e5 * counts / 1.05).astype(float)
     if foil:
         muf = 0.3 + 0.8 / (1 + np.exp(-(t - E_EDGE) / 0.9))
         I1 = 0.6 * I0
@@ -1173,9 +1175,10 @@ def test_spots_of_split_files_take_the_motor_names_from_the_acquisition_file(tmp
 SPOT_SZ = (-7.45, -7.15, -6.85, -6.55)
 
 
-def _dose_run(wl_of, per_spot=3, scale_of=None, noise_of=None):
+def _dose_run(wl_of, per_spot=3, scale_of=None, noise_of=None, counts=None):
     """4 spots x ``per_spot`` scans, spot after spot (A1 A2 A3 B1 ...); ``wl_of(j)``: the white-line height of the j-th
-    scan AT ITS SPOT (0-based); ``wl_of(j, k)`` too, with k the scan's place in the run."""
+    scan AT ITS SPOT (0-based); ``wl_of(j, k)`` too, with k the scan's place in the run. The signal is ~2000 counts per
+    point in the post-edge (above the dose rule's counts floor); ``counts``: Poisson noise at that many counts instead."""
     sz, cols = [], []
     for s_ in range(4):
         for j in range(per_spot):
@@ -1185,8 +1188,9 @@ def _dose_run(wl_of, per_spot=3, scale_of=None, noise_of=None):
             except TypeError:
                 wl = wl_of(j)
             sz.append(SPOT_SZ[s_])
-            cols.append(scan_cols(110 + k, wl=wl, scale=(scale_of or (lambda j, k: 1.0))(j, k),
-                                  noise=(noise_of or (lambda j, k: 2e-3))(j, k)))
+            scale = (scale_of or (lambda j, k: 1.0))(j, k)
+            cols.append(scan_cols(110 + k, wl=wl, scale=scale if counts else 20.0 * scale,
+                                  noise=(noise_of or (lambda j, k: 2e-3))(j, k), counts=counts))
     return _spot_run(sz, cols)
 
 
@@ -1293,6 +1297,63 @@ def test_a_logbook_discard_first_note_wins_over_the_dose_rule(tmp_path, monkeypa
     assert [k for k, x in sorted(rows.items()) if x["decision"] == "keep"] == [3, 6, 9, 12]
     codes = {y["code"] for x in rows.values() for y in x["reasons"]}
     assert not codes & {EX.DOSE_CODE, EX.SETTLING_CODE} and EX.DOSE_QUESTION_FLAG not in r["review_flags"]
+
+
+@pytest.mark.parametrize("counts", [40, 5000])
+def test_identical_scans_with_counting_noise_show_no_dose_trend(tmp_path, counts):
+    """v3 (audit 18 Nov, finding 1): one unchanged curve, Poisson noise only. At 40 counts per point the rule says it
+    cannot judge; at 5000 it finds no trend. v2's fit of one noisy scan onto another read a falling white line here."""
+    bdir, _ = imported(tmp_path, _dose_run(lambda j: 3.0, counts=counts))
+    r = by_run(v1_results(bdir), "02_SYN_ZZ2")
+    d = _dose(r)
+    if counts < EX.DOSE["min_counts"]:
+        assert d["outcome"] == EX.DOSE_LOW_COUNTS, d
+        assert "cannot be judged at this count level" in d["statement"]
+        assert "dose_damage" in r["qc"]["statements"]
+    else:
+        assert d.get("outcome") is None, d
+    assert EX.DOSE_QUESTION_FLAG not in r["review_flags"]
+    codes = {y["code"] for x in r[EX.DECISIONS_KEY]["rows"] for y in x["reasons"]}
+    assert not codes & {EX.DOSE_CODE, EX.SETTLING_CODE}
+
+
+def test_the_v3_difference_has_no_noise_bias_where_v2_had_one():
+    """The metric itself, many draws: two Poisson scans of one curve at 20 counts per point. The mean difference is
+    zero within its error (v2's regression read about -0.3 edge steps on the real data at such counts)."""
+    from xas_analysis.average import AlignedScan
+
+    rng = np.random.default_rng(7)
+    E = GRID
+    mu = 0.05 + 1.0 / (1 + np.exp(-(E - E_EDGE) / 1.2)) + 3.0 * np.exp(-((E - 11218) / 1.5) ** 2)
+    I0 = np.full(E.size, 1e5)
+    win = [11214.0, 11222.0]
+    ds = []
+    for _ in range(400):
+        a, b = (AlignedScan(1, E, rng.poisson(mu * 20 / 1.05).astype(float), I0, np.ones(E.size), 0, 0, True, True)
+                for _k in range(2))
+        ds.append(EX._norm_difference({"aligned": a}, {"aligned": b}, E_EDGE, win, np))
+    m = np.array([x[0] for x in ds])
+    assert abs(m.mean()) < 3 * m.std() / np.sqrt(m.size)
+    assert np.median([x[1] for x in ds]) == pytest.approx(m.std(), rel=0.5)      # the noise said is the scatter seen
+
+
+def test_a_seven_percent_white_line_drop_with_dose_at_high_counts_is_still_beam_damage(tmp_path):
+    """A real change: the white-line peak falls 3.5 % per scan at a spot (7 % by scan 3), recovering at a fresh spot,
+    Poisson noise at 5000 counts per point: beam damage, the first scan per spot kept."""
+    peak = 4.05                                              # the normalised peak at wl = 3.0
+    bdir, _ = imported(tmp_path, _dose_run(lambda j: 3.0 - 0.035 * j * peak, counts=5000))
+    r = by_run(v1_results(bdir), "02_SYN_ZZ2")
+    assert _dose(r)["outcome"] == "beam_damage", _dose(r)
+    rows = {x["scan"]: x for x in r[EX.DECISIONS_KEY]["rows"]}
+    assert [rows[k]["decision"] for k in range(1, 13)] == ["keep", "drop", "drop"] * 4
+
+
+def test_a_settling_first_scan_at_high_counts_is_still_found(tmp_path):
+    bdir, _ = imported(tmp_path, _dose_run(lambda j: 2.7 if j == 0 else 3.0, counts=5000))
+    r = by_run(v1_results(bdir), "02_SYN_ZZ2")
+    assert _dose(r)["outcome"] == "first_scan_settling", _dose(r)
+    rows = {x["scan"]: x for x in r[EX.DECISIONS_KEY]["rows"]}
+    assert [rows[k]["decision"] for k in range(1, 13)] == ["drop", "keep", "keep"] * 4
 
 
 # --- single-point I0 dropouts: the POINT is excluded, said, never interpolated; the scan is kept ----------------------

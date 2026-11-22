@@ -1207,7 +1207,7 @@ ATHENA_SELECT_DECISION = "select_athena_version"
 #: isaac.xas.v1 (processing/engine_xas.py): the scientist's keep / drop of named scans of a record group; value
 #: ``{"decision": "keep"|"drop", "scans": [scan id, ...]}``. It moves no group status; the group is re-processed.
 SCAN_DECISION = "set_scan_decision"
-#: isaac.xas.v1 (processing/engine_xas.py, isaac.xas.dose_damage.v2): the scientist's reading of a within-spot change,
+#: isaac.xas.v1 (processing/engine_xas.py, isaac.xas.dose_damage.v3): the scientist's reading of a within-spot change,
 #: for one record group or (target ``experiment``) the whole beamtime; a group's own reading wins
 DOSE_READING_DECISION = "set_dose_reading"
 DOSE_READINGS = ("beam_damage", "not_beam_damage", "first_scan_settling")

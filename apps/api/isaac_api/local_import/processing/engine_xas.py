@@ -143,8 +143,9 @@ DECISION_RULE = {
         "6 robust sigmas and 1.5 times the median, and more than twice its own counting noise), a ratio-shape or "
         "post-edge-drift flag whose NORMALISED shape is distorted (after a free scale and offset it still departs 5 % "
         "of the edge step; a within-scan step collapse is shape, a uniformly weaker scan is not), or a dead channel "
-        "that shows no edge at all; or (d) a within-spot change at two or more spots (isaac.xas.dose_damage.v2): beam "
-        "damage when it GROWS with dose (scan 3 further from scan 1 than scan 2), the way the edge expects (the white "
+        "that shows no edge at all; or (d) a within-spot change at two or more spots (isaac.xas.dose_damage.v3; "
+        "each scan normalised on its own, never fitted onto another; under 150 post-edge counts per point at most "
+        "spots the rule says it cannot judge and decides nothing): beam damage when it GROWS with dose (scan 3 further from scan 1 than scan 2), the way the edge expects (the white "
         "line falls at Ir and Pt L3) and a fresh spot recovers: the later scans are dropped, the first kept; a first "
         "scan still settling when the later scans agree with each other: the first is dropped; otherwise (two scans per "
         "spot, mixed patterns, a logbook note on CV or equilibration) a question to the scientist, nothing decided "
@@ -160,7 +161,7 @@ DECISION_RULE = {
                 "screening": "xas-analysis screen_report (report-only) + this rule's intensity guard",
                 "input": "the scan could not be read or formed (its skip reason)",
                 "params_file": "the params file's exclude_scans",
-                "dose": "isaac.xas.dose_damage.v2 (beam damage, or a first scan still settling, at each spot)",
+                "dose": "isaac.xas.dose_damage.v3 (beam damage, or a first scan still settling, at each spot)",
                 "merge": "a point excluded from the scan's contribution (an I0 dropout), said, never a drop",
                 "scientist": "a set_scan_decision decision"},
 }
@@ -2138,12 +2139,25 @@ def apply_spots(table: dict, recs: Sequence[Mapping], stability: Mapping, np) ->
     return block
 
 
-#: WITHIN-SPOT CHANGE: BEAM DAMAGE, OR A FIRST SCAN STILL SETTLING (isaac.xas.dose_damage.v2; review of 271efe4a).
-#: The measure: one scan at a spot against another there, in NORMALISED shape: put on the other's scale by a free scale
-#: and offset fitted over the pre-edge and the post-edge (an intensity change or a background is never shape), the
-#: mean difference over the white-line window (the group's white-line energy +- ``wl_half_eV``) in edge-step units,
-#: with its noise (the point-to-point scatter of the difference over the window, / sqrt(n)); "beyond the noise" is
-#: max(``floor``, ``noise_mult`` x that noise). Per spot with three or more scans (in time):
+#: WITHIN-SPOT CHANGE: BEAM DAMAGE, OR A FIRST SCAN STILL SETTLING (isaac.xas.dose_damage.v3; v2 reviewed 271efe4a;
+#: v3 after the processing-science audit of 18 Nov 2026, finding 1).
+#: The measure: EACH scan is normalised ON ITS OWN with the same fixed windows (its mean IF/I0 below E_edge +
+#: ``pre_eV`` set to 0, its mean above E_edge + ``post_eV`` set to 1: an intensity change or a constant background is
+#: never shape), and the later scan minus the earlier one is averaged over the white-line window (the group's
+#: white-line energy +- ``wl_half_eV``), in edge-step units. v2 instead fitted one scan onto the other by least squares
+#: (yf ~ c*ys + k): the regressor is itself a noisy scan, so c is attenuated (regression dilution) and the later scan's
+#: white line reads LOWER from counting noise alone, the more so the fewer the counts (on the real 2025 data, two
+#: simulated scans of one unchanged curve gave almost the same "damage" as measured). Normalising each scan alone has
+#: no regressor: noise enters only through the two window means, the same way for both scans, so pure noise gives no
+#: trend (a residual bias is second order in the window means' relative error, about 1e-4 of the step for a 1 % error,
+#: and cancels between scans of equal counts). Fitting both scans onto the group's merge was the other option; it
+#: still regresses on a noisy curve (the merge contains the two scans) and its bias depends on how many scans merge. The noise of the difference: the point-to-point scatter of the difference over the window, / sqrt(n),
+#: combined with each scan's edge-step error (its window means' scatter / sqrt(n), times the window's mean level);
+#: "beyond the noise" is max(``floor``, ``noise_mult`` x that noise). COUNTS FLOOR: a spot whose scans have under
+#: ``min_counts`` counts per point in the post-edge (the median IF above E_edge + ``post_eV``, the lower of the scans
+#: compared, IF read as the counts the beamline wrote) is NOT JUDGED; when at least half of the spots measured more
+#: than once are under it, the rule says it cannot judge dose at this count level and decides nothing (no drop, no
+#: question). Per spot with three or more scans (in time):
 #:   GROWS (beam damage): scan 3 differs from scan 1 more than scan 2 does, the same way, and scan 3 differs from
 #:     scan 2 beyond the noise: the change grows with dose;
 #:   PLATEAU (a first scan still settling): scans 2 and 3 both differ from scan 1 the same way and agree with each
@@ -2160,8 +2174,10 @@ def apply_spots(table: dict, recs: Sequence[Mapping], stability: Mapping, np) ->
 #: of CV, equilibration or discarding the first scans. A logbook exclude / start_from / keep_only note on the group
 #: always wins (this rule then decides nothing); an existing shape-screen drop is never cleared; a scientist's
 #: set_dose_reading (the group's, else the beamtime's) decides the reading; set_scan_decision still wins per scan.
-DOSE = {"wl_half_eV": 4.0, "floor": 0.01, "noise_mult": 3.0, "pre_eV": -10.0, "post_eV": 30.0, "recovery_frac": 0.5}
-DOSE_RULE_ID = "isaac.xas.dose_damage.v2"
+DOSE = {"wl_half_eV": 4.0, "floor": 0.01, "noise_mult": 3.0, "pre_eV": -10.0, "post_eV": 30.0, "recovery_frac": 0.5,
+        "min_counts": 150.0}
+DOSE_RULE_ID = "isaac.xas.dose_damage.v3"
+DOSE_LOW_COUNTS = "cannot_judge_low_counts"
 DOSE_CODE = "beam_damage_at_spot"
 SETTLING_CODE = "first_scan_settling"
 DOSE_SAID = "beam damage at each spot: later scans at the same spot change shape"
@@ -2191,7 +2207,9 @@ def dose_reading_of(bundle: Mapping, group_id: str) -> dict | None:
 
 
 def _norm_difference(f: Mapping, s: Mapping, E_edge: float, win: Sequence[float], np) -> tuple[float, float] | None:
-    """``(mean difference, its noise)`` of scan ``s`` against scan ``f`` in normalised shape over ``win`` (:data:`DOSE`)."""
+    """``(mean difference, its noise)`` of scan ``s`` minus scan ``f``, each normalised ON ITS OWN with the same fixed
+    pre- and post-edge windows, over ``win`` in edge-step units (:data:`DOSE`; no regression of one noisy scan on the
+    other, which biases the later scan's white line low)."""
     a, b = f.get("aligned"), s.get("aligned")
     if a is None or b is None:
         return None
@@ -2203,13 +2221,30 @@ def _norm_difference(f: Mapping, s: Mapping, E_edge: float, win: Sequence[float]
         w = ok & (E >= win[0]) & (E <= win[1])
         if pre.sum() < 2 or post.sum() < 3 or w.sum() < 5:
             return None
-        fit = pre | post
-        (c, k), *_ = np.linalg.lstsq(np.c_[ys[fit], np.ones(fit.sum())], yf[fit], rcond=None)
-        step = float(np.median(yf[post]) - np.median(yf[pre]))
-        if not step > 0:
-            return None
-        d = (c * ys[w] + k - yf[w]) / step
-        return float(np.mean(d)), float(np.std(np.diff(d)) / np.sqrt(2.0) / np.sqrt(w.sum()))
+        normed, step_var = [], 0.0
+        for y in (yf, ys):
+            lo, hi = float(np.mean(y[pre])), float(np.mean(y[post]))
+            step = hi - lo
+            if not step > 0:
+                return None
+            nrm = (y - lo) / step
+            normed.append(nrm)
+            # the edge-step error: each window mean's point-to-point scatter / sqrt(n), carried to the window's level
+            e_lo, e_hi = (float(np.std(np.diff(y[m])) / np.sqrt(2.0) / np.sqrt(m.sum())) for m in (pre, post))
+            step_var += (float(np.mean(nrm[w])) * np.hypot(e_lo, e_hi) / step) ** 2
+        d = normed[1][w] - normed[0][w]
+        noise = np.hypot(float(np.std(np.diff(d)) / np.sqrt(2.0) / np.sqrt(w.sum())), np.sqrt(step_var))
+        return float(np.mean(d)), float(noise)
+
+
+def _post_counts(r: Mapping, E_edge: float, np) -> float | None:
+    """The scan's counts per point in the post-edge (median IF above E_edge + ``post_eV``, as written), or None."""
+    a = r.get("aligned")
+    if a is None:
+        return None
+    with np.errstate(all="ignore"):
+        m = np.isfinite(a.IF) & (a.E > E_edge + DOSE["post_eV"])
+        return float(np.median(a.IF[m])) if m.sum() >= 3 else None
 
 
 def apply_dose_damage(table: dict, recs: Sequence[Mapping], stability: Mapping, np, E_edge: float | None = None, *,
@@ -2230,6 +2265,23 @@ def apply_dose_damage(table: dict, recs: Sequence[Mapping], stability: Mapping, 
     repeat = {lab: rs for lab, rs in by_spot.items() if len(rs) >= 2}
     if len(repeat) < 2:
         return None
+    # the COUNTS FLOOR (v3): a spot under min_counts post-edge counts per point is not judged
+    counts = {}
+    for lab, rs in repeat.items():
+        c = [v for r in rs if (v := _post_counts(r, float(E_edge), np)) is not None]
+        counts[lab] = min(c) if c else None
+    low = {lab for lab, c in counts.items() if c is not None and c < DOSE["min_counts"]}
+    if low and 2 * len(low) >= len(repeat):
+        known = sorted(c for c in counts.values() if c is not None)
+        return {"rule_id": DOSE_RULE_ID, "rule": DOSE, "outcome": DOSE_LOW_COUNTS, "spots_measured_more_than_once":
+                len(repeat), "spots_under_floor": len(low), "post_edge_counts_per_point": counts,
+                "statement": (f"Beam damage cannot be judged at this count level: {len(low)} of {len(repeat)} spots "
+                              f"measured more than once have under {DOSE['min_counts']:.0f} counts per point in the "
+                              f"post-edge (median {known[len(known) // 2]:.0f}); at so few counts counting noise "
+                              "alone can look like a change between scans. Nothing is decided by this rule; every scan "
+                              "is judged by the other rules.")}
+    if low:
+        repeat = {lab: rs for lab, rs in repeat.items() if lab not in low}
     wle = [((stab.get(r["scan_id"]) or {}).get("metrics") or {}).get("wl_e_eV") for r in judged]
     wle = [float(v) for v in wle if isinstance(v, (int, float)) and v == v]
     centre = float(np.median(wle)) if wle else float(E_edge) + 3.0
@@ -2283,7 +2335,8 @@ def apply_dose_damage(table: dict, recs: Sequence[Mapping], stability: Mapping, 
         per[lab] = x
     changed = {lab: x for lab, x in per.items() if x["kind"] != "none"}
     block: dict = {"rule_id": DOSE_RULE_ID, "rule": DOSE, "window_eV": win, "per_spot": per,
-                   "spots_measured_more_than_once": len(repeat)}
+                   "spots_measured_more_than_once": len(repeat), "post_edge_counts_per_point": counts,
+                   **({"spots_under_floor_not_judged": sorted(low)} if low else {})}
     # a logbook exclude / start_from / keep_only note on the group ALWAYS wins
     applied = [n for n in (notes_said or {}).get("notes") or () if n.get("applied") and n.get("drops")]
     if applied:
