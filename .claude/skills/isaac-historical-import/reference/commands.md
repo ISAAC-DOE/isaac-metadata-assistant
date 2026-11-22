@@ -82,7 +82,7 @@ Decisions by target:
 |---|---|
 | Compose drafts | `<isaac> bundle build-records <bundle> [--full]` |
 | Every check, per draft | `<isaac> bundle validate <bundle> [--full]` |
-| Write the passing records | `<isaac> bundle export <bundle> --out <records> [--full] [--allow-indistinguishable]` |
+| Write the passing records | `<isaac> bundle export <bundle> --out <records> [--full] [--allow-indistinguishable --by "<name>"]` |
 | What would be uploaded | `<isaac> bundle upload <records> --dry-run [--portal-url <url>] [--full]` |
 
 - `build-records`: counts and the first 3 drafts; `--full` prints every row. Never `--test-marker`: it is for self-tests only.
