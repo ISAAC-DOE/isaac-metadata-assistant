@@ -3405,10 +3405,10 @@ def _absorber_questions(bundle: Mapping, groups: Sequence[Mapping], *, include_a
             text = (f"The files state element {element}, edge {edge} for {len(items)} group(s), and no file disagrees: "
                     f"{own} of them from processed outputs linked to their runs"
                     + (" or from their own scans' energy grid" if any(w["kind"] == "scanned_range" for _, s in items for w in s["witnesses"]) else "")
-                    + ", "
-                    f"the rest only from beamtime-wide statements: {len(items) - own} group(s), from {statements} "
-                    "statement(s) (e.g. an acquisition macro's name). "
-                    "Is that the absorber? Answer once, or per group (a reference foil or blank cell may differ).")
+                    + (", "
+                       f"the rest only from beamtime-wide statements: {len(items) - own} group(s), from {statements} "
+                       "statement(s) (e.g. an acquisition macro's name). " if own < len(items) else ". ")
+                    + "Is that the absorber? Answer once, or per group (a reference foil or blank cell may differ).")
         else:
             partial = sum(1 for _, s in items for r in s["ai_readings"] if r.get("read_for"))
             text = (f"Element {element}, edge {edge} is suggested for {len(items)} group(s): "
