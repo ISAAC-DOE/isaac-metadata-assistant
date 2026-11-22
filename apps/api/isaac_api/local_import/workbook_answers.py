@@ -33,7 +33,7 @@ import re
 import shlex
 import shutil
 import tempfile
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 from typing import Any, Iterable, Mapping, Sequence
 
 from . import bundle as B
@@ -80,6 +80,10 @@ H_STORED = "athena group (as stored)"
 H_NEAR = "near name"  # prefix: "Near name (hint only, never matched)"
 #: what a row says its answer may be; a collapsed row's "yes only (each record's own shown value)" is read from it
 H_ALLOWED = "allowed answers"
+#: the runs and the file a question row was made for (review of PR 346, I3: a row whose question now targets other runs
+#: is refused as stale, never applied to them)
+H_RECORDS = "record (run names)"
+H_FILE = "file (inside the beamtime folder)"
 _EACH_OWN = re.compile(r"each record'?s own", re.IGNORECASE)
 
 #: how a tab is read, decided from its header row alone
@@ -258,6 +262,7 @@ def read_tabs(wb) -> list[dict]:
             "covered_by": _find(header, H_COVERED), "field": _find(header, H_FIELD),
             "projects": _find(header, H_PROJECTS), "label": _find(header, H_LABEL), "stored": _find(header, H_STORED),
             "near": _find(header, H_NEAR, prefix=True), "allowed": _find(header, H_ALLOWED),
+            "records": _find(header, H_RECORDS), "file": _find(header, H_FILE),
         }
         if col["answer"] is None:
             kind = "no_answer"
@@ -286,6 +291,7 @@ def read_tabs(wb) -> list[dict]:
                 "covered_by": _shown(get("covered_by")), "field": _shown(get("field")), "notes": _shown(get("notes")),
                 "projects": _shown(get("projects")), "label": _shown(get("label")), "stored": _shown(get("stored")),
                 "near": _shown(get("near")), "allowed": _shown(get("allowed")),
+                "records": _shown(get("records")), "file": _shown(get("file")),
                 # a row that names a bundle's id (or an Athena merge) belongs to the bundle its Folder names; a
                 # free-text row with no Folder (a rule, a rule proposal) is every bundle's
                 "folder_required": col["folder"] is not None and (get("id") is not None or kind == "athena_merges"),
@@ -328,6 +334,10 @@ class _Ctx:
             gid = live.get(run.get("run_key"))
             if gid and run.get("stem"):
                 self.stem_groups.setdefault(str(run["stem"]).strip(), set()).add(gid)
+        self.run_stem = {r.get("run_id"): str(r.get("stem") or "") for r in bundle.get("runs") or ()}
+        self.key_stem = {r.get("run_key"): str(r.get("stem") or "") for r in bundle.get("runs") or ()}
+        self.missing_run = {m.get("value_id"): m.get("run_id") for m in bundle.get("missing_values") or ()}
+        self.conflict_runs = {c.get("conflict_id"): list(c.get("run_ids") or ()) for c in bundle.get("conflicts") or ()}
         self.schema, _ = Q._target_schema()
         self._rules: dict[str, dict] = {}
 
@@ -429,6 +439,54 @@ def _field_for(row: Mapping, q: Mapping) -> tuple[str | None, str | None, str | 
             return None, None, (f"the row names {other}, but question {q['question_id']} asks {path}: the bundle "
                                 "changed since the workbook was made")
     return path, None, None
+
+
+_NAME_SPLIT = re.compile(r"[,;\n]+")
+
+
+def _target_stems(q: Mapping, ctx: "_Ctx") -> set[str]:
+    """The run stems a question targets NOW: its group's runs, and the runs of its candidate, missing-value and
+    conflict targets."""
+    stems: set[str] = set()
+    scope = str(q.get("scope") or "")
+    gids = [scope[len("group:"):]] if scope.startswith("group:") else []
+    for t in q.get("targets") or ():
+        kind, tid = t.get("kind"), t.get("id")
+        if kind == "candidate" and tid in ctx.candidates:
+            stems.add(ctx.run_stem.get(ctx.candidates[tid].get("run_id"), ""))
+        elif kind == "missing_value":
+            stems.add(ctx.run_stem.get(ctx.missing_run.get(tid), ""))
+        elif kind == "conflict":
+            stems |= {ctx.run_stem.get(r, "") for r in ctx.conflict_runs.get(tid) or ()}
+        elif kind == "record_group":
+            gids.append(tid)
+    for gid in gids:
+        stems |= {ctx.key_stem.get(k, "") for k in (ctx.groups.get(gid) or {}).get("member_run_keys") or ()}
+    return {s for s in stems if s}
+
+
+def stale_row(row: Mapping, q: Mapping, ctx: "_Ctx") -> str | None:
+    """Why a row's answer must NOT be applied: the runs (``Record (run names)``) or the file it was made for are none of
+    the runs its question targets now (a re-import by a newer build can give the same question id other runs), or
+    ``None``. A row naming no run or file, or a beamtime-wide question, is not checked."""
+    if str(q.get("scope") or "") == "experiment":
+        return None
+    now = _target_stems(q, ctx)
+    if not now:
+        return None
+    names = [n.strip() for n in _NAME_SPLIT.split(row.get("records") or "") if n.strip() and " " not in n.strip()]
+    file = (row.get("file") or "").strip().replace("\\", "/")
+    if file:
+        base = PurePosixPath(file).name
+        names.append(base.rsplit(".", 1)[0] if "." in base else base)
+        names += [part[: -len("_dir")] for part in PurePosixPath(file).parts[:-1] if part.endswith("_dir")]
+    if not names:
+        return None
+    if any(n in now or any(n.startswith(stem + "_") for stem in now) for n in names):
+        return None
+    said = ", ".join(sorted(now)[:3]) + (", ..." if len(now) > 3 else "")
+    return (f"the row was made for {', '.join(dict.fromkeys(names[:3]))}, but question {q['question_id']} now targets "
+            f"{said}: the bundle was re-imported since the workbook was made, so the answer is not applied")
 
 
 def _asked_now_by(row: Mapping, q: Mapping, ctx: "_Ctx") -> tuple[str, str] | None:
@@ -665,6 +723,8 @@ def _plan_row(row: Mapping, ans: str, ctx: _Ctx, covered: Mapping[str, list[dict
             elif q.get("kind") not in VALUE_KINDS:
                 out.append(_problem(row, f"row {c.get('ref')} is a {q.get('kind')} question: answer it on its own row",
                                     via=c))
+            elif (why := stale_row(c, q, ctx)) is not None:
+                out.append(_problem(row, why, kind="stale", via=c))
             else:
                 out += _plan_value_row(c, ans, raw, q, ctx, via=row)
         return out
@@ -673,6 +733,9 @@ def _plan_row(row: Mapping, ans: str, ctx: _Ctx, covered: Mapping[str, list[dict
         if q is None:
             return [_problem(row, f"no question {rid} in this bundle (open or answered): the bundle changed since the "
                                   "workbook was made", kind="not_resolving")]
+        why = stale_row(row, q, ctx)
+        if why is not None:
+            return [_problem(row, why, kind="stale")]
         return _plan_question(row, ans, raw, q, ctx)
     if rid.startswith("mc-"):
         return _plan_merge_candidate(row, ans, raw, ctx)

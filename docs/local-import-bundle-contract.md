@@ -986,7 +986,11 @@ click; nothing scientific is filled in silently.
 - **Ids on a re-import.** Every new candidate is numbered after every other candidate; a slot it fills keeps its
   number, unused (as at 1.14.0); a conflict no longer made keeps its number, unused. A file that is no longer a run
   takes its run's ids with it, so the run, candidate and value ids after it renumber (as at 1.11.0 and 1.13.0); a
-  bundle imported before holds such files as runs until re-imported.
+  bundle imported before holds such files as runs until re-imported. **Some question ids then name other runs**: a
+  run-scoped question id is built from its group and field, so measured on the real beamtimes 6 (PtOxidation), 42
+  (PtCCorrosion) and 10 (IrOxAcid) question ids target other runs after a re-import (IrOxBase, TiON and MOF-Co: 0).
+  `bundle answers import` therefore checks a row's `Record (run names)` and `File` against the runs its question
+  targets now and refuses a row made for others (`problem: stale`), never applying it to them.
 - **An older bundle keeps the rules it was imported with.** The widened title test and the title-link re-check apply
   only to a bundle a 1.15.0 build imported (`_imported_by_at_least`); a 1.14.0 bundle stays valid and keeps taking
   decisions, and its first save names the runs a re-import would keep as processed outputs
