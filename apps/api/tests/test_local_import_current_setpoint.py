@@ -70,7 +70,7 @@ def test_the_current_setpoint_is_a_run_scope_local_answer_field_new_in_1_7_0():
     assert CURRENT == "context.electrochemistry.current_setpoint_mA_cm2"
     assert B.LOCAL_ANSWER_FIELDS[CURRENT] == B.LOCAL_ANSWER_FIELDS[POT] == "run"
     assert CURRENT in B._writable_paths() and B.WRITABLE_ADDED_IN["1.7.0"] == frozenset({CURRENT})
-    assert B._VERSION_ORDER.index("1.7.0") == B._VERSION_ORDER.index(B.FORMAT_VERSION) - 6  # 1.8.0 bounds, 1.9.0 `last`, 1.10.0 vocabulary requests, 1.11.0 quick merges, 1.12.0 scan notes, 1.13.0 MERGE-folder outputs: none writable
+    assert B._VERSION_ORDER.index("1.7.0") == B._VERSION_ORDER.index(B.FORMAT_VERSION) - 7  # 1.8.0 bounds, 1.9.0 `last`, 1.10.0 vocabulary requests, 1.11.0 quick merges, 1.12.0 scan notes, 1.13.0 MERGE-folder outputs: none writable, 1.14.0 audit import rules
     assert B._added_since("1.6.0") == frozenset({CURRENT}) and B._added_since("1.7.0") == frozenset()
     assert not Q._is_shared(CURRENT)  # never asked once for the whole beamtime
     # DEC-92: no companion gate — the schema declares no reference for a current density
@@ -102,7 +102,8 @@ def test_current_setpoint_value_ids_come_after_every_older_fields_ids(grouped):
     for m in ms:
         nums[m["target_field_path"]].append(int(m["value_id"].split("-")[1]))
     older = sorted(n for p, ns in nums.items() if p not in (CM, CURRENT) for n in ns)
-    assert older == list(range(1, len(older) + 1))
+    # each once, from 1 (a value that is not asked keeps its number, so there may be gaps: MENTION_GATE_RULE_ID)
+    assert older == sorted(set(older)) and older[0] == 1
     assert max(older) < min(nums[CM]) and max(nums[CM]) < min(nums[CURRENT])  # 1.5.0's, then 1.7.0's
 
 
