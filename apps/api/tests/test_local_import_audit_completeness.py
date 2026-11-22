@@ -484,3 +484,36 @@ def test_each_validation_report_and_the_local_imports_row_say_a_held_record_is_h
     R.validate_records(bdir, run_portal=_portal())
     rows = {r["group_id"]: r for r in LB.progress(bdir, M.load(bdir), {"status": "OK"})["last_validation"]["reports"]}
     assert all(r["export_verdict"] == "exportable" and r["record_completeness"]["ready"] for r in rows.values())
+
+
+# --- review of PR 342, finding 8: export judges identical records among the groups that pass ---------------------
+
+
+def test_export_holds_identical_records_only_among_the_groups_official_validation_passes(bdir, tmp_path,
+                                                                                         fake_upstream_env, monkeypatch):
+    g060, g120, gocv = (_group_of(bdir, p) for p in ("01_", "02_", "03_"))
+    ocv_runs = set(next(g for g in M.load(bdir)["record_groups"] if g["group_id"] == gocv)["member_run_ids"])
+    real = R.validate_draft_file
+
+    def portal_refuses_the_ocv_record(draft, *, run_portal, composition=None):
+        report = real(draft, run_portal=run_portal, composition=composition)
+        if set((composition or {}).get("member_run_ids") or ()) == ocv_runs:
+            report = {**report, "verdict": "portal_reject"}
+        return report
+
+    seen = []
+    real_holds = R.completeness_holds
+
+    def spy(bundle, fresh, payload, candidates):
+        seen.append(list(candidates))
+        return real_holds(bundle, fresh, payload, candidates)
+
+    monkeypatch.setattr(R, "validate_draft_file", portal_refuses_the_ocv_record)
+    monkeypatch.setattr(R, "completeness_holds", spy)
+    out = R.export_records(bdir, tmp_path / "records", run_portal=_portal())
+    assert seen and all(gocv not in c and set(c) == {g060, g120} for c in seen)
+    refused = {r["group_id"]: r for r in out["refused"]}
+    assert refused[gocv]["verdict"] == "portal_reject"
+    # the two that pass are still held for their own open potential, never for being like the refused one
+    for gid in (g060, g120):
+        assert refused[gid]["verdict"] == R.HELD_VERDICT and gocv not in (refused[gid].get("indistinguishable_from") or ())

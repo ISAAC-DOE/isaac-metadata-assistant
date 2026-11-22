@@ -3479,6 +3479,11 @@ def export_records(bundle_dir: Path, out: Path, *, run_portal=None, allow_indist
     warned = with_question_commands(bundle, [w for _, _, comp in fresh for w in comp.get("warnings") or ()], payload)
     # finding 1: the local completeness gate over the groups whose draft is complete (the ones that can be written)
     writable = [gid for gid, _, comp in fresh if not comp.get("missing_required") and not comp.get("disagreements")]
+    # review of PR 342, finding 8: the gate judges the groups official validation PASSES, as `validate` does, so a
+    # record the portal refuses never holds its twin. Each report is reused below when the draft gains no link.
+    pre = {gid: validate_draft_file(draft, run_portal=run_portal, composition=comp)
+           for gid, draft, comp in fresh if gid in set(writable)}
+    writable = [gid for gid in writable if pre[gid]["verdict"] == "exportable"]
     holds, identical, gate_of = completeness_holds(bundle, fresh, payload, writable)
     if allow_indistinguishable and holds:
         # the scientist's word, recorded BEFORE anything is written (review of PR 342, finding 5)
@@ -3518,7 +3523,8 @@ def export_records(bundle_dir: Path, out: Path, *, run_portal=None, allow_indist
                                                             drafts=drafts_by_gid, minted=minted, stale=stale_follows)
         if link is not None:
             draft = L.with_link(draft, link, link_evidence)
-        report = validate_draft_file(draft, run_portal=run_portal, composition=composition)
+        report = (pre[group_id] if link is None and group_id in pre else
+                  validate_draft_file(draft, run_portal=run_portal, composition=composition))
         if report["verdict"] != "exportable":
             row = {"group_id": group_id, **_label(label_of, group_id), "verdict": report["verdict"],
                    "summary": report["plain_summary"],
