@@ -196,7 +196,7 @@ def test_build_records_never_says_a_differing_file_name_and_header_state_one_pot
     assert wrong.startswith("the file names and scan headers write different potentials (m600mV in ")
     assert f"{_rid(b, WRONG)}: the scan header writes '0Vrhe', the file name writes m600mV" in wrong
     assert "state a potential" not in wrong
-    # 1.15.0: the name's m600mV is read (a suggestion that needs review: suggestions.NAME_POTENTIAL_RULE_ID)
+    # 1.16.0: the name's m600mV is read (a suggestion that needs review: suggestions.NAME_POTENTIAL_RULE_ID)
     assert same.startswith("the file names and scan headers state a potential (m600mV, read as -0.6 V; ")
     assert "different" not in same
 
@@ -290,7 +290,7 @@ def test_the_runs_own_exp_is_still_the_one_read(tmp_path):
 
 
 def test_a_merge_candidate_whose_data_files_agree_says_so(tmp_path):
-    # names with no potential: since 1.15.0 a name's potential is a classified condition (suggestions.
+    # names with no potential: since 1.16.0 a name's potential is a classified condition (suggestions.
     # NAME_POTENTIAL_RULE_ID), and this caution is about groups whose files classify nothing
     src = _template_beamtime(tmp_path, {"SYNti_dry_096": "SYNti_dry", "SYNti_dry_097": "SYNti_dry"})
     b = M.load(_import(src, tmp_path / "bundle"))

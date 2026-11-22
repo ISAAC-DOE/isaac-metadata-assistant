@@ -82,7 +82,7 @@ def _flags(data: dict, stem: str) -> list[dict]:
 
 def _cand(data: dict, stem: str, path: str) -> dict:
     rid = _run(data, stem)["run_id"]
-    # the comment line's own candidate: since 1.15.0 a run's name may give a second one for the set-point
+    # the comment line's own candidate: since 1.16.0 a run's name may give a second one for the set-point
     # (suggestions.NAME_POTENTIAL_RULE_ID, the scientists' rule that the potential is inferable from the experiment)
     [c] = [c for c in data["candidates"] if c["run_id"] == rid and c["target_field_path"] == path
            and B.is_header_comment_candidate(c)]
@@ -132,7 +132,7 @@ def test_the_flag_reaches_the_scientist_also_when_the_line_never_parsed_to_a_val
     assert B.validate_bundle(data) == []
     copy = _cand(data, "15_SYNZZ_1MKOH_m600mV_096", SETPOINT)
     assert copy["value"] is None  # as before: no value is read from such a line
-    # 1.15.0: the first run's name (0V) writes what its line mentions, so the NAME offers the set-point (the
+    # 1.16.0: the first run's name (0V) writes what its line mentions, so the NAME offers the set-point (the
     # scientists' rule: the potential is inferable from the experiment) and the line no longer asks for it
     first = _name_cand(data, "14_SYNZZ_1MKOH_0V_095")
     assert first["value"] == 0.0 and "possibly" not in first["state_basis"]["not_proposable_reason"]

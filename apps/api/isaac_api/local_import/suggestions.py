@@ -47,7 +47,7 @@ def _element(literal: Any) -> str | None:
     return text if _ELEMENT.fullmatch(text) else None
 
 
-#: 1.15.0 (audit of 18 Nov 2026, rule 14): an SSRL XDC scan whose "Requested Energy" grid has a finest-step window
+#: 1.16.0 (audit of 18 Nov 2026, rule 14): an SSRL XDC scan whose "Requested Energy" grid has a finest-step window
 #: strictly inside its range (a pre-edge region before it and a post-edge region after it: the XANES region) names the
 #: absorption edge that window brackets (``readers.xray_tables``, edges of 1 keV and up); where it brackets several, a
 #: K or L3 edge (the edges one scans) is taken when exactly one is; otherwise nothing. A run's scans that name
@@ -121,7 +121,7 @@ def absorber_for_group(bundle: Mapping, group: Mapping) -> dict:
             note("processed_output_header", None, _edge(st.get("literal")), st.get("source_id"), st.get("locator"), extra, st.get("literal"))
     for ev in (bundle.get("experiment") or {}).get("element_evidence") or ():
         if ev.get("role") == SCANNED_EDGE_ROLE:
-            # 1.15.0: the edge a run's OWN scans bracket, a witness for that run's group only
+            # 1.16.0: the edge a run's OWN scans bracket, a witness for that run's group only
             if ev.get("run_key") in keys:
                 note("scanned_range", _element(ev.get("element")), _edge(ev.get("edge")), ev.get("source_id"),
                      ev.get("locator"), {"role": ev.get("role"), "rule_id": SCANNED_EDGE_RULE_ID},

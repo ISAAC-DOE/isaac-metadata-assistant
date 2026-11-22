@@ -434,6 +434,7 @@ def test_the_dry_run_leads_with_the_count_and_says_each_note_and_portal_warning_
     out = json.loads(capsys.readouterr().out)
     assert out["statement"].startswith("3 records, 2 requests each, to https://portal.example. Nothing was sent.")
     assert out["statement"].count("start time left out") == 1 and "(3 record(s), e.g. question Q-0000000001)" in out["statement"]
+    assert out["notes_by_code"][0]["records"] == 3  # by kind too (audit of 18 Nov 2026, finding 16)
     assert out["statement"].count("NO_DATA_OWNER") == 1 and "(3 record(s))" in out["statement"]
     assert out["network_calls"] == 0 and len(out["records"]) == 3 and out["portal_warnings"][0]["records"] == 3
     assert all(r["notes"] for r in out["records"])  # a record's own notes stay in its row

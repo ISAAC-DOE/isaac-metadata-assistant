@@ -323,7 +323,7 @@ def test_a_potential_in_the_name_and_the_header_names_both_steps_and_the_headers
     assert [(s["literal"], s["stated_in"]) for s in w["stated"]] == [("500mV", "file name"),
                                                                     ("SYN sample in 1M KOH, 0.5 V vs RHE", "scan header")]
     name, header = w["stated"]
-    # 1.15.0: the name's potential is a suggestion that needs review (the scientists' rule: inferable from the
+    # 1.16.0: the name's potential is a suggestion that needs review (the scientists' rule: inferable from the
     # experiment; the round-one reader reads a SPEC name the same way), so a candidate holds it
     assert name["read_as_V"] == 0.5 and name["candidate_id"] and name["value_state"] == B.STATE_NEEDS_REVIEW
     # c16b: the header's comment line is read into candidates that need review (rule ssrl_xdc_header_comment_v1)
@@ -372,7 +372,7 @@ def test_validate_and_the_minimum_carry_the_warnings(grouped, capsys):
 
 
 def test_a_file_name_potential_is_a_candidate_that_needs_review_after_every_other(grouped):
-    # c16b: what the header's comment lines state is a candidate that needs review. 1.15.0 reverses "a file name gives
+    # c16b: what the header's comment lines state is a candidate that needs review. 1.16.0 reverses "a file name gives
     # none": the scientists' rule is that the potential is inferable from the experiment, and the round-one reader
     # already reads a SPEC name the same way, so the name's potential (or open circuit) is one too, numbered last
     b = _confirm_groups(grouped)

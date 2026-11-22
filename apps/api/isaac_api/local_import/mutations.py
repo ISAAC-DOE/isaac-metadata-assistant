@@ -28,6 +28,7 @@ import json
 import math
 import os
 import re
+import uuid
 import sys
 from contextlib import contextmanager
 from datetime import datetime, timezone
@@ -792,6 +793,10 @@ def _check_decision(bundle: Mapping, kind: str, obj: Mapping, decision: str, val
         raise MutationRefused(f"A {kind} cannot be decided.")
     if decision not in allowed:
         raise MutationRefused(f"`{decision}` is not a decision for a {kind}; allowed: {', '.join(sorted(allowed))}.")
+    if decision == B.EXPORT_ANYWAY_DECISION:
+        raise MutationRefused("export_despite_completeness is recorded by `isaac bundle export <bundle_dir> --out <dir> "
+                              '--allow-indistinguishable --by "<your name>"`, for the record bodies that export holds. '
+                              "Nothing was recorded.")
     if kind == "record_group" and decision == B.SCAN_DECISION:
         problem = scan_decision_target_problem(bundle, obj, value)
         if problem is not None:
@@ -1222,6 +1227,14 @@ C_ATHENA_NEVER_RULE_ID = "isaac.processing.athena_never_used.v0"
 C_ATHENA_SOURCE = "scientist_athena"
 
 
+def _approval_predates_a_note(bundle: Mapping, result: Mapping, approval: Mapping) -> bool:
+    """True when a scan note names a run of ``result``'s group that was not there when ``approval`` was recorded
+    (``approved_curve``): approving again is then a new statement, never "unchanged"."""
+    from . import approved_curve as AC
+
+    return AC.approval_predates_a_note(bundle, result, approval)
+
+
 def isaac_results_for(bundle: Mapping, group_id: str | None) -> list[str]:
     """The ISAAC-processed results of ``group_id`` a scientist can approve instead of an Athena curve: from
     ``isaac process`` (never Athena), not rejected, not "protocol does not apply", a curve first."""
@@ -1501,6 +1514,7 @@ def decide(
                                                "question_id": None, "as_said": True}) from None
         if not nothing_to_save(bundle, result):
             save_bundle(bundle_dir, bundle)
+        result = _with_defer_cost(result, bundle, decision, target_ids)
         return _with_same_ruling_left(_said_on_list(_with_answered(result, bundle, before), as_said), bundle, peers)
 
 
@@ -1797,6 +1811,68 @@ def _propose_terms_entries(bundle: Mapping) -> dict | None:
         return None
     report = P.propose_terms(bundle, sources)
     return {(f["field_path"], t["term"]): t for f in report["fields"] for t in f["terms"]}
+
+
+def defer_cost(bundle: Mapping, target_ids: Sequence[str]) -> dict | None:
+    """Finding 14 (audit of 18 Nov 2026): what "I don't know" costs. For the targets a ``defer`` named:
+    ``{"records_blocked", "records_held", "fields", "statement"}`` when they belong to a question that still BLOCKS
+    record groups (a required field: no record of those groups can be exported until it is answered) or that the local
+    completeness gate needs; ``None`` when deferring costs nothing (an optional value)."""
+    from . import questions as Q
+
+    named = set(target_ids)
+    blocked: set[str] = set()
+    held: set[str] = set()
+    blocked_count = 0
+    fields: list[str] = []
+    for q in Q.consolidate(bundle)["questions"]:
+        if not ({t["id"] for t in q.get("targets") or ()} & named):
+            continue
+        path = q.get("target_field_path")
+        if q.get("blocking"):
+            ids = q.get("blocks_group_ids")
+            if ids is None and str(q.get("scope") or "").startswith("group:"):
+                ids = [q["scope"][len("group:"):]]
+            if ids is not None:
+                blocked |= set(ids)
+            else:
+                applies = q.get("applies_to") or {}
+                blocked_count = max(blocked_count, int(applies.get("groups_that_can_export", applies.get("groups") or 0)))
+            if path and path not in fields:
+                fields.append(path)
+        if isinstance(q.get("completeness"), Mapping):
+            held |= set(q["completeness"].get("group_ids") or ())
+            if path and path not in fields:
+                fields.append(path)
+    n = max(len(blocked), blocked_count)
+    m = len(held - blocked)
+    if not n and not m:
+        return None
+    parts = []
+    if n:
+        parts.append(f"{_count(n, 'record')} cannot be exported until this is answered: the field is required and "
+                     "takes no \"unknown\"")
+    if m:
+        parts.append(f"{_count(m, 'record')} stay{'s' if m == 1 else ''} held by the record-completeness gate until it "
+                     "is answered or declined (reject)")
+    return {"records_blocked": n, "records_held": m, "fields": fields,
+            "statement": ("Recorded as \"I don't know\". " + "; ".join(parts) + ". It is asked again, last in its "
+                          "tier; a colleague, the logbook or the answer template (`isaac bundle template export`) can "
+                          "supply it.")}
+
+
+def _with_defer_cost(result: Mapping, bundle: Mapping, decision: str, target_ids: Sequence[str]) -> Mapping:
+    """``result`` with :func:`defer_cost` said (``deferral_cost`` and a sentence), for a ``defer`` only."""
+    if decision != "defer" or not isinstance(result, Mapping):
+        return result
+    try:
+        cost = defer_cost(bundle, target_ids)
+    except Exception:  # noqa: BLE001 - the cost is said when it can be derived; a deferral is never refused for it
+        cost = None
+    if cost is None:
+        return result
+    return {**result, "deferral_cost": {k: v for k, v in cost.items() if k != "statement"},
+            "statement": " ".join(x for x in (result.get("statement"), cost["statement"]) if x)}
 
 
 def _with_answered(result: Mapping, bundle: Mapping, before: set[str]) -> Mapping:
@@ -2588,6 +2664,7 @@ def decide_question(
                           **({"labels_recorded": fed["recorded"]} if fed["recorded"] else {})}
         if not nothing_to_save(bundle, recorded):
             save_bundle(bundle_dir, bundle)
+        result = _with_defer_cost(result, bundle, decision, params["target_ids"])
         return (result, bundle_version(bundle_dir)) if with_version else result
 
 
@@ -2999,6 +3076,7 @@ def plain_statement(bundle: Mapping, planned: Sequence[tuple[str, Mapping]], tar
         "set_counter_positions": _counter_positions_words(positions),
         B.CLOCK_ZONE_DECISION: f"instrument clock time zone {value} recorded",
         B.ROLE_DECISION: f"role {value!r} recorded (the scientist's word on what the group is; its status is unchanged)",
+        B.DOSE_READING_DECISION: f"dose reading {value!r} recorded",
     }.get(decision, f"{decision} recorded")
     cand_path = {c["candidate_id"]: c.get("target_field_path") for c in bundle.get("candidates") or ()}
     context = B.context_run_ids(bundle)  # r2-a L4: a run kept as context (an exported file) is no measurement run
@@ -3049,6 +3127,16 @@ def plain_statement(bundle: Mapping, planned: Sequence[tuple[str, Mapping]], tar
     out = f"{what} for {who}" + (f": {fields}" if fields else "") + "."
     if rest:
         out += f" {subject(rest)[0]} already had it (nothing new recorded for them)."
+    if decision == B.DOSE_READING_DECISION:
+        # finding 4: the curves follow the reading only once processed again; say how many still carry the question
+        from . import questions as Q
+
+        stale = [r for r in bundle.get("processing_results") or ()
+                 if Q.DOSE_QUESTION_FLAG in (r.get("review_flags") or ()) and r.get("state") in B.PROCESSING_UNDECIDED_STATES]
+        if stale:
+            out += (f" {count(len(stale), 'processing result')} made before this answer still "
+                    f"carr{'ies' if len(stale) == 1 else 'y'} the open question: run `isaac process <bundle_dir> --source "
+                    "<the beamtime folder you imported>` again so the curves follow it.")
     return out
 
 
@@ -3130,6 +3218,16 @@ def record_decision(
                     if bulk and (why := bulk_approve_problem(obj)) is not None:
                         raise MutationRefused(f"{why} Approve this one on its own, after its sentence is read to the "
                                               "scientist; a bulk approval does not. Nothing was recorded.")
+                    # finding 2 (audit of 18 Nov 2026): a curve older than its evidence (a scan note it was processed
+                    # without, or a newer result of its group) is never approved in a bulk call
+                    from . import approved_curve as AC
+
+                    # (two results of ONE group named in one call are refused by the rule above, for whichever comes
+                    # second: "is not the newest" would only hide that sentence)
+                    twin = any(k == "processing_result" and o is not obj and o.get("group_id") == obj.get("group_id")
+                               for _, k, o in resolved)
+                    if (why := AC.approval_problem(bundle, obj, bulk=bulk and not twin)) is not None:
+                        raise MutationRefused(why)
                     if "athena_e0_possibly_fixed" in (obj.get("review_flags") or ()) and not e0_measured:
                         # r1 M5: an Athena E0 shared by groups whose own edges differ may be a fixed setting, not a measure
                         said = next((s for s in (((obj.get("qc") or {}).get("statements") or {}).values())
@@ -3272,8 +3370,10 @@ def record_decision(
             ) == signature and not record_unchanged and not (
                     kind == "processing_result" and decision == "approve" and approval_is_stale(prior, obj)) and not (
                     restated_after_request(bundle, kind, obj, prior, request_index)) and not (
-                    _restated_for_one_run(kind, obj, prior, bulk)):
-                # an approval restated after its result's files changed binds it to them: a new statement; so is a
+                    _restated_for_one_run(kind, obj, prior, bulk)) and not (
+                    kind == "processing_result" and decision == "approve" and _approval_predates_a_note(bundle, obj, prior)):
+                # an approval restated after its result's files changed binds it to them: a new statement; so is an
+                # approval restated after a scan note landed on its group's runs (finding 2: it says "still stands"); a
                 # value restated after the scientist asked for their own word on its field (c13g M1), and a set-point
                 # restated for one run after an answer given to several at once (r3c HIGH)
                 unchanged.append(tid)
@@ -3313,6 +3413,11 @@ def record_decision(
             if kind == "processing_result" and decision == "approve":
                 # AN APPROVAL BINDS TO EXACTLY THIS RESULT'S FILES (and their hashes).
                 entry["approved_files"] = approval_files(obj)
+                # finding 2 (audit of 18 Nov 2026): the scan notes on the group's runs NOW are kept on the result, so
+                # a note that lands later reads as newer than this approval (approved_curve.older_than_evidence)
+                from . import approved_curve as AC
+
+                obj[AC.SNAPSHOT_KEY] = AC.approval_snapshot(bundle, obj, entry["decision_id"])
                 tie = tie_note(obj)
                 if tie:
                     # r6 review M1: a tie is no decision kind of its own: the approval's note records it
@@ -3357,6 +3462,13 @@ def record_decision(
         statement = CAPTURE_STATEMENTS.get(decision)
         if statement:
             result["statement"] = statement.format(value=value, positions=", ".join(map(str, positions or ())))
+        if decision == "confirm" and recorded:
+            # finding 12 (audit of 18 Nov 2026): a confirm that takes groups carrying a care flag NAMES them and says
+            # why (before: "confirmed for 91 groups." and nothing about the 15 that merge scans read differently)
+            care = confirmed_with_care(bundle, [obj for tid, (kind, obj) in zip(target_ids, planned)
+                                                if kind == "record_group" and tid in set(recorded)])
+            if care:
+                result["confirmed_with_a_care_flag"] = care
         if decision == B.ATHENA_SELECT_DECISION and recorded:
             # r5c C1: A CHOICE THAT IS NOT WHAT THE RECORD CARRIES IS SAID NOW (before: only a later `isaac process`
             # said it, and validate and export were silent): the group's approved result is another curve
@@ -3487,6 +3599,8 @@ def record_decision(
         if calibration_said:
             said = list(dict.fromkeys(calibration_said.values()))
             statement = " ".join([statement, *said[:3]] + ([f"(and {len(said) - 3} more)"] if len(said) > 3 else []))
+        if result.get("confirmed_with_a_care_flag"):
+            statement = f"{statement} {result['confirmed_with_a_care_flag']['statement']}"  # finding 12: named, with why
         return {"statement": statement, **result}
 
     return change(bundle)
@@ -5244,8 +5358,15 @@ def process(
 
         apply_kept_result_notes(keep, payload.get("kept_result_notes") or ())  # r1 M3/M5: outside the hashed files
         kept = {B.processing_id(r) for r in keep}
+        kept_by_id = {B.processing_id(r): r for r in keep}
+        from . import approved_curve as AC
+
         fresh = []
         for r in produced:
+            if r.get("group_id") in known and B.processing_id(r) in kept_by_id:
+                # the SAME result again (the same curve) for a result already decided: only its logbook block is
+                # brought up to date, each note it gains stamped (approved_curve.refresh_kept_block)
+                AC.refresh_kept_block(kept_by_id[B.processing_id(r)], r)
             if r.get("group_id") not in known or B.processing_id(r) in kept:
                 continue
             if r.get("state") not in B.PROCESSING_UNDECIDED_STATES:
@@ -5264,6 +5385,29 @@ def process(
         if group_ids:
             # the groups NOT named keep their results as stored (`new` counts only the named groups')
             out["kept_other_groups"] = len(keep) - kept_decided
+        # finding 2 (audit of 18 Nov 2026): whether a logbook reading was loaded at all, said ONCE when none was
+        reading = logbook_reading(bundle)
+        if reading is not None:
+            out["logbook_reading"] = reading
+            if reading["state"] == "no_reading_loaded" and isinstance(out.get("summary"), Mapping):
+                out["summary"] = {**out["summary"], "lines": [*(out["summary"].get("lines") or ()), reading["statement"]]}
+        # ...and every live group whose approved curve is now older than its evidence (a scan note, a newer result)
+        stale = [f for g in bundle.get("record_groups") or () if g.get("status") in B.LIVE_GROUP_STATUSES
+                 and (not group_ids or g["group_id"] in set(group_ids))
+                 and (f := AC.older_than_evidence(bundle, g["group_id"])) is not None]
+        if stale:
+            line = (f"{len(stale)} group(s) keep an approved curve older than its evidence ({AC.WARNING}): "
+                    + "; ".join(f"{f['group_id']} (approved {f['approved_result_id']}"
+                                + (f", newer {f['newer_result_ids'][0]}" if f["newer_result_ids"] else "") + ")"
+                                for f in stale[:5])
+                    + (f"; and {len(stale) - 5} more" if len(stale) > 5 else "")
+                    + ". The record keeps the approved curve until a scientist decides; `isaac bundle validate` says "
+                      "what to do for each.")
+            out["approved_curves_older_than_evidence"] = {"groups": len(stale), "statement": line,
+                                                         "items": [{k: f[k] for k in ("group_id", "approved_result_id",
+                                                                                      "newer_result_ids")} for f in stale]}
+            if isinstance(out.get("summary"), Mapping):
+                out["summary"] = {**out["summary"], "lines": [*(out["summary"].get("lines") or ()), line]}
         merges = unmatched_merges_reply(payload.get("athena") or {})
         if merges:
             out["athena_unmatched_merges"] = merges
@@ -5303,6 +5447,90 @@ def process(
         return out
 
     return mutate(bundle_dir, change)
+
+
+CARE_GROUPS_SHOWN = 20
+
+
+def confirmed_with_care(bundle: Mapping, groups: Sequence[Mapping]) -> dict | None:
+    """Finding 12: of the groups a confirm just took, those carrying a care flag (their files read one condition two
+    ways): ``{"groups": n, "items": [{"group_id", "file", "conditions", "why"}], "statement"}``, or ``None``. The
+    confirm stands (it is the scientist's word); this is what they are told beside it."""
+    from . import grouping as G
+
+    stem_of = {r["run_key"]: str(r.get("stem") or "") for r in bundle.get("runs") or ()}
+    items = []
+    for g in groups:
+        reasons = G.care_reasons(bundle, g)
+        if reasons:
+            items.append({"group_id": g["group_id"], "file": stem_of.get((g.get("member_run_keys") or [None])[0]),
+                          "conditions": [r["condition"] for r in reasons], "why": "; ".join(r["why"] for r in reasons),
+                          **({"from_a_merge_file_name": True} if any(r["only_a_processed_output_name"] for r in reasons)
+                             else {})})
+    if not items:
+        return None
+    shown = items[:CARE_GROUPS_SHOWN]
+    by_cond: dict[str, int] = {}
+    for it in items:
+        for c in it["conditions"]:
+            by_cond[c] = by_cond.get(c, 0) + 1
+    merge = sum(1 for it in items if it.get("from_a_merge_file_name"))
+    statement = (
+        f"{len(items)} of the groups confirmed carry a care flag: their files read one condition two ways ("
+        + ", ".join(f"{c} in {n}" for c, n in sorted(by_cond.items(), key=lambda kv: (-kv[1], kv[0]))) + "). "
+        + " ".join(f"{it['file'] or it['group_id']} ({it['group_id']}): {it['why']}." for it in shown[:G.CARE_SHOWN])
+        + (f" And {len(items) - G.CARE_SHOWN} more (confirmed_with_a_care_flag.items)." if len(items) > G.CARE_SHOWN else "")
+        + (f" In {merge} of them one reading is only the name of the scientists' own merge file (no reading of the run)."
+           if merge else "")
+        + " They are confirmed as you said; tell the scientist which, and split or correct any they did not mean "
+          "(`isaac bundle show <bundle_dir> group <id>`).")
+    return {"groups": len(items), "by_condition": by_cond, "items": shown,
+            **({"items_omitted": len(items) - len(shown)} if len(items) > len(shown) else {}), "statement": statement}
+
+
+def record_export_anyway(bundle_dir: Path, items: Sequence[tuple[str, Mapping]], *, by: str,
+                         orcid: str | None = None) -> list[str]:
+    """Review of PR 342, finding 5: record the scientist's ``export_despite_completeness`` decision on each record
+    group of ``items`` (``(group id, {"body_sha256", "held_by"})``), in ONE write; a group whose latest such decision
+    already names the same body records nothing new. Returns the decision ids recorded."""
+    decided_by = _decider(by, orcid)
+    if decided_by is None:
+        raise MutationRefused('Exporting a held record anyway is the scientist\'s decision: give --by "<your name>". '
+                              "Nothing was written.", code=2)
+
+    def change(bundle):
+        from . import completeness as CP
+
+        latest = CP.export_anyway_of(bundle)
+        decisions = bundle.setdefault("scientist_decisions", [])
+        groups = {g.get("group_id") for g in bundle.get("record_groups") or ()}
+        recorded, batch = [], f"b-{uuid.uuid4().hex[:12]}"
+        for gid, value in items:
+            if gid not in groups:
+                raise MutationRefused(f"No record group {gid!r} in this bundle; nothing was recorded.", code=6)
+            prior = latest.get(gid)
+            if prior is not None and (prior.get("value") or {}).get("body_sha256") == value.get("body_sha256"):
+                continue
+            entry = {"decision_id": f"d-{len(decisions) + 1:05d}", "target": {"kind": "record_group", "id": gid},
+                     "decision": B.EXPORT_ANYWAY_DECISION, "value": dict(value), "chosen_reading_index": None,
+                     "decided_by": decided_by, "decided_utc": now_utc(), "method": "scientist_answer",
+                     "note": "export --allow-indistinguishable", "batch_id": batch}
+            decisions.append(entry)
+            recorded.append(entry["decision_id"])
+        return recorded
+
+    return mutate(Path(bundle_dir), change)
+
+
+def logbook_reading(bundle: Mapping) -> dict | None:
+    """``scan_notes.reading_state``: whether a reading pass over the files was loaded at all (``process`` says once
+    when none was). ``None`` when it cannot be derived; never a failure of the command."""
+    try:
+        from .scan_notes import reading_state
+
+        return reading_state(bundle)
+    except Exception:  # noqa: BLE001 - said when known, never a reason to fail processing
+        return None
 
 
 #: r7 K1: how many of the scientist's unmatched merges the process reply lists (the rest are paged by

@@ -25,7 +25,8 @@ A SCAN NOTE IS AN AI READING, NEVER A DECISION. Nothing here leaves a scan out o
 PROPOSE a scan selection from it, saying which note it read, and only the scientist's word changes what is merged.
 
 Read them with :func:`scan_notes_for_run` (the processing step's accessor), ``isaac bundle show <dir> run <id>``
-(``scan_notes``) and ``isaac bundle list <dir> scan-notes``.
+(``scan_notes``) and ``isaac bundle list <dir> scan-notes``. :func:`reading_state` says whether a reading pass has
+been loaded at all: "no note names these runs" is only true once one has.
 """
 
 from __future__ import annotations
@@ -242,6 +243,66 @@ def scan_notes_for_run(bundle: Mapping, run_id: str) -> list[dict]:
             "conflicts": with_.get(n.get("scan_note_id"), []),
             **({"scan_count_note": n["scan_count_note"]} if n.get("scan_count_note") else {}),
         })
+    return out
+
+
+#: WHAT A BEAMTIME'S LOGBOOK READING IS, for the processing step's logbook block (audit of 18 Nov 2026, finding 2):
+#: "no scan note names these runs" is only true once a reading has been loaded. Three states, never one sentence.
+READING_NOT_LOADED = "no_reading_loaded"
+READING_LOADED = "reading_loaded"
+NOTHING_TO_READ = "nothing_to_read"
+#: The classifier's source types that are prose about the beamtime (a logbook, a shared readme).
+NOTES_SOURCE_TYPES = ("beamtime_notes", "shared_readme")
+NOTES_FILES_SHOWN = 5
+
+
+def notes_files(bundle: Mapping) -> list[str]:
+    """The files of this beamtime that may hold a logbook: every source the classifier calls notes
+    (:data:`NOTES_SOURCE_TYPES`) and every file no reader read (``unread_files``: documents, PDFs, text nobody
+    parsed). By relative path, sorted. Never a measurement file a reader read."""
+    out = {str(s.get("relative_path")) for s in bundle.get("sources") or ()
+           if isinstance(s, Mapping) and ((s.get("classification") or {}).get("source_type") in NOTES_SOURCE_TYPES)
+           and s.get("relative_path")}
+    out |= {str(u.get("relative_path")) for u in bundle.get("unread_files") or ()
+            if isinstance(u, Mapping) and u.get("relative_path")}
+    return sorted(out)
+
+
+def _names(paths: list[str]) -> str:
+    shown = ", ".join(paths[:NOTES_FILES_SHOWN])
+    return shown + (f" and {len(paths) - NOTES_FILES_SHOWN} more" if len(paths) > NOTES_FILES_SHOWN else "")
+
+
+def reading_state(bundle: Mapping) -> dict:
+    """Whether a reading pass over the files has been LOADED into this bundle (``annotate --from-readings``), and
+    which notes files are present: ``{"state", "notes_files", "findings_loaded", "scan_notes", "files_cited",
+    "statement"}``. Pure; derived from what the bundle already holds, so no format change.
+
+    * :data:`READING_NOT_LOADED`: notes files are present and the bundle holds no finding of a reading pass and no
+      scan note. Nothing here can say the logbook has no note about a run's scans.
+    * :data:`READING_LOADED`: at least one finding or scan note of a reading pass is held (a blind cross-check
+      annotation is not one: it has no ``finding_id``).
+    * :data:`NOTHING_TO_READ`: no notes file and no reading."""
+    files = notes_files(bundle)
+    findings = [i for i in bundle.get("ai_interpretations") or () if isinstance(i, Mapping) and i.get("finding_id")]
+    notes = [n for n in bundle.get("scan_notes") or () if isinstance(n, Mapping)]
+    cited = sorted({str(x.get("source_path")) for x in [*findings, *notes] if x.get("source_path")})
+    out = {"notes_files": files, "findings_loaded": len(findings), "scan_notes": len(notes), "files_cited": cited}
+    if findings or notes:
+        out["state"] = READING_LOADED
+        out["statement"] = (f"A reading of the files was loaded ({len(findings)} finding(s) and {len(notes)} scan "
+                            f"note(s)" + (f", citing {_names(cited)}" if cited else "") + ").")
+    elif files:
+        out["state"] = READING_NOT_LOADED
+        out["statement"] = (
+            f"No logbook reading has been loaded for this beamtime, although {len(files)} notes or unread file(s) "
+            f"are present ({_names(files)}): nothing here says the logbook has no note about these scans. Read "
+            "them and load the findings (`isaac bundle annotate <bundle_dir> --from-readings <findings.json> "
+            "--model <id> --root <the beamtime folder> --apply`), then run `isaac process` again.")
+    else:
+        out["state"] = NOTHING_TO_READ
+        out["statement"] = ("This beamtime folder holds no notes or unread file, and no reading has been loaded: "
+                            "there is no logbook to take a scan note from.")
     return out
 
 

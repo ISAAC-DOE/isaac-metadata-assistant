@@ -87,8 +87,10 @@ def xdc(tmp_path):
 
 
 def _ids(payload) -> list[str]:
-    # the condition labels (labels.py) are new questions beside these, never one of them
-    return sorted(q["question_id"] for q in payload["questions"] if q["kind"] != L.KIND)
+    # the condition labels (labels.py) are new questions beside these, never one of them; so is the beamtime-wide
+    # potential-scale question (audit of 18 Nov 2026, finding 1), which has its own new id
+    return sorted(q["question_id"] for q in payload["questions"]
+                  if q["kind"] != L.KIND and q["question_id"] != Q.potential_scale_question_id())
 
 
 def _absorber_argv(bdir, element="Fe", edge="K", *extra):
@@ -380,7 +382,9 @@ def test_every_decide_reply_starts_with_a_plain_statement(grouped, capsys):
     runs = len({m["run_id"] for m in M.load(grouped)["missing_values"] if m["value_id"] in {t["id"] for t in env["targets"]}})
     reply = json.loads(_run(capsys, "bundle", "decide", grouped, "--question", env["question_id"], "--decision", "defer",
                             "--by", WHO)[1])
-    assert next(iter(reply)) == "statement" and reply["statement"] == f"deferred for {runs} runs: environment."
+    # the plain sentence first; then what "I don't know" costs on a required field (audit of 18 Nov 2026, finding 14)
+    assert next(iter(reply)) == "statement" and reply["statement"].startswith(f"deferred for {runs} runs: environment. ")
+    assert "cannot be exported until this is answered" in reply["statement"] and reply["deferral_cost"]["records_blocked"] >= 1
     assert reply["recorded"]  # the ids stay, for --json consumers
 
 

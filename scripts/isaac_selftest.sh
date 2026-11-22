@@ -5,7 +5,8 @@
 #
 # Runs, in a temporary folder, on tests/fixtures/bl15/semantics/multi_operator_corpus (made-up
 # data, safe to show Claude): import, check, cross-check (plan, excerpt, blind annotate, reveal),
-# group, process, decide, build-records, validate, export, upload --dry-run, and prints PASS,
+# group, process, decide, build-records, validate, export (the local completeness gate, then the
+# records written with --allow-indistinguishable), upload --dry-run, and prints PASS,
 # FAIL or SKIP for each step with the reason. Every decision it records is labelled
 # "SYNTHETIC SELF-TEST (not a scientist)". It uploads nothing and needs no network.
 #
@@ -265,7 +266,25 @@ if [[ $PROCESSED -eq 1 && "$GROUPS_N" -gt 0 ]]; then
   else report FAIL "validate: answers move drafts forward" "still $INCOMPLETE2 incomplete: $(json "$WORK/validate.json" "[d['verdicts'][k] for k in d['verdicts']][:3]")"; fi
 fi
 
-run "$ISAAC" bundle export "$BUNDLE" --out "$RECORDS"; EXP_RC=$RC
+# THE LOCAL COMPLETENESS GATE (completeness.py): a record official validation passes is HELD while a condition that
+# keeps it apart from another record of its sample is not in it, or while it would say exactly what another record
+# says. This walk answers only the schema-required values, so the gate is expected to hold records here: that is
+# asserted (nothing held is written; each held row says official validation passed), and the export the later
+# steps check is then made with the explicit flag, as a person who decides to export anyway would.
+"$ISAAC" bundle export "$BUNDLE" --out "$WORK/held-records" > "$WORK/export-held.json" 2>/dev/null; HELD_RC=$?
+HELD="$(json "$WORK/export-held.json" "d.get('records_held_by_completeness') or 0" 2>/dev/null || echo 0)"
+HELD_OK="$(json "$WORK/export-held.json" "all(r.get('official_validation')=='passed' and r.get('held_by') for r in d['refused'] if r.get('verdict')=='held_by_record_completeness') and len(d['exported'])+len(d['refused'])>=(d.get('records_held_by_completeness') or 0)" 2>/dev/null)"
+HELD_WROTE="$(find "$WORK/held-records" -maxdepth 1 -name '*.json' ! -name '*.evidence.json' 2>/dev/null | wc -l | tr -d ' ')"
+ALLOW=()
+if [[ "${HELD:-0}" -gt 0 ]]; then
+  ALLOW=(--allow-indistinguishable --by "$BY")
+  if [[ "$HELD_OK" == "True" && "$HELD_RC" -eq 1 && $((HELD_WROTE + HELD)) -le "$EXPORTABLE" ]]; then
+    report PASS "export: completeness gate holds" "$HELD record(s) held (a local gate; official validation passed for each), $HELD_WROTE written"
+  else report FAIL "export: completeness gate holds" "held $HELD, wrote $HELD_WROTE, exit $HELD_RC, rows ok: $HELD_OK"; fi
+elif [[ "$EXPORTABLE" -gt 0 ]]; then
+  report PASS "export: completeness gate holds" "nothing held: every exportable record carries what keeps it apart"
+fi
+run "$ISAAC" bundle export "$BUNDLE" --out "$RECORDS" ${ALLOW[@]+"${ALLOW[@]}"}; EXP_RC=$RC
 WROTE="$(ls "$RECORDS" 2>/dev/null | grep -vc 'evidence.json$' || true)"; WROTE="${WROTE:-0}"
 [[ -d "$RECORDS" ]] || { mkdir -p "$RECORDS"; WROTE=0; }
 WROTE="$(find "$RECORDS" -maxdepth 1 -name '*.json' ! -name '*.evidence.json' 2>/dev/null | wc -l | tr -d ' ')"

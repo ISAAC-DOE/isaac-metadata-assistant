@@ -92,7 +92,7 @@ def test_the_same_reading_reply_names_each_members_file(shared):
     q = next(q for q in _setpoint_questions(M.load(shared)) if q.get("same_reading_group"))
     got = M.decide_question(shared, question_id=q["question_id"], same_reading=True, decision="correct", value=-0.6,
                             by=WHO, orcid=None)
-    # each run's question holds its comment line's candidate and (1.15.0, suggestions.NAME_POTENTIAL_RULE_ID) its
+    # each run's question holds its comment line's candidate and (1.16.0, suggestions.NAME_POTENTIAL_RULE_ID) its
     # name's: one answer records both, for each of the two runs
     assert len(got["recorded"]) == 4
     assert [m["file_name"] for m in got["same_reading_members"]] == [f"{SIX}_A.001", f"{SIX2}_A.001"]
@@ -301,7 +301,7 @@ def test_a_cell_adopted_before_mentions_were_compared_is_recorded_with_the_menti
 def test_one_exp_shared_by_a_folders_runs_is_said_to_be_a_template(tmp_path):
     src = tmp_path / "SYN_bt43"
     d = src / "mixed"
-    # names with no potential: since 1.15.0 a name's potential is a classified condition (suggestions.
+    # names with no potential: since 1.16.0 a name's potential is a classified condition (suggestions.
     # NAME_POTENTIAL_RULE_ID), and this caution is about groups whose files classify nothing
     for stem in ("SYNti_dry_096", "SYNti_dry_097", "SYNfoo_wet_001"):
         make_scan(d / f"{stem}_A.001", free_text=("SYN gain 1e8", "SYN comment"))

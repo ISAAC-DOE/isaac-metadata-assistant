@@ -1,4 +1,4 @@
-"""At SSRL BL4-3: a reference standard named as one, and the absorber the scanned energy range brackets (bundle 1.15.0;
+"""At SSRL BL4-3: a reference standard named as one, and the absorber the scanned energy range brackets (bundle 1.16.0;
 audit of 18 Nov 2026, rules 13 and 14). SYNTHETIC files only.
 
 What these pin:

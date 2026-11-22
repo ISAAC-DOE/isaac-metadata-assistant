@@ -1,104 +1,72 @@
-"""Bundle format 1.15.0: the import rules of the second round of the 18 Nov 2026 audit are disclosed.
+"""Bundle format 1.15.0: the ``export_despite_completeness`` record-group decision (review of PR 342, finding 5).
+SYNTHETIC data only.
 
-A 1.15.0 build reads, at import, what a 1.14.0 build did not. Only a re-import applies it. What these pin:
-
-* the version is bumped by the existing mechanism (``FORMAT_VERSION``, ``_VERSION_ORDER``, the schema's enum and its
-  per-version block), and a 1.14.0 bundle stays valid;
-* ``CHANGES_ADDED_IN["1.15.0"]`` names each rule by its id and says only a re-import applies them;
-* the first write of a 1.14.0 bundle by this build appends ONE ``format_upgrades`` entry whose statement says so,
-  and the longest such statement still fits the schema.
-
-SYNTHETIC files only.
+* the version is bumped by the existing mechanism, after 1.14.0, and a 1.14.0 bundle stays valid;
+* the decision is valid only on a record group, with the record body it was decided for and why it was held;
+* ``bundle decide`` never records it: ``bundle export --allow-indistinguishable --by`` does.
 """
 
 from __future__ import annotations
 
 import json
-import sys
-from pathlib import Path
+import shutil
 
 import pytest
 
-from isaac_api.bl15 import classify as C
 from isaac_api.local_import import bundle as B
-from isaac_api.local_import import cli
-from isaac_api.local_import import grouping as G
 from isaac_api.local_import import mutations as M
-from isaac_api.local_import import suggestions as S
 
-sys.path.insert(0, str(Path(__file__).resolve().parent))
-from test_local_import_quick_merges import _spec_run  # noqa: E402
+from tests_support_records import BY, pristine_bundle  # noqa: F401
 
 
-@pytest.fixture(autouse=True)
-def _vendored_schema_basis(monkeypatch, tmp_path):
-    monkeypatch.setenv("ISAAC_PORTAL_VALIDATOR_DIR", str(tmp_path / "no-validator"))
-    monkeypatch.setenv("ISAAC_PORTAL_VALIDATOR_PYTHON", str(tmp_path / "no-validator" / "python"))
-
-
-RULES = (S.NAME_POTENTIAL_RULE_ID, S.OPEN_CIRCUIT_RULE_ID, C.PROCESSED_TITLE_RULE_ID, B.TITLE_LINK_RULE_ID, *B.NOT_A_CONFLICT_RULES,
-         B.CLOCK_OFFSET_RULE_ID, G.XDC_STANDARD_NAME_RULE_ID, S.SCANNED_EDGE_RULE_ID)
-
-
-def test_the_version_is_bumped_by_the_existing_mechanism():
-    assert B.FORMAT_VERSION == "1.15.0" == B._VERSION_ORDER[-1] and B._VERSION_ORDER[-2] == "1.14.0"
+def test_the_version_follows_1_14_0_by_the_existing_mechanism():
+    # 1.16.0 follows it (test_local_import_format_1_16.py)
+    assert B._VERSION_ORDER.index("1.15.0") == B._VERSION_ORDER.index("1.14.0") + 1
     schema = B.bundle_schema()
-    assert schema["properties"]["format_version"]["enum"][-2:] == ["1.14.0", "1.15.0"]
+    enum = schema["properties"]["format_version"]["enum"]
+    assert enum.index("1.15.0") == enum.index("1.14.0") + 1
     assert "1.15.0" in schema["properties"]["format_version"]["description"]
     blocks = [b for b in schema.get("allOf") or ()
               if (b.get("if") or {}).get("properties", {}).get("format_version", {}).get("const") == "1.15.0"]
     assert blocks and blocks[0]["then"]["required"] == ["processed_outputs"]
+    assert B.EXPORT_ANYWAY_DECISION in schema["$defs"]["scientist_decision"]["properties"]["decision"]["enum"]
+    assert B.changes_since("1.14.0")[0] == B.CHANGES_ADDED_IN["1.15.0"]  # and each later version's, after it
 
 
-def test_the_change_note_names_each_rule_and_what_a_re_import_does():
-    note = B.CHANGES_ADDED_IN["1.15.0"]
-    for rule in RULES:
-        assert rule in note, rule
-    assert "re-import" in note
-    assert B.changes_since("1.14.0") == [note]
+@pytest.fixture()
+def bdir(pristine_bundle, tmp_path):
+    target = tmp_path / "b"
+    shutil.copytree(pristine_bundle, target)
+    M.group(target)
+    return target
 
 
-def test_an_older_bundle_is_told_on_its_first_write(tmp_path, capsys):
-    src = tmp_path / "src" / "SYN_BL00_2100-24_ZZ"
-    _spec_run(src, "21_01_SYN_filter10_m800mV")
-    out = tmp_path / "out"
-    assert cli.main(["import", str(src), "--out", str(out)]) == 0
-    capsys.readouterr()
-    data = json.loads((out / "bundle.json").read_text())
-    data["format_version"] = "1.14.0"  # what a 1.14.0 build wrote (its shape is the same)
-    (out / "bundle.json").write_text(json.dumps(data))
-    assert B.validate_bundle(json.loads((out / "bundle.json").read_text())) == []  # a 1.14.0 bundle stays valid
-    M.decide(out, target_ids=["experiment"], decision="defer", value=None, by="SYN Scientist", orcid=None)
-    saved = json.loads((out / "bundle.json").read_text())
-    assert saved["format_version"] == "1.15.0" and B.validate_bundle(saved) == []
-    [u] = [u for u in saved.get("format_upgrades") or () if u.get("from_format_version") == "1.14.0"]
-    assert B.CHANGES_ADDED_IN["1.15.0"] in u["statement"]
+def _with(bdir, decision):
+    b = json.loads((bdir / "bundle.json").read_text())
+    b["scientist_decisions"].append({"decision_id": f"d-{len(b['scientist_decisions']) + 1:05d}", "chosen_reading_index": None,
+                                     "decided_by": {"name": "SYN", "basis": "self_reported_local_user",
+                                                    "identity": "local_unverified", "orcid_claimed": None},
+                                     "decided_utc": "2026-11-22T00:00:00Z", "method": "scientist_answer", "note": None,
+                                     **decision})
+    return b
 
 
-# --- a bundle the 1.14.0 build WROTE (review of PR 346, C1) ----------------------------------------------------------
+def test_the_decision_is_valid_only_on_a_record_group_with_its_body_and_reasons(bdir):
+    gid = M.load(bdir)["record_groups"][0]["group_id"]
+    good = {"target": {"kind": "record_group", "id": gid}, "decision": B.EXPORT_ANYWAY_DECISION,
+            "value": {"body_sha256": "a" * 64, "held_by": ["indistinguishable_from_another_record"]}}
+    assert B.validate_bundle(_with(bdir, good)) == []
+    for bad in ({**good, "value": {"held_by": ["x"]}}, {**good, "value": {"body_sha256": "a" * 64, "held_by": []}},
+                {**good, "target": {"kind": "experiment", "id": "experiment"}}):
+        assert [e for e in B.validate_bundle(_with(bdir, bad)) if B.EXPORT_ANYWAY_DECISION in e or "record group" in e]
 
-#: written by tests/fixtures/local_import/make_bundle_1_14_0.py on the 1.14.0 build (never relabelled): an
-#: expression-titled PyMca .mca kept as a run, a SPEC-format average kept as an engine run, and a MERGE average the
-#: 1.14.0 build left unlinked whose title names a run's scan
-BUNDLE_1_14_0 = Path(__file__).resolve().parents[3] / "tests" / "fixtures" / "local_import" / "bundle_1_14_0"
 
-
-def test_a_bundle_the_1_14_0_build_wrote_stays_valid_takes_decisions_and_is_told_to_re_import(tmp_path):
-    import shutil
-
-    out = tmp_path / "b"
-    shutil.copytree(BUNDLE_1_14_0, out)
-    old = json.loads((out / "bundle.json").read_text())
-    assert old["format_version"] == "1.14.0" and not old.get("format_upgrades")
-    assert B.validate_bundle(old) == []  # the 1.15.0 rules are not applied to what an older build imported
-    M.decide(out, target_ids=["experiment"], decision="defer", value=None, by="SYN Scientist", orcid=None)
-    saved = json.loads((out / "bundle.json").read_text())
-    assert saved["format_version"] == "1.15.0" and B.validate_bundle(saved) == []
-    assert saved["runs"] == old["runs"] and saved["processed_outputs"][0]["proposed_links"] == []  # nothing re-derived
-    [u] = saved["format_upgrades"]
-    stems = {r["run_id"]: (r["stem"], r["source_type"]) for r in saved["runs"]}
-    held = B.processed_title_runs(saved)
-    assert {stems[r] for r in held} == {("SYN_cat_m600mV", "generic:mca_v1"), ("SYN_cat_m600mV_ave.dat", "spec_acquisition")}
-    assert f"{len(held)} of its runs ({', '.join(held)})" in u["statement"]
-    assert "scan title names the scans it was computed from" in u["statement"]
-    assert "re-import to keep them as processed outputs" in u["statement"]
+def test_an_older_bundle_stays_valid_and_decide_never_records_the_decision(bdir):
+    b = json.loads((bdir / "bundle.json").read_text())
+    b["format_version"] = "1.14.0"
+    assert B.validate_bundle(b) == []
+    gid = b["record_groups"][0]["group_id"]
+    with pytest.raises(M.MutationRefused) as exc:
+        M.decide(bdir, target_ids=[gid], decision=B.EXPORT_ANYWAY_DECISION, value=None, **BY)
+    assert "--allow-indistinguishable" in str(exc.value)
+    assert not [d for d in M.load(bdir)["scientist_decisions"] if d["decision"] == B.EXPORT_ANYWAY_DECISION]

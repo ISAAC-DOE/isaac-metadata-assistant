@@ -352,7 +352,7 @@ def test_a_1_10_0_bundle_still_validates_and_its_first_save_says_what_1_11_0_add
     assert B.check_bundle(out) == []
     M.group(out)
     saved = M.load(out)
-    assert saved["format_version"] == B.FORMAT_VERSION == "1.15.0"
+    assert saved["format_version"] == B.FORMAT_VERSION == "1.16.0"
     [u] = saved["format_upgrades"]
     assert u["from_format_version"] == "1.10.0" and B.CHANGES_ADDED_IN["1.11.0"] in u["statement"]
     # review L5: the runs it still holds of the quick merges are named, and re-import is said to fix them
@@ -369,7 +369,7 @@ def test_a_1_10_0_validator_shape_refuses_nothing_old_and_the_new_enums_are_the_
     assert f["rule_id"]["enum"][:2] == ["isaac.processed_output.origin.v0", "isaac.processed_output.origin.engine_classification.v0"]
     assert f["basis"]["enum"][:3] == ["line_1", "fields", "engine_classification"]  # 1.13.0 appends merge_folder (test_local_import_overnight_polish_merge)
     link = s["$defs"]["processed_output"]["properties"]["proposed_links"]["items"]["properties"]
-    # 1.15.0 appends the title-scans link (additive enum values for the scientists' processed merge files, approved
+    # 1.16.0 appends the title-scans link (additive enum values for the scientists' processed merge files, approved
     # 9 Nov 2026): test_local_import_processed_titles.py
     assert link["rule_id"]["enum"][:2] == ["isaac.processed_output.link_by_run_stem.v0", "isaac.processed_output.link_by_legacy_number.v0"]
     assert link["match"]["enum"][:3] == ["exact", "scan_selection_suffix", "legacy_number"]

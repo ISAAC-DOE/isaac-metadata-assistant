@@ -41,11 +41,10 @@ RULES = (B._rule_id(filenames.RULE_SIGNED_POTENTIAL), S.TECHNIQUE_RULE_ID, S.MEN
 
 
 def test_the_version_is_bumped_by_the_existing_mechanism():
-    # 1.15.0 follows it (test_local_import_format_1_15.py)
-    assert B._VERSION_ORDER.index("1.14.0") == B._VERSION_ORDER.index("1.13.0") + 1
+    assert B._VERSION_ORDER.index("1.14.0") == B._VERSION_ORDER.index("1.13.0") + 1  # later versions follow it (1.15.0)
     schema = B.bundle_schema()
     enum = schema["properties"]["format_version"]["enum"]
-    assert enum[enum.index("1.13.0") + 1] == "1.14.0"
+    assert enum.index("1.14.0") == enum.index("1.13.0") + 1
     assert "1.14.0" in schema["properties"]["format_version"]["description"]
     blocks = [b for b in schema.get("allOf") or () if (b.get("if") or {}).get("properties", {}).get("format_version", {}).get("const") == "1.14.0"]
     assert blocks and blocks[0]["then"]["required"] == ["processed_outputs"]
@@ -56,7 +55,7 @@ def test_the_change_note_names_each_rule_and_what_a_re_import_does():
     for rule in RULES:
         assert rule in note, rule
     assert "re-import" in note and "every id" in note
-    assert B.changes_since("1.13.0")[0] == note
+    assert B.changes_since("1.13.0")[0] == note  # and each later version's, after it
 
 
 def test_an_older_bundle_is_told_on_its_first_write(tmp_path, capsys):

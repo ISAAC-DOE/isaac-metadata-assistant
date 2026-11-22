@@ -52,11 +52,13 @@ Every list returns one page (`--limit` at most 200): follow its `more` line unti
 
 | Purpose | Command |
 |---|---|
-| The questions (use these) | `<isaac> bundle questions <bundle> [--scope experiment\|group:<id>\|run:<id>] [--blocking-only] [--limit N] [--offset M] [--skip-deferred] [--with-targets] [--include-outside-live-groups] [--each-group] [--no-context]` |
+| The questions (use these) | `<isaac> bundle questions <bundle> [--scope experiment\|group:<id>\|run:<id>] [--blocking-only] [--distinguishing-only] [--limit N] [--offset M] [--skip-deferred] [--with-targets] [--include-outside-live-groups] [--each-group] [--no-context]` |
 | A decision | `<isaac> bundle decide <bundle> (--target <id> [--target <id> ...] \| --targets-file <file> \| --question <Q> [--only group:<id> ...] [--field <path>] [--same-reading]) --decision <d> [--value <v> [--as-said]] [--json] --by "<name>" [--orcid 0000-0000-0000-0000] [--note "<text>"]` |
 | …more `decide` flags | `[--split-into '<json of run keys>'] [--merge-with <group ids> [--same-conditions]] [--qc-status <word> [--qc-note "<text>"]] [--element <symbol> --edge <edge> [--accept-shift <eV>]] [--scans "<scan id>,..."] [--positions N,N or last] [--same-sample [--names-differ-ok]] [--from-earlier-answer <entry id>]` |
 | The metadata template | `<isaac> bundle template export <bundle> --out <file.xlsx> [--force] [--no-suggestions] [--json]` · `<isaac> bundle template import <bundle> <file.xlsx> --by "<name>" [--orcid ...] [--apply] [--supersede] [--full] [--json]` · `<isaac> bundle template adopt <bundle> <their.xlsx> --out <file.xlsx> [--by "<name>"] [--force] [--no-suggestions] [--json]` |
 | A filled question workbook | `<isaac> bundle answers import <bundle> <workbook.xlsx> --by "<name>" [--orcid <id>] [--folder <name> [--folder-differs-ok]] [--supersede] [--apply] [--json]` |
+| The question site: the cards | `<isaac> bundle site export <bundle> --out <folder> [--suggestions <file>] [--include optional] [--include deferred] [--include approvals] [--site-template <folder>] [--json]` (`<folder>` outside every git repository and the bundle folder; see `question-site.md`) |
+| The question site: its answers | `<isaac> bundle site import <bundle> <answers.json> --site-data <folder>/data/site-data.json [--apply] [--remember] [--note-read <card id>] [--json]` (preview unless `--apply`; refused in a `_runs…` folder) |
 | Words outside the vocabulary | `<isaac> bundle propose-terms <bundle> [--out <file.json>] [--force \| --merge]` (prints values, sends nothing) |
 | Earlier answers (opt-in) | `<isaac> answer-memory on --by "<name>"` · `off` · `status` · `list [--field <path>] [--beamtime <folder name>]` · `forget (--entry <id> \| --beamtime <folder name> \| --all)` · `learn <bundle> --by "<name>"` |
 
@@ -82,7 +84,7 @@ Decisions by target:
 |---|---|
 | Compose drafts | `<isaac> bundle build-records <bundle> [--full]` |
 | Every check, per draft | `<isaac> bundle validate <bundle> [--full]` |
-| Write the passing records | `<isaac> bundle export <bundle> --out <records> [--full]` |
+| Write the passing records | `<isaac> bundle export <bundle> --out <records> [--full] [--allow-indistinguishable --by "<name>"]` |
 | What would be uploaded | `<isaac> bundle upload <records> --dry-run [--portal-url <url>] [--full]` |
 
 - `build-records`: counts and the first 3 drafts; `--full` prints every row. Never `--test-marker`: it is for self-tests only.

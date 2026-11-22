@@ -156,8 +156,9 @@ run `process`:
 - "I read the whole logbook; it says nothing about which scans to use", or
 - "this folder has no logbook or notes file".
 
-A result's line "No logbook scan note names these runs" only means no note was LOADED for those runs.
-Never relay it as "the logbook says nothing" unless you read the logbook yourself.
+A result's `logbook_notes.state` says which is true: `no_reading_loaded` (notes files are present and no reading was
+loaded; `process` says it once in its summary), `read_no_note_for_these_runs`, or `notes`.
+Never relay the first as "the logbook says nothing" unless you read the logbook yourself.
 
 ### The scan decisions
 
@@ -187,6 +188,12 @@ A scan is dropped only for one of these reasons. Say the reason in these words:
 - Scan ids are the ones the result's `scan_decisions` rows give (`<run name>#<scan number>`, or the file name).
 - Then `<isaac> process <bundle> --source <folder> --group <group id>` and show the new result. It has a new id and
   shows the row as the scientist's.
+
+**An approved curve older than its evidence** (`approved_curve_older_than_evidence`): a scan note on a run whose curve
+is already approved, or a newer result than the approved one, is the first warning of `build-records`, `validate` and
+`export`. Tell the scientist at once and read its "Next:". The record keeps the approved curve until they decide.
+A bulk approval refuses such a result; one approval of a result processed without the note waits until a result that
+lists the note exists.
 
 ### The dose question (ask it before any bulk approval)
 

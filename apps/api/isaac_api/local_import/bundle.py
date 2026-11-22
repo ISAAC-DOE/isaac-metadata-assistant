@@ -108,18 +108,24 @@ FORMAT_ID = "isaac.local-import-bundle"
 #: re-import keeps every id the earlier build gave (new candidates are numbered last; a newly filled slot keeps its
 #: number). Nothing becomes newly writable; the upgrade is disclosed (:data:`CHANGES_ADDED_IN`). The version is bumped
 #: so a bundle says which readings it was imported with.
-#: 1.15.0 (import rules only; the bundle's shape is unchanged): readings a 1.14.0 build did not make at import — the
+#: 1.15.0 (additive): the ``export_despite_completeness`` record-group decision. A scientist's word that a record the
+#: LOCAL record-completeness gate holds (``completeness.py``: a condition that keeps it apart from another record is
+#: not in it, or it says what another record says) is exported anyway, for that record body
+#: (``value``: ``{"body_sha256", "held_by"}``). Recorded by ``bundle export --allow-indistinguishable --by``; later
+#: exports honour it while the body is the same. A 1.14.0 validator refuses the new enum value, hence the version.
+#: Nothing becomes newly writable; the bundle's other shapes are unchanged.
+#: 1.16.0 (import rules only, and two additive enum values): readings a 1.15.0 build did not make at import — the
 #: potential an SSRL XDC run's NAME writes (``suggestions.NAME_POTENTIAL_RULE_ID``, a suggestion that needs review,
 #: compared with the run's comment lines; open circuit, ``suggestions.OPEN_CIRCUIT_RULE_ID``, suggests the control
 #: mode); a SPEC-format file whose scan title names the scans it was computed from is a processed output, kept by
 #: :data:`AVERAGE_TITLE_ORIGIN_RULE_ID` and linked by :data:`TITLE_LINK_RULE_ID` (new enum values: an additive schema
-#: change, so a 1.14.0 validator refuses such a bundle); a macro-driven run with no declaring block is no conflict
+#: change, so a 1.16.0 validator refuses such a bundle); a macro-driven run with no declaring block is no conflict
 #: (:data:`NOT_A_CONFLICT_RULES`). Only a re-import applies them; new candidates are numbered after every other, a
 #: comment-line candidate the name now answers keeps its id and targets no field, and a conflict no longer made keeps
 #: its number unused. A file that is no longer a run takes its run's ids with it, so run, candidate and value ids after
 #: it renumber (as at 1.11.0 and 1.13.0). Nothing becomes newly writable; the upgrade is disclosed
 #: (:data:`CHANGES_ADDED_IN`).
-FORMAT_VERSION = "1.15.0"
+FORMAT_VERSION = "1.16.0"
 #: The electrochemical control mode. Its allowed values are the official schema's enum (read at
 #: runtime by :func:`value_problem`); the schema's conditional rules key the set-point a record
 #: requires on it (:func:`required_record_paths`). Never defaulted, never derived.
@@ -145,7 +151,7 @@ VALUE_IDS_APPEND_FROM = "1.5.0"
 IMPORT_RULES_ADDED_IN: Mapping[str, tuple] = {
     "1.4.0": (("generic:ssrl_xdc_v1", "ssrl_xdc_scan_start_v1"),),
 }
-_VERSION_ORDER = ("1.0.0", "1.1.0", "1.2.0", "1.3.0", "1.4.0", "1.5.0", "1.6.0", "1.7.0", "1.8.0", "1.9.0", "1.10.0", "1.11.0", "1.12.0", "1.13.0", "1.14.0", "1.15.0")
+_VERSION_ORDER = ("1.0.0", "1.1.0", "1.2.0", "1.3.0", "1.4.0", "1.5.0", "1.6.0", "1.7.0", "1.8.0", "1.9.0", "1.10.0", "1.11.0", "1.12.0", "1.13.0", "1.14.0", "1.15.0", "1.16.0")
 #: A change a format version made that moves no eligibility and adds no import rule, but that the
 #: first save by a newer build still DISCLOSES in its ``format_upgrades`` entry (never silently).
 CHANGES_ADDED_IN: Mapping[str, str] = {
@@ -168,7 +174,10 @@ CHANGES_ADDED_IN: Mapping[str, str] = {
                "instrument (isaac.suggest.technique_from_configuration.v1), pellet fields only where mentioned "
                "(isaac.import.optional_field_asked_where_mentioned.v1), stale comment lines "
                "(isaac.import.comment_possibly_stale.v1); a re-import keeps every id the earlier build gave"),
-    "1.15.0": ("1.15.0 reads at import, only on a re-import: an SSRL XDC run's name potential, a suggestion "
+    "1.15.0": ("1.15.0 keeps the scientist's export_despite_completeness decision on a record group: a record the local "
+               "record-completeness gate holds is exported anyway, for that record body, by `bundle export "
+               "--allow-indistinguishable --by`"),
+    "1.16.0": ("1.16.0 reads at import, only on a re-import: an SSRL XDC run's name potential, a suggestion "
                "(isaac.suggest.name_potential.v1, isaac.suggest.name_open_circuit.v1); a SPEC-format file whose scan "
                "title names other scans is a processed output, never a run (bl15.classify.processed_scan_title.v1, "
                "isaac.processed_output.link_by_title_scans.v0; later run, candidate, value and some question ids then "
@@ -544,10 +553,10 @@ def in_merge_folder(rel: Any) -> bool:
 
 def is_average_title(literal: Any, *, widened: bool = True) -> bool:
     """True for a scan title that names the scans it was computed from (:data:`AVERAGE_TITLE_ORIGIN_RULE_ID`): an
-    average of N spectra, and (1.15.0, ``bl15.classify.PROCESSED_TITLE_RULE_ID``) an arithmetic expression over named
+    average of N spectra, and (1.16.0, ``bl15.classify.PROCESSED_TITLE_RULE_ID``) an arithmetic expression over named
     scans or a normalised copy of one. The engine's own test, so a SPEC-format file and a PyMca ``.mca`` are judged
     alike. ``widened=False``: the 1.13.0 test alone (``Average of N from``), for a bundle an older build imported
-    (review of PR 346, C1: the 1.15.0 rule is never applied to what an older build kept)."""
+    (review of PR 346, C1: the 1.16.0 rule is never applied to what an older build kept)."""
     from ..bl15.classify import is_processed_scan_title
 
     return isinstance(literal, str) and (bool(_AVERAGE_TITLE.match(literal.strip()))
@@ -619,9 +628,9 @@ def average_title_runs(bundle: Mapping, *, widened: bool | None = None) -> list[
     :func:`is_average_title`), in a bundle that also holds SPEC acquisition runs: what
     :data:`AVERAGE_TITLE_ORIGIN_RULE_ID` makes processed outputs. Non-empty only for a bundle a build older than 1.13.0
     imported (a 1.13.0 import holds none: the validator refuses one). ``widened`` (default: the bundle was imported by
-    1.15.0 or later): whether the 1.15.0 title test applies, never to what an older build imported."""
+    1.16.0 or later): whether the 1.16.0 title test applies, never to what an older build imported."""
     if widened is None:
-        widened = _imported_by_at_least(bundle, "1.15.0")
+        widened = _imported_by_at_least(bundle, "1.16.0")
     runs = bundle.get("runs") or ()
     if not quick_merges_apply(runs):
         return []
@@ -635,7 +644,7 @@ _SCAN_LOCATOR = re.compile(r"^line (\d+) header #S \(scan (\S+)\)$")
 
 
 def processed_title_runs(bundle: Mapping) -> list[str]:
-    """1.15.0 (``bl15.classify.PROCESSED_TITLE_RULE_ID``): the runs of this bundle that a 1.15.0 import keeps as
+    """1.16.0 (``bl15.classify.PROCESSED_TITLE_RULE_ID``): the runs of this bundle that a 1.16.0 import keeps as
     processed outputs: generic runs whose scan title only the widened test reads as computed from other scans, and SPEC
     runs whose FIRST ``#S`` title names other scans (its ``scan_command`` statement). Non-empty only for a bundle an
     older build imported; the upgrade statement names them ("re-import to keep them as processed outputs")."""
@@ -999,7 +1008,7 @@ def _selection_numbers(sel: str) -> set[int] | None:
     return set(range(lo, hi + 1))
 
 
-#: 1.15.0: a quick merge or average whose scan title NAMES the scans it was computed from (``A 3.1 X + A 1.1 X``,
+#: 1.16.0: a quick merge or average whose scan title NAMES the scans it was computed from (``A 3.1 X + A 1.1 X``,
 #: ``Average of 8 from A 1.1 X to A 8.1 X``: ``bl15.classify.processed_title_scans``) is linked to the ONE run with
 #: scans whose stem is that name and which has every scan named (its scan indices, else 1..scan_count). Content,
 #: never a folder or a file name; tried before :data:`LEGACY_LINK_RULE_ID`, which applies when the title names none.
@@ -1083,7 +1092,7 @@ def propose_processed_links(processed_outputs: Sequence[dict], runs: Sequence[Ma
     for po in processed_outputs:
         if is_quick_merge(po):
             # 1.11.0: an output the ENGINE classified is linked by its legacy number, never by its stem (1.13.0: and one
-            # kept by its MERGE folder); 1.15.0: by the scans its own title names first
+            # kept by its MERGE folder); 1.16.0: by the scans its own title names first
             if not _link_by_title_scans(po, runs, titles.get(po.get("processed_output_id")) or ()):
                 _link_by_legacy_number(po, runs)
             continue
@@ -1379,7 +1388,7 @@ DECISIONS_BY_KIND: Mapping[str, frozenset[str]] = {
     "conflict": frozenset({"confirm", "correct", "reject", "defer"}),
     # set_scan_decision (isaac.xas.v1): a scientist's keep / drop of named scans, overriding the scan-decision rule
     "record_group": frozenset({"confirm", "split", "merge", "reject", "defer", "approve_calibration", "set_absorber",
-                               "set_scan_decision", "set_dose_reading", "set_role"}),
+                               "set_scan_decision", "set_dose_reading", "set_role", "export_despite_completeness"}),
     "processing_result": frozenset({"approve", "reject", "needs_changes", "defer", "select_athena_version"}),
     # `defer` (1.9.x polish): "I don't know" to the counter question — recorded, changes no grouping
     "experiment": frozenset({"set_counter_positions", "set_clock_time_zone", "set_not_counter_positions", "defer",
@@ -1406,6 +1415,19 @@ DOSE_READINGS = ("beam_damage", "not_beam_damage", "first_scan_settling")
 #: scan — over the role grouping proposed (a file name's ``foil`` / ``align`` token, a header, the engine's class).
 #: Latest wins; :func:`apply_derivations` sets the group's ``role`` and ``role_basis`` from it. It moves no status.
 ROLE_DECISION = "set_role"
+#: 1.15.0: "export it anyway" for a record the local record-completeness gate holds (``completeness.py``)
+EXPORT_ANYWAY_DECISION = "export_despite_completeness"
+
+
+def export_anyway_problem(value: Any) -> str | None:
+    """Why an export_despite_completeness value is malformed (None when it is ``{"body_sha256": <64 hex>,
+    "held_by": [<reason>, ...]}``)."""
+    if not isinstance(value, Mapping) or not re.fullmatch(r"[0-9a-f]{64}", str(value.get("body_sha256") or "")):
+        return "export_despite_completeness needs the record body it was decided for (body_sha256)"
+    held = value.get("held_by")
+    if not isinstance(held, list) or not held or not all(isinstance(h, str) and h for h in held):
+        return "export_despite_completeness needs the reasons the record was held for (held_by)"
+    return None
 ROLES = ("sample", "reference", "alignment")
 ROLE_DECISION_RULE_ID = "isaac.record_group.role.scientist_decision.v0"
 
@@ -2687,7 +2709,7 @@ def local_clock_binding_problem(candidate: Mapping, decision: Mapping | None, zo
     return None
 
 
-# --- the clock's offset from a SPEC #E / #D pair (1.15.0; audit of 18 Nov 2026, rule 4) ------------------------------
+# --- the clock's offset from a SPEC #E / #D pair (1.16.0; audit of 18 Nov 2026, rule 4) ------------------------------
 
 #: A SPEC header writes the file's creation instant twice: ``#E <unix epoch>`` (UTC by definition) and, on the next
 #: line, ``#D <local wall time>``. Their difference is the offset of the clock that wrote it. Where every pair of the
@@ -2789,7 +2811,7 @@ def clock_zone_question(bundle: Mapping) -> dict | None:
     """THE ONE beamtime-scope question about the instrument clock's zone, or ``None`` when no
     start-time candidate waits on it or a ``set_clock_time_zone`` decision exists. It states how
     many runs the answer unblocks, ONE example literal with its file, that no file states a zone,
-    and the exact command. It never guesses a zone from where the facility is (CLAUDE.md §5); 1.15.0
+    and the exact command. It never guesses a zone from where the facility is (CLAUDE.md §5); 1.16.0
     (:data:`CLOCK_OFFSET_RULE_ID`): where the import's own SPEC ``#E`` / ``#D`` pairs give the clock's offset and
     it is the named facility's zone on every date, that zone is SUGGESTED (``suggestion``), with the pairs as
     evidence, never applied."""
@@ -4146,7 +4168,7 @@ def _account_key(account: str) -> str:
     return account.replace("/", "\\").rsplit("\\", 1)[-1].strip().casefold()
 
 
-# --- what is not a disagreement (1.15.0; audit of 18 Nov 2026, rules 2 and 5) ------------------------------------------
+# --- what is not a disagreement (1.16.0; audit of 18 Nov 2026, rules 2 and 5) ------------------------------------------
 
 #: A SPEC ``#C`` line is an EVENT LOG entry: ``#C <date>.  do run3.mac.`` (a macro started), ``#C <date>.  gap reset
 #: from A to B.`` (a motor redefined). Two such lines are two events, never two readings of one field; the session
@@ -5011,7 +5033,7 @@ def build_bundle(
             unread = [u for u in unread if u["relative_path"] not in generic_claimed]
     if source_kind == "zip":
         _zip_inside_zip_rows(generic, unread, sources)
-    # 1.15.0 (bl15.classify.PROCESSED_TITLE_RULE_ID): a SPEC-format file the ENGINE classified as a processed spectrum
+    # 1.16.0 (bl15.classify.PROCESSED_TITLE_RULE_ID): a SPEC-format file the ENGINE classified as a processed spectrum
     # because its scan title names the scans it was computed from (no generic reader reads it) is the scientists'
     # average, kept by AVERAGE_TITLE_ORIGIN_RULE_ID beside SPEC acquisitions, as a PyMca .mca average is
     if quick_merges_apply(runs):
@@ -5036,7 +5058,7 @@ def build_bundle(
     out_candidates: list[dict] = []
     windows_truncated = [0]
     conflicts: list[dict] = []
-    # conflict ids are numbered by POSITION, counting a disagreement this build no longer reports (1.15.0: an event-log
+    # conflict ids are numbered by POSITION, counting a disagreement this build no longer reports (1.16.0: an event-log
     # comment line, a position within motor resolution, a macro-driven run with no declaring block), so every other
     # conflict keeps the id the build before gave it
     conflict_seq = [0]
@@ -5045,7 +5067,7 @@ def build_bundle(
         conflict_seq[0] += 1
         return f"conf-{conflict_seq[0]:03d}"
 
-    # 1.15.0 (NOT_A_CONFLICT_RULES): the acquisitions whose own `#C` lines say a macro ran them
+    # 1.16.0 (NOT_A_CONFLICT_RULES): the acquisitions whose own `#C` lines say a macro ran them
     macro_driven = macro_driven_paths(evidence_by_source)
     acq_path_of = {s["source_id"]: s["relative_path"] for s in sources}
     not_conflicts: dict[str, int] = {}
@@ -5076,7 +5098,7 @@ def build_bundle(
             dropped = not_a_conflict(key, [r.get("value") for r in c.disagreement], engine_conflict,
                                      macro_driven=bool(run) and acq_path_of.get(run.get("acquisition_source_id")) in macro_driven)
         if dropped is not None:
-            # 1.15.0 (NOT_A_CONFLICT_RULES): not a disagreement. The readings stay this candidate's evidence (the engine's
+            # 1.16.0 (NOT_A_CONFLICT_RULES): not a disagreement. The readings stay this candidate's evidence (the engine's
             # window, its total said); the conflict id it took is kept, unused, so every later conflict keeps its own
             not_conflicts[dropped] = not_conflicts.get(dropped, 0) + 1
             c = dataclasses.replace(c, disagreement=(), unresolved_reason=None,
@@ -6410,7 +6432,7 @@ def upgrade_statement(from_version: str | None, newly_writable: Iterable[str],
     titled = [i for i in processed_title_run_ids if i not in ids and i not in folder]
     if titled:
         text += (f"; {len(titled)} of its runs ({', '.join(titled[:5])}{', ...' if len(titled) > 5 else ''}) are files whose "
-                 "scan title names the scans it was computed from (1.15.0), kept as runs by the build that imported it "
+                 "scan title names the scans it was computed from (1.16.0), kept as runs by the build that imported it "
                  "— re-import to keep them as processed outputs")
     return text
 
@@ -6660,6 +6682,10 @@ def validate_bundle(bundle: Any, *, max_errors: int = 50, encoded: bytes | None 
             problem = scan_decision_problem(d.get("value"))
             if problem is not None or (d.get("target") or {}).get("kind") != "record_group":
                 errors.append(f"decision: {d['decision_id']} {problem or 'set_scan_decision is for a record group'}")
+        if d.get("decision") == EXPORT_ANYWAY_DECISION:
+            problem = export_anyway_problem(d.get("value"))
+            if problem is not None or (d.get("target") or {}).get("kind") != "record_group":
+                errors.append(f"decision: {d['decision_id']} {problem or 'export_despite_completeness is for a record group'}")
         if d.get("decision") == ROLE_DECISION:
             problem = role_problem(d.get("value"))
             if problem is not None or (d.get("target") or {}).get("kind") != "record_group":
@@ -6772,7 +6798,7 @@ def validate_bundle(bundle: Any, *, max_errors: int = 50, encoded: bytes | None 
         for rid in quick_merge_runs(bundle):
             errors.append(f"consistency: run {rid} is a file the engine classifies {ENGINE_PROCESSED_SOURCE_TYPE} beside "
                           f"SPEC acquisition runs, which {ENGINE_ORIGIN_RULE_ID} keeps as a processed output, never a run")
-    if _imported_by_at_least(bundle, "1.15.0"):
+    if _imported_by_at_least(bundle, "1.16.0"):
         for rid in processed_title_runs(bundle):
             errors.append(f"consistency: run {rid} is a file whose scan title names the scans it was computed from, "
                           f"which {AVERAGE_TITLE_ORIGIN_RULE_ID} keeps as a processed output, never a run")
@@ -6810,10 +6836,10 @@ def validate_bundle(bundle: Any, *, max_errors: int = 50, encoded: bytes | None 
     # what `propose_processed_links` gives over the stored runs (the derived group_id aside).
     if bundle.get("processed_outputs"):
         again = json.loads(json.dumps(bundle["processed_outputs"]))
-        # TITLE_LINK_RULE_ID is re-run only for a bundle a 1.15.0 build imported: an older one keeps the links it was
+        # TITLE_LINK_RULE_ID is re-run only for a bundle a 1.16.0 build imported: an older one keeps the links it was
         # given (review of PR 346, C1)
         propose_processed_links(again, bundle["runs"],
-                                bundle["extended_context"] if _imported_by_at_least(bundle, "1.15.0") else ())
+                                bundle["extended_context"] if _imported_by_at_least(bundle, "1.16.0") else ())
 
         def _bare(links):
             return [{k: v for k, v in link.items() if k != "group_id"} for link in links]

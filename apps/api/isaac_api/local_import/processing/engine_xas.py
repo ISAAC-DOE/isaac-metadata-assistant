@@ -223,6 +223,29 @@ def scan_notes_for(bundle: Mapping, run_id: str) -> tuple[list[dict] | None, str
         return None, f"the logbook scan notes could not be read ({type(exc).__name__}: {exc})"[:300]
 
 
+#: The logbook block's ``state`` (the result's :data:`LOGBOOK_KEY`): which of these is true for the group's runs.
+LOGBOOK_NOTES = "notes"
+LOGBOOK_READ_NO_NOTE = "read_no_note_for_these_runs"
+LOGBOOK_NOT_READ = "no_reading_loaded"
+LOGBOOK_NOTHING_TO_READ = "nothing_to_read"
+LOGBOOK_UNAVAILABLE = "unavailable"
+
+
+def logbook_reading_state(bundle: Mapping) -> dict | None:
+    """``scan_notes.reading_state(bundle)``: whether a reading pass over the files has been loaded at all, and which
+    notes files are present. ``None`` when this build's scan-notes module cannot say (then the block keeps the plain
+    sentence); never a failure."""
+    try:
+        from ..scan_notes import reading_state  # type: ignore[import-not-found]
+    except ImportError:
+        return None
+    try:
+        out = reading_state(bundle)
+    except Exception:  # noqa: BLE001 - a state that cannot be derived is not said, never a failure
+        return None
+    return out if isinstance(out, Mapping) and out.get("statement") else None
+
+
 def scientist_scan_decisions(bundle: Mapping, group_id: str) -> dict[str, dict]:
     """``{scan id: the latest set_scan_decision naming it}`` for one group (later decisions win)."""
     out: dict[str, dict] = {}
@@ -1720,7 +1743,8 @@ def _logbook(ctx, gr, recs) -> tuple[dict, dict]:
                 hit = {n for n in nums if n not in set(scans)}
             else:
                 hit = set()
-            entry = {"run": run.get("stem"), "action": action, "scans": scans, "reason": nt.get("reason"),
+            entry = {"scan_note_id": nt.get("scan_note_id"),
+                     "run": run.get("stem"), "action": action, "scans": scans, "reason": nt.get("reason"),
                      "quote": nt.get("quote"), "source": nt.get("source"), "strength": nt.get("strength"),
                      "drops": sorted(hit), "applied": action in ("exclude", "start_from", "keep_only")}
             said["notes"].append(entry)
@@ -1731,10 +1755,30 @@ def _logbook(ctx, gr, recs) -> tuple[dict, dict]:
                     # a flag naming scans is shown on each; a flag naming none is said once (the logbook block)
                     by_scan.setdefault(r["scan_id"], []).append({**entry, "applied": False})
     if why_none is not None and not said["notes"]:
-        said = {"available": False, "notes": [], "statement": f"No logbook scan notes: {why_none}."}
+        said = {"available": False, "notes": [], "state": LOGBOOK_UNAVAILABLE,
+                "statement": f"No logbook scan notes: {why_none}."}
     elif not said["notes"]:
-        said["statement"] = "No logbook scan note names these runs."
+        # THREE DIFFERENT THINGS, NEVER ONE SENTENCE (audit of 18 Nov 2026, finding 2): "no note names these runs"
+        # is only true once a reading of the logbook has been loaded. With none loaded, the result says THAT.
+        reading = logbook_reading_state(ctx.bundle)
+        state = (reading or {}).get("state")
+        if state == "no_reading_loaded":
+            said["state"] = LOGBOOK_NOT_READ
+            said["statement"] = reading["statement"]
+        elif state == "nothing_to_read":
+            said["state"] = LOGBOOK_NOTHING_TO_READ
+            said["statement"] = reading["statement"]
+        elif state == "reading_loaded":
+            said["state"] = LOGBOOK_READ_NO_NOTE
+            said["statement"] = reading["statement"][:-1] + "; no scan note names these runs."
+        else:  # the reading state could not be derived (an older scan-notes module): the plain sentence, as before
+            said["state"] = LOGBOOK_READ_NO_NOTE
+            said["statement"] = "No logbook scan note names these runs."
+        if reading:
+            said["reading"] = {k: reading[k] for k in ("state", "notes_files", "findings_loaded", "scan_notes",
+                                                       "files_cited") if k in reading}
     else:
+        said["state"] = LOGBOOK_NOTES
         said["statement"] = (f"{len(said['notes'])} logbook scan note(s) name these runs; exclude, start_from and keep_only "
                              "notes are applied (an 'inferred' one marked so); a flag changes nothing and is shown.")
     return by_scan, said
@@ -3188,7 +3232,7 @@ def show_blocks(r: Mapping, *, full: bool = False) -> dict:
         out["measurement_mode"] = mm.get("statement")
     lb = r.get(LOGBOOK_KEY)
     if isinstance(lb, Mapping):
-        out["logbook_notes"] = {"statement": lb.get("statement"),
+        out["logbook_notes"] = {"state": lb.get("state"), "statement": lb.get("statement"),
                                 "notes": [f"{n.get('run')}: {n.get('action')} {n.get('scans') or ''} ({n.get('strength')}): "
                                           f"{n.get('reason')}" for n in lb.get("notes") or ()]}
     nm = r.get(NORMALIZATION_KEY)

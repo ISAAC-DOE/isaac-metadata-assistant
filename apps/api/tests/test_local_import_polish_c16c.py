@@ -86,7 +86,7 @@ def _readings(rep: dict) -> list[str]:
 def test_the_preview_names_the_scan_headers_reading_the_typed_value_replaces(tmp_path, capsys):
     out = _imported(tmp_path)
     lines = _readings(_typed(out, tmp_path, -0.15, capsys))
-    # 1.15.0: the name (m150mV) and the header (-300mV vs RHE) write different numbers, so neither is offered
+    # 1.16.0: the name (m150mV) and the header (-300mV vs RHE) write different numbers, so neither is offered
     # (suggestions.NAME_POTENTIAL_RULE_ID); the typed value is still said to contradict the header's line
     assert f"contradicts the scan header -300mV vs RHE at line:10 of {LABEL}_A.001: -0.3" in lines
 
@@ -116,7 +116,7 @@ def test_validate_warns_while_no_one_has_ruled_on_the_headers_reading(tmp_path, 
     cand = next(c for c in b["candidates"] if c["run_id"] == rid and B.is_header_comment_candidate(c)
                 and c["target_field_path"] == SETPOINT)
     assert w["targets"] == [cand["candidate_id"]] and "no one has ruled on the scan header's reading yet" in w["text"]
-    # 1.15.0: the header's value is withheld (the name writes another number), so it is answered with a value
+    # 1.16.0: the header's value is withheld (the name writes another number), so it is answered with a value
     assert cand["value"] is None
     assert w["command"].startswith(f"isaac bundle decide <bundle_dir> --target {cand['candidate_id']} --decision correct")
     assert R.written_without(w).startswith("Written with a potential its files disagree about: ")

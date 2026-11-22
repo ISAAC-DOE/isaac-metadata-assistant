@@ -229,7 +229,7 @@ LABEL = "05_SYNmof_m150mV_021"
 def old_bundle(tmp_path, monkeypatch) -> Path:
     """What a build before the comment rule made: no candidate holds the scan header's reading."""
     monkeypatch.setattr(B, "_xdc_comment_candidates", lambda *a, **k: [])
-    # nor the name's (1.15.0, suggestions.NAME_POTENTIAL_RULE_ID): that build read nothing from an XDC run's name
+    # nor the name's (1.16.0, suggestions.NAME_POTENTIAL_RULE_ID): that build read nothing from an XDC run's name
     monkeypatch.setattr(S, "name_potential_candidates", lambda *a, **k: [])
     src = tmp_path / "SYN_bt43"
     for i in (1, 2):

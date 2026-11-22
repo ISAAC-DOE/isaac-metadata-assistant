@@ -1,5 +1,5 @@
 """SPEC ``#C`` lines are an event log, and a read-back position equal to the commanded one within motor resolution is
-one position (bundle 1.15.0; audit of 18 Nov 2026, rule 2). SYNTHETIC files only.
+one position (bundle 1.16.0; audit of 18 Nov 2026, rule 2). SYNTHETIC files only.
 
 On real beamtimes every SPEC run carried a "which reading is right?" question about its comment lines (``do
 run3.mac`` beside ``do Pt_XAS.mac`` beside ``spec User = ...``) and about a motor the macro moved to ``-21.2782``

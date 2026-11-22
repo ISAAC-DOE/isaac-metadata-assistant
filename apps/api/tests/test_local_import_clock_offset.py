@@ -1,5 +1,5 @@
 """The clock zone from a SPEC header's #E / #D pair is SUGGESTED for the clock-zone question, never applied (bundle
-1.15.0; audit of 18 Nov 2026, rule 4). SYNTHETIC files only.
+1.16.0; audit of 18 Nov 2026, rule 4). SYNTHETIC files only.
 
 A SPEC header writes the file's creation instant twice: ``#E <unix epoch>`` (UTC) and ``#D <local wall time>`` on the
 next line, so their difference is the offset of the clock that wrote it. What these pin

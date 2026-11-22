@@ -53,6 +53,12 @@ never above needs_review; ``--blind`` honoured only before exposure), ``decide``
 ``export`` and ``upload --dry-run``. Every mutation re-derives, re-validates and writes
 atomically under a lock, or writes nothing.
 
+``isaac bundle site export <dir> --out <folder> [--suggestions FILE] [--include optional|deferred|approvals] [--site-template <folder>]``
+and ``isaac bundle site import <dir> <answers.json> --site-data <site-data.json> [--apply] [--remember]``: the question
+site (``question_site``, ``question_site_import``; ``docs/question-site-contract.md``). The export writes the open
+questions as plain cards outside every git working tree; the import reads the site's answers back as ``bundle decide``
+calls, a preview unless ``--apply``.
+
 ``isaac bundle annotate <dir> --from-readings <findings.json> --model M [--root <folder>] [--apply]`` and
 ``isaac bundle check-readings <dir> <findings.json> [--root <folder>]``: every finding's quote is checked against
 the file it cites under the imported folder (``reading_check``); a finding whose quote is not found, whose run
@@ -862,7 +868,9 @@ CANNOT_EXPORT_NOTE = ("Such a group can never become an exportable record as it 
                       "protocol covers this data yet. not_a_measurement_run: every run is a reference standard, an "
                       "alignment or a calibration scan, so the import asks nothing about its sample or conditions and "
                       "the required fields in cannot_export_fields have nowhere to hold an answer; its curve can be "
-                      "approved, but it does not become a record.")
+                      "approved, but it does not become a record. processing_result_has_no_curve: every processing "
+                      "result it has made no curve (a failure, such as a file with no energy axis), so there is nothing "
+                      "to approve; a result with a curve lifts it.")
 
 
 def group_list_extras(bundle: Mapping) -> dict[str, dict]:
@@ -899,6 +907,12 @@ def group_list_extras(bundle: Mapping) -> dict[str, dict]:
                                  "note": ("it merges scans read at different " + ", ".join(sorted({str(c) for c in care}))
                                           + f": check it before a bulk confirm (`isaac bundle show <bundle_dir> group "
                                           f"{g['group_id']}` gives the readings)")}
+            # finding 12 (audit of 18 Nov 2026): a flag raised only by the NAME of the scientists' own merge file (an
+            # older import read it as a second reading of the run) says so; no reading is printed here
+            if any(r["only_a_processed_output_name"] for r in G.care_reasons(bundle, g)):
+                row["needs_care"]["from_a_merge_file_name"] = (
+                    "one of the two readings is only the name of the scientists' own merge file, which is no reading of "
+                    "the run: an older import took it as one; importing the folder again with this build drops it")
         basis = g.get("role_basis") if isinstance(g.get("role_basis"), Mapping) else {}
         if g.get("role") in (G.ROLE_REFERENCE, G.ROLE_ALIGNMENT) and basis.get("basis") in ("name_token", "element_name_token"):
             # a role a NAME proposes (SPEC or XDC) is a proposal: said as judged from the name, never as a fact
@@ -2114,6 +2128,8 @@ def cmd_bundle_questions(args) -> int:
         payload = Q.consolidate(bundle, compositions_out=reports)
         rows = Q.filter_questions(payload, scope=args.scope, blocking_only=args.blocking_only, reports=reports)
         kept = [q for q in rows if not (args.skip_deferred and q.get("deferred"))]
+        if getattr(args, "distinguishing_only", False):
+            kept = [q for q in kept if q.get("completeness")]  # the local completeness tier (completeness.py)
         # r3a L5: a question about runs no live record group holds builds no record: counted, listed on request (or
         # when a run's own scope is asked for); the local questions screen hides them the same way (r3c LOW-3)
         kept, outside = Q.hide_outside_live_groups(kept, scope=args.scope, include=args.include_outside_live_groups)
@@ -2152,6 +2168,9 @@ def cmd_bundle_questions(args) -> int:
             # whole bundle's under their own name
             "counts": Q.scope_counts(payload, args.scope, reports),
             **({"counts_whole_bundle": payload["counts"]} if args.scope else {}),
+            # finding 1: the LOCAL completeness gate, said beside the counts (its questions are listed right after the
+            # blocking ones, each with `completeness`)
+            **({"record_completeness": payload["record_completeness"]} if payload.get("record_completeness") else {}),
             "total": len(kept), "offset": args.offset, "limit": args.limit, "returned": len(page),
             "omitted_before": min(args.offset, len(kept)),
             "omitted_after": max(0, len(kept) - args.offset - len(page)),
@@ -2274,6 +2293,8 @@ def _compact_question(q: Mapping) -> dict:
     if isinstance(out.get("applies_to"), Mapping) and not out["applies_to"].get("runs_outside_live_groups"):
         out["applies_to"] = {k: v for k, v in out["applies_to"].items() if k != "runs_outside_live_groups"}
     pst = q.get("per_scope_targets") or {}
+    if isinstance(out.get("completeness"), Mapping):  # its group ids are counted (`groups`), like every target list
+        out["completeness"] = {k: v for k, v in out["completeness"].items() if k != "group_ids"}
     out["targets_count"] = len(q.get("targets") or ())
     out["scopes_count"] = len(pst)
     # the groups it REACHES (applies_to.groups: a beamtime-wide question reaches every live group, c10-m), less those
@@ -2647,7 +2668,9 @@ def cmd_bundle_export(args) -> int:
     holder: dict = {}
 
     def run():
-        holder["r"] = R.export_records(Path(args.bundle_dir), Path(args.out))
+        holder["r"] = R.export_records(Path(args.bundle_dir), Path(args.out),
+                                       allow_indistinguishable=getattr(args, "allow_indistinguishable", False),
+                                       by=getattr(args, "by", None), orcid=getattr(args, "orcid", None))
         return holder["r"] if args.full else compact_export(holder["r"])
 
     code = _mutation(run)
@@ -2893,6 +2916,55 @@ def cmd_bundle_answers_import(args) -> int:
     return EXIT_OK
 
 
+def cmd_bundle_site_export(args) -> int:
+    """``isaac bundle site export``: the bundle's open questions as plain cards for the question site
+    (``question_site``): ``<out>/data/site-data.json`` and the images its cards show."""
+    from . import mutations as M
+    from . import question_site as S
+
+    try:
+        report = S.export_site(Path(args.bundle_dir), Path(args.out),
+                               suggestions=Path(args.suggestions) if args.suggestions else None,
+                               include=args.include or (),
+                               site_template=Path(args.site_template) if args.site_template else None,
+                               quiet=bool(args.json))
+    except S.SiteRefused as exc:
+        _err(str(exc))
+        return exc.code
+    except M.MutationRefused as exc:
+        _err(str(exc))
+        return exc.code
+    if args.json:
+        _print(report)
+    else:
+        print(S.render_export(report))
+    return EXIT_OK
+
+
+def cmd_bundle_site_import(args) -> int:
+    """``isaac bundle site import``: the question site's answers.json, read back as the ``bundle decide`` calls it
+    stands for (``question_site_import``). Preview by default; ``--apply`` records them."""
+    from . import mutations as M
+    from . import question_site as S
+    from . import question_site_import as SI
+
+    try:
+        report = SI.import_answers(Path(args.bundle_dir), Path(args.answers), site_data=Path(args.site_data),
+                                   apply=args.apply, remember=args.remember, bundle_arg=args.bundle_dir,
+                                   notes_read=args.note_read or ())
+    except S.SiteRefused as exc:
+        _err(str(exc))
+        return exc.code
+    except M.MutationRefused as exc:
+        _err(str(exc))
+        return exc.code
+    if args.json:
+        _print(report)
+    else:
+        print(SI.render_report(report))
+    return EXIT_OK
+
+
 # --- argparse ---------------------------------------------------------------------------
 
 
@@ -3066,6 +3138,9 @@ def build_parser(prog: str = "isaac") -> argparse.ArgumentParser:
     q.add_argument("--each-group", action="store_true",
                    help="also list each per-group question a beamtime-wide question answers at once (e.g. the start "
                         "time); by default they are counted, not listed")
+    q.add_argument("--distinguishing-only", action="store_true",
+                   help="only the questions that put a condition into a record that keeps it apart from another record "
+                        "of its sample (the local completeness tier: after the blocking ones, before the optional ones)")
     q.add_argument("--no-context", action="store_true",
                    help="leave out each question's context (the quotes, values, plots and images beside it; "
                         "`bundle show <dir> question <id>` prints it in full)")
@@ -3123,6 +3198,12 @@ def build_parser(prog: str = "isaac") -> argparse.ArgumentParser:
     q.add_argument("--out", required=True)
     q.add_argument("--full", action="store_true", help="print every exported row in full (default: every refused, withdrawn, "
                    "replaced row and every row with a warning of its own; of the repeated ones the first few)")
+    q.add_argument("--allow-indistinguishable", action="store_true",
+                   help="write the records the local completeness gate holds anyway (a record without a condition that "
+                        "keeps it apart from another record of its sample, or one that says exactly what another says); "
+                        "needs --by: the decision is kept in the bundle, so later exports keep those records")
+    q.add_argument("--by", help="the scientist's name, for --allow-indistinguishable (a local, unverified statement)")
+    q.add_argument("--orcid", help="optional ORCID iD claimed with --by")
     q.set_defaults(func=cmd_bundle_export)
 
     q = bsub.add_parser("upload", help="DRY RUN ONLY: what would be sent to the portal")
@@ -3188,6 +3269,40 @@ def build_parser(prog: str = "isaac") -> argparse.ArgumentParser:
                         "default that row is refused and the existing decision is named)")
     a.add_argument("--json", action="store_true", help="print the full report as JSON")
     a.set_defaults(func=cmd_bundle_answers_import)
+
+    q = bsub.add_parser("site", help="the question site: export the open questions as plain cards, import its answers")
+    ssub = q.add_subparsers(dest="site_command", required=True)
+    e = ssub.add_parser("export", help="write the cards (data/site-data.json and its images) for the question site")
+    e.add_argument("bundle_dir")
+    e.add_argument("--out", required=True,
+                   help="the folder to write (data/ inside it); outside every git working tree: it holds real data")
+    e.add_argument("--suggestions", help="a JSON file of extra hints for the cards (never values): see "
+                                         "docs/question-site-contract.md")
+    e.add_argument("--include", action="append", choices=("optional", "deferred", "approvals"),
+                   help="optional: also the questions not needed to export; deferred: also the ones answered \"I "
+                        "don't know\" earlier; approvals: also one yes / no card per record group to confirm and per "
+                        "merged curve to approve (give it once per kind)")
+    e.add_argument("--site-template", help="the site's own files, copied beside data/ so the folder deploys as it is "
+                                           "(default: this repository's apps/question-site, when it exists)")
+    e.add_argument("--json", action="store_true", help="print the full report as JSON")
+    e.set_defaults(func=cmd_bundle_site_export)
+    i = ssub.add_parser("import", help="read the site's answers.json back as bundle decide calls: preview by default, "
+                                       "--apply to record them (notes are reported, never applied)")
+    i.add_argument("bundle_dir")
+    i.add_argument("answers", help="the answers.json downloaded from the question site")
+    i.add_argument("--site-data", required=True, help="the site-data.json the site was showing (the export's data/ file)")
+    i.add_argument("--apply", action="store_true",
+                   help="record the decisions (default: preview, nothing written); refused for a bundle inside a "
+                        "folder named _runs… (apply to a copy first)")
+    i.add_argument("--remember", action="store_true",
+                   help="with --apply: also keep the recorded answers in the answer memory, only when the scientist "
+                        "has turned it on (isaac answer-memory on)")
+    i.add_argument("--note-read", action="append", metavar="CARD_ID",
+                   help="an answer with a note on a card for several measurements is held (the note may name "
+                        "exceptions); give the card's id here once the note has been read and names none, to apply "
+                        "the answer as it was given (once per card)")
+    i.add_argument("--json", action="store_true", help="print the full report as JSON")
+    i.set_defaults(func=cmd_bundle_site_import)
 
     p = sub.add_parser("answer-memory", help="OPT-IN: remember answers confirmed on earlier beamtimes, on this computer "
                                              "only, and show them as hints (never values) on later ones")

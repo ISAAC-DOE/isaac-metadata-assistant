@@ -1,4 +1,4 @@
-"""A file whose own scan title names the scans it was computed from is a processed output, never a run (bundle 1.15.0;
+"""A file whose own scan title names the scans it was computed from is a processed output, never a run (bundle 1.16.0;
 audit of 18 Nov 2026, rule 5). SYNTHETIC files only: every name is ``SYN``/``ZZ``-prefixed and every value invented.
 
 On real beamtimes the scientists' PyMca exports write a full SPEC header (``#F`` included) whose ``#S`` line names

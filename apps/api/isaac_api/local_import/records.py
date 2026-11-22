@@ -90,6 +90,11 @@ ATHENA_NOT_CHOSEN_WARNING = "athena_version_no_longer_chosen"
 #: r6h H2: a member run's ``macro_setpoint_disagrees`` conflict (a macro and the file name state other set-points for
 #: one measurement) is unanswered: the record goes out with the file's set-point (or none) while that is open.
 MACRO_SETPOINT_WARNING = "macro_setpoint_unanswered"
+#: ``approved_curve.WARNING``: the record's approved curve is older than a scan note or a newer result of its group
+CURVE_OLDER_WARNING = "approved_curve_older_than_evidence"
+#: finding 1: ``export``'s verdict for a record official validation passes that the LOCAL completeness gate holds
+HELD_VERDICT = "held_by_record_completeness"
+ANSWER_FIRST_SHOWN = 20
 #: r6h H3: an in-situ record carries no electrolyte, cell type or control mode (what it was measured in).
 IN_SITU_WARNING = "in_situ_conditions_not_in_record"
 START_TIME_LEFT_OUT = "start time left out: instrument clock zone deferred (question {question})"
@@ -1292,6 +1297,14 @@ def compose_group(bundle: Mapping, group: Mapping, bundle_dir: Path, index: dict
                                               index["memo"])
                           + _start_time_warnings(bundle, group, measured_ids, fields, index["memo"],
                                                  disagreements=report["disagreements"]))
+    # finding 2 (audit of 18 Nov 2026): the record's curve is an approved result OLDER THAN ITS EVIDENCE (a scan note
+    # it was processed without or that came after the approval, or a newer result): said at build-records, validate
+    # and export, first. The record keeps the approved curve: only the scientist changes that.
+    from . import approved_curve as AC
+
+    stale_curve = AC.older_than_evidence(bundle, group["group_id"], index["processing_state"])
+    if stale_curve is not None and (report.get("processing") or {}).get("result") == stale_curve["approved_result_id"]:
+        report["warnings"].insert(0, AC.warning(stale_curve))
     if chose_other is not None:
         # r5c C1: the record carries an approved result that is not the version the scientist chose last: said at
         # build-records, validate and export (on the record's row), never silent
@@ -1331,7 +1344,7 @@ def _stated_potentials(bundle: Mapping, member_ids: set) -> list[dict]:
                                "read_as_V": value, "value_state": c.get("value_state"), "stated_in": "scan header",
                                "locator": e.get("locator"), "run_id": c["run_id"], "runs": [c["run_id"]],
                                "volts": got.get("value"), **({"scale": got["scale"]} if got.get("scale") else {}),
-                               # 1.15.0: a plain line whose value is NOT offered (another potential in the run's name,
+                               # 1.16.0: a plain line whose value is NOT offered (another potential in the run's name,
                                # or a stale line): said so, never "not written in a plain form"
                                **({"withheld": True} if got.get("value") is not None and value is None else {}),
                                # r3a H2: what a line read with no value mentions, to compare only
@@ -1977,6 +1990,8 @@ def potential_warning_text(w: Mapping) -> str:
         return in_situ_text(w)
     if w.get("code") == ATHENA_NOT_CHOSEN_WARNING:
         return athena_choice_text(w, w["group_id"])
+    if w.get("code") == CURVE_OLDER_WARNING:
+        return w["text"]  # approved_curve.text: it names results and notes, never a question
     if w.get("code") == START_TIME_WARNING:
         return start_time_text(w)
     if w.get("open_circuit"):
@@ -2635,6 +2650,8 @@ def warning_rank(code: str | None) -> int:
     else; 2 = the routine start-time note. Only ORDERS the short list: nothing is dropped, and ``--full`` keeps the
     original order."""
     code = str(code or "")
+    if code == CURVE_OLDER_WARNING:
+        return -1  # finding 2: the one warning that says the record's CURVE may be wrong, before every other
     if code in (STATED_POTENTIAL_WARNING, POTENTIAL_SOURCES_WARNING, ATHENA_NOT_CHOSEN_WARNING,
                 MACRO_SETPOINT_WARNING) or code.startswith("portal:"):
         return 0
@@ -2722,6 +2739,74 @@ def group_by_text(per_record: Iterable[Iterable[str]]) -> list[dict]:
     return sorted(seen.values(), key=lambda r: -r["records"])
 
 
+#: finding 16: codes of export's lines that are not a composer warning
+FOLLOWS_LEFT_OUT_CODE = "follows_link_left_out"
+COMPLETENESS_CODE = "record_completeness"
+CODE_EXAMPLE_CHARS = 240
+
+
+def _lead(text: Any) -> str:
+    """What a "Written without …: <sentence>" line says in a few words: its part before the first colon."""
+    return str(text).split(": ", 1)[0].strip()
+
+
+def group_by_code(per_record: Iterable[Iterable[tuple[str, str]]]) -> list[dict]:
+    """Finding 16: the warnings of many records grouped BY CODE: ``[{code, what, records, variants, example,
+    questions, questions_total}]`` over each record's ``(code, text)`` lines. ``what`` is the line's lead ("Written
+    without the potential set-point"); ``records`` how many records carry the code; ``variants`` how many distinct
+    sentences it has (they differ in a value, a file name or a question id); ``example`` one of them, clipped;
+    ``questions`` up to three question ids the sentences name, the one most records name first. Most records first."""
+    seen: dict[tuple[str, str], dict] = {}
+    for lines in per_record:
+        mine: set[tuple[str, str]] = set()
+        for code, text in lines:
+            key = (str(code), _lead(text))
+            row = seen.setdefault(key, {"code": key[0], "what": key[1], "records": 0, "_variants": set(),
+                                        "example": None, "_questions": {}})
+            if key not in mine:
+                mine.add(key)
+                row["records"] += 1
+            row["_variants"].add(fold_key(text))
+            if row["example"] is None:
+                t = str(text)
+                row["example"] = t if len(t) <= CODE_EXAMPLE_CHARS else t[:CODE_EXAMPLE_CHARS - 1] + "…"
+            for qid in dict.fromkeys(m.group(0) for m in _QUESTION_ID_IN_TEXT.finditer(str(text))):
+                row["_questions"][qid] = row["_questions"].get(qid, 0) + 1
+    out = []
+    for row in sorted(seen.values(), key=lambda r: -r["records"]):
+        # the question the most records name comes first (one that answers many at once), ties in first-seen order
+        counted = row.pop("_questions")
+        qs = sorted(counted, key=lambda q: -counted[q])
+        out.append({**{k: v for k, v in row.items() if k != "_variants"}, "variants": len(row["_variants"]),
+                    # ONE sentence on every record that carries it: that sentence, whole (its question id folded)
+                    **({"text": next(iter(row["_variants"]))} if len(row["_variants"]) == 1 else {}),
+                    "questions": qs[:3], "questions_total": len(qs)})
+    return out
+
+
+def by_code_sentence(rows: Sequence[Mapping]) -> str:
+    """One short sentence for :func:`group_by_code` rows: "87 record(s) written without the potential set-point (18
+    variants; answer question Q-… and 10 more); 89 record(s) written without the start time (…)". A kind with ONE
+    sentence on all its records says that sentence whole, with its record count."""
+    parts = []
+    for r in rows:
+        if r.get("text"):
+            # one sentence, said whole, as before (r5f L3): nothing is gained by shortening it
+            parts.append(f"{r['text']} ({r['records']} record(s)"
+                         + (f", e.g. question {r['questions'][0]}" if r["questions"] else "") + ")")
+            continue
+        what = str(r["what"])
+        what = what[:1].lower() + what[1:]
+        notes = []
+        if r["variants"] > 1:
+            notes.append(f"{r['variants']} variants that differ only in the value, file or question they name")
+        if r["questions"]:
+            more = r["questions_total"] - 1
+            notes.append(f"answer question {r['questions'][0]}" + (f" and {more} more" if more > 0 else ""))
+        parts.append(f"{r['records']} record(s) {what}" + (f" ({'; '.join(notes)})" if notes else ""))
+    return "; ".join(parts)
+
+
 def grouped_sentence(rows: Sequence[Mapping]) -> str:
     """One sentence for :func:`group_by_text` rows: each text once, with how many records carry it and one example."""
     return "; ".join(f"{r['text']} ({r['records']} record(s)" + (f", e.g. question {r['example_question']}" if r["example_question"] else "")
@@ -2787,6 +2872,8 @@ def written_without(w: Mapping) -> str:
         return f"Written without what it was measured in: {w['text']}"
     if w.get("code") == ATHENA_NOT_CHOSEN_WARNING:
         return f"Written with an approved curve that is not the chosen Athena version: {w['text']}"
+    if w.get("code") == CURVE_OLDER_WARNING:
+        return f"Written with an approved curve older than its evidence: {w['text']}"
     name = WRITTEN_WITHOUT_NAMES.get(w.get("path"), w.get("path") or "a stated condition")
     return f"Written without {name}: {w['text']}"
 
@@ -2837,7 +2924,14 @@ def validate_records(bundle_dir: Path, *, run_portal=None, full: bool = False) -
     verdicts, stale, not_exportable = {}, [], []
     portal_warned: dict[str, list[dict]] = {}
     fresh = fresh_compositions(bundle_dir, bundle, test_marker=marked)
-    warned = with_question_commands(bundle, [w for _, _, comp in fresh for w in comp.get("warnings") or ()])
+    from . import questions as Q
+
+    payload = Q.consolidate(bundle) if fresh else {"questions": []}
+    warned = with_question_commands(bundle, [w for _, _, comp in fresh for w in comp.get("warnings") or ()], payload)
+    # finding 1: the LOCAL record-completeness gate, per group (each condition, its state, what answers it); it is
+    # reported under its own name and never moves a verdict
+    holds_all, _, gate_of = completeness_holds(bundle, fresh, payload, [gid for gid, _, _ in fresh])
+    to_write: list[tuple[str, dict]] = []  # written once the gate is known for the groups that pass (finding 7)
     for group_id, draft, composition in fresh:
         if _on_disk_differs(bundle_dir, group_id, draft, composition):
             stale.append(group_id)
@@ -2846,7 +2940,7 @@ def validate_records(bundle_dir: Path, *, run_portal=None, full: bool = False) -
         report["composed_from"] = "the validated bundle, now (an on-disk draft is never trusted)"
         report["on_disk_draft_differs"] = group_id in stale
         report["warnings"] = [w for w in warned if w["group_id"] == group_id]
-        _atomic_write(out_dir / f"{group_id}.json", _json_bytes(report))
+        to_write.append((group_id, report))
         verdicts[group_id] = report["verdict"]
         if pw := portal_warnings_of(report):
             portal_warned[group_id] = pw
@@ -2870,6 +2964,26 @@ def validate_records(bundle_dir: Path, *, run_portal=None, full: bool = False) -
             not_exportable_omitted=max(0, len(not_exportable) - REASONS_SHOWN),
             reports=f"{VALIDATION_DIR}/<group_id>.json holds each group's full report (every gate, verbatim).",
         )
+    if verdicts:
+        # finding 1: of the records official validation passes, how many the local completeness gate holds, and why
+        passing = [g for g, v in verdicts.items() if v == "exportable"]
+        holds, sets, _ = completeness_holds(bundle, fresh, payload, passing)
+        out["record_completeness"] = completeness_summary(holds, sets, gate_of, passing)
+        out["ready_to_export"] = len(passing) - sum(1 for g in passing if g in holds)
+    else:
+        holds = {}
+    for group_id, report in to_write:
+        # review of PR 342, finding 7: each report says whether export would write the record, and why not: the
+        # gate over the groups that pass, as `export` judges it (a condition held, or the same body as another)
+        if group_id in gate_of:
+            h = holds.get(group_id) if report.get("verdict") == "exportable" else holds_all.get(group_id)
+            report["record_completeness"] = {
+                **gate_of[group_id], "ready": h is None, "held_by": list((h or {}).get("held_by") or ()),
+                **({"text": h["text"]} if h and h.get("text") else {}),
+                **({"questions": h["questions"]} if h and h.get("questions") else {}),
+                "note": "A local gate beside official validation: it never changes the verdict above; `export` holds "
+                        "a record it names."}
+        _atomic_write(out_dir / f"{group_id}.json", _json_bytes(report))
     # r8: the condition labels' own warnings (two ready records ISAAC cannot tell apart; a label not proposed)
     warned = warned + L.record_warnings(bundle, fresh, [g for g, v in verdicts.items() if v == "exportable"])
     out.update(warning_summary(warned, first=[g for g, v in verdicts.items() if v == "exportable"], full=full,
@@ -2907,6 +3021,147 @@ def validate_records(bundle_dir: Path, *, run_portal=None, full: bool = False) -
         # an empty verdict list is "nothing checked", never "everything passed"
         out["nothing_validated"] = ("No record draft to validate: no record group is confirmed yet. Confirm the groups "
                                     "(`isaac bundle decide --decision confirm`), then run `isaac bundle build-records`.")
+    return out
+
+
+def completeness_holds(bundle: Mapping, fresh: Sequence[tuple[str, Mapping, Mapping]], payload: Mapping,
+                       candidates: Sequence[str]) -> tuple[dict[str, dict], list[list[str]], dict[str, dict]]:
+    """Finding 1 (audit of 18 Nov 2026), the LOCAL record-completeness gate (``completeness.py``) over the groups
+    ``candidates`` (those that would otherwise be written): ``(holds, identical sets, gate per group)``.
+
+    ``holds``: ``{group_id: {"held_by": [reason, ...], "text", "needs", "questions", "indistinguishable_from"}}`` for
+    each group with an OPEN distinguishing condition (a condition grouping used to keep it apart from another record
+    of its sample that is neither in its record nor declined) or whose record would say exactly what another one
+    says. Official validation is not read and not changed here."""
+    from . import completeness as CP
+    from . import questions as Q
+
+    wanted = set(candidates)
+    gate_of = CP.gates(bundle, {gid: comp for gid, _, comp in fresh})
+    questions_of = CP.questions_for(payload)
+    # questions that share one reading are answered together (--same-reading): counted as ONE answer
+    batch_of = {q["question_id"]: q.get("same_reading_group") or q["question_id"]
+                for q in payload.get("questions") or () if q.get("completeness")}
+    holds: dict[str, dict] = {}
+    for gid, gate in gate_of.items():
+        if gid in wanted and not gate["ready"]:
+            qs = list(dict.fromkeys(q for path in gate["needs"] for q in (questions_of.get(gid) or {}).get(path, ())))
+            holds[gid] = {"held_by": [CP.HELD_CONDITION], "needs": list(gate["needs"]), "questions": qs,
+                          "answers": list(dict.fromkeys(batch_of.get(q, q) for q in qs)),
+                          "conditions": [r["condition"] for r in gate["conditions"] if r["state"] == CP.OPEN],
+                          "text": CP.hold_text(gate, questions_of.get(gid))}
+    first = first_member_runs(bundle)
+    sets = CP.identical_sets(bundle, [(gid, draft) for gid, draft, _ in fresh if gid in wanted], gate_of)
+    for same in sets:
+        names = [str((first.get(g) or {}).get("stem") or g) for g in same]
+        shown = ", ".join(names[:CP.NAMED]) + (f" and {len(names) - CP.NAMED} more" if len(names) > CP.NAMED else "")
+        # the questions that would tell them apart: the open ones of its members, the widest-reaching first
+        reach: dict[str, int] = {}
+        for g in same:
+            for ids in (questions_of.get(g) or {}).values():
+                for q in ids:
+                    reach[q] = reach.get(q, 0) + 1
+        qs = [q for q, _ in sorted(reach.items(), key=lambda kv: (-kv[1], kv[0]))]
+        # review of PR 342, finding 4: keep_apart is offered only when a merge candidate over the set exists
+        mc = next((m.get("merge_candidate_id") for m in bundle.get("merge_candidates") or ()
+                   if isinstance(m, Mapping) and set(same) <= set(m.get("group_ids") or ())), None)
+        repeats = (f"keep them apart (`isaac bundle decide <bundle_dir> --target {mc} --decision keep_apart --by "
+                   '"<your name>"`), or give each its own sample id or history label' if mc else
+                   "give each its own sample id or history label, or export them anyway")
+        how = (f"Answer question {', '.join(qs[:3])}" + (f" (and {len(qs) - 3} more)" if len(qs) > 3 else "")
+               + " to say what differs" if qs else
+               "No open question tells them apart: if they are one measurement, merge their groups; if they are "
+               f"intended repeats, {repeats}")
+        said = (f"Held ({CP.GATE_ID}): these {len(same)} records would be indistinguishable (the same sample, system "
+                f"and context in every field): {shown}. {how}; `export {CP.ALLOW_FLAG} --by \"<your name>\"` writes them anyway.")
+        for gid in same:
+            row = holds.setdefault(gid, {"held_by": [], "needs": [], "questions": [], "answers": [], "conditions": [],
+                                         "text": ""})
+            row["held_by"].append(CP.HELD_IDENTICAL)
+            row["indistinguishable_from"] = [g for g in same if g != gid]
+            if not row["questions"]:  # a member with no open condition of its own: the set's widest questions
+                row["questions"] = qs[:3]
+            row["text"] = (row["text"] + " " if row["text"] else "") + said
+    # review of PR 342, finding 5: a hold the scientist decided to export anyway (export_despite_completeness, for THIS
+    # record body) is not a hold; the decision is said on the group's gate. A decision for another body is not.
+    anyway = CP.export_anyway_of(bundle)
+    draft_of = {gid: draft for gid, draft, _ in fresh}
+    for gid in list(holds):
+        d = anyway.get(gid)
+        if d is None or gid not in draft_of:
+            continue
+        if (d.get("value") or {}).get("body_sha256") == CP.body_digest(draft_of[gid]):
+            said = {"decision_id": d.get("decision_id"), "by": (d.get("decided_by") or {}).get("name"),
+                    "decided_utc": d.get("decided_utc"), "held_by": list(holds[gid]["held_by"]),
+                    "text": holds[gid]["text"]}
+            if gid in gate_of:
+                gate_of[gid]["exported_anyway"] = said
+            del holds[gid]
+        else:
+            holds[gid]["text"] += (f" (An earlier decision to export it anyway, {d.get('decision_id')}, was for another "
+                                   "record body: the record has changed since.)")
+    return holds, sets, gate_of
+
+
+def completeness_summary(holds: Mapping[str, Mapping], sets: Sequence[Sequence[str]], gate_of: Mapping[str, Mapping],
+                         candidates: Sequence[str], *, allowed: bool = False) -> dict:
+    """The reply's ``record_completeness`` block: the gate by name, how many of the ``candidates`` it holds and for
+    what, the questions that answer the most held records first, and one plain statement."""
+    from . import completeness as CP
+
+    wanted = list(candidates)
+    by_reason: dict[str, int] = {}
+    by_condition: dict[str, int] = {}
+    asked: dict[str, int] = {}
+    for gid in wanted:
+        h = holds.get(gid)
+        if not h:
+            continue
+        for r in h["held_by"]:
+            by_reason[r] = by_reason.get(r, 0) + 1
+        for c in h.get("conditions") or ():
+            by_condition[c] = by_condition.get(c, 0) + 1
+        for q in (h.get("answers") or h.get("questions") or ()):
+            asked[q] = asked.get(q, 0) + 1
+    held = [g for g in wanted if g in holds]
+    anyway = [g for g in wanted if (gate_of.get(g) or {}).get("exported_anyway")]
+    out: dict[str, Any] = {"gate": CP.GATE_ID, "checked": len(wanted), "ready": len(wanted) - len(held), "held": len(held),
+                           "exported_anyway": len(anyway),
+                           "held_by_reason": by_reason,
+                           "open_conditions": dict(sorted(by_condition.items(), key=lambda kv: (-kv[1], kv[0]))),
+                           "indistinguishable_sets": [list(x) for x in sets][:REASONS_SHOWN * 4],
+                           "indistinguishable_sets_total": len(sets),
+                           # one row per ANSWER: a question id, or a same-reading batch (SR-…: answer any one of its
+                           # questions with --same-reading), with how many held records it reaches
+                           "answer_first": [{("same_reading_group" if str(q).startswith("SR-") else "question_id"): q,
+                                             "records": n}
+                                            for q, n in sorted(asked.items(), key=lambda kv: (-kv[1], kv[0]))[:ANSWER_FIRST_SHOWN]],
+                           "answers_needed": len(asked)}
+    if not held:
+        out["statement"] = (f"Record completeness ({CP.GATE_ID}, a local gate beside official validation): all "
+                            f"{len(wanted)} record(s) carry or decline every condition that keeps them apart from "
+                            "another record of their sample, and no two say the same thing"
+                            + (f", or the scientist decided to export them anyway ({len(anyway)}, "
+                               f"{CP.EXPORT_ANYWAY_DECISION})" if anyway else "") + ".")
+        return out
+    parts = []
+    if by_condition:
+        parts.append(f"{by_reason.get(CP.HELD_CONDITION, 0)} would be written without a condition that keeps them apart "
+                     "from another record of their sample ("
+                     + "; ".join(f"{w}: {n}" for w, n in CP._by_words(out["open_conditions"]).items()) + ")")
+    if sets:
+        n = sum(len(x) for x in sets)
+        parts.append(f"{n} would be indistinguishable from another record ({len(sets)} set(s) of records that say the "
+                     "same thing in every sample, system and context field)")
+    first = "; ".join(f"{a.get('question_id') or a.get('same_reading_group')} ({a['records']} record(s))"
+                      for a in out["answer_first"][:5])
+    out["statement"] = (
+        f"Record completeness ({CP.GATE_ID}, a local gate beside official validation, which it does not change): "
+        f"{len(held)} of {len(wanted)} record(s) " + ("are written although " if allowed else "are held: ")
+        + "; and ".join(parts) + "."
+        + (f" {out['answers_needed']} answer(s) fill them; first: {first}." if first else "")
+        + (" Each needs its condition confirmed, corrected or declined (reject)." if by_condition else "")
+        + ("" if allowed else f" `isaac bundle export <bundle_dir> --out <dir> {CP.ALLOW_FLAG} --by \"<your name>\"` writes them anyway."))
     return out
 
 
@@ -3167,7 +3422,8 @@ def _withdrawal_statement(record_id: str, exported_utc: Any, moved: Sequence[str
             f"what the bundle composes; {where}. Do not upload it. If it was already uploaded, the portal still holds it.")
 
 
-def export_records(bundle_dir: Path, out: Path, *, run_portal=None) -> dict:
+def export_records(bundle_dir: Path, out: Path, *, run_portal=None, allow_indistinguishable: bool = False,
+                   by: str | None = None, orcid: str | None = None) -> dict:
     """Write ONLY records that pass the portal-target official validation AND whose portal
     outcome is ``publish`` (DEC-76). Every gate is re-run here; a stale validation file is
     never trusted. The record is composed with ``export.transform`` and its sidecar with
@@ -3184,7 +3440,18 @@ def export_records(bundle_dir: Path, out: Path, *, run_portal=None) -> dict:
     exportable now — refused by a gate, or no longer a scientist-confirmed group — has its record moved to
     ``withdrawn/`` (kept, never in an upload plan; nothing replaces it), its index entry marked
     ``withdrawn_utc``, and the result lists it under ``withdrawn`` (and on its ``refused`` row). Exporting
-    the same record body again later restores it under the same id, and its withdrawn copy is removed."""
+    the same record body again later restores it under the same id, and its withdrawn copy is removed.
+
+    THE LOCAL COMPLETENESS GATE (finding 1 of the 18 Nov 2026 audit; ``completeness.py``): a record official
+    validation passes is HELD (not written; listed under ``refused`` with ``verdict: held_by_record_completeness``
+    and ``official_validation: passed``) while a condition grouping used to keep it apart from another record of its
+    sample is neither in it nor declined, or while it would say exactly what another record says.
+    ``allow_indistinguishable`` (with ``by``, the scientist's name) writes such records anyway and RECORDS that word in
+    the bundle (``export_despite_completeness``, per group and record body), so a later export keeps them; each row
+    says so. A record written before and held now is withdrawn, and the outcome says why."""
+    if allow_indistinguishable and not (by and str(by).strip()):
+        raise RecordsRefused('Exporting a held record anyway is the scientist\'s decision, kept in the bundle: give --by '
+                             '"<your name>" with --allow-indistinguishable. Nothing was written.', code=2)
     from isaac_records.export import build_sidecar
     from isaac_records.ids import new_record_id
     from isaac_records.official import validate_official
@@ -3197,7 +3464,9 @@ def export_records(bundle_dir: Path, out: Path, *, run_portal=None) -> dict:
     bundle = load_validated(bundle_dir)
     label_of = group_labels(bundle)  # r7 J6: each row names its first member file
     exported, refused = [], []
+    curve_older: list[str] = []
     said_each_record: list[list[str]] = []
+    coded_each_record: list[list[tuple[str, str]]] = []
     portal_warned: dict[str, list[dict]] = {}
     index = _read_export_index(out) if out.is_dir() else {"format": EXPORT_INDEX_FORMAT, "records": []}
     bundle_id = bundle.get("bundle_id")
@@ -3217,7 +3486,31 @@ def export_records(bundle_dir: Path, out: Path, *, run_portal=None) -> dict:
     minted: dict[str, str] = {}
     withdrawn: list[dict] = []
     # c11-a: a record written while a warning still applies says so on its row ("Written without …"), never silent
-    warned = with_question_commands(bundle, [w for _, _, comp in fresh for w in comp.get("warnings") or ()])
+    from . import completeness as CP
+    from . import questions as Q
+
+    payload = Q.consolidate(bundle) if fresh else {"questions": []}
+    warned = with_question_commands(bundle, [w for _, _, comp in fresh for w in comp.get("warnings") or ()], payload)
+    # finding 1: the local completeness gate over the groups whose draft is complete (the ones that can be written)
+    writable = [gid for gid, _, comp in fresh if not comp.get("missing_required") and not comp.get("disagreements")]
+    # review of PR 342, finding 8: the gate judges the groups official validation PASSES, as `validate` does, so a
+    # record the portal refuses never holds its twin. Each report is reused below when the draft gains no link.
+    pre = {gid: validate_draft_file(draft, run_portal=run_portal, composition=comp)
+           for gid, draft, comp in fresh if gid in set(writable)}
+    writable = [gid for gid in writable if pre[gid]["verdict"] == "exportable"]
+    holds, identical, gate_of = completeness_holds(bundle, fresh, payload, writable)
+    if allow_indistinguishable and holds:
+        # the scientist's word, recorded BEFORE anything is written (review of PR 342, finding 5)
+        from . import mutations as M
+
+        draft_of = {gid: d for gid, d, _ in fresh}
+        M.record_export_anyway(bundle_dir, [(gid, {"body_sha256": CP.body_digest(draft_of[gid]),
+                                                   "held_by": list(h["held_by"])}) for gid, h in holds.items()],
+                               by=str(by), orcid=orcid)
+        bundle = load_validated(bundle_dir)
+        holds, identical, gate_of = completeness_holds(bundle, fresh, payload, writable)
+    held_now: list[str] = []
+    withdrawn_held: list[str] = []
 
     def withdraw(earlier: dict, why: str) -> dict:
         """Move an earlier export's record to WITHDRAWN_DIR and mark its index entry; the row's keys."""
@@ -3244,7 +3537,8 @@ def export_records(bundle_dir: Path, out: Path, *, run_portal=None) -> dict:
                                                             drafts=drafts_by_gid, minted=minted, stale=stale_follows)
         if link is not None:
             draft = L.with_link(draft, link, link_evidence)
-        report = validate_draft_file(draft, run_portal=run_portal, composition=composition)
+        report = (pre[group_id] if link is None and group_id in pre else
+                  validate_draft_file(draft, run_portal=run_portal, composition=composition))
         if report["verdict"] != "exportable":
             row = {"group_id": group_id, **_label(label_of, group_id), "verdict": report["verdict"],
                    "summary": report["plain_summary"],
@@ -3255,6 +3549,22 @@ def export_records(bundle_dir: Path, out: Path, *, run_portal=None) -> dict:
                 # out of --out's top level, so `upload --dry-run` no longer lists it, and the row says so
                 row.update(withdraw(earlier, f"this export refused the group ({report['verdict']})"))
             refused.append(row)
+            continue
+        if group_id in holds:
+            # HELD by the local completeness gate: official validation passed, and the record is still not written
+            h = holds[group_id]
+            row = {"group_id": group_id, **_label(label_of, group_id), "verdict": HELD_VERDICT,
+                   "official_validation": "passed", "held_by": list(h["held_by"]), "summary": [h["text"]],
+                   "missing_required": [], "processing_blocker": None,
+                   **({"answer": h["questions"][:5]} if h.get("questions") else {}),
+                   **({"indistinguishable_from": h["indistinguishable_from"]} if h.get("indistinguishable_from") else {})}
+            earlier = prior_of.get((bundle_id, group_id))
+            if earlier is not None and earlier.get("record_id"):
+                row.update(withdraw(earlier, f"this export holds the group ({CP.GATE_ID})"))
+                if row.get("withdrawn"):
+                    withdrawn_held.append(group_id)
+            refused.append(row)
+            held_now.append(group_id)
             continue
         where = P.locate()
         from .mutations import now_utc
@@ -3346,14 +3656,27 @@ def export_records(bundle_dir: Path, out: Path, *, run_portal=None) -> dict:
                "sidecar": sidecar_path.name,
                "artifacts": artifacts, "schemas_used": report["schemas_used"], "export": status,
                "statement": "Valid for the portal's pinned schema; NOT claimed valid for the website."}
-        still = [written_without(w) for w in sorted((w for w in warned if w["group_id"] == group_id),
-                                                    key=lambda w: warning_rank(w.get("code")))]
+        mine = sorted((w for w in warned if w["group_id"] == group_id), key=lambda w: warning_rank(w.get("code")))
+        still = [written_without(w) for w in mine]
+        codes = [str(w.get("code") or "warning") for w in mine]  # finding 16: each line's warning code, in step
         if link_left_out:
             still.append(L.NOT_WRITTEN_FOLLOWS.format(why=link_left_out))
+            codes.append(FOLLOWS_LEFT_OUT_CODE)
+        if (anyway := (gate_of.get(group_id) or {}).get("exported_anyway")):
+            # written although the completeness gate would hold it: the scientist's recorded decision, said first
+            still.insert(0, f"Written although record completeness holds it ({CP.ALLOW_FLAG}): {anyway['by']} decided "
+                         f"to export it anyway ({anyway['decision_id']}, {CP.EXPORT_ANYWAY_DECISION}): "
+                         + anyway["text"].replace(f"Held ({CP.GATE_ID}): ", "", 1))
+            codes.insert(0, COMPLETENESS_CODE)
+            held_now.append(group_id)
         if link is not None:
             row["follows"] = {"target": link["target"], "basis": link["basis"]}
+        if any(w.get("code") == CURVE_OLDER_WARNING for w in warned if w["group_id"] == group_id):
+            curve_older.append(group_id)  # finding 2: repeated in the reply's own block and outcome, first
         said_each_record.append(list(still))  # r5f L3: grouped by text for the summary below (rows keep their own)
+        coded_each_record.append(list(zip(codes, still)))  # finding 16: ...and by warning code, for the outcome
         written_notes = list(still)  # what export says the record is written without, kept for `upload --dry-run`
+        written_codes = list(codes)
         if pw := portal_warnings_of(report):
             # r4-b M7: a record the portal validator warns about says so on its row
             portal_warned[group_id] = pw
@@ -3399,7 +3722,7 @@ def export_records(bundle_dir: Path, out: Path, *, run_portal=None) -> dict:
                                          if status == "replaced" else list((prior or {}).get("replaced_record_ids") or [])),
                  # what export says this record is written without (every "Written without ..." line), kept so the
                  # upload dry run says exactly the same notes
-                 **({"written_without": written_notes} if written_notes else {}),
+                 **({"written_without": written_notes, "written_without_codes": written_codes} if written_notes else {}),
                  # r5f L3: what the portal validator warned about this record, kept so the dry run can say it once
                  **({"portal_warnings": [{"code": w["code"], "path": w["path"], "message": w["message"]} for w in pw]}
                     if (pw := portal_warnings_of(report)) else {})}
@@ -3440,11 +3763,49 @@ def export_records(bundle_dir: Path, out: Path, *, run_portal=None) -> dict:
         "on_disk_drafts_ignored_because_they_differ": stale,
         "on_disk_drafts_ignored_with_no_confirmed_group": orphans,
     }
+    if writable:
+        # finding 1: the local gate by name, what it holds and what answers it; nothing about official validation
+        anyway_now = [g for g in held_now if (gate_of.get(g) or {}).get("exported_anyway")]
+        held_only = [g for g in held_now if g in holds]
+        block = completeness_summary({g: holds[g] for g in held_only}, [x for x in identical if set(x) & set(held_only)],
+                                     gate_of, writable)
+        result["record_completeness"] = block
+        if held_only:
+            result["records_held_by_completeness"] = len(held_only)
+            result["outcome"] += " " + block["statement"]
+        if anyway_now:
+            who = sorted({str(gate_of[g]["exported_anyway"]["by"]) for g in anyway_now})
+            result["records_written_although_incomplete"] = len(anyway_now)
+            result["outcome"] += (f" {len(anyway_now)} record(s) are written although record completeness would hold them: "
+                                  f"{', '.join(who)} decided to export them anyway ({CP.EXPORT_ANYWAY_DECISION}, kept in "
+                                  "the bundle, so later exports keep them while each record stays the same).")
+        if withdrawn_held:
+            result["withdrawn_by_completeness"] = withdrawn_held
+            result["outcome"] += (f" {len(withdrawn_held)} earlier record(s) were withdrawn because record completeness "
+                                  "holds them now (their record changed, or no decision to export them anyway applies): "
+                                  "each `refused` row says why; `export --allow-indistinguishable --by \"<your name>\"` "
+                                  "writes them again.")
+    if curve_older:
+        # finding 2 (audit of 18 Nov 2026): said before every other warning, with the groups, never only on a row
+        said = (f"{len(curve_older)} record(s) carry an approved curve older than its evidence (a logbook scan note "
+                "it was processed without or that came after the approval, or a newer processing result): "
+                + ", ".join(curve_older[:REASONS_SHOWN])
+                + (f" and {len(curve_older) - REASONS_SHOWN} more" if len(curve_older) > REASONS_SHOWN else "")
+                + ". Each record keeps its approved curve; `isaac bundle validate <bundle_dir>` says what is newer "
+                  "and the next step for each.")
+        result["older_than_evidence"] = {"code": CURVE_OLDER_WARNING, "records": len(curve_older),
+                                         "group_ids": list(curve_older), "statement": said}
+        result["outcome"] += " " + said
     if (said_once := group_by_text(said_each_record)):
         # r5f L3: the same warning on every record is said once here, with its record count and one example question;
         # each row of `exported` keeps its own `warnings`
         result["warnings_by_text"] = said_once
-        result["outcome"] += warnings_outcome_sentence(said_once)
+        # finding 16 (audit of 18 Nov 2026): the outcome says each KIND of warning once, by its code, with how many
+        # records carry it and how many variants it has (before: 18 "kinds" that differed only in a voltage, about
+        # 3,000 characters); `warnings_by_text` keeps every distinct sentence
+        result["warnings_by_code"] = group_by_code(coded_each_record)
+        result["outcome"] += " Warnings that apply, by kind: " + by_code_sentence(result["warnings_by_code"]) + (
+            " (`warnings_by_code`; every distinct sentence is in `warnings_by_text`).")
     if portal_warned:
         # r4-b M7: each portal warning once, with how many of the records written carry it
         result["portal_warnings"] = portal_warning_summary(portal_warned)
@@ -3591,13 +3952,20 @@ def upload_summary(plan: Sequence[Mapping], records_dir: Path, portal_url: str |
     ids = {Path(p["record"]).stem for p in plan}
     portal = _portal_warnings_in_index(Path(records_dir), ids)
     statement = lead + " Nothing was sent. The token is never read or printed."
+    # finding 16: by warning code, with counts (the codes export kept in its index; an older index has none, and its
+    # lines are grouped by their lead instead)
+    codes_of = _written_without_codes_in_index(Path(records_dir))
+    by_code = group_by_code([((codes_of.get(Path(p["record"]).stem) or {}).get(t) or _lead(t), t)
+                             for t in p.get("notes") or ()] for p in plan)
     if notes:
-        statement += " What these records are written without, each said once: " + grouped_sentence(notes) + " (records[].notes)."
+        statement += (" What these records are written without, by kind: " + by_code_sentence(by_code)
+                      + " (notes_by_code; each record's own lines are in records[].notes).")
     if portal:
         statement += (" The portal validator warned, each said once: "
                       + "; ".join(f"{w['code']}" + (f" at {w['path']}" if w.get("path") else "") + f": {w['message']} ({w['records']} record(s))"
                                   for w in portal) + " (portal_warnings).")
-    return {"statement": statement, "notes_by_text": notes, **({"portal_warnings": portal} if portal else {})}
+    return {"statement": statement, "notes_by_code": by_code, "notes_by_text": notes,
+            **({"portal_warnings": portal} if portal else {})}
 
 
 def _portal_warnings_in_index(records_dir: Path, record_ids: set[str]) -> list[dict]:
@@ -3659,6 +4027,22 @@ def _labels_in_index(records_dir: Path) -> dict[str, str]:
     rows = index.get("records") if isinstance(index, Mapping) else None
     return {r["record_id"]: r["label"] for r in rows or () if isinstance(r, Mapping)
             and isinstance(r.get("record_id"), str) and isinstance(r.get("label"), str)}
+
+
+def _written_without_codes_in_index(records_dir: Path) -> dict[str, dict[str, str]]:
+    """``{record_id: {a "Written without ..." line: its warning code}}`` from the export index (finding 16); ``{}``
+    for an index an older export wrote. By the line's text, never by position: the dry run orders a record's notes
+    its own way."""
+    try:
+        index = json.loads((records_dir / EXPORT_INDEX).read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return {}
+    rows = index.get("records") if isinstance(index, Mapping) else None
+    return {r["record_id"]: {str(t): str(c) for t, c in zip(r["written_without"], r["written_without_codes"])}
+            for r in rows or ()
+            if isinstance(r, Mapping) and isinstance(r.get("record_id"), str)
+            and isinstance(r.get("written_without_codes"), list) and isinstance(r.get("written_without"), list)
+            and len(r["written_without"]) == len(r["written_without_codes"])}
 
 
 def _written_without_in_index(records_dir: Path) -> dict[str, list[str]]:

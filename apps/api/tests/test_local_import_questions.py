@@ -79,7 +79,12 @@ def test_questions_are_deduplicated_ordered_and_fewer_than_v1(grouped):
     assert len(keys) == len(set(keys))
     ids = [q["question_id"] for q in p["questions"]]
     assert len(ids) == len(set(ids))
-    assert [q["tier"] for q in p["questions"]] == sorted(q["tier"] for q in p["questions"])
+    # blocking first; then the questions that fill a condition which keeps two records apart (the local completeness
+    # tier, audit of 18 Nov 2026 finding 1), whatever their tier number; then the rest by tier
+    def rank(q):
+        return (0 if q["tier"] == 1 else 1 if q.get("completeness") else 2, q["tier"])
+
+    assert [rank(q) for q in p["questions"]] == sorted(rank(q) for q in p["questions"])
     assert p["counts"]["total"] < p["counts"]["fine_grained_v1"] + len(b["conflicts"])
     # every question with an answer has a command; an informational one (no answer can reach the
     # record: an array path, or no write route) says so instead of offering one
