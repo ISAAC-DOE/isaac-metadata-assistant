@@ -335,6 +335,8 @@ def render_summary(bundle: Mapping) -> str:
     )
     if counts.get(B.HEADER_COMMENT_RUNS_NOT_READ):
         add(f"  - {B.header_comment_runs_not_read_text(counts[B.HEADER_COMMENT_RUNS_NOT_READ])}")
+    if counts.get(B.NOT_A_CONFLICT_COUNT):
+        add(f"  - {B.not_a_conflict_text(counts[B.NOT_A_CONFLICT_COUNT])}")
     add(f"- People named in the sources: {counts['contributors']} (evidence, not the naming profile)")
     groups = bundle.get("record_groups") or []
     if groups or bundle.get("processing_results"):

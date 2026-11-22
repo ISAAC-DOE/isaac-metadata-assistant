@@ -19,6 +19,7 @@ from pathlib import Path
 
 import pytest
 
+from isaac_api.bl15 import classify as C
 from isaac_api.local_import import bundle as B
 from isaac_api.local_import import cli
 from isaac_api.local_import import mutations as M
@@ -34,7 +35,7 @@ def _vendored_schema_basis(monkeypatch, tmp_path):
     monkeypatch.setenv("ISAAC_PORTAL_VALIDATOR_PYTHON", str(tmp_path / "no-validator" / "python"))
 
 
-RULES = (S.NAME_POTENTIAL_RULE_ID, S.OPEN_CIRCUIT_RULE_ID)
+RULES = (S.NAME_POTENTIAL_RULE_ID, S.OPEN_CIRCUIT_RULE_ID, C.PROCESSED_TITLE_RULE_ID, B.TITLE_LINK_RULE_ID, *B.NOT_A_CONFLICT_RULES)
 
 
 def test_the_version_is_bumped_by_the_existing_mechanism():

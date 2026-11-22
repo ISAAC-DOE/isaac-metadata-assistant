@@ -369,8 +369,11 @@ def test_a_1_10_0_validator_shape_refuses_nothing_old_and_the_new_enums_are_the_
     assert f["rule_id"]["enum"][:2] == ["isaac.processed_output.origin.v0", "isaac.processed_output.origin.engine_classification.v0"]
     assert f["basis"]["enum"][:3] == ["line_1", "fields", "engine_classification"]  # 1.13.0 appends merge_folder (test_local_import_overnight_polish_merge)
     link = s["$defs"]["processed_output"]["properties"]["proposed_links"]["items"]["properties"]
-    assert link["rule_id"]["enum"] == ["isaac.processed_output.link_by_run_stem.v0", "isaac.processed_output.link_by_legacy_number.v0"]
-    assert link["match"]["enum"] == ["exact", "scan_selection_suffix", "legacy_number"]
+    # 1.15.0 appends the title-scans link (additive enum values for the scientists' processed merge files, approved
+    # 9 Nov 2026): test_local_import_processed_titles.py
+    assert link["rule_id"]["enum"][:2] == ["isaac.processed_output.link_by_run_stem.v0", "isaac.processed_output.link_by_legacy_number.v0"]
+    assert link["match"]["enum"][:3] == ["exact", "scan_selection_suffix", "legacy_number"]
+    assert link["rule_id"]["enum"][2:] == [B.TITLE_LINK_RULE_ID] and link["match"]["enum"][3:] == ["title_scans"]
     note = s["$defs"]["processed_output"]["properties"]["link_note"]["anyOf"][1]["properties"]
     assert note["code"]["enum"][-2:] == ["spans_several_runs", "run_has_no_scans"]
     assert "legacy_number" in note["match"]["enum"]
