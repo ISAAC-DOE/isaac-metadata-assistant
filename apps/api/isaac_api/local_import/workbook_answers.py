@@ -399,6 +399,11 @@ def decide_command(bundle_arg: str, plan: Mapping, *, by: str, orcid: str | None
         parts.append("--merge-with " + " ".join(plan["merge_with"]))
     if plan.get("as_said"):
         parts.append("--as-said")
+    if plan.get("same_reading"):  # the question site's calls (question_site.cover_call); a workbook plan has none
+        parts.append("--same-reading")
+    parts += [f"--only {q(sc)}" for sc in plan.get("only_scopes") or ()]
+    if plan.get("qc_status"):
+        parts.append(f"--qc-status {plan['qc_status']}")
     parts.append(f"--by {q(by)}")
     if orcid:
         parts.append(f"--orcid {orcid}")
