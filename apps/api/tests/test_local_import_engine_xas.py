@@ -1366,7 +1366,7 @@ def test_identical_scans_with_counting_noise_show_no_dose_trend(tmp_path, counts
     d = _dose(r)
     if counts < EX.DOSE["min_counts"]:
         assert d["outcome"] == EX.DOSE_LOW_COUNTS, d
-        assert "cannot be judged at this count level" in d["statement"]
+        assert "not judged at this count level" in d["statement"] and "cannot be told" in d["statement"]
         assert "dose_damage" in r["qc"]["statements"]
     else:
         assert d.get("outcome") is None, d
@@ -1412,6 +1412,32 @@ def test_a_settling_first_scan_at_high_counts_is_still_found(tmp_path):
     assert _dose(r)["outcome"] == "first_scan_settling", _dose(r)
     rows = {x["scan"]: x for x in r[EX.DECISIONS_KEY]["rows"]}
     assert [rows[k]["decision"] for k in range(1, 13)] == ["drop", "keep", "keep"] * 4
+
+
+def _mixed_counts_run(counts_of_spot, wl_of):
+    """4 spots x 3 scans, Poisson noise at ``counts_of_spot[spot]``; ``wl_of(spot, j)``: the white line of scan j."""
+    sz, cols, k = [], [], 0
+    for s_ in range(4):
+        for j in range(3):
+            sz.append(SPOT_SZ[s_])
+            cols.append(scan_cols(110 + k, wl=wl_of(s_, j), counts=counts_of_spot[s_]))
+            k += 1
+    return _spot_run(sz, cols)
+
+
+PEAK = 4.05                                                  # the normalised white-line peak at wl = 3.0
+
+
+@pytest.mark.parametrize("damaged", [True, False])
+def test_low_count_spots_are_left_out_and_the_others_still_judged(tmp_path, damaged):
+    """Review of PR 345, I1: two spots at 5000 counts (a 7 % drop by scan 3, or none) beside two at 40 counts: the two
+    high-count spots are judged, the low ones left out and said."""
+    runs = _mixed_counts_run([5000, 5000, 40, 40],
+                             lambda s_, j: 3.0 - 0.035 * j * PEAK if damaged and s_ < 2 else 3.0)
+    bdir, _ = imported(tmp_path, runs)
+    d = _dose(by_run(v1_results(bdir), "02_SYN_ZZ2"))
+    assert d["outcome"] == ("beam_damage" if damaged else EX.DOSE_NO_CHANGE), d
+    assert "2 of 4 spots measured more than once were left out" in d["statement"] and "spot 3, spot 4" in d["statement"]
 
 
 # --- single-point I0 dropouts: the POINT is excluded, said, never interpolated; the scan is kept ----------------------

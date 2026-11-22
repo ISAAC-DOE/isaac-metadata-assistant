@@ -2260,6 +2260,7 @@ DOSE = {"wl_half_eV": 4.0, "floor": 0.01, "noise_mult": 3.0, "pre_eV": -10.0, "p
         "min_counts": 150.0}
 DOSE_RULE_ID = "isaac.xas.dose_damage.v3"
 DOSE_LOW_COUNTS = "cannot_judge_low_counts"
+DOSE_NO_CHANGE = "no_change_at_judged_spots"
 DOSE_CODE = "beam_damage_at_spot"
 SETTLING_CODE = "first_scan_settling"
 DOSE_SAID = "beam damage at each spot: later scans at the same spot change shape"
@@ -2332,7 +2333,28 @@ def _post_counts(r: Mapping, E_edge: float, np) -> float | None:
 def apply_dose_damage(table: dict, recs: Sequence[Mapping], stability: Mapping, np, E_edge: float | None = None, *,
                       absorber: Mapping | None = None, notes_said: Mapping | None = None,
                       reading: Mapping | None = None) -> dict | None:
-    """:data:`DOSE_RULE_ID` on the decision table (changed in place); the block said on the result, or None."""
+    """:data:`DOSE_RULE_ID` on the decision table (changed in place); the block said on the result, or None. Spots
+    under the counts floor are left out and said (review of PR 345, I1)."""
+    info: dict = {}
+    block = _dose_core(table, recs, stability, np, E_edge, absorber=absorber, notes_said=notes_said, reading=reading,
+                       info=info)
+    low = info.get("left_out") or ()
+    if not low:
+        return block
+    said = (f"{len(low)} of {info['repeat']} spots measured more than once were left out of this judgement (under "
+            f"{DOSE['min_counts']:.0f} post-edge counts per point: {', '.join(sorted(low))}); {info['judged']} were "
+            "judged.")
+    if block is None:
+        return {"rule_id": DOSE_RULE_ID, "rule": DOSE, "outcome": DOSE_NO_CHANGE, "spots_under_floor_not_judged":
+                sorted(low), "post_edge_counts_per_point": info.get("counts"),
+                "statement": f"No consistent within-spot change at the {info['judged']} spots judged. {said}"}
+    block["statement"] = block["statement"].rstrip() + " " + said
+    return block
+
+
+def _dose_core(table: dict, recs: Sequence[Mapping], stability: Mapping, np, E_edge: float | None = None, *,
+               absorber: Mapping | None = None, notes_said: Mapping | None = None, reading: Mapping | None = None,
+               info: dict) -> dict | None:
     if E_edge is None:
         return None
     spot = _spots_of(recs)
@@ -2353,16 +2375,22 @@ def apply_dose_damage(table: dict, recs: Sequence[Mapping], stability: Mapping, 
         c = [v for r in rs if (v := _post_counts(r, float(E_edge), np)) is not None]
         counts[lab] = min(c) if c else None
     low = {lab for lab, c in counts.items() if c is not None and c < DOSE["min_counts"]}
-    if low and 2 * len(low) >= len(repeat):
-        known = sorted(c for c in counts.values() if c is not None)
-        return {"rule_id": DOSE_RULE_ID, "rule": DOSE, "outcome": DOSE_LOW_COUNTS, "spots_measured_more_than_once":
-                len(repeat), "spots_under_floor": len(low), "post_edge_counts_per_point": counts,
-                "statement": (f"Beam damage cannot be judged at this count level: {len(low)} of {len(repeat)} spots "
-                              f"measured more than once have under {DOSE['min_counts']:.0f} counts per point in the "
-                              f"post-edge (median {known[len(known) // 2]:.0f}); at so few counts counting noise "
-                              "alone can look like a change between scans. Nothing is decided by this rule; every scan "
-                              "is judged by the other rules.")}
-    if low:
+    reading_of = (reading or {}).get("reading")
+    forced = False
+    if len(repeat) - len(low) < 2:
+        known = [c for c in counts.values() if c is not None]
+        block = {"rule_id": DOSE_RULE_ID, "rule": DOSE, "outcome": DOSE_LOW_COUNTS, "spots_measured_more_than_once":
+                 len(repeat), "spots_under_floor": len(low), "post_edge_counts_per_point": counts,
+                 "statement": (f"Beam damage is not judged at this count level: {len(low)} of {len(repeat)} spots "
+                               f"measured more than once have under {DOSE['min_counts']:.0f} counts per point in the "
+                               f"post-edge (median {statistics.median(known):.0f}), so fewer than two can be judged. "
+                               "At these counts a within-spot change of a few % of the white line cannot be told "
+                               "from counting noise, and its absence cannot be confirmed either; only a much larger "
+                               "change would stand out. Nothing is decided by this rule; every scan is judged by the "
+                               "other rules.")}
+        return block
+    elif low:
+        info.update(left_out=sorted(low), repeat=len(repeat), judged=len(repeat) - len(low), counts=counts)
         repeat = {lab: rs for lab, rs in repeat.items() if lab not in low}
     wle = [((stab.get(r["scan_id"]) or {}).get("metrics") or {}).get("wl_e_eV") for r in judged]
     wle = [float(v) for v in wle if isinstance(v, (int, float)) and v == v]
@@ -2415,7 +2443,7 @@ def apply_dose_damage(table: dict, recs: Sequence[Mapping], stability: Mapping, 
             else:
                 x.update(kind="mixed", direction=s13 or s12)
         per[lab] = x
-    changed = {lab: x for lab, x in per.items() if x["kind"] != "none"}
+    changed = dict(per) if forced else {lab: x for lab, x in per.items() if x["kind"] != "none"}
     block: dict = {"rule_id": DOSE_RULE_ID, "rule": DOSE, "window_eV": win, "per_spot": per,
                    "spots_measured_more_than_once": len(repeat), "post_edge_counts_per_point": counts,
                    **({"spots_under_floor_not_judged": sorted(low)} if low else {})}
@@ -2429,7 +2457,7 @@ def apply_dose_damage(table: dict, recs: Sequence[Mapping], stability: Mapping, 
                 + "); the beam-damage rule decides nothing here."))
             return block
         return None
-    if len(changed) < 2 or 2 * len(changed) <= len(repeat):
+    if not forced and (len(changed) < 2 or 2 * len(changed) <= len(repeat)):
         return None
     three = {lab: x for lab, x in changed.items() if len(x["scans"]) >= 3}
     directions = {x["direction"] for x in changed.values() if x["direction"]}
@@ -2457,7 +2485,6 @@ def apply_dose_damage(table: dict, recs: Sequence[Mapping], stability: Mapping, 
                                      and abs(x[0]) >= DOSE["recovery_frac"] * abs(dmg[0]))})
         return out
 
-    reading_of = (reading or {}).get("reading")
     outcome, why = None, None
     if reading_of == "not_beam_damage":
         block.update(outcome="not_beam_damage", reading=reading, statement=(
@@ -2519,6 +2546,10 @@ def apply_dose_damage(table: dict, recs: Sequence[Mapping], stability: Mapping, 
                 + ("" if expected is not None or reading_of else f"; at {el} {ed} the direction the spots share, "
                                                                    f"the white line {word}, is taken as the damage")
                 + f"; decided by {by}); the first scan per spot is kept")
+        if forced:
+            what = (f"{DOSE_SAID}: decided by {by} for this group, at every one of the {len(repeat)} spots measured "
+                    "more than once; no change could be measured at this count level (" + spots_said
+                    + "); the first scan per spot is kept")
         for lab in changed:
             for r in repeat[lab][1:]:
                 x = rows[r["scan_id"]]
@@ -2531,6 +2562,10 @@ def apply_dose_damage(table: dict, recs: Sequence[Mapping], stability: Mapping, 
     else:
         what = (f"{SETTLING_SAID} ({spots_said}; normalised shape, edge-step units, window {win[0]:.1f}-{win[1]:.1f} "
                 f"eV; decided by {by}); the first scan per spot is dropped")
+        if forced:
+            what = (f"{SETTLING_SAID}: decided by {by} for this group, at every one of the {len(repeat)} spots "
+                    "measured more than once; no change could be measured at this count level (" + spots_said
+                    + "); the first scan per spot is dropped")
         for lab in changed:
             r = repeat[lab][0]
             x = rows[r["scan_id"]]
