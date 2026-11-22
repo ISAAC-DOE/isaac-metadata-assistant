@@ -429,7 +429,7 @@ def summary(gate_of: Mapping[str, Mapping], group_ids: Iterable[str] | None = No
             "validation is not changed by it): " + "; ".join(f"{w} in {n}" for w, n in _by_words(out["open_conditions"]).items())
             + ". These are the conditions grouping used to keep records of one sample apart; each must be in the "
               "record or declined before export writes it. `isaac bundle questions <bundle_dir>` lists the questions "
-              f"that fill them right after the blocking ones (`completeness`); `export {ALLOW_FLAG}` writes them anyway.")
+              f"that fill them right after the blocking ones (`completeness`); `export {ALLOW_FLAG} --by \"<your name>\"` writes them anyway.")
     else:
         out["statement"] = (f"Every distinguishing condition of {len(rows)} record group(s) is in its record or "
                             f"declined ({GATE_ID}).")
@@ -551,7 +551,7 @@ def hold_text(gate: Mapping, questions_of: Mapping[str, Sequence[str]] | None = 
                     f"{gid}` gives its readings")
         steps.append(step)
     return (f"Held ({GATE_ID}): the record would be written without {said}. To free it: " + "; ".join(steps)
-            + f". Or export it anyway: `export {ALLOW_FLAG}`.")
+            + f". Or export it anyway: `export {ALLOW_FLAG} --by \"<your name>\"`.")
 
 
 def _shown(value: Any) -> str:

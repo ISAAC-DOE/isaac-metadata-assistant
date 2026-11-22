@@ -3059,7 +3059,7 @@ def completeness_holds(bundle: Mapping, fresh: Sequence[tuple[str, Mapping, Mapp
                "No open question tells them apart: if they are one measurement, merge their groups; if they are "
                f"intended repeats, {repeats}")
         said = (f"Held ({CP.GATE_ID}): these {len(same)} records would be indistinguishable (the same sample, system "
-                f"and context in every field): {shown}. {how}; `export {CP.ALLOW_FLAG}` writes them anyway.")
+                f"and context in every field): {shown}. {how}; `export {CP.ALLOW_FLAG} --by \"<your name>\"` writes them anyway.")
         for gid in same:
             row = holds.setdefault(gid, {"held_by": [], "needs": [], "questions": [], "answers": [], "conditions": [],
                                          "text": ""})
@@ -3147,7 +3147,7 @@ def completeness_summary(holds: Mapping[str, Mapping], sets: Sequence[Sequence[s
         + "; and ".join(parts) + "."
         + (f" {out['answers_needed']} answer(s) fill them; first: {first}." if first else "")
         + (" Each needs its condition confirmed, corrected or declined (reject)." if by_condition else "")
-        + ("" if allowed else f" `isaac bundle export <bundle_dir> --out <dir> {CP.ALLOW_FLAG}` writes them anyway."))
+        + ("" if allowed else f" `isaac bundle export <bundle_dir> --out <dir> {CP.ALLOW_FLAG} --by \"<your name>\"` writes them anyway."))
     return out
 
 
