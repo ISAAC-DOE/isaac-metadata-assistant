@@ -73,3 +73,32 @@ def test_an_older_bundle_is_told_on_its_first_write(tmp_path, capsys):
     assert saved["format_version"] == "1.15.0" and B.validate_bundle(saved) == []
     [u] = [u for u in saved.get("format_upgrades") or () if u.get("from_format_version") == "1.14.0"]
     assert B.CHANGES_ADDED_IN["1.15.0"] in u["statement"]
+
+
+# --- a bundle the 1.14.0 build WROTE (review of PR 346, C1) ----------------------------------------------------------
+
+#: written by tests/fixtures/local_import/make_bundle_1_14_0.py on the 1.14.0 build (never relabelled): an
+#: expression-titled PyMca .mca kept as a run, a SPEC-format average kept as an engine run, and a MERGE average the
+#: 1.14.0 build left unlinked whose title names a run's scan
+BUNDLE_1_14_0 = Path(__file__).resolve().parents[3] / "tests" / "fixtures" / "local_import" / "bundle_1_14_0"
+
+
+def test_a_bundle_the_1_14_0_build_wrote_stays_valid_takes_decisions_and_is_told_to_re_import(tmp_path):
+    import shutil
+
+    out = tmp_path / "b"
+    shutil.copytree(BUNDLE_1_14_0, out)
+    old = json.loads((out / "bundle.json").read_text())
+    assert old["format_version"] == "1.14.0" and not old.get("format_upgrades")
+    assert B.validate_bundle(old) == []  # the 1.15.0 rules are not applied to what an older build imported
+    M.decide(out, target_ids=["experiment"], decision="defer", value=None, by="SYN Scientist", orcid=None)
+    saved = json.loads((out / "bundle.json").read_text())
+    assert saved["format_version"] == "1.15.0" and B.validate_bundle(saved) == []
+    assert saved["runs"] == old["runs"] and saved["processed_outputs"][0]["proposed_links"] == []  # nothing re-derived
+    [u] = saved["format_upgrades"]
+    stems = {r["run_id"]: (r["stem"], r["source_type"]) for r in saved["runs"]}
+    held = B.processed_title_runs(saved)
+    assert {stems[r] for r in held} == {("SYN_cat_m600mV", "generic:mca_v1"), ("SYN_cat_m600mV_ave.dat", "spec_acquisition")}
+    assert f"{len(held)} of its runs ({', '.join(held)})" in u["statement"]
+    assert "scan title names the scans it was computed from" in u["statement"]
+    assert "re-import to keep them as processed outputs" in u["statement"]

@@ -1,0 +1,462 @@
+{
+ "total": 4,
+ "runs": [
+  {
+   "run_id": "run-001",
+   "run_key": "SYN_cat_1200mV@sha256:dc4fc3340b053f5c84d5e7787c1199ebf2572bd115c60ce51990a4e2837fedfd",
+   "label": "10 · 1200mV · SYN · cat",
+   "stem": "SYN_cat_1200mV",
+   "source_type": "spec_acquisition",
+   "run_candidate": true,
+   "legacy_number": null,
+   "legacy_number_shared": false,
+   "shares_legacy_number_with": [],
+   "group_token": null,
+   "sample_id": "sample-01",
+   "acquisition_source_id": "src-0003",
+   "scans": [
+    {
+     "source_id": "src-0005",
+     "relative_path": "SYN_cat_1200mV_dir/SYN_cat_1200mV_001.dat",
+     "scan_index": 1
+    }
+   ],
+   "scan_count": 1,
+   "declared_by": [],
+   "note_rows": [],
+   "other_relationships": {
+    "duplicate_copies": [
+     "SYN_cat_1200mV_dir/SYN_cat_1200mV"
+    ],
+    "suppressed_duplicate_acquisitions": [
+     "SYN_cat_1200mV_dir/SYN_cat_1200mV"
+    ],
+    "internal_declaration": "/data/synthetic/2001-09_fixture/SYN_cat_1200mV"
+   },
+   "candidate_ids": [
+    "cand-0001",
+    "cand-0002",
+    "cand-0003",
+    "cand-0004",
+    "cand-0005",
+    "cand-0006",
+    "cand-0007",
+    "cand-0008",
+    "cand-0009",
+    "cand-0010",
+    "cand-0011",
+    "cand-0012",
+    "cand-0013",
+    "cand-0014",
+    "cand-0015",
+    "cand-0016",
+    "cand-0017"
+   ],
+   "shares_file_name_with": [],
+   "conflict_ids": [
+    "conf-001",
+    "conf-002"
+   ],
+   "contributor_ids": [],
+   "data_quality_note_ids": [],
+   "naming_profile": {
+    "profile_ids": [
+     "ssrl_bl152_herfd_echem_naming"
+    ],
+    "profile_versions": [
+     "1"
+    ],
+    "scope": "acquisition_system",
+    "basis": "build_default",
+    "binding_ids": [
+     "build-default"
+    ],
+    "rule_refs": [],
+    "selector_description": "every source",
+    "ambiguous": false,
+    "ambiguity": null,
+    "stale_bindings": []
+   },
+   "signal_selection": {
+    "selector_id": "bl15.signals.herfd_primary_signal_selector.v1",
+    "system_id": "ssrl_bl152_spec_vortex_channels",
+    "status": "unresolved",
+    "reason_code": "channel_liveness_ambiguous",
+    "reason": "Channel(s) vortDT are neither clearly live nor clearly empty under the recorded thresholds, so no channel is suggested.",
+    "primary_channel": null,
+    "assignments": [],
+    "channels": [
+     {
+      "channel": "vortDT",
+      "scans_present": 1,
+      "scans_with_edge": 0,
+      "share": 1.0,
+      "edge_fraction": 0.0,
+      "liveness": "ambiguous",
+      "reason": "the channel's share and its edge evidence point different ways (edge in 0 of 1 scan(s)), so it is neither live nor empty under these thresholds"
+     },
+     {
+      "channel": "vortDT2",
+      "scans_present": 0,
+      "scans_with_edge": 0,
+      "share": null,
+      "edge_fraction": null,
+      "liveness": "absent",
+      "reason": "no scan of this Run carries this column"
+     },
+     {
+      "channel": "vortDT3",
+      "scans_present": 0,
+      "scans_with_edge": 0,
+      "share": null,
+      "edge_fraction": null,
+      "liveness": "absent",
+      "reason": "no scan of this Run carries this column"
+     },
+     {
+      "channel": "vortDT4",
+      "scans_present": 0,
+      "scans_with_edge": 0,
+      "share": null,
+      "edge_fraction": null,
+      "liveness": "absent",
+      "reason": "no scan of this Run carries this column"
+     }
+    ],
+    "elements": [],
+    "thresholds": {
+     "edge_z_min": 5.0,
+     "live_edge_fraction_min": 0.5,
+     "empty_share_max": 0.05,
+     "basis": {
+      "edge_z_min": "A scan counts as showing an absorption edge in a channel when the channel's last-decile mean exceeds its first-decile mean by at least this many Poisson standard deviations. At 5, every sample-measurement unit's vortDT shows an edge in at least half its scans and no sample unit's vortDT2 shows one in any scan (measured 2026-09-22, 92 units). At 3 a few vortDT2 scans cross; at 10 a second vortDT unit drops below one half — 5 is the value at which only the alignment scan and a transmission reference fall outside.",
+      "live_edge_fraction_min": "A channel is LIVE only if it shows an edge in at least this fraction of the Run's scans. Measured: every sample-measurement unit's vortDT is at or above one half; the only unit below is the alignment scan (0.200).",
+      "empty_share_max": "A channel is EMPTY only if it carries at most this share of the Run's candidate-channel counts. Measured: vortDT2's per-unit share never exceeds 0.0397 and vortDT's is never below 0.9603, so the smallest round value above the measured empty maximum sits in a gap no unit falls in."
+     }
+    },
+    "authority": "non_authoritative_suggestion",
+    "rule_ref": null,
+    "evidence_not_used": [
+     "energy_window: checking a scan's energy range against the established edge would need an edge-energy reference this build does not carry, and reading the method macro's grid literal for it would interpret that literal, which Q12 forbids. Not used.",
+     "the domain owner's 'vortDT is generally the HERFD channel': recorded for the reviewer and never used as a tie-breaker, because a default channel is a hard-coded hierarchy and is wrong in exactly the dual-element case."
+    ],
+    "writes_a_record_field": false
+   }
+  },
+  {
+   "run_id": "run-002",
+   "run_key": "SYN_cat_m600mV@sha256:e84f6d11059fb3755279ecda5475ce396146e2f70a51c3244201653bea495c60",
+   "label": "10 · m600mV · SYN · cat",
+   "stem": "SYN_cat_m600mV",
+   "source_type": "spec_acquisition",
+   "run_candidate": true,
+   "legacy_number": null,
+   "legacy_number_shared": false,
+   "shares_legacy_number_with": [],
+   "group_token": null,
+   "sample_id": "sample-01",
+   "acquisition_source_id": "src-0006",
+   "scans": [
+    {
+     "source_id": "src-0008",
+     "relative_path": "SYN_cat_m600mV_dir/SYN_cat_m600mV_001.dat",
+     "scan_index": 1
+    }
+   ],
+   "scan_count": 1,
+   "declared_by": [],
+   "note_rows": [],
+   "other_relationships": {
+    "duplicate_copies": [
+     "SYN_cat_m600mV_dir/SYN_cat_m600mV"
+    ],
+    "suppressed_duplicate_acquisitions": [
+     "SYN_cat_m600mV_dir/SYN_cat_m600mV"
+    ],
+    "internal_declaration": "/data/synthetic/2001-09_fixture/SYN_cat_m600mV"
+   },
+   "candidate_ids": [
+    "cand-0018",
+    "cand-0019",
+    "cand-0020",
+    "cand-0021",
+    "cand-0022",
+    "cand-0023",
+    "cand-0024",
+    "cand-0025",
+    "cand-0026",
+    "cand-0027",
+    "cand-0028",
+    "cand-0029",
+    "cand-0030",
+    "cand-0031",
+    "cand-0032",
+    "cand-0033",
+    "cand-0041"
+   ],
+   "shares_file_name_with": [],
+   "conflict_ids": [
+    "conf-003",
+    "conf-004"
+   ],
+   "contributor_ids": [],
+   "data_quality_note_ids": [],
+   "naming_profile": {
+    "profile_ids": [
+     "ssrl_bl152_herfd_echem_naming"
+    ],
+    "profile_versions": [
+     "1"
+    ],
+    "scope": "acquisition_system",
+    "basis": "build_default",
+    "binding_ids": [
+     "build-default"
+    ],
+    "rule_refs": [],
+    "selector_description": "every source",
+    "ambiguous": false,
+    "ambiguity": null,
+    "stale_bindings": []
+   },
+   "signal_selection": {
+    "selector_id": "bl15.signals.herfd_primary_signal_selector.v1",
+    "system_id": "ssrl_bl152_spec_vortex_channels",
+    "status": "unresolved",
+    "reason_code": "channel_liveness_ambiguous",
+    "reason": "Channel(s) vortDT are neither clearly live nor clearly empty under the recorded thresholds, so no channel is suggested.",
+    "primary_channel": null,
+    "assignments": [],
+    "channels": [
+     {
+      "channel": "vortDT",
+      "scans_present": 1,
+      "scans_with_edge": 0,
+      "share": 1.0,
+      "edge_fraction": 0.0,
+      "liveness": "ambiguous",
+      "reason": "the channel's share and its edge evidence point different ways (edge in 0 of 1 scan(s)), so it is neither live nor empty under these thresholds"
+     },
+     {
+      "channel": "vortDT2",
+      "scans_present": 0,
+      "scans_with_edge": 0,
+      "share": null,
+      "edge_fraction": null,
+      "liveness": "absent",
+      "reason": "no scan of this Run carries this column"
+     },
+     {
+      "channel": "vortDT3",
+      "scans_present": 0,
+      "scans_with_edge": 0,
+      "share": null,
+      "edge_fraction": null,
+      "liveness": "absent",
+      "reason": "no scan of this Run carries this column"
+     },
+     {
+      "channel": "vortDT4",
+      "scans_present": 0,
+      "scans_with_edge": 0,
+      "share": null,
+      "edge_fraction": null,
+      "liveness": "absent",
+      "reason": "no scan of this Run carries this column"
+     }
+    ],
+    "elements": [],
+    "thresholds": {
+     "edge_z_min": 5.0,
+     "live_edge_fraction_min": 0.5,
+     "empty_share_max": 0.05,
+     "basis": {
+      "edge_z_min": "A scan counts as showing an absorption edge in a channel when the channel's last-decile mean exceeds its first-decile mean by at least this many Poisson standard deviations. At 5, every sample-measurement unit's vortDT shows an edge in at least half its scans and no sample unit's vortDT2 shows one in any scan (measured 2026-09-22, 92 units). At 3 a few vortDT2 scans cross; at 10 a second vortDT unit drops below one half — 5 is the value at which only the alignment scan and a transmission reference fall outside.",
+      "live_edge_fraction_min": "A channel is LIVE only if it shows an edge in at least this fraction of the Run's scans. Measured: every sample-measurement unit's vortDT is at or above one half; the only unit below is the alignment scan (0.200).",
+      "empty_share_max": "A channel is EMPTY only if it carries at most this share of the Run's candidate-channel counts. Measured: vortDT2's per-unit share never exceeds 0.0397 and vortDT's is never below 0.9603, so the smallest round value above the measured empty maximum sits in a gap no unit falls in."
+     }
+    },
+    "authority": "non_authoritative_suggestion",
+    "rule_ref": null,
+    "evidence_not_used": [
+     "energy_window: checking a scan's energy range against the established edge would need an edge-energy reference this build does not carry, and reading the method macro's grid literal for it would interpret that literal, which Q12 forbids. Not used.",
+     "the domain owner's 'vortDT is generally the HERFD channel': recorded for the reviewer and never used as a tie-breaker, because a default channel is a hard-coded hierarchy and is wrong in exactly the dual-element case."
+    ],
+    "writes_a_record_field": false
+   }
+  },
+  {
+   "run_id": "run-003",
+   "run_key": "SYN_cat_m600mV_ave.dat@sha256:4afe7ff4ed705672361161972b602e7c9906b2656def3a90b501ff3c98a064a0",
+   "label": "m600mV · ave · SYN · cat",
+   "stem": "SYN_cat_m600mV_ave.dat",
+   "source_type": "spec_acquisition",
+   "run_candidate": true,
+   "legacy_number": null,
+   "legacy_number_shared": false,
+   "shares_legacy_number_with": [],
+   "group_token": null,
+   "sample_id": "sample-01",
+   "acquisition_source_id": "src-0009",
+   "scans": [],
+   "scan_count": 0,
+   "declared_by": [],
+   "note_rows": [],
+   "other_relationships": {
+    "internal_declaration": "/data/synthetic/SYN_cat_m600mV_ave.dat",
+    "scans_in_spec_file": {
+     "rule_id": "spec_file_energy_scans_v1",
+     "scans": [],
+     "left_out": [
+      {
+       "scan": "1",
+       "command": "(SYN_cat_m600mV",
+       "why": "not an energy scan ((SYN_cat_m600mV)"
+      }
+     ],
+     "statement": "No scan file was found in a `<stem>_dir` folder, and its SPEC file holds no energy scan with data rows. Left out: #S 1 (not an energy scan ((SYN_cat_m600mV))."
+    }
+   },
+   "candidate_ids": [
+    "cand-0034",
+    "cand-0035",
+    "cand-0036",
+    "cand-0037",
+    "cand-0038",
+    "cand-0039",
+    "cand-0040",
+    "cand-0042"
+   ],
+   "shares_file_name_with": [],
+   "conflict_ids": [],
+   "contributor_ids": [],
+   "data_quality_note_ids": [],
+   "naming_profile": {
+    "profile_ids": [
+     "ssrl_bl152_herfd_echem_naming"
+    ],
+    "profile_versions": [
+     "1"
+    ],
+    "scope": "acquisition_system",
+    "basis": "build_default",
+    "binding_ids": [
+     "build-default"
+    ],
+    "rule_refs": [],
+    "selector_description": "every source",
+    "ambiguous": false,
+    "ambiguity": null,
+    "stale_bindings": []
+   },
+   "signal_selection": {
+    "selector_id": "bl15.signals.herfd_primary_signal_selector.v1",
+    "system_id": "ssrl_bl152_spec_vortex_channels",
+    "status": "unresolved",
+    "reason_code": "no_candidate_channel",
+    "reason": "No scan of this Run carries any of the candidate HERFD channels (vortDT, vortDT2, vortDT3, vortDT4), so there is nothing to select from.",
+    "primary_channel": null,
+    "assignments": [],
+    "channels": [
+     {
+      "channel": "vortDT",
+      "scans_present": 0,
+      "scans_with_edge": 0,
+      "share": null,
+      "edge_fraction": null,
+      "liveness": "absent",
+      "reason": "no scan of this Run carries this column"
+     },
+     {
+      "channel": "vortDT2",
+      "scans_present": 0,
+      "scans_with_edge": 0,
+      "share": null,
+      "edge_fraction": null,
+      "liveness": "absent",
+      "reason": "no scan of this Run carries this column"
+     },
+     {
+      "channel": "vortDT3",
+      "scans_present": 0,
+      "scans_with_edge": 0,
+      "share": null,
+      "edge_fraction": null,
+      "liveness": "absent",
+      "reason": "no scan of this Run carries this column"
+     },
+     {
+      "channel": "vortDT4",
+      "scans_present": 0,
+      "scans_with_edge": 0,
+      "share": null,
+      "edge_fraction": null,
+      "liveness": "absent",
+      "reason": "no scan of this Run carries this column"
+     }
+    ],
+    "elements": [],
+    "thresholds": {
+     "edge_z_min": 5.0,
+     "live_edge_fraction_min": 0.5,
+     "empty_share_max": 0.05,
+     "basis": {
+      "edge_z_min": "A scan counts as showing an absorption edge in a channel when the channel's last-decile mean exceeds its first-decile mean by at least this many Poisson standard deviations. At 5, every sample-measurement unit's vortDT shows an edge in at least half its scans and no sample unit's vortDT2 shows one in any scan (measured 2026-09-22, 92 units). At 3 a few vortDT2 scans cross; at 10 a second vortDT unit drops below one half — 5 is the value at which only the alignment scan and a transmission reference fall outside.",
+      "live_edge_fraction_min": "A channel is LIVE only if it shows an edge in at least this fraction of the Run's scans. Measured: every sample-measurement unit's vortDT is at or above one half; the only unit below is the alignment scan (0.200).",
+      "empty_share_max": "A channel is EMPTY only if it carries at most this share of the Run's candidate-channel counts. Measured: vortDT2's per-unit share never exceeds 0.0397 and vortDT's is never below 0.9603, so the smallest round value above the measured empty maximum sits in a gap no unit falls in."
+     }
+    },
+    "authority": "non_authoritative_suggestion",
+    "rule_ref": null,
+    "evidence_not_used": [
+     "energy_window: checking a scan's energy range against the established edge would need an edge-energy reference this build does not carry, and reading the method macro's grid literal for it would interpret that literal, which Q12 forbids. Not used.",
+     "the domain owner's 'vortDT is generally the HERFD channel': recorded for the reviewer and never used as a tie-breaker, because a default channel is a hard-coded hierarchy and is wrong in exactly the dual-element case."
+    ],
+    "writes_a_record_field": false
+   }
+  },
+  {
+   "run_id": "run-004",
+   "run_key": "mca_v1:PyMcaAdded/SYN_cat_m600mV",
+   "label": "SYN_cat_m600mV",
+   "stem": "SYN_cat_m600mV",
+   "source_type": "generic:mca_v1",
+   "run_candidate": true,
+   "legacy_number": null,
+   "legacy_number_shared": false,
+   "shares_legacy_number_with": [],
+   "shares_file_name_with": [],
+   "group_token": null,
+   "sample_id": null,
+   "acquisition_source_id": "src-0002",
+   "scans": [
+    {
+     "source_id": "src-0002",
+     "relative_path": "PyMcaAdded/SYN_cat_m600mV.mca",
+     "scan_index": null
+    }
+   ],
+   "scan_count": 1,
+   "declared_by": [],
+   "note_rows": [],
+   "other_relationships": {
+    "companions": [],
+    "anomalies": [],
+    "header_differences": []
+   },
+   "candidate_ids": [],
+   "conflict_ids": [],
+   "contributor_ids": [],
+   "data_quality_note_ids": [],
+   "naming_profile": {},
+   "signal_selection": null,
+   "reader": {
+    "reader_id": "mca_reader_v1",
+    "profile": "mca_v1",
+    "profile_version": "1",
+    "statements_total": 7,
+    "statements_kept": 7
+   }
+  }
+ ]
+}

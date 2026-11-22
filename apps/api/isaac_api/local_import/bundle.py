@@ -541,14 +541,16 @@ def in_merge_folder(rel: Any) -> bool:
     return any(p.casefold() == MERGE_FOLDER_NAME for p in parts)
 
 
-def is_average_title(literal: Any) -> bool:
+def is_average_title(literal: Any, *, widened: bool = True) -> bool:
     """True for a scan title that names the scans it was computed from (:data:`AVERAGE_TITLE_ORIGIN_RULE_ID`): an
     average of N spectra, and (1.15.0, ``bl15.classify.PROCESSED_TITLE_RULE_ID``) an arithmetic expression over named
     scans or a normalised copy of one. The engine's own test, so a SPEC-format file and a PyMca ``.mca`` are judged
-    alike."""
+    alike. ``widened=False``: the 1.13.0 test alone (``Average of N from``), for a bundle an older build imported
+    (review of PR 346, C1: the 1.15.0 rule is never applied to what an older build kept)."""
     from ..bl15.classify import is_processed_scan_title
 
-    return isinstance(literal, str) and (bool(_AVERAGE_TITLE.match(literal.strip())) or is_processed_scan_title(literal))
+    return isinstance(literal, str) and (bool(_AVERAGE_TITLE.match(literal.strip()))
+                                         or (widened and is_processed_scan_title(literal)))
 
 
 def merge_folder_note(rel: str) -> dict:
@@ -611,18 +613,49 @@ def quick_merge_runs(bundle: Mapping) -> list[str]:
             and all(type_of.get(s.get("source_id")) == ENGINE_PROCESSED_SOURCE_TYPE for s in r["scans"])]
 
 
-def average_title_runs(bundle: Mapping) -> list[str]:
+def average_title_runs(bundle: Mapping, *, widened: bool | None = None) -> list[str]:
     """Run ids of GENERIC runs every scan file of which states an average title (a run-scoped ``scan_title`` statement,
     :func:`is_average_title`), in a bundle that also holds SPEC acquisition runs: what
     :data:`AVERAGE_TITLE_ORIGIN_RULE_ID` makes processed outputs. Non-empty only for a bundle a build older than 1.13.0
-    imported (a 1.13.0 import holds none: the validator refuses one)."""
+    imported (a 1.13.0 import holds none: the validator refuses one). ``widened`` (default: the bundle was imported by
+    1.15.0 or later): whether the 1.15.0 title test applies, never to what an older build imported."""
+    if widened is None:
+        widened = _imported_by_at_least(bundle, "1.15.0")
     runs = bundle.get("runs") or ()
     if not quick_merges_apply(runs):
         return []
     titled = {(e.get("run_id"), e.get("relative_path")) for e in bundle.get("extended_context") or ()
-              if e.get("concept") == "scan_title" and is_average_title(e.get("raw_literal"))}
+              if e.get("concept") == "scan_title" and is_average_title(e.get("raw_literal"), widened=widened)}
     return [r["run_id"] for r in runs if str(r.get("source_type") or "").startswith("generic:") and r.get("scans")
             and all((r["run_id"], s.get("relative_path")) in titled for s in r["scans"])]
+
+
+_SCAN_LOCATOR = re.compile(r"^line (\d+) header #S \(scan (\S+)\)$")
+
+
+def processed_title_runs(bundle: Mapping) -> list[str]:
+    """1.15.0 (``bl15.classify.PROCESSED_TITLE_RULE_ID``): the runs of this bundle that a 1.15.0 import keeps as
+    processed outputs: generic runs whose scan title only the widened test reads as computed from other scans, and SPEC
+    runs whose FIRST ``#S`` title names other scans (its ``scan_command`` statement). Non-empty only for a bundle an
+    older build imported; the upgrade statement names them ("re-import to keep them as processed outputs")."""
+    from ..bl15.classify import is_processed_scan_title
+
+    runs = bundle.get("runs") or ()
+    if not quick_merges_apply(runs):
+        return []
+    generic = set(average_title_runs(bundle, widened=True)) - set(average_title_runs(bundle, widened=False))
+    first: dict[str, tuple[int, str]] = {}
+    for c in bundle.get("candidates") or ():
+        if c.get("statement_key") != "scan_command" or not c.get("run_id"):
+            continue
+        for e in c.get("evidence") or ():
+            m = _SCAN_LOCATOR.match(str(e.get("locator") or ""))
+            if m and isinstance(e.get("literal_value"), str):
+                line = int(m.group(1))
+                if c["run_id"] not in first or line < first[c["run_id"]][0]:
+                    first[c["run_id"]] = (line, f"{m.group(2)} {e['literal_value']}")
+    engine = {rid for rid, (_, title) in first.items() if is_processed_scan_title(title)}
+    return [r["run_id"] for r in runs if r["run_id"] in generic or r["run_id"] in engine]
 
 
 def _imported_by_at_least(bundle: Mapping, version: str) -> bool:
@@ -6333,7 +6366,7 @@ def import_rules_missing(bundle: Mapping) -> list[tuple[str, str]]:
 
 def upgrade_statement(from_version: str | None, newly_writable: Iterable[str],
                       rules_missing: Iterable[tuple[str, str]] = (), quick_merge_run_ids: Sequence[str] = (),
-                      average_title_run_ids: Sequence[str] = ()) -> str:
+                      average_title_run_ids: Sequence[str] = (), processed_title_run_ids: Sequence[str] = ()) -> str:
     """THE ONE SENTENCE every surface prints about an upgrade of an older bundle. ``quick_merge_run_ids``
     (:func:`quick_merge_runs`): runs an older build made of the scientists' quick merges, which only a re-import
     keeps as processed outputs (review L5); ``average_title_run_ids`` (:func:`average_title_runs`, 1.13.0) the same for
@@ -6358,6 +6391,11 @@ def upgrade_statement(from_version: str | None, newly_writable: Iterable[str],
         text += (f"; {len(folder)} of its runs ({', '.join(folder[:5])}{', ...' if len(folder) > 5 else ''}) are files whose "
                  "scan title states an average, beside SPEC acquisitions (the scientists' averages), kept as runs by the build that "
                  "imported it — re-import to keep them as processed outputs")
+    titled = [i for i in processed_title_run_ids if i not in ids and i not in folder]
+    if titled:
+        text += (f"; {len(titled)} of its runs ({', '.join(titled[:5])}{', ...' if len(titled) > 5 else ''}) are files whose "
+                 "scan title names the scans it was computed from (1.15.0), kept as runs by the build that imported it "
+                 "— re-import to keep them as processed outputs")
     return text
 
 
@@ -6376,7 +6414,7 @@ def record_format_upgrade(bundle: dict, *, from_version: str | None, to_version:
         "decisions_before": int(decisions_before),
         "newly_writable_paths": newly,
         "statement": upgrade_statement(from_version, newly, import_rules_missing(bundle), quick_merge_runs(bundle),
-                                       average_title_runs(bundle)),
+                                       average_title_runs(bundle), processed_title_runs(bundle)),
     }
     bundle.setdefault("format_upgrades", []).append(entry)
     return entry
@@ -6718,6 +6756,10 @@ def validate_bundle(bundle: Any, *, max_errors: int = 50, encoded: bytes | None 
         for rid in quick_merge_runs(bundle):
             errors.append(f"consistency: run {rid} is a file the engine classifies {ENGINE_PROCESSED_SOURCE_TYPE} beside "
                           f"SPEC acquisition runs, which {ENGINE_ORIGIN_RULE_ID} keeps as a processed output, never a run")
+    if _imported_by_at_least(bundle, "1.15.0"):
+        for rid in processed_title_runs(bundle):
+            errors.append(f"consistency: run {rid} is a file whose scan title names the scans it was computed from, "
+                          f"which {AVERAGE_TITLE_ORIGIN_RULE_ID} keeps as a processed output, never a run")
     if _imported_by_at_least(bundle, "1.13.0"):
         for rid in average_title_runs(bundle):
             errors.append(f"consistency: run {rid} is a file whose scan title states an average beside SPEC acquisition "
@@ -6752,7 +6794,10 @@ def validate_bundle(bundle: Any, *, max_errors: int = 50, encoded: bytes | None 
     # what `propose_processed_links` gives over the stored runs (the derived group_id aside).
     if bundle.get("processed_outputs"):
         again = json.loads(json.dumps(bundle["processed_outputs"]))
-        propose_processed_links(again, bundle["runs"], bundle["extended_context"])
+        # TITLE_LINK_RULE_ID is re-run only for a bundle a 1.15.0 build imported: an older one keeps the links it was
+        # given (review of PR 346, C1)
+        propose_processed_links(again, bundle["runs"],
+                                bundle["extended_context"] if _imported_by_at_least(bundle, "1.15.0") else ())
 
         def _bare(links):
             return [{k: v for k, v in link.items() if k != "group_id"} for link in links]

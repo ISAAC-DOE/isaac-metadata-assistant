@@ -986,6 +986,10 @@ click; nothing scientific is filled in silently.
   number, unused (as at 1.14.0); a conflict no longer made keeps its number, unused. A file that is no longer a run
   takes its run's ids with it, so the run, candidate and value ids after it renumber (as at 1.11.0 and 1.13.0); a
   bundle imported before holds such files as runs until re-imported.
+- **An older bundle keeps the rules it was imported with.** The widened title test and the title-link re-check apply
+  only to a bundle a 1.15.0 build imported (`_imported_by_at_least`); a 1.14.0 bundle stays valid and keeps taking
+  decisions, and its first save names the runs a re-import would keep as processed outputs
+  (`processed_title_runs`: "re-import to keep them as processed outputs").
 - **A 1.15.0 validator accepts 1.0.0–1.14.0 bundles;** a 1.14.0 validator refuses a 1.15.0 one (the label). Nothing
   becomes newly writable; `processed_outputs` is required at 1.15.0 as at 1.2.0–1.14.0.
 - **The upgrade is disclosed**: the first write of an older bundle appends one `format_upgrades` entry whose

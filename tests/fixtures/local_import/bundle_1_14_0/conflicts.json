@@ -1,0 +1,249 @@
+{
+ "total": 4,
+ "conflicts": [
+  {
+   "conflict_id": "conf-001",
+   "engine_conflict_id": "SYN_cat_1200mV::acquisition_timestamp",
+   "kind": "field_disagreement",
+   "subject": "timestamps.acquired_start_utc",
+   "candidate_id": "cand-0004",
+   "run_ids": [
+    "run-001"
+   ],
+   "readings": [
+    {
+     "reading_index": 0,
+     "value": "Mon Sep  9 01:46:40 2001",
+     "witnesses": [
+      {
+       "source_id": "src-0003",
+       "relative_path": "SYN_cat_1200mV",
+       "locator": "line 3 header #D",
+       "source_role": null
+      }
+     ]
+    },
+    {
+     "reading_index": 1,
+     "value": "Mon Sep  9 01:46:48 2001",
+     "witnesses": [
+      {
+       "source_id": "src-0003",
+       "relative_path": "SYN_cat_1200mV",
+       "locator": "line 10 header #D (scan 1)",
+       "source_role": null
+      },
+      {
+       "source_id": "src-0005",
+       "relative_path": "SYN_cat_1200mV_dir/SYN_cat_1200mV_001.dat",
+       "locator": "line 2 header #D",
+       "source_role": null
+      }
+     ]
+    },
+    {
+     "reading_index": 2,
+     "value": "Mon Sep  9 02:00:00 2001",
+     "witnesses": [
+      {
+       "source_id": "src-0003",
+       "relative_path": "SYN_cat_1200mV",
+       "locator": "line 25 header #D (scan 2)",
+       "source_role": null
+      }
+     ]
+    },
+    {
+     "reading_index": 3,
+     "value": "Mon Sep  9 02:10:00 2001",
+     "witnesses": [
+      {
+       "source_id": "src-0003",
+       "relative_path": "SYN_cat_1200mV",
+       "locator": "line 38 header #D (scan 3)",
+       "source_role": null
+      }
+     ]
+    }
+   ],
+   "explanation": "5 source(s) state acquisition timestamp, and they do not agree. Two different start times for one measurement are a real discrepancy for you to review; nothing here picks one.",
+   "recommendation": null,
+   "resolution": null,
+   "value_state": "conflicting"
+  },
+  {
+   "conflict_id": "conf-002",
+   "engine_conflict_id": "SYN_cat_1200mV::scan_command",
+   "kind": "field_disagreement",
+   "subject": "assets[].uri",
+   "candidate_id": "cand-0014",
+   "run_ids": [
+    "run-001"
+   ],
+   "readings": [
+    {
+     "reading_index": 0,
+     "value": "ascan Sz -4 -3 10 0.500000",
+     "witnesses": [
+      {
+       "source_id": "src-0003",
+       "relative_path": "SYN_cat_1200mV",
+       "locator": "line 37 header #S (scan 3)",
+       "source_role": null
+      }
+     ]
+    },
+    {
+     "reading_index": 1,
+     "value": "gscan energy 1000 1020 5 1040 1 1100 2 0.500000",
+     "witnesses": [
+      {
+       "source_id": "src-0003",
+       "relative_path": "SYN_cat_1200mV",
+       "locator": "line 9 header #S (scan 1)",
+       "source_role": null
+      },
+      {
+       "source_id": "src-0003",
+       "relative_path": "SYN_cat_1200mV",
+       "locator": "line 24 header #S (scan 2)",
+       "source_role": null
+      },
+      {
+       "source_id": "src-0005",
+       "relative_path": "SYN_cat_1200mV_dir/SYN_cat_1200mV_001.dat",
+       "locator": "line 1 header #S",
+       "source_role": null
+      }
+     ]
+    }
+   ],
+   "explanation": "4 source(s) state scan command, and they do not agree. Acquisition settings are kept the same for every scan of a measurement so that measurements can be compared; a deliberate change belongs in the logbook or run files. So two values within one measurement are a discrepancy for you to review. Different measurements may use different settings, and are never compared here.",
+   "recommendation": null,
+   "resolution": null,
+   "value_state": "conflicting"
+  },
+  {
+   "conflict_id": "conf-003",
+   "engine_conflict_id": "SYN_cat_m600mV::acquisition_timestamp",
+   "kind": "field_disagreement",
+   "subject": "timestamps.acquired_start_utc",
+   "candidate_id": "cand-0021",
+   "run_ids": [
+    "run-002"
+   ],
+   "readings": [
+    {
+     "reading_index": 0,
+     "value": "Mon Sep  9 01:46:40 2001",
+     "witnesses": [
+      {
+       "source_id": "src-0006",
+       "relative_path": "SYN_cat_m600mV",
+       "locator": "line 3 header #D",
+       "source_role": null
+      }
+     ]
+    },
+    {
+     "reading_index": 1,
+     "value": "Mon Sep  9 01:46:48 2001",
+     "witnesses": [
+      {
+       "source_id": "src-0006",
+       "relative_path": "SYN_cat_m600mV",
+       "locator": "line 10 header #D (scan 1)",
+       "source_role": null
+      },
+      {
+       "source_id": "src-0008",
+       "relative_path": "SYN_cat_m600mV_dir/SYN_cat_m600mV_001.dat",
+       "locator": "line 2 header #D",
+       "source_role": null
+      }
+     ]
+    },
+    {
+     "reading_index": 2,
+     "value": "Mon Sep  9 02:00:00 2001",
+     "witnesses": [
+      {
+       "source_id": "src-0006",
+       "relative_path": "SYN_cat_m600mV",
+       "locator": "line 25 header #D (scan 2)",
+       "source_role": null
+      }
+     ]
+    },
+    {
+     "reading_index": 3,
+     "value": "Mon Sep  9 02:10:00 2001",
+     "witnesses": [
+      {
+       "source_id": "src-0006",
+       "relative_path": "SYN_cat_m600mV",
+       "locator": "line 38 header #D (scan 3)",
+       "source_role": null
+      }
+     ]
+    }
+   ],
+   "explanation": "5 source(s) state acquisition timestamp, and they do not agree. Two different start times for one measurement are a real discrepancy for you to review; nothing here picks one.",
+   "recommendation": null,
+   "resolution": null,
+   "value_state": "conflicting"
+  },
+  {
+   "conflict_id": "conf-004",
+   "engine_conflict_id": "SYN_cat_m600mV::scan_command",
+   "kind": "field_disagreement",
+   "subject": "assets[].uri",
+   "candidate_id": "cand-0030",
+   "run_ids": [
+    "run-002"
+   ],
+   "readings": [
+    {
+     "reading_index": 0,
+     "value": "ascan Sz -4 -3 10 0.500000",
+     "witnesses": [
+      {
+       "source_id": "src-0006",
+       "relative_path": "SYN_cat_m600mV",
+       "locator": "line 37 header #S (scan 3)",
+       "source_role": null
+      }
+     ]
+    },
+    {
+     "reading_index": 1,
+     "value": "gscan energy 1000 1020 5 1040 1 1100 2 0.500000",
+     "witnesses": [
+      {
+       "source_id": "src-0006",
+       "relative_path": "SYN_cat_m600mV",
+       "locator": "line 9 header #S (scan 1)",
+       "source_role": null
+      },
+      {
+       "source_id": "src-0006",
+       "relative_path": "SYN_cat_m600mV",
+       "locator": "line 24 header #S (scan 2)",
+       "source_role": null
+      },
+      {
+       "source_id": "src-0008",
+       "relative_path": "SYN_cat_m600mV_dir/SYN_cat_m600mV_001.dat",
+       "locator": "line 1 header #S",
+       "source_role": null
+      }
+     ]
+    }
+   ],
+   "explanation": "4 source(s) state scan command, and they do not agree. Acquisition settings are kept the same for every scan of a measurement so that measurements can be compared; a deliberate change belongs in the logbook or run files. So two values within one measurement are a discrepancy for you to review. Different measurements may use different settings, and are never compared here.",
+   "recommendation": null,
+   "resolution": null,
+   "value_state": "conflicting"
+  }
+ ]
+}
