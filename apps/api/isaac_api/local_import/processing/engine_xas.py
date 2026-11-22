@@ -2388,7 +2388,27 @@ def _dose_core(table: dict, recs: Sequence[Mapping], stability: Mapping, np, E_e
                                "from counting noise, and its absence cannot be confirmed either; only a much larger "
                                "change would stand out. Nothing is decided by this rule; every scan is judged by the "
                                "other rules.")}
-        return block
+        # a scientist's set_dose_reading is checked BEFORE the floor (review of PR 345, I2): applied, or said as not
+        # applied (override_not_applied), never ignored
+        if reading_of == "not_beam_damage":
+            block.update(outcome="not_beam_damage", reading=reading, statement=(
+                f"The scientist's reading ({reading.get('decided_by')}, {reading.get('scope')}): not beam damage. "
+                + block["statement"]))
+            return block
+        if reading_of in ("beam_damage", "first_scan_settling") and reading.get("scope") == "group":
+            forced = True                  # the scientist's reading for THIS group decides it at every repeated spot
+        else:
+            if reading_of:
+                table.setdefault("overrides_not_applied", []).append({
+                    "scan": None, "decision": f"{DOSE_READING} {reading_of}", "decision_id": reading.get("decision_id"),
+                    "decided_by": reading.get("decided_by"),
+                    "said": (f"override not applied: the scientist's beamtime-wide {DOSE_READING} {reading_of} "
+                             f"({reading.get('decision_id')}) has nothing to act on in this group, because no spot's "
+                             "change can be measured at this count level; it stays in the bundle (a "
+                             f"{DOSE_READING} on this group, or set_scan_decision, decides it here)")})
+                _recount(table)
+                block.update(reading=reading, reading_applied=False)
+            return block
     elif low:
         info.update(left_out=sorted(low), repeat=len(repeat), judged=len(repeat) - len(low), counts=counts)
         repeat = {lab: rs for lab, rs in repeat.items() if lab not in low}

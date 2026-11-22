@@ -1440,6 +1440,37 @@ def test_low_count_spots_are_left_out_and_the_others_still_judged(tmp_path, dama
     assert "2 of 4 spots measured more than once were left out" in d["statement"] and "spot 3, spot 4" in d["statement"]
 
 
+@pytest.mark.parametrize("scope,value", [("group", "beam_damage"), ("experiment", "beam_damage"),
+                                         ("experiment", "not_beam_damage")])
+def test_a_dose_reading_at_low_counts_is_applied_or_said_never_ignored(tmp_path, scope, value):
+    """Review of PR 345, I2: every spot under the floor. The group's own reading is applied at every repeated spot; a
+    beamtime-wide reading that needs a change is not applied and says so (override_not_applied); not_beam_damage is."""
+    from isaac_api.local_import import cli
+    from isaac_api.local_import import mutations as M
+
+    bdir, root = imported(tmp_path, _mixed_counts_run([40] * 4, lambda s_, j: 3.0 - 0.035 * j * PEAK))
+    r = by_run(v1_results(bdir), "02_SYN_ZZ2")
+    tid = r["group_id"] if scope == "group" else "experiment"
+    assert cli.main(["bundle", "decide", str(bdir), "--target", tid, "--decision", "set_dose_reading", "--value",
+                     value, "--note", "SYN", "--by", "SYN Scientist"]) == 0
+    M.process(bdir, source=str(root))
+    r = by_run(v1_results(bdir), "02_SYN_ZZ2")
+    d = _dose(r)
+    rows = {x["scan"]: x for x in r[EX.DECISIONS_KEY]["rows"]}
+    if scope == "group":
+        assert d["outcome"] == "beam_damage" and d["reading"]["scope"] == "group", d
+        assert [rows[k]["decision"] for k in range(1, 13)] == ["keep", "drop", "drop"] * 4
+        assert "no change could be measured at this count level" in d["statement"]
+    elif value == "beam_damage":
+        assert d["outcome"] == EX.DOSE_LOW_COUNTS and d["reading_applied"] is False, d
+        assert "override_not_applied" in r["qc"]["reasons"]
+        assert "has nothing to act on in this group" in r["qc"]["statements"]["override_not_applied"]
+        assert all(x["decision"] == "keep" for x in rows.values())
+    else:
+        assert d["outcome"] == "not_beam_damage" and "not judged at this count level" in d["statement"], d
+        assert all(x["decision"] == "keep" for x in rows.values())
+
+
 # --- single-point I0 dropouts: the POINT is excluded, said, never interpolated; the scan is kept ----------------------
 
 
