@@ -35,7 +35,8 @@ def _vendored_schema_basis(monkeypatch, tmp_path):
     monkeypatch.setenv("ISAAC_PORTAL_VALIDATOR_PYTHON", str(tmp_path / "no-validator" / "python"))
 
 
-RULES = (S.NAME_POTENTIAL_RULE_ID, S.OPEN_CIRCUIT_RULE_ID, C.PROCESSED_TITLE_RULE_ID, B.TITLE_LINK_RULE_ID, *B.NOT_A_CONFLICT_RULES)
+RULES = (S.NAME_POTENTIAL_RULE_ID, S.OPEN_CIRCUIT_RULE_ID, C.PROCESSED_TITLE_RULE_ID, B.TITLE_LINK_RULE_ID, *B.NOT_A_CONFLICT_RULES,
+         B.CLOCK_OFFSET_RULE_ID)
 
 
 def test_the_version_is_bumped_by_the_existing_mechanism():

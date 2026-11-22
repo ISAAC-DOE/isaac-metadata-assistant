@@ -1388,9 +1388,13 @@ def consolidate(bundle: Mapping, *, compositions_out: dict | None = None, includ
                 "targets": [{"kind": "experiment", "id": "experiment"}],
                 "per_scope_targets": {"experiment": ["experiment"]},
                 "hints": [{"kind": "local_clock_literal", **zq["example"],
-                           "note": "The header's own words: a local clock time with no zone. A hint about WHAT is asked, never an answer."}],
+                           "note": "The header's own words: a local clock time with no zone. A hint about WHAT is asked, never an answer."}]
+                + [{"kind": "clock_offset_pair", "rule_id": B.CLOCK_OFFSET_RULE_ID, **p,
+                    "note": "A SPEC header writes one instant as UTC (#E) and as local clock time (#D): their difference is the clock's offset."}
+                   for p in ((zq.get("suggestion") or {}).get("pairs") or ())],
                 "allowed_values": None,
-                "suggested_value": None,
+                "suggested_value": (zq.get("suggestion") or {}).get("value"),
+                **({"suggestion": {k: v for k, v in zq["suggestion"].items() if k != "pairs"}} if zq.get("suggestion") else {}),
                 "answer_command": (f'isaac bundle decide <bundle_dir> --question {qid} --decision {B.CLOCK_ZONE_DECISION} '
                                    '--value <IANA time-zone name> --by "<your name>"'),
                 **({"deferred": deferred} if (deferred := _clock_zone_deferral(bundle)) else {}),

@@ -177,7 +177,9 @@ CHANGES_ADDED_IN: Mapping[str, str] = {
                "after one renumber); a run its own comment line says a macro ran is no acquired-never-declared "
                "conflict (isaac.import.macro_run_line.v1), nor are two SPEC comment lines that are events "
                "(isaac.import.comment_lines_are_events.v1) or positions equal within motor resolution "
-               "(isaac.import.position_within_motor_resolution.v1): their conflict ids stay unused; new candidates are "
+               "(isaac.import.position_within_motor_resolution.v1): their conflict ids stay unused; the clock zone "
+               "the SPEC #E / #D pairs give is suggested for the clock-zone question, never applied "
+               "(isaac.suggest.clock_zone_from_epoch_pair.v1); new candidates are "
                "numbered last"),
 }
 #: A field composed into a draft only beside another of the SAME run (interim decision for the
@@ -2626,12 +2628,102 @@ def local_clock_binding_problem(candidate: Mapping, decision: Mapping | None, zo
     return None
 
 
+# --- the clock's offset from a SPEC #E / #D pair (1.15.0; audit of 18 Nov 2026, rule 4) ------------------------------
+
+#: A SPEC header writes the file's creation instant twice: ``#E <unix epoch>`` (UTC by definition) and, on the next
+#: line, ``#D <local wall time>``. Their difference is the offset of the clock that wrote it. Where every pair of the
+#: import gives an offset one IANA zone has at that instant (its daylight-saving change included), and the SPEC
+#: headers name the facility (``acquisition_system.fingerprint``), the facility's zone is SUGGESTED for the clock-zone
+#: question, with the pairs as evidence. Never applied: the scientist confirms it. Pairs that fit no zone, or no
+#: facility, suggest nothing and the question asks as before.
+CLOCK_OFFSET_RULE_ID = "isaac.suggest.clock_zone_from_epoch_pair.v1"
+#: The zone of a facility the SPEC fingerprint names (``ACQUISITION_FINGERPRINTS``): a fact about the facility,
+#: offered only when the files' own offsets agree with it
+FACILITY_ZONES: Mapping[str, str] = {"SSRL": "America/Los_Angeles"}
+_EPOCH_LOCATOR = re.compile(r"^line (\d+) header #E$")
+_FILE_D_LOCATOR = re.compile(r"^line (\d+) header #D$")
+
+
+def spec_clock_pairs(bundle: Mapping) -> list[dict]:
+    """Every run's ``#E`` / ``#D`` pair (``#D`` on the line after ``#E`` of the same file): ``{run_id, relative_path,
+    epoch_literal, epoch_locator, utc, local_literal, local_locator, offset_minutes}``, the offset rounded to 15 min.
+    A ``#D`` that does not parse gives no pair."""
+    from datetime import datetime, timezone
+
+    epochs: dict[tuple, dict] = {}
+    locals_: dict[tuple, dict] = {}
+    for c in bundle.get("candidates") or ():
+        for e in c.get("evidence") or ():
+            loc, rel = str(e.get("locator") or ""), e.get("relative_path")
+            if c.get("statement_key") == "acquisition_epoch" and (m := _EPOCH_LOCATOR.match(loc)):
+                epochs.setdefault((c.get("run_id"), rel), {"line": int(m.group(1)), "e": e})
+            elif c.get("statement_key") == "acquisition_timestamp" and (m := _FILE_D_LOCATOR.match(loc)):
+                locals_.setdefault((c.get("run_id"), rel, int(m.group(1))), e)
+    out = []
+    for (run_id, rel), got in sorted(epochs.items(), key=lambda kv: (str(kv[0][0]), str(kv[0][1]))):
+        d = locals_.get((run_id, rel, got["line"] + 1))
+        try:
+            epoch = float(str(got["e"].get("literal_value")).strip())
+            utc = datetime.fromtimestamp(epoch, tz=timezone.utc)
+            local = datetime.strptime(" ".join(str(d.get("literal_value")).split()), _XDC_TIME_FORMAT) if d else None
+        except (TypeError, ValueError, OverflowError, OSError):
+            continue
+        if local is None:
+            continue
+        minutes = round((local - utc.replace(tzinfo=None)).total_seconds() / 900) * 15
+        out.append({"run_id": run_id, "relative_path": rel, "epoch_literal": f"#E {got['e'].get('literal_value')}",
+                    "epoch_locator": got["e"].get("locator"), "utc": utc.isoformat(),
+                    "local_literal": f"#D {d.get('literal_value')}", "local_locator": d.get("locator"),
+                    "offset_minutes": minutes})
+    return out
+
+
+def _zone_fits(zone: str, pairs: Sequence[Mapping]) -> bool:
+    from datetime import datetime
+    from zoneinfo import ZoneInfo
+
+    z = ZoneInfo(zone)
+    return all(datetime.fromisoformat(p["utc"]).astimezone(z).utcoffset().total_seconds() / 60 == p["offset_minutes"]
+               for p in pairs)
+
+
+def clock_zone_suggestion(bundle: Mapping) -> dict | None:
+    """:data:`CLOCK_OFFSET_RULE_ID`: ``{value, offsets, pairs, facility, reason}`` (``value`` ``None`` when nothing is
+    offered), or ``None`` when the import holds no ``#E`` / ``#D`` pair."""
+    pairs = spec_clock_pairs(bundle)
+    if not pairs:
+        return None
+    offsets = sorted({p["offset_minutes"] for p in pairs})
+    said = ", ".join(f"{m / 60:+g} h" for m in offsets)
+    example = pairs[0]
+    seen = (f"{len(pairs)} SPEC file(s) write their creation instant both as UTC and as local clock time (e.g. "
+            f"{example['epoch_literal']!r} and {example['local_literal']!r} in {example['relative_path']}, "
+            f"{example['epoch_locator']} and {example['local_locator']}): the clock ran at {said} from UTC")
+    fp = (bundle.get("experiment") or {}).get("acquisition_system", {}).get("fingerprint") or {}
+    facilities = sorted({m.get("facility") for m in fp.get("matches") or () if m.get("facility")})
+    zone = FACILITY_ZONES.get(facilities[0]) if len(facilities) == 1 else None
+    value = zone if zone is not None and _zone_fits(zone, pairs) else None
+    if value is not None:
+        reason = (f"{seen}, which is exactly {value} on each of those dates (daylight saving included), and the SPEC "
+                  f"headers name {facilities[0]} (the beamline fingerprint). Suggested, not applied: confirm it, or "
+                  "give the zone the clock was set to.")
+    elif zone is not None:
+        reason = (f"{seen}, which {zone} (the zone of {facilities[0]}, which the SPEC headers name) does not give on "
+                  "every one of those dates, so no zone is suggested.")
+    else:
+        reason = f"{seen}; the SPEC headers name no single facility, so no zone is suggested."
+    return {"rule_id": CLOCK_OFFSET_RULE_ID, "value": value, "offsets_minutes": offsets, "pairs": pairs[:5],
+            "pairs_total": len(pairs), "facility": facilities[0] if len(facilities) == 1 else None, "reason": reason}
+
+
 def clock_zone_question(bundle: Mapping) -> dict | None:
     """THE ONE beamtime-scope question about the instrument clock's zone, or ``None`` when no
     start-time candidate waits on it or a ``set_clock_time_zone`` decision exists. It states how
     many runs the answer unblocks, ONE example literal with its file, that no file states a zone,
-    and the exact command. It suggests NO zone: guessing one from where the facility is would be
-    exactly the guess CLAUDE.md §5 forbids."""
+    and the exact command. It never guesses a zone from where the facility is (CLAUDE.md §5); 1.15.0
+    (:data:`CLOCK_OFFSET_RULE_ID`): where the import's own SPEC ``#E`` / ``#D`` pairs give the clock's offset and
+    it is the named facility's zone on every date, that zone is SUGGESTED (``suggestion``), with the pairs as
+    evidence, never applied."""
     if clock_zone_decision(bundle) is not None:
         return None
     waiting = [c for c in bundle.get("candidates") or () if is_local_clock_start(c)]
@@ -2649,9 +2741,16 @@ def clock_zone_question(bundle: Mapping) -> dict | None:
         f"for you to confirm: "
         f"{CLOCK_ZONE_COMMAND}"
     )
+    suggestion = clock_zone_suggestion(bundle)
+    if suggestion is not None:
+        text += f" {suggestion['reason']}"
+        if suggestion["value"] is not None:
+            text += (" To confirm it: isaac bundle decide <bundle_dir> --target experiment --decision "
+                     f'set_clock_time_zone --value {suggestion["value"]} --by "<your name>"')
     return {"text": text, "run_ids": runs, "candidate_ids": [c["candidate_id"] for c in waiting],
             "example": {"literal": example.get("literal_value"), "relative_path": example.get("relative_path"),
-                        "source_id": example.get("source_id"), "locator": example.get("locator")}}
+                        "source_id": example.get("source_id"), "locator": example.get("locator")},
+            "suggestion": suggestion}
 
 
 def local_clock_reconfirm(bundle: Mapping) -> list[dict]:
