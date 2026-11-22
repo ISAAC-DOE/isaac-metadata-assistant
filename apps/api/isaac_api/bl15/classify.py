@@ -145,10 +145,15 @@ _PROCESSED_TITLE = re.compile(
     r")",
     re.IGNORECASE,
 )
-_TITLE_TERM = re.compile(r"(?:Norm\.\s+)?\(*\s*([^\s()+*/]+)\s+(\d+)\.\d+\s+\S+", re.IGNORECASE)
+#: a term: a WHOLE whitespace-delimited name (an opening parenthesis aside), then `<scan>.<column> <counter>`. Never
+#: a name cut at a `+`, `(` or `/` inside it (review of PR 346, I1: `SYN+C_01` is not `C_01`)
+_TITLE_TERM = re.compile(r"(?<!\S)\(*([^\s(][^\s]*?)\s+(\d+)\.\d+\s+[^\s()+*/]+")
 _AVERAGE_RANGE = re.compile(
     r"Average of \d+ from\s+(?:Norm\.\s+)?(\S+)\s+(\d+)\.\d+\s+\S+\s+to\s+(?:Norm\.\s+)?(\S+)\s+(\d+)\.\d+\s+\S+",
     re.IGNORECASE)
+
+
+_GLUED_OPERATOR = re.compile(r"[^\s()][+*/][^\s()\d]")
 
 
 def is_processed_scan_title(title: object) -> bool:
@@ -167,6 +172,8 @@ def processed_title_scans(title: object) -> list[tuple[str, int]]:
     if span and span.group(1) == span.group(3) and int(span.group(2)) <= int(span.group(4)) <= int(span.group(2)) + 10_000:
         return [(span.group(1), n) for n in range(int(span.group(2)), int(span.group(4)) + 1)]
     body = re.sub(r"^(?:S\s+)?\d+\s+(?:Average of \d+ from\s+)?", "", text, flags=re.IGNORECASE)
+    if _GLUED_OPERATOR.search(body):
+        return []  # `A+B 1.1 X`: a name holding an operator, or an operator with no space: never cut, never linked
     return list(dict.fromkeys((m.group(1), int(m.group(2))) for m in _TITLE_TERM.finditer(body)))
 
 

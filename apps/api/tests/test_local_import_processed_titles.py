@@ -104,6 +104,28 @@ def test_the_engine_reads_what_a_title_is_by_its_content(title, processed):
         assert got.source_type == "spec_acquisition" or "synthetic title" in title
 
 
+@pytest.mark.parametrize("title,named", [
+    ("1 (SYN(a)_01 1.1 DTC + SYN(a)_01 2.1 DTC)/2", [("SYN(a)_01", 1), ("SYN(a)_01", 2)]),
+    ("1 (SYN_a 3.1 DTC_FF1 + SYN_a 1.1 DTC_FF1)/2", [("SYN_a", 3), ("SYN_a", 1)]),
+    # an operator glued to a name: a stem holding `+` or `/`, or an operator with no space around it, cannot be told
+    # apart, so the title names nothing to link by
+    ("1 (SYN+C_01 1.1 DTC + SYN+C_01 2.1 DTC)/2", []),
+    ("1 (SYN/x_01 1.1 DTC + SYN/x_01 3.1 DTC)/2", []),
+    ("1 Norm. (SYN_a 1.1 FF1+SYN_a 2.1 FF1)", []),
+])
+def test_a_title_term_is_a_whole_name_never_a_cut_one(title, named):
+    # review of PR 346, I1: a stem holding `+`, `(` or `/` is never cut to the part after it (`C_01`, `_01`, `x_01`)
+    assert C.processed_title_scans(title) == named
+
+
+def test_a_cut_name_links_no_other_run(tmp_path):
+    runs = [{"run_id": "run-001", "run_key": "k1", "stem": "C_01", "run_candidate": True, "scan_count": 2, "scans": []}]
+    po = {"processed_output_id": "po-1", "label": "ZZ", "files": [{"processing_origin": {"rule_id": B.AVERAGE_TITLE_ORIGIN_RULE_ID}}]}
+    entry = {"processed_output_id": "po-1", "concept": "scan_title", "raw_literal": "1 (SYN+C_01 1.1 DTC + SYN+C_01 2.1 DTC)/2"}
+    B.propose_processed_links([po], runs, [entry])
+    assert po["proposed_links"] == []
+
+
 def test_the_scans_a_title_names():
     assert C.processed_title_scans("1 (SYN_a 3.1 X + SYN_a 1.1 X)/2") == [("SYN_a", 3), ("SYN_a", 1)]
     assert C.processed_title_scans("1 Average of 3 from Norm. SYN_a 2.1 Y to Norm. SYN_a 4.1 Y") == [
