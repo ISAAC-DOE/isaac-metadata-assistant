@@ -34,7 +34,7 @@ def _engine_on(monkeypatch):
 
 
 def scan_cols(seed, *, d=0.0, chem=0.0, scale=1.0, noise=2e-3, foil=False, glitch=True, fluo=True, trans_step=0.0,
-              n_points=None, wl=3.0, bg=0.0, wl_shift=0.0):
+              n_points=None, wl=3.0, bg=0.0, wl_shift=0.0, counts=None):
     """One SYN scan. ``d``: the mono offset (the recorded absev reads ``d`` above the true energy, so every feature
     sits at its true energy + d); ``chem``: a true shift of the sample's own edge; ``scale``: the signal's intensity."""
     rng = np.random.default_rng(seed)
@@ -45,6 +45,8 @@ def scan_cols(seed, *, d=0.0, chem=0.0, scale=1.0, noise=2e-3, foil=False, glitc
         I0 = I0 * (1 - 0.06 * np.exp(-((t - GLITCH) / 0.22) ** 2))
     mu = 0.05 + 1.0 / (1 + np.exp(-(t - E_EDGE - chem) / 1.2)) + wl * np.exp(-((t - 11218 - chem - wl_shift) / 1.5) ** 2)
     IF = (scale * mu + bg) * I0 * 1e-3 * (1 + noise * rng.standard_normal(E.size))
+    if counts is not None:          # Poisson counting noise, ``counts`` per point in the post-edge (mu ~ 1.05 there)
+        IF = rng.poisson((scale * mu + bg) * I0 / 1e5 * counts / 1.05).astype(float)
     if foil:
         muf = 0.3 + 0.8 / (1 + np.exp(-(t - E_EDGE) / 0.9))
         I1 = 0.6 * I0
@@ -526,9 +528,75 @@ def test_a_transmission_sample_falls_back_to_v0(tmp_path):
         stem = (r.get("inputs") or [{}])[0].get("relative_path", "").split("/")[0]
         by[stem[:2]] = r
     assert by["01"]["protocol_id"] == by["02"]["protocol_id"] == "isaac.xas.v1"
-    for k in ("03", "04"):
-        assert by[k]["protocol_id"] == "isaac.xas.v0", k
-        assert "transmission" in by[k][EX.ENGINE_KEY]["reason"] and "NOT SUPPORTED" in by[k][EX.ENGINE_KEY]["reason"]
+    # a transmission SAMPLE stays on v0; a transmission STANDARD (the pellet) is reduced on v1 (audit 18 Nov, finding 7)
+    assert by["04"]["protocol_id"] == "isaac.xas.v0"
+    assert "transmission" in by["04"][EX.ENGINE_KEY]["reason"] and "NOT SUPPORTED" in by["04"][EX.ENGINE_KEY]["reason"]
+    assert by["03"]["protocol_id"] == "isaac.xas.v1" and by["03"]["measurement_mode"]["mode"] == "transmission"
+
+
+def _std_cols(seed, d, *, gain=1.0, step=0.6):
+    """A transmission standard scan: mu = ln(I0/I1) with an edge step ``step`` at the true edge, a mono offset ``d``
+    (features at true energy + d), the I0 glitch, and I1 on a chamber ``gain`` (gain 3: ln(I0/I1) is negative)."""
+    c = scan_cols(seed, d=d, fluo=False, trans_step=step)
+    c["I1"] = c["I1"] * gain
+    return c
+
+
+@pytest.mark.parametrize("gain", [1.0, 3.0])
+def test_a_transmission_standard_is_aligned_per_scan_and_normalised_as_the_samples(tmp_path, gain):
+    """Audit 18 Nov, finding 7: a standard in transmission is aligned per scan to the samples' beamtime reference (the
+    I0 glitch here) and normalised with the samples' model (Victoreen + McMaster), never left unaligned on v0; a
+    negative ln(I0/I1) (a chamber gain) is carried by a constant that merged.csv takes out again."""
+    ds = [0.04, -0.03, 0.06]
+    runs = _two_groups() + [("03_SYN_IrO2_std_005", 13, [_std_cols(70 + k, d, gain=gain) for k, d in enumerate(ds)])]
+    bdir, _ = imported(tmp_path, runs)
+    r = by_run(v1_results(bdir), "03_SYN_IrO2_std")
+    assert r["protocol_id"] == "isaac.xas.v1" and r["qc"]["verdict"] != "fail", r["qc"]
+    assert r["measurement_mode"]["mode"] == "transmission"
+    bt = json.loads((bdir / "processing" / "processing_results.json").read_text())[EX.BEAMTIME_KEY]
+    assert r["group_id"] in bt["transmission_standards_on_v1"] and r["group_id"] not in bt["out_of_scope_groups"]
+    assert "no thickness, pinhole or harmonic correction" in r["measurement_mode"]["statement"]
+    assert "measurement_mode_unknown" not in r["review_flags"] and "dose_damage" not in r
+    rows = {x["scan_id"]: x for x in r[EX.SHIFTS_KEY]["rows"]}
+    ref_mean = float(np.mean(REF_D))
+    for k, d in enumerate(ds):
+        assert abs(1000 * (rows[f"03_SYN_IrO2_std_005#{k + 1}"]["shift_eV"] - (ref_mean - d))) < 10.0, rows
+    assert r[EX.NORMALIZATION_KEY]["model"] == "victoreen" and r[EX.NORMALIZATION_KEY]["tender"]["tender"] is False
+    assert r["outputs"]["edge_step"] == pytest.approx(0.6, rel=0.1)
+    merged = next(f for f in r["outputs"]["files"] if f["role"] == "merged")["relative_path"]
+    m = np.genfromtxt(bdir / merged, delimiter=",", names=True, skip_header=1)
+    pre = m["energy_eV"] < 11200
+    assert np.median(m["mu_mean"][pre]) == pytest.approx(0.5 - np.log(gain), abs=0.02)   # ln(I0/I1) as measured
+    # review of PR 345, I4: the record speaks of ln(I0/I1), never of fluorescence IF/I0, and carries the disclosure
+    from isaac_api.local_import import provenance as PV
+
+    notes = PV.summary(r, merged_series_id="x_merged", merged_stderr="all")
+    assert "IF/I0" not in notes and "fluorescence" not in notes.replace("tender-fluorescence", ""), notes
+    assert "Merge: uniform mean of the raw ln(I0/I1)" in notes and "raw ln(I0/I1) units" in notes
+    assert "no thickness, pinhole or harmonic correction" in notes and "merged raw ln(I0/I1)" in notes
+    series, _, _ = PV.merged_series("x", bdir / merged, result=r)
+    assert series[0]["channels"][0]["notes"].startswith("Transmission ln(I0/I1)")
+    assert "IF/I0" not in json.dumps(series)
+
+
+def test_a_motor_scan_never_comes_out_as_a_spectrum(tmp_path):
+    """Audit 18 Nov, finding 7: an alignment file whose energy column holds motor positions (here 10-60) fails with the
+    reason, on v0 as on v1."""
+    def motor(seed):
+        c = scan_cols(seed, fluo=True)
+        x = np.linspace(10.0, 60.0, c["energy"].size)
+        c["energy"], c["absev"] = x, x
+        return c
+
+    runs = _two_groups() + [("03_SYN_ZZ3_060mV", 13, [motor(80 + k) for k in range(2)])]
+    bdir, _ = imported(tmp_path, runs)
+    from isaac_api.local_import import mutations as M
+
+    r = next(x for x in M.load(bdir)["processing_results"] if x["source"] == "isaac_protocol"
+             and str((x.get("inputs") or [{}])[0].get("relative_path", "")).startswith("03_"))
+    assert r["qc"]["verdict"] == "fail" and r["qc"]["reasons"] == ["not_an_energy_scan"], r["qc"]
+    assert "a motor or alignment scan, not an energy scan" in r["qc"]["statements"]["not_an_energy_scan"]
+    assert not any(f.get("role") == "merged" for f in (r.get("outputs") or {}).get("files") or ())
 
 
 def test_the_v0_pin_keeps_every_group_on_v0(tmp_path, monkeypatch):
@@ -1038,8 +1106,12 @@ def test_separate_foil_scans_give_a_foil_timeline_on_the_package_rules(tmp_path)
     route = bt["routes"][0]
     assert route["reference_name"] == "01_SYN_Irfoil_calib_b" and route["method"] == "shape"
     assert [x["foil"] for x in route["timeline"]] == used
-    res = v1_results(bdir)
+    allv1 = v1_results(bdir)
+    res = [r for r in allv1 if r["measurement_mode"]["mode"] != "transmission"]
     assert len(res) == 3
+    # the foils are standards in transmission: on v1 too, aligned on the same timeline (audit 18 Nov, finding 7)
+    foils = [r for r in allv1 if r["measurement_mode"]["mode"] == "transmission"]
+    assert foils and all(x["route"] == "foil_timeline" for r in foils for x in r[EX.SHIFTS_KEY]["rows"] if x.get("ok"))
     for stem, hour in (("02_SYN_ZZ2", 9), ("03_SYN_ZZ3", 12), ("05_SYN_ZZ5", 14)):
         rows = by_run(res, stem)[EX.SHIFTS_KEY]["rows"]
         want = _drift(8) - _drift(hour)                       # linear in time between the foils, on the reference foil
@@ -1173,9 +1245,10 @@ def test_spots_of_split_files_take_the_motor_names_from_the_acquisition_file(tmp
 SPOT_SZ = (-7.45, -7.15, -6.85, -6.55)
 
 
-def _dose_run(wl_of, per_spot=3, scale_of=None, noise_of=None):
+def _dose_run(wl_of, per_spot=3, scale_of=None, noise_of=None, counts=None):
     """4 spots x ``per_spot`` scans, spot after spot (A1 A2 A3 B1 ...); ``wl_of(j)``: the white-line height of the j-th
-    scan AT ITS SPOT (0-based); ``wl_of(j, k)`` too, with k the scan's place in the run."""
+    scan AT ITS SPOT (0-based); ``wl_of(j, k)`` too, with k the scan's place in the run. The signal is ~2000 counts per
+    point in the post-edge (above the dose rule's counts floor); ``counts``: Poisson noise at that many counts instead."""
     sz, cols = [], []
     for s_ in range(4):
         for j in range(per_spot):
@@ -1185,8 +1258,9 @@ def _dose_run(wl_of, per_spot=3, scale_of=None, noise_of=None):
             except TypeError:
                 wl = wl_of(j)
             sz.append(SPOT_SZ[s_])
-            cols.append(scan_cols(110 + k, wl=wl, scale=(scale_of or (lambda j, k: 1.0))(j, k),
-                                  noise=(noise_of or (lambda j, k: 2e-3))(j, k)))
+            scale = (scale_of or (lambda j, k: 1.0))(j, k)
+            cols.append(scan_cols(110 + k, wl=wl, scale=scale if counts else 20.0 * scale,
+                                  noise=(noise_of or (lambda j, k: 2e-3))(j, k), counts=counts))
     return _spot_run(sz, cols)
 
 
@@ -1293,6 +1367,142 @@ def test_a_logbook_discard_first_note_wins_over_the_dose_rule(tmp_path, monkeypa
     assert [k for k, x in sorted(rows.items()) if x["decision"] == "keep"] == [3, 6, 9, 12]
     codes = {y["code"] for x in rows.values() for y in x["reasons"]}
     assert not codes & {EX.DOSE_CODE, EX.SETTLING_CODE} and EX.DOSE_QUESTION_FLAG not in r["review_flags"]
+
+
+@pytest.mark.parametrize("counts", [40, 5000])
+def test_identical_scans_with_counting_noise_show_no_dose_trend(tmp_path, counts):
+    """v3 (audit 18 Nov, finding 1): one unchanged curve, Poisson noise only. At 40 counts per point the rule says it
+    cannot judge; at 5000 it finds no trend. v2's fit of one noisy scan onto another read a falling white line here."""
+    bdir, _ = imported(tmp_path, _dose_run(lambda j: 3.0, counts=counts))
+    r = by_run(v1_results(bdir), "02_SYN_ZZ2")
+    d = _dose(r)
+    if counts < EX.DOSE["min_counts"]:
+        assert d["outcome"] == EX.DOSE_LOW_COUNTS, d
+        assert "not judged at this count level" in d["statement"] and "cannot be told" in d["statement"]
+        assert "dose_damage" in r["qc"]["statements"]
+    else:
+        assert d.get("outcome") is None, d
+    assert EX.DOSE_QUESTION_FLAG not in r["review_flags"]
+    codes = {y["code"] for x in r[EX.DECISIONS_KEY]["rows"] for y in x["reasons"]}
+    assert not codes & {EX.DOSE_CODE, EX.SETTLING_CODE}
+
+
+def test_the_v3_difference_has_no_noise_bias_where_v2_had_one():
+    """The metric itself, many draws: two Poisson scans of one curve at 20 counts per point. The mean difference is
+    zero within its error (v2's regression read about -0.3 edge steps on the real data at such counts)."""
+    from xas_analysis.average import AlignedScan
+
+    rng = np.random.default_rng(7)
+    E = GRID
+    mu = 0.05 + 1.0 / (1 + np.exp(-(E - E_EDGE) / 1.2)) + 3.0 * np.exp(-((E - 11218) / 1.5) ** 2)
+    I0 = np.full(E.size, 1e5)
+    win = [11214.0, 11222.0]
+    ds = []
+    for _ in range(400):
+        a, b = (AlignedScan(1, E, rng.poisson(mu * 20 / 1.05).astype(float), I0, np.ones(E.size), 0, 0, True, True)
+                for _k in range(2))
+        ds.append(EX._norm_difference({"aligned": a}, {"aligned": b}, E_EDGE, win, np))
+    m = np.array([x[0] for x in ds])
+    assert abs(m.mean()) < 3 * m.std() / np.sqrt(m.size)
+    assert np.median([x[1] for x in ds]) == pytest.approx(m.std(), rel=0.5)      # the noise said is the scatter seen
+
+
+def test_the_noise_said_covers_the_resampling():
+    """Review of PR 345, M4: scans shifted by up to 0.1 eV and interpolated once onto the grid (as aligned scans are):
+    the spread of the difference over 400 draws matches the noise said (it was about 1.17 x without the factor)."""
+    from xas_analysis.average import AlignedScan
+
+    rng = np.random.default_rng(11)
+    E = GRID
+    I0 = np.full(E.size, 1e5)
+    win = [11214.0, 11222.0]
+
+    def scan():
+        sh = rng.uniform(-0.1, 0.1)
+        t = E + sh
+        mu = 0.05 + 1.0 / (1 + np.exp(-(t - E_EDGE) / 1.2)) + 3.0 * np.exp(-((t - 11218) / 1.5) ** 2)
+        y = rng.poisson(mu * 500 / 1.05).astype(float)
+        return AlignedScan(1, E, np.interp(E, t, y), I0, np.ones(E.size), 0, 0, True, True)
+
+    ds = [EX._norm_difference({"aligned": scan()}, {"aligned": scan()}, E_EDGE, win, np) for _ in range(400)]
+    m = np.array([x[0] for x in ds])
+    assert m.std() / np.median([x[1] for x in ds]) == pytest.approx(1.0, abs=0.15)
+
+
+def test_a_seven_percent_white_line_drop_with_dose_at_high_counts_is_still_beam_damage(tmp_path):
+    """A real change: the white-line peak falls 3.5 % per scan at a spot (7 % by scan 3), recovering at a fresh spot,
+    Poisson noise at 5000 counts per point: beam damage, the first scan per spot kept."""
+    peak = 4.05                                              # the normalised peak at wl = 3.0
+    bdir, _ = imported(tmp_path, _dose_run(lambda j: 3.0 - 0.035 * j * peak, counts=5000))
+    r = by_run(v1_results(bdir), "02_SYN_ZZ2")
+    assert _dose(r)["outcome"] == "beam_damage", _dose(r)
+    rows = {x["scan"]: x for x in r[EX.DECISIONS_KEY]["rows"]}
+    assert [rows[k]["decision"] for k in range(1, 13)] == ["keep", "drop", "drop"] * 4
+
+
+def test_a_settling_first_scan_at_high_counts_is_still_found(tmp_path):
+    bdir, _ = imported(tmp_path, _dose_run(lambda j: 2.7 if j == 0 else 3.0, counts=5000))
+    r = by_run(v1_results(bdir), "02_SYN_ZZ2")
+    assert _dose(r)["outcome"] == "first_scan_settling", _dose(r)
+    rows = {x["scan"]: x for x in r[EX.DECISIONS_KEY]["rows"]}
+    assert [rows[k]["decision"] for k in range(1, 13)] == ["drop", "keep", "keep"] * 4
+
+
+def _mixed_counts_run(counts_of_spot, wl_of):
+    """4 spots x 3 scans, Poisson noise at ``counts_of_spot[spot]``; ``wl_of(spot, j)``: the white line of scan j."""
+    sz, cols, k = [], [], 0
+    for s_ in range(4):
+        for j in range(3):
+            sz.append(SPOT_SZ[s_])
+            cols.append(scan_cols(110 + k, wl=wl_of(s_, j), counts=counts_of_spot[s_]))
+            k += 1
+    return _spot_run(sz, cols)
+
+
+PEAK = 4.05                                                  # the normalised white-line peak at wl = 3.0
+
+
+@pytest.mark.parametrize("damaged", [True, False])
+def test_low_count_spots_are_left_out_and_the_others_still_judged(tmp_path, damaged):
+    """Review of PR 345, I1: two spots at 5000 counts (a 7 % drop by scan 3, or none) beside two at 40 counts: the two
+    high-count spots are judged, the low ones left out and said."""
+    runs = _mixed_counts_run([5000, 5000, 40, 40],
+                             lambda s_, j: 3.0 - 0.035 * j * PEAK if damaged and s_ < 2 else 3.0)
+    bdir, _ = imported(tmp_path, runs)
+    d = _dose(by_run(v1_results(bdir), "02_SYN_ZZ2"))
+    assert d["outcome"] == ("beam_damage" if damaged else EX.DOSE_NO_CHANGE), d
+    assert "2 of 4 spots measured more than once were left out" in d["statement"] and "spot 3, spot 4" in d["statement"]
+
+
+@pytest.mark.parametrize("scope,value", [("group", "beam_damage"), ("experiment", "beam_damage"),
+                                         ("experiment", "not_beam_damage")])
+def test_a_dose_reading_at_low_counts_is_applied_or_said_never_ignored(tmp_path, scope, value):
+    """Review of PR 345, I2: every spot under the floor. The group's own reading is applied at every repeated spot; a
+    beamtime-wide reading that needs a change is not applied and says so (override_not_applied); not_beam_damage is."""
+    from isaac_api.local_import import cli
+    from isaac_api.local_import import mutations as M
+
+    bdir, root = imported(tmp_path, _mixed_counts_run([40] * 4, lambda s_, j: 3.0 - 0.035 * j * PEAK))
+    r = by_run(v1_results(bdir), "02_SYN_ZZ2")
+    tid = r["group_id"] if scope == "group" else "experiment"
+    assert cli.main(["bundle", "decide", str(bdir), "--target", tid, "--decision", "set_dose_reading", "--value",
+                     value, "--note", "SYN", "--by", "SYN Scientist"]) == 0
+    M.process(bdir, source=str(root))
+    r = by_run(v1_results(bdir), "02_SYN_ZZ2")
+    d = _dose(r)
+    rows = {x["scan"]: x for x in r[EX.DECISIONS_KEY]["rows"]}
+    if scope == "group":
+        assert d["outcome"] == "beam_damage" and d["reading"]["scope"] == "group", d
+        assert [rows[k]["decision"] for k in range(1, 13)] == ["keep", "drop", "drop"] * 4
+        assert "no change could be measured at this count level" in d["statement"]
+    elif value == "beam_damage":
+        assert d["outcome"] == EX.DOSE_LOW_COUNTS and d["reading_applied"] is False, d
+        assert "override_not_applied" in r["qc"]["reasons"]
+        assert "has nothing to act on in this group" in r["qc"]["statements"]["override_not_applied"]
+        assert all(x["decision"] == "keep" for x in rows.values())
+    else:
+        assert d["outcome"] == "not_beam_damage" and "not judged at this count level" in d["statement"], d
+        assert all(x["decision"] == "keep" for x in rows.values())
 
 
 # --- single-point I0 dropouts: the POINT is excluded, said, never interpolated; the scan is kept ----------------------
@@ -1431,3 +1641,137 @@ def test_before_the_stable_window_within_the_noise_is_kept():
     row = _decide(recs, stability=stab)["by_id"]
     assert row["SYN_E#1"]["decision"] == "keep" and row["SYN_E#1"]["notes"][0]["code"] == "change_within_noise"
     assert row["SYN_E#2"]["decision"] == "drop" and row["SYN_E#2"]["reasons"][0]["code"] == "before_stable_window"
+
+
+# --- the absolute energy statement (audit 18 Nov, finding 2) ---------------------------------------------------------
+
+
+def test_the_absolute_energy_statement_states_the_set_point_and_never_says_none_is_needed():
+    one = {"time": "Sat Apr 12 09:00:00 2025", "axis": "mono", "from": 11564.3, "to": 11563.5, "file": "SYN_alignment"}
+    routes = [{"mode": "glitch_I0", "reference_anchor_eV": 11226.6, "reference_scans": 4}]
+    story = EX.energy_story({EX.REFERENCE_KEY: {"mono_reset_lines": [one], "routes": routes}})["absolute_calibration"]
+    said = story["statement"]
+    assert "none is needed" not in said and "calibrated energies" not in said
+    assert "at the start of the beamtime, as the files state it: `mono reset from 11564.3 to 11563.5` at Sat Apr 12" in said
+    assert "aligned to one beamtime reference" in said and "not across beamtimes" in said
+    assert story["traced_across_beamtimes"] is False and story["set_points"][0]["to"] == 11563.5
+    # review of PR 345, I3: no reset line is no calibration record; several resets drop "at the start"; no route, no
+    # alignment claim
+    bare = EX.energy_story({EX.REFERENCE_KEY: {"routes": routes}})["absolute_calibration"]["statement"]
+    assert EX.SET_POINT_NONE in bare and "foil calibration" not in bare
+    two = EX.energy_story({EX.REFERENCE_KEY: {"mono_reset_lines": [one, {**one, "to": 11563.8}],
+                                              "routes": routes}})["absolute_calibration"]["statement"]
+    assert "state 2 mono resets" in two and "at the start" not in two
+    none = EX.energy_story({EX.REFERENCE_KEY: {"routes": [{"mode": "none"}]}})["absolute_calibration"]["statement"]
+    assert "No scan is aligned" in none and "aligned to one beamtime reference" not in none
+
+
+# --- a scale-matched mean where coverage differs (audit 18 Nov, finding 6) -------------------------------------------
+
+
+def test_a_scan_ending_early_leaves_no_step_in_the_merge_and_full_coverage_is_the_plain_mean():
+    from xas_analysis.average import AlignedScan, average_scans
+
+    E = GRID
+    mu = 0.05 + 1.0 / (1 + np.exp(-(E - E_EDGE) / 1.2)) + 3.0 * np.exp(-((E - 11218) / 1.5) ** 2)
+    I0 = np.full(E.size, 1e5)
+    scans = []
+    for k, level in enumerate((1.0, 1.4, 0.7)):
+        IF = level * mu * I0 * 1e-3
+        if k == 1:
+            IF = np.where(E > 11440, np.nan, IF)              # the high scan ends early, inside the post-edge
+        scans.append(AlignedScan(k + 1, E, IF, I0, np.ones(E.size), 0, 0, True, True))
+    avg, _ = average_scans(scans, "uniform", 1, True, True)
+    plain = avg["IF_over_I0"].copy()
+    said = EX.coverage_matched_mean(scans, avg, np)
+    y = avg["IF_over_I0"]
+    full = E <= 11440
+    assert np.allclose(y[full], plain[full])                       # unchanged where all scans contribute
+    truth = mu * 1e-3 * (1.0 + 1.4 + 0.7) / 3
+    assert np.allclose(y, truth, rtol=1e-9)                        # no step at 11440 eV
+    assert not np.allclose(plain[~full], truth[~full], rtol=0.05)  # the plain mean stepped there
+    assert said["applied"] and said["partial_points"] == int((~full).sum())
+    assert "Scale-matched where coverage differs" in said["statement"] and "Nothing is interpolated" in said["statement"]
+    avg2, _ = average_scans(scans[::2], "uniform", 1, True, True)
+    assert EX.coverage_matched_mean(scans[::2], avg2, np) is None     # full coverage: nothing to say, nothing changed
+    assert "spread of the contributing scans around their plain mean" in said["stderr_statement"]  # review M7
+    avg3, _ = average_scans(scans, "uniform", 1, True, True)
+    tr = EX.coverage_matched_mean(scans, avg3, np, transmission=True)
+    assert tr["applied"] is False and np.allclose(avg3["IF_over_I0"], plain, equal_nan=True)
+
+
+# --- E0, the white-line spread and the counts, disclosed (audit 18 Nov, findings 4, 5, 8) ----------------------------
+
+
+def test_e0_the_white_line_spread_and_the_counts_are_disclosed(tmp_path):
+    bdir, _ = imported(tmp_path, _two_groups())
+    r = by_run(v1_results(bdir), "02_SYN_ZZ2")
+    e0 = r["e0"]
+    assert e0["e0_eV"] == round(e0["e0_eV"], 2) and r["outputs"]["e0_eV"] == e0["e0_eV"]
+    assert e0["grid_step_eV"] == pytest.approx(0.25) and "grid point of the maximum first derivative" in e0["statement"]
+    assert e0["tabulated_edge_eV"] == pytest.approx(E_EDGE, abs=1) and "a different definition" in e0["statement"]
+    u = r[EX.NORMALIZATION_KEY]["uncertainty"]
+    assert u["white_line_windows_tried"] > u["windows_tried"] >= 6
+    assert u["white_line_min"] <= u["white_line_height"] <= u["white_line_max"]
+    assert "white-line height" in u["white_line_statement"] and "no self-absorption correction" in u["white_line_statement"]
+    acq = r["acquisition"]
+    assert acq["attenuator_filter"] == [10.0] and acq["post_edge_counts_per_point"]["median"] > 0
+    assert "Attenuator (filter, as the #P line states it): 10" in acq["statement"]
+    assert EX.NOT_CORRECTED_SAID in acq["statement"]
+
+
+def test_the_quick_merge_comparison_and_the_plot_take_the_transmission_constant_out(monkeypatch, tmp_path):
+    """Review of PR 345, M1/M2: a standard's constant is subtracted from the curves compared with a scientist's MERGE
+    file and from the raw panel of the plot; the normaliser adds it back only to normalise."""
+    from types import SimpleNamespace
+
+    from isaac_api.local_import.processing import quick_merge as QM
+    from xas_analysis.average import AlignedScan
+
+    E = GRID
+    mu = 0.5 + 0.6 / (1 + np.exp(-(E - E_EDGE) / 1.2))
+    off = 0.7
+    a = AlignedScan(1, E, (mu + off) * 1e5, np.full(E.size, 1e5), np.ones(E.size), 0, 0, True, True)
+    rec = {"aligned": a, "entry": {}}
+    seen = {}
+
+    def fake(group, ctx, **kw):
+        seen.update(kw)
+        seen["sci"] = kw["normalizer"](E, mu)
+        return []
+
+    monkeypatch.setattr(QM, "compare_group", fake)
+    absorber = {"element": "Ir", "edge": "L3", "E_edge_eV": E_EDGE}
+    nm = EX.normalize_once(E, mu + off, np.ones(E.size), absorber, {"windows": {}}, np, transmission=True)
+    EX._quick_merges({}, SimpleNamespace(), [rec], [rec], E, mu + off, nm, E_EDGE, absorber, np, offset=off)
+    assert np.allclose(seen["mean"], mu) and np.allclose(seen["M"][0], mu)
+    assert np.allclose(seen["sci"][0], nm["norm"], atol=1e-6)          # the scientist's ln(I0/I1) normalised alike
+    table = {"by_id": {}, "counts": {"kept": 1}}
+    assert EX.plot(tmp_path / "p.png", {"group_id": "g"}, [], table, E, mu + off, nm, E_EDGE, absorber, np,
+                   offset=off, signal="ln(I0/I1)") in (True, False)
+
+
+def test_one_stray_point_does_not_make_the_transmission_constant_large():
+    """Review of PR 345, M3: the constant comes from robust percentiles, not the extremes."""
+    E = GRID
+    mu = 0.5 + 0.6 / (1 + np.exp(-(E - E_EDGE) / 1.2))
+    I0 = np.full(E.size, 1e5)
+    IF = mu * I0
+    IF[40] = -11.0 * I0[40]                                    # one point at ln(I0/I1) = -11
+    off = EX._transmission_offset([{"IF": IF, "I0": I0}], np)
+    assert off == pytest.approx(0.6 - 0.5, abs=0.05)
+
+
+def test_a_short_real_scan_is_too_short_not_a_motor_scan():
+    """Review of PR 345, M6: a 10 eV glitch check or a +-12 eV foil check is a real energy scan too short to process;
+    one fixed energy or motor positions are not energy scans; a stopped fragment is its own rule's."""
+    from isaac_api.local_import.processing import run as R
+
+    p = {"channels": {"energy_value_range_eV": (1000.0, 100000.0)}, "merge": {"min_points": 20}}
+    for E in (np.linspace(11222, 11232, 101), np.linspace(11552, 11576, 97)):
+        code, said = R.energy_axis_problem(E, p)
+        assert code == R.SHORT_SCAN and "too short to process as a spectrum" in said and "motor" not in said
+    assert R.energy_axis_problem(np.full(30, 11215.0), p)[0] == R.NOT_ENERGY_SCAN
+    assert R.energy_axis_problem(np.linspace(10, 60, 50), p)[0] == R.NOT_ENERGY_SCAN
+    assert R.energy_axis_problem(np.linspace(11200, 11201, 6), p) is None
+    assert R.energy_axis_problem(np.linspace(11150, 11400, 300), p) is None
