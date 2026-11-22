@@ -497,6 +497,43 @@ def _same_written(literal: Any, value: Any) -> bool:
     return text.casefold() == str(value).casefold()
 
 
+_DERIVED_REASONS = {
+    "isaac.suggest.technique_from_configuration.v1": (
+        "Every energy scan holds the emission spectrometer at {literal} eV, on an emission line of the edge being "
+        "scanned: that is how a high-resolution fluorescence (HERFD) measurement is set up. Likely, please check."),
+}
+
+
+def _derive_steps(cand: Mapping | None) -> list[dict]:
+    out = []
+    for e in (cand or {}).get("evidence") or ():
+        if e.get("relation") == "supports" and any(n.get("step") == "derive" for n in e.get("normalization") or ()):
+            out.append(e)
+    return out
+
+
+def _derived_evidence(cand: Mapping | None) -> list[dict]:
+    """The file lines a derived value rests on, as quotes (at most 3, one per file)."""
+    out, files = [], set()
+    for e in _derive_steps(cand):
+        if e.get("relative_path") in files:
+            continue
+        files.add(e.get("relative_path"))
+        out.append({"quote": str(e.get("literal_value")), "file": e.get("relative_path"), "locator": e.get("locator")})
+        if len(out) == 3:
+            break
+    return out
+
+
+def _derived_reason(cand: Mapping | None, label: str) -> str:
+    steps = _derive_steps(cand)
+    rule = next((n.get("rule_id") for e in steps for n in e.get("normalization") or () if n.get("step") == "derive"), None)
+    literal = steps[0].get("literal_value") if steps else None
+    if rule in _DERIVED_REASONS and literal is not None:
+        return _DERIVED_REASONS[rule].format(literal=literal)
+    return f"ISAAC read {label} from your files by a stated rule; the lines it read are shown. Likely, please check."
+
+
 def _suggestion_from_bundle(view: _View, unit: Mapping, shape: str, path: str) -> tuple[dict | None, dict | None]:
     """``(suggestion, on_accept)`` from what the bundle holds for a value card, or ``(None, None)``."""
     qs = unit["questions"]
@@ -511,7 +548,16 @@ def _suggestion_from_bundle(view: _View, unit: Mapping, shape: str, path: str) -
             # ISAAC's reading of it: likely, and to be checked
             exact = any(_same_written(h["literal"], values[0]) for h in hints)
             label = P.value_label(values[0], _unit_of(path, cand))
-            reason = (f"Your files write {written}." if exact or not written else
+            if not written:
+                # no text of the files IS the value: ISAAC derived it by a stated rule (the technique from the
+                # instrument setup, say). Say what was read, show where, and never call it "high"
+                derived = _derived_evidence(cand)
+                if not derived:
+                    return None, None
+                return ({"value": values[0], "label": label, "confidence": "medium", "basis": "files",
+                         "reason": _derived_reason(cand, label), "evidence": derived},
+                        {"decision": "confirm", "value": None})
+            reason = (f"Your files write {written}." if exact else
                       f"Read from {written} in your files as {label}; likely, please check.")
             return ({"value": values[0], "label": label, "confidence": "high" if exact else "medium", "basis": "files",
                      "reason": reason, "evidence": _evidence(hints)}, {"decision": "confirm", "value": None})

@@ -1392,3 +1392,20 @@ def test_the_export_drops_any_quote_citing_a_path_outside_the_import():
     assert S._no_outside_paths(cards) == 2
     assert cards[0]["context"] == [{"kind": "quotes", "items": [{"quote": "kept", "file": "run01.dat"}]}]
     assert cards[0]["suggestion"]["evidence"] == [{"quote": "f", "file": "log.txt"}]
+
+
+def test_a_value_derived_by_a_rule_is_worded_with_its_evidence_never_an_empty_quote():
+    from isaac_api.local_import import question_site as S
+
+    cand = {"evidence": [
+        {"relation": "supports", "relative_path": "01_FAKE_run", "locator": "line 36 header #P0 column 2", "literal_value": "9999.0",
+         "normalization": [{"step": "derive", "rule_id": "isaac.suggest.technique_from_configuration.v1"}]},
+        {"relation": "context", "relative_path": "01_FAKE_run", "locator": "line 28 header #S", "literal_value": "gscan energy 1 2 3",
+         "normalization": []},
+        {"relation": "supports", "relative_path": "02_FAKE_run", "locator": "line 36 header #P0 column 2", "literal_value": "9999.0",
+         "normalization": [{"step": "derive", "rule_id": "isaac.suggest.technique_from_configuration.v1"}]}]}
+    ev = S._derived_evidence(cand)
+    assert [e["file"] for e in ev] == ["01_FAKE_run", "02_FAKE_run"] and ev[0]["quote"] == "9999.0"
+    reason = S._derived_reason(cand, "HERFD-XAS")
+    assert "9999.0 eV" in reason and "Likely, please check" in reason and "Your files write ." not in reason
+    assert S._derived_evidence({"evidence": []}) == []
