@@ -70,28 +70,34 @@ def test_the_pair_is_read_with_its_places(tmp_path, capsys):
     assert pair["offset_minutes"] == -7 * 60 and pair["utc"] == "2001-09-09T01:46:40+00:00"
 
 
-def test_the_facility_zone_the_offsets_fit_is_suggested_and_nothing_is_applied(tmp_path, capsys):
+def test_another_instruments_clock_is_shown_never_suggested(tmp_path, capsys):
+    """Review of PR 346, I4: the pairs are the SPEC computer's clock; the start times the question waits on are an
+    SSRL XDC run's, written by another computer. The pairs are a labelled hint; no zone is suggested from them."""
     out, b = _grouped(tmp_path, LA_D)
     q = _clock_question(b)
     assert q["question_id"] == Q.CLOCK_QUESTION_ID  # the id stands
-    assert q["suggested_value"] == "America/Los_Angeles"
+    assert q["suggested_value"] is None and "--value America" not in q["text"]
     [hint] = [h for h in q["hints"] if h["kind"] == "clock_offset_pair"]
     assert hint["epoch_literal"] == "#E 1000000000" and hint["local_literal"] == LA_D
-    assert "-7 h" in q["text"] and "Suggested, not applied" in q["text"]
-    assert "--value America/Los_Angeles" in q["text"] and "SSRL" in q["text"]
+    assert "SPEC computer's clock" in hint["note"] and "SPEC computer's clock" in q["text"] and "-7 h" in q["text"]
     assert B.clock_zone_decision(b) is None  # nothing applied
     assert all(c["value"] is None for c in b["candidates"] if B.is_local_clock_start(c))
-    # one click confirms it; the start time then waits only for its own confirmation, as before
-    M.decide(out, target_ids=["experiment"], decision=B.CLOCK_ZONE_DECISION, value=q["suggested_value"],
-             by="SYN Scientist", orcid=None)
-    assert B.clock_zone_decision(M.load(out))["value"] == "America/Los_Angeles"
+
+
+def test_the_facility_zone_the_offsets_fit_is_suggested_for_the_same_clock(tmp_path, capsys):
+    _, b = _grouped(tmp_path, LA_D)
+    spec = [c for c in b["candidates"] if c["statement_key"] == "acquisition_epoch"]  # the pairs' own system
+    got = B.clock_zone_suggestion(b, spec)
+    assert got["value"] == "America/Los_Angeles" and "Suggested, not applied" in got["reason"] and "SSRL" in got["reason"]
+    waiting = [c for c in b["candidates"] if B.is_local_clock_start(c)]
+    assert B.clock_zone_suggestion(b, waiting)["value"] is None
 
 
 def test_pairs_that_fit_no_facility_zone_suggest_nothing(tmp_path, capsys):
     _, b = _grouped(tmp_path, UTC_D)  # the clock ran on UTC: not the facility's zone
-    q = _clock_question(b)
-    assert q["suggested_value"] is None
-    assert "+0 h" in q["text"] and "does not give" in q["text"] and "--value America" not in q["text"]
+    spec = [c for c in b["candidates"] if c["statement_key"] == "acquisition_epoch"]
+    got = B.clock_zone_suggestion(b, spec)
+    assert got["value"] is None and "+0 h" in got["reason"] and "does not give" in got["reason"]
 
 
 def test_without_a_pair_the_question_is_as_before(tmp_path, capsys):

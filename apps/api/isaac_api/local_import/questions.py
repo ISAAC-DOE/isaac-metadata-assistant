@@ -1390,7 +1390,10 @@ def consolidate(bundle: Mapping, *, compositions_out: dict | None = None, includ
                 "hints": [{"kind": "local_clock_literal", **zq["example"],
                            "note": "The header's own words: a local clock time with no zone. A hint about WHAT is asked, never an answer."}]
                 + [{"kind": "clock_offset_pair", "rule_id": B.CLOCK_OFFSET_RULE_ID, **p,
-                    "note": "A SPEC header writes one instant as UTC (#E) and as local clock time (#D): their difference is the clock's offset."}
+                    "note": ("A SPEC header writes one instant as UTC (#E) and as local clock time (#D): their difference "
+                             "is the offset of the clock that wrote it."
+                             + ("" if (zq.get("suggestion") or {}).get("value") is not None else
+                                " It is the SPEC computer's clock; the clock this question asks about may differ."))}
                    for p in ((zq.get("suggestion") or {}).get("pairs") or ())],
                 "allowed_values": None,
                 "suggested_value": (zq.get("suggestion") or {}).get("value"),

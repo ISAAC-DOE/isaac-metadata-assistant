@@ -967,11 +967,12 @@ click; nothing scientific is filled in silently.
   way the candidate keeps its id and its readings as evidence and says why; no conflict and no question is made.
 - **The clock zone from a SPEC `#E` / `#D` pair** (`isaac.suggest.clock_zone_from_epoch_pair.v1`): the header writes
   one instant as a UTC epoch and, on the next line, as local wall time, so their difference (rounded to 15 min) is
-  the clock's offset. Where every pair of the import gives the offset the named facility's zone has on that date
-  (daylight saving included; the facility from `acquisition_system.fingerprint`), that zone is the clock-zone
-  question's `suggested_value`, the pairs are its `clock_offset_pair` hints, and its text gives the one command that
-  confirms it. Nothing is applied; pairs that fit no such zone suggest nothing and say why; the question id is
-  unchanged. (The question is asked only where a run states its start in local clock time alone, an SSRL XDC run.)
+  the clock's offset. Where the pairs come from the same acquisition system as the start times the clock-zone question
+  waits on, and every pair gives the offset the named facility's zone has on that date (daylight saving included; the
+  facility from `acquisition_system.fingerprint`), that zone is the question's `suggested_value`, the pairs are its `clock_offset_pair` hints, and its text gives the one command that
+  confirms it. Nothing is applied; pairs that fit no such zone suggest nothing and say why; pairs from another
+  instrument (the SPEC computer's clock, beside SSRL XDC start times, the only case this build asks about) are a
+  labelled hint and suggest nothing; the question id is unchanged. (The question is asked only where a run states its start in local clock time alone, an SSRL XDC run.)
 - **A reference standard named as one at BL4-3** (`isaac.grouping.xdc_standard_name.v1`): an SSRL XDC run whose name
   is a mineral (`ANATASE`, `rutile`), `elemental` before an element symbol, a weight-percent dilution (`0p8wtpc`,
   `5wt`) or a dilution matrix (`sucrose`, `sugar`, `BN`, `cellulose`) proposes the role `reference`, said as judged

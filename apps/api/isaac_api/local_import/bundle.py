@@ -2746,12 +2746,19 @@ def _zone_fits(zone: str, pairs: Sequence[Mapping]) -> bool:
                for p in pairs)
 
 
-def clock_zone_suggestion(bundle: Mapping) -> dict | None:
+def clock_zone_suggestion(bundle: Mapping, waiting: Sequence[Mapping] = ()) -> dict | None:
     """:data:`CLOCK_OFFSET_RULE_ID`: ``{value, offsets, pairs, facility, reason}`` (``value`` ``None`` when nothing is
-    offered), or ``None`` when the import holds no ``#E`` / ``#D`` pair."""
+    offered), or ``None`` when the import holds no ``#E`` / ``#D`` pair. ``waiting``: the start-time candidates the
+    clock-zone question waits on. A zone is offered only when the pairs come from the SAME acquisition system (run
+    source type) as those (review of PR 346, I4): one computer's clock is not another's, so otherwise the pairs are
+    shown as a labelled hint and nothing is suggested."""
     pairs = spec_clock_pairs(bundle)
     if not pairs:
         return None
+    type_of = {r["run_id"]: r.get("source_type") for r in bundle.get("runs") or ()}
+    pair_systems = {type_of.get(p["run_id"]) for p in pairs}
+    waiting_systems = {type_of.get(c.get("run_id")) for c in waiting}
+    same_system = not waiting_systems or bool(pair_systems & waiting_systems)
     offsets = sorted({p["offset_minutes"] for p in pairs})
     said = ", ".join(f"{m / 60:+g} h" for m in offsets)
     example = pairs[0]
@@ -2761,8 +2768,11 @@ def clock_zone_suggestion(bundle: Mapping) -> dict | None:
     fp = (bundle.get("experiment") or {}).get("acquisition_system", {}).get("fingerprint") or {}
     facilities = sorted({m.get("facility") for m in fp.get("matches") or () if m.get("facility")})
     zone = FACILITY_ZONES.get(facilities[0]) if len(facilities) == 1 else None
-    value = zone if zone is not None and _zone_fits(zone, pairs) else None
-    if value is not None:
+    value = zone if zone is not None and _zone_fits(zone, pairs) and same_system else None
+    if not same_system:
+        reason = (f"{seen}. Those are the SPEC computer's clock; the start times waiting on this answer were written by "
+                  "another instrument's clock, which may differ, so no zone is suggested from them.")
+    elif value is not None:
         reason = (f"{seen}, which is exactly {value} on each of those dates (daylight saving included), and the SPEC "
                   f"headers name {facilities[0]} (the beamline fingerprint). Suggested, not applied: confirm it, or "
                   "give the zone the clock was set to.")
@@ -2800,7 +2810,7 @@ def clock_zone_question(bundle: Mapping) -> dict | None:
         f"for you to confirm: "
         f"{CLOCK_ZONE_COMMAND}"
     )
-    suggestion = clock_zone_suggestion(bundle)
+    suggestion = clock_zone_suggestion(bundle, waiting)
     if suggestion is not None:
         text += f" {suggestion['reason']}"
         if suggestion["value"] is not None:
