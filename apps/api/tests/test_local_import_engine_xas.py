@@ -1721,3 +1721,14 @@ def test_the_quick_merge_comparison_and_the_plot_take_the_transmission_constant_
     table = {"by_id": {}, "counts": {"kept": 1}}
     assert EX.plot(tmp_path / "p.png", {"group_id": "g"}, [], table, E, mu + off, nm, E_EDGE, absorber, np,
                    offset=off, signal="ln(I0/I1)") in (True, False)
+
+
+def test_one_stray_point_does_not_make_the_transmission_constant_large():
+    """Review of PR 345, M3: the constant comes from robust percentiles, not the extremes."""
+    E = GRID
+    mu = 0.5 + 0.6 / (1 + np.exp(-(E - E_EDGE) / 1.2))
+    I0 = np.full(E.size, 1e5)
+    IF = mu * I0
+    IF[40] = -11.0 * I0[40]                                    # one point at ln(I0/I1) = -11
+    off = EX._transmission_offset([{"IF": IF, "I0": I0}], np)
+    assert off == pytest.approx(0.6 - 0.5, abs=0.05)

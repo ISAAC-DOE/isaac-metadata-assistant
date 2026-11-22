@@ -472,7 +472,8 @@ def _arrays(table, choice, np, *, signal: bool = True, transmission: bool = Fals
 #: reference as the samples (the foil on I1/I2, else the I0 glitch), merged and normalised exactly as they are
 #: (Victoreen + McMaster). It is never part of the beamtime survey as a sample (the reference group stays a sample's).
 #: ln(I0/I1) carries the ion chambers' gain ratio as a constant and may be negative; one constant per group
-#: (``offset``: the curve's span minus its minimum, so it starts at its own span above zero) is added while it is
+#: (``offset``: the curve's robust span minus its robust minimum, 1st and 99th percentiles, so it starts at its own
+#: span above zero) is added while it is
 #: processed, because the Victoreen background is non-negative, and subtracted again in merged.csv and the
 #: background column; the normalised curve does not depend on a constant. The dose rule is not applied (IF is not a
 #: count). No thickness, pinhole or harmonic correction. Transmission SAMPLES stay on v0 (not in the engine's scope), and
@@ -492,7 +493,9 @@ def _transmission_offset(recs: Sequence[dict], np) -> float:
     mus = mus[np.isfinite(mus)]
     if not mus.size:
         return 0.0
-    lo, hi = float(np.min(mus)), float(np.max(mus))
+    # robust (review of PR 345, M3): the 1st and 99th percentiles of the points kept (I0 dropouts are already out), so
+    # one stray point (an I0 of a few counts that is not a dropout) cannot make the constant large
+    lo, hi = (float(v) for v in np.percentile(mus, [1.0, 99.0]))
     offset = (hi - lo) - lo
     for r in recs:
         r["IF"] = r["IF"] + offset * r["I0"]
