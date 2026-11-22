@@ -187,6 +187,8 @@ def summary(result: Mapping, *, merged_series_id: str | None = None, merged_stde
         parts.append(cov["statement"])
     if merged_stderr in ("all", "partial"):
         parts.append(MERGE_STDERR_SAID.format(signal=sig))
+        if cov.get("stderr_statement"):
+            parts.append(cov["stderr_statement"])
     w = nm.get("window_eV")
     windows = (f"pre-edge {w[0]:g}-{w[1]:g} eV, post-edge {w[2]:g}-{w[3]:g} eV"
                if isinstance(w, (list, tuple)) and len(w) == 4 else "windows not recorded")

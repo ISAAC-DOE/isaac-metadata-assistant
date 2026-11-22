@@ -2669,8 +2669,9 @@ def coverage_matched_mean(aligned: Sequence, avg: dict, np, *, transmission: boo
                           "scans cover), so a missing scan's level leaves no step. Where all scans contribute it is "
                           "the plain mean. Nothing is interpolated. The levels are a pure scale fitted mostly on the "
                           "white line, so a scan with its own background or white line is matched only "
-                          "approximately; at those points the standard error is still the spread of the contributing "
-                          "scans around their plain mean, not around the value reported.")}
+                          "approximately."),
+            "stderr_statement": ("Where coverage differs the standard error is still the spread of the contributing "
+                                 "scans around their plain mean, not around the value reported.")}
 
 
 def _earliest(flagged: Sequence[str], recs: Sequence[Mapping], rows: Mapping) -> bool:
