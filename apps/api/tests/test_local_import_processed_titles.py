@@ -201,6 +201,9 @@ def test_a_run_its_own_comment_line_says_a_macro_ran_is_no_acquired_never_declar
     assert rid["SYN_cat_run9"] not in never    # its header says run9.mac ran it
     assert b["counts"][B.NOT_A_CONFLICT_COUNT] >= 1
     assert B.not_a_conflict_text(1) in (out / "summary.md").read_text() or B.NOT_A_CONFLICT_RULES[0] in (out / "summary.md").read_text()
+    cand = next(c for c in b["candidates"] if c["run_id"] == rid["SYN_cat_run9"] and c["statement_key"] == "acquired_never_declared")
+    assert "a macro named in its own comment line ran it" in cand["state_basis"]["not_proposable_reason"]
+    assert "overwritten" not in cand["state_basis"]["not_proposable_reason"]
 
 
 def test_conflict_ids_after_a_dropped_one_keep_their_numbers(tmp_path, capsys, monkeypatch):

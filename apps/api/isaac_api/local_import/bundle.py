@@ -4157,8 +4157,9 @@ COMMENT_EVENT_RULE_ID = "isaac.import.comment_lines_are_events.v1"
 #: ``Sx -21.2782`` and ``Sx -21.27825``), is one position, not two. Positions further apart (another spot) still
 #: disagree, as before.
 POSITION_RESOLUTION_RULE_ID = "isaac.import.position_within_motor_resolution.v1"
-#: An acquisition whose own ``#C`` lines say a macro ran it (``do run3.mac``) was macro-driven, even when that macro's
-#: text was later overwritten and no longer declares it: no "acquired, never declared" conflict.
+#: An acquisition whose own ``#C`` lines name a macro that ran it (``do run3.mac``) was macro-driven: when no macro in
+#: the import declares it (the macro's text may have been overwritten since; nothing here checks that), that is no
+#: "acquired, never declared" conflict.
 MACRO_RUN_LINE_RULE_ID = "isaac.import.macro_run_line.v1"
 NOT_A_CONFLICT_RULES = (COMMENT_EVENT_RULE_ID, POSITION_RESOLUTION_RULE_ID, MACRO_RUN_LINE_RULE_ID)
 POSITION_RESOLUTION = 1e-3
@@ -4167,8 +4168,8 @@ NOT_A_CONFLICT_REASONS = {
                             "motor redefined), not competing readings of one value; they are kept as evidence."),
     POSITION_RESOLUTION_RULE_ID: (f"{POSITION_RESOLUTION_RULE_ID}: the positions agree within the motor's resolution "
                                   f"({POSITION_RESOLUTION:g} of its unit), so they are one position, kept as evidence."),
-    MACRO_RUN_LINE_RULE_ID: (f"{MACRO_RUN_LINE_RULE_ID}: no macro in the import declares this measurement, but its own "
-                             "comment line says a macro ran it (that macro was later overwritten): no conflict."),
+    MACRO_RUN_LINE_RULE_ID: (f"{MACRO_RUN_LINE_RULE_ID}: a macro named in its own comment line ran it; no macro in the "
+                             "import declares it, which is not a conflict."),
 }
 #: ``counts`` key: the engine disagreements these rules do not make conflicts (their conflict ids stay unused)
 NOT_A_CONFLICT_COUNT = "disagreements_not_conflicts"
@@ -4193,10 +4194,10 @@ def macro_driven_paths(evidence_by_source: Mapping[str, Sequence]) -> set[str]:
                    for i in items)}
 
 
-def _clusters(numbers: Sequence[float]) -> int:
-    """How many groups ``numbers`` form when two closer than :data:`POSITION_RESOLUTION` are one."""
-    ordered = sorted(numbers)
-    return 1 + sum(1 for a, b in zip(ordered, ordered[1:]) if b - a >= POSITION_RESOLUTION - 1e-12)
+def _one_position(numbers: Sequence[float]) -> bool:
+    """Whether ``numbers`` are one position: their whole spread (max - min) is under :data:`POSITION_RESOLUTION`
+    (never a chain of small steps: review of PR 346)."""
+    return max(numbers) - min(numbers) < POSITION_RESOLUTION - 1e-12
 
 
 def not_a_conflict(key: Any, readings: Sequence[Any], engine_conflict: Mapping | None = None, *,
@@ -4215,7 +4216,7 @@ def not_a_conflict(key: Any, readings: Sequence[Any], engine_conflict: Mapping |
             if not m:
                 return None  # a reading that is not `<motor> <number>`: compared as the engine compared it
             by_motor.setdefault(m.group(1), []).append(float(m.group(2)))
-        if by_motor and all(_clusters(v) == 1 for v in by_motor.values()):
+        if by_motor and all(_one_position(v) for v in by_motor.values()):
             return POSITION_RESOLUTION_RULE_ID
     return None
 

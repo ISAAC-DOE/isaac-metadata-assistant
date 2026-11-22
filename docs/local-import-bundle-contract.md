@@ -941,6 +941,9 @@ click; nothing scientific is filled in silently.
   a potential, with no value read from it, keeps its candidate and id but targets no field, and is evidence on the
   name's. A `Pos` / `Neg` pair is a pulsed step (no set-point); a number above 3 V is not offered. The scientists'
   rule: the potential is inferable from the experiment.
+- **A merge caution that no longer fires**: since a potential in an SSRL XDC name is now a classified condition, the
+  merge candidate's `nothing_classified` caution (and the `.exp DATA_FILE` agreement it carries) no longer appears for
+  XDC runs named only by a potential; it still does for runs whose files classify nothing.
 - **Open circuit in a name** (`isaac.suggest.name_open_circuit.v1`, candidate key `control_mode_statement`): an `OCV`
   / `OCP` token with no potential token after it suggests the control mode `open_circuit` (SSRL XDC and SPEC runs).
 - **A scan title that names other scans is a processed output** (`bl15.classify.processed_scan_title.v1`): the
@@ -954,15 +957,15 @@ click; nothing scientific is filled in silently.
   enum value): to the one run with scans whose stem the title names and which has every scan named; several files
   named gives `spans_several_runs`, none fitting `no_run_named_like_it`. A title naming no scans keeps the 1.11.0
   legacy-number rule. The validator re-runs it.
-- **A macro that was overwritten is not a conflict** (`isaac.import.macro_run_line.v1`): an acquisition whose own
-  `#C <date>.  do <macro>.` line says a macro ran it gets no `acquired_never_declared` conflict when no macro in the
-  import still declares it. Its candidate keeps its id, says why, and is no longer a disagreement;
+- **A macro-driven run no macro declares is not a conflict** (`isaac.import.macro_run_line.v1`): an acquisition
+  whose own `#C <date>.  do <macro>.` line names a macro that ran it gets no `acquired_never_declared` conflict when no
+  macro in the import declares it (the macro may have been overwritten since; that is not checked). Its candidate keeps its id, says why, and is no longer a disagreement;
   `counts.disagreements_not_conflicts` counts them, and the summary says so.
 - **SPEC `#C` lines are an event log** (`isaac.import.comment_lines_are_events.v1`): two comment lines of different
   kinds, or two events (only the verbs `do <macro>` and `<motor> reset from A to B`), are not competing readings of one
   field; two different session lines (`spec User = ...`), or any other dated line (`potential set to 1.2 V`), still
   disagree. **A read-back position equal to the commanded one
-  within motor resolution** (1e-3 of the motor's unit: `Sx -21.2782` and `Sx -21.27825`) is one position
+  within motor resolution** (a whole spread under 1e-3 of the motor's unit: `Sx -21.2782` and `Sx -21.27825`) is one position
   (`isaac.import.position_within_motor_resolution.v1`); positions further apart (another spot) still disagree. Either
   way the candidate keeps its id and its readings as evidence and says why; no conflict and no question is made.
 - **The clock zone from a SPEC `#E` / `#D` pair** (`isaac.suggest.clock_zone_from_epoch_pair.v1`): the header writes

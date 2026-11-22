@@ -104,7 +104,9 @@ def test_import_proposes_the_role_and_suggests_the_absorber(tmp_path, capsys):
     assert {(stem[e["run_key"]], e["element"], e["edge"]) for e in ev} == {
         ("01_SYNTiON_1x1mm_dry_091", "Ti", "K"), ("03_ANATASE_1x1mm_081", "Ti", "K")}  # the uniform scan names none
     [q] = [q for q in Q.consolidate(b)["questions"] if q["kind"] == "confirm_absorber" and q["scope"] == "experiment"]
-    assert "element Ti, edge K for 2 group(s)" in q["text"] and "their own scans' energy grid" in q["text"]
+    # the only witness is the energy grid: said so, never "the files state" (review of PR 346)
+    assert "Element Ti, edge K is suggested from the scans' energy grid for 2 group(s)" in q["text"]
+    assert "files state" not in q["text"]
     assert any(h["kind"] == "scanned_range" and h["literal"] == "Ti K" for h in q["hints"])
     assert "--element <El>" in q["answer_command"]  # never a ready-to-run answer
     assert not [d for d in b["scientist_decisions"] if d.get("decision") == "set_absorber"]

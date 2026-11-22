@@ -3405,7 +3405,13 @@ def _absorber_questions(bundle: Mapping, groups: Sequence[Mapping], *, include_a
             own = sum(1 for _, s in items if s['group_specific_statements'])
             statements = items[0][1]['beamtime_wide_statements']
             # r4-b L3: the rest counted in groups, the statements apart ("the rest (2, …)" read as two groups of eight)
-            text = (f"The files state element {element}, edge {edge} for {len(items)} group(s), and no file disagrees: "
+            only_grid = all(w["kind"] == "scanned_range" for _, s in items for w in s["witnesses"])
+            text = (f"Element {element}, edge {edge} is suggested from the scans' energy grid for {len(items)} group(s) "
+                    "(the finest energy steps of each group's own scans bracket that edge; no file states the absorber), "
+                    "and no scan disagrees. "
+                    "Is that the absorber? Answer once, or per group (a reference foil or blank cell may differ)."
+                    if only_grid else
+                    f"The files state element {element}, edge {edge} for {len(items)} group(s), and no file disagrees: "
                     f"{own} of them from processed outputs linked to their runs"
                     + (" or from their own scans' energy grid" if any(w["kind"] == "scanned_range" for _, s in items for w in s["witnesses"]) else "")
                     + (", "

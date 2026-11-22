@@ -100,6 +100,8 @@ def test_comment_lines_are_events_and_positions_within_resolution_are_one(tmp_pa
     ("sample_position", ["Sx -21.2782", "Sx -21.27825"], B.POSITION_RESOLUTION_RULE_ID),
     ("sample_position", ["Sx 21.1537", "Sx 21.15375", "Sz 30.4142", "Sz 30.41425"], B.POSITION_RESOLUTION_RULE_ID),
     ("sample_position", ["Sz 30.4142", "Sz 30.43925"], None),
+    # the whole spread counts, never a chain of small steps (review of PR 346)
+    ("sample_position", ["Sx 1.0000", "Sx 1.0009", "Sx 1.0018", "Sx 1.0027", "Sx 1.0036"], None),
     ("motor_position", ["11215.198", "9174.8014"], None),  # no motor named: compared as the engine compared it
     ("counting_time", ["0.2  (Seconds)", "1  (Seconds)"], None),
 ])
