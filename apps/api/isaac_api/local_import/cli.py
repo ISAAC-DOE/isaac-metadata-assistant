@@ -866,7 +866,9 @@ CANNOT_EXPORT_NOTE = ("Such a group can never become an exportable record as it 
                       "protocol covers this data yet. not_a_measurement_run: every run is a reference standard, an "
                       "alignment or a calibration scan, so the import asks nothing about its sample or conditions and "
                       "the required fields in cannot_export_fields have nowhere to hold an answer; its curve can be "
-                      "approved, but it does not become a record.")
+                      "approved, but it does not become a record. processing_result_has_no_curve: every processing "
+                      "result it has made no curve (a failure, such as a file with no energy axis), so there is nothing "
+                      "to approve; a result with a curve lifts it.")
 
 
 def group_list_extras(bundle: Mapping) -> dict[str, dict]:
@@ -903,6 +905,12 @@ def group_list_extras(bundle: Mapping) -> dict[str, dict]:
                                  "note": ("it merges scans read at different " + ", ".join(sorted({str(c) for c in care}))
                                           + f": check it before a bulk confirm (`isaac bundle show <bundle_dir> group "
                                           f"{g['group_id']}` gives the readings)")}
+            # finding 12 (audit of 18 Nov 2026): a flag raised only by the NAME of the scientists' own merge file (an
+            # older import read it as a second reading of the run) says so; no reading is printed here
+            if any(r["only_a_processed_output_name"] for r in G.care_reasons(bundle, g)):
+                row["needs_care"]["from_a_merge_file_name"] = (
+                    "one of the two readings is only the name of the scientists' own merge file, which is no reading of "
+                    "the run: an older import took it as one; importing the folder again with this build drops it")
         basis = g.get("role_basis") if isinstance(g.get("role_basis"), Mapping) else {}
         if g.get("role") in (G.ROLE_REFERENCE, G.ROLE_ALIGNMENT) and basis.get("basis") in ("name_token", "element_name_token"):
             # a role a NAME proposes (SPEC or XDC) is a proposal: said as judged from the name, never as a fact
@@ -2118,6 +2126,8 @@ def cmd_bundle_questions(args) -> int:
         payload = Q.consolidate(bundle, compositions_out=reports)
         rows = Q.filter_questions(payload, scope=args.scope, blocking_only=args.blocking_only, reports=reports)
         kept = [q for q in rows if not (args.skip_deferred and q.get("deferred"))]
+        if getattr(args, "distinguishing_only", False):
+            kept = [q for q in kept if q.get("completeness")]  # the local completeness tier (completeness.py)
         # r3a L5: a question about runs no live record group holds builds no record: counted, listed on request (or
         # when a run's own scope is asked for); the local questions screen hides them the same way (r3c LOW-3)
         kept, outside = Q.hide_outside_live_groups(kept, scope=args.scope, include=args.include_outside_live_groups)
@@ -2156,6 +2166,9 @@ def cmd_bundle_questions(args) -> int:
             # whole bundle's under their own name
             "counts": Q.scope_counts(payload, args.scope, reports),
             **({"counts_whole_bundle": payload["counts"]} if args.scope else {}),
+            # finding 1: the LOCAL completeness gate, said beside the counts (its questions are listed right after the
+            # blocking ones, each with `completeness`)
+            **({"record_completeness": payload["record_completeness"]} if payload.get("record_completeness") else {}),
             "total": len(kept), "offset": args.offset, "limit": args.limit, "returned": len(page),
             "omitted_before": min(args.offset, len(kept)),
             "omitted_after": max(0, len(kept) - args.offset - len(page)),
@@ -2278,6 +2291,8 @@ def _compact_question(q: Mapping) -> dict:
     if isinstance(out.get("applies_to"), Mapping) and not out["applies_to"].get("runs_outside_live_groups"):
         out["applies_to"] = {k: v for k, v in out["applies_to"].items() if k != "runs_outside_live_groups"}
     pst = q.get("per_scope_targets") or {}
+    if isinstance(out.get("completeness"), Mapping):  # its group ids are counted (`groups`), like every target list
+        out["completeness"] = {k: v for k, v in out["completeness"].items() if k != "group_ids"}
     out["targets_count"] = len(q.get("targets") or ())
     out["scopes_count"] = len(pst)
     # the groups it REACHES (applies_to.groups: a beamtime-wide question reaches every live group, c10-m), less those
@@ -2651,7 +2666,9 @@ def cmd_bundle_export(args) -> int:
     holder: dict = {}
 
     def run():
-        holder["r"] = R.export_records(Path(args.bundle_dir), Path(args.out))
+        holder["r"] = R.export_records(Path(args.bundle_dir), Path(args.out),
+                                       allow_indistinguishable=getattr(args, "allow_indistinguishable", False),
+                                       by=getattr(args, "by", None), orcid=getattr(args, "orcid", None))
         return holder["r"] if args.full else compact_export(holder["r"])
 
     code = _mutation(run)
@@ -3119,6 +3136,9 @@ def build_parser(prog: str = "isaac") -> argparse.ArgumentParser:
     q.add_argument("--each-group", action="store_true",
                    help="also list each per-group question a beamtime-wide question answers at once (e.g. the start "
                         "time); by default they are counted, not listed")
+    q.add_argument("--distinguishing-only", action="store_true",
+                   help="only the questions that put a condition into a record that keeps it apart from another record "
+                        "of its sample (the local completeness tier: after the blocking ones, before the optional ones)")
     q.add_argument("--no-context", action="store_true",
                    help="leave out each question's context (the quotes, values, plots and images beside it; "
                         "`bundle show <dir> question <id>` prints it in full)")
@@ -3176,6 +3196,12 @@ def build_parser(prog: str = "isaac") -> argparse.ArgumentParser:
     q.add_argument("--out", required=True)
     q.add_argument("--full", action="store_true", help="print every exported row in full (default: every refused, withdrawn, "
                    "replaced row and every row with a warning of its own; of the repeated ones the first few)")
+    q.add_argument("--allow-indistinguishable", action="store_true",
+                   help="write the records the local completeness gate holds anyway (a record without a condition that "
+                        "keeps it apart from another record of its sample, or one that says exactly what another says); "
+                        "needs --by: the decision is kept in the bundle, so later exports keep those records")
+    q.add_argument("--by", help="the scientist's name, for --allow-indistinguishable (a local, unverified statement)")
+    q.add_argument("--orcid", help="optional ORCID iD claimed with --by")
     q.set_defaults(func=cmd_bundle_export)
 
     q = bsub.add_parser("upload", help="DRY RUN ONLY: what would be sent to the portal")

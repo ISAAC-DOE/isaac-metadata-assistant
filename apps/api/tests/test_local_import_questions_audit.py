@@ -77,7 +77,9 @@ def _store_unfit_answer(bdir, target_ids, good, bad):
 def test_question_ids_of_the_grouped_corpus_are_pinned(grouped):
     p = Q.consolidate(M.load(grouped))
     # the condition labels (labels.py) are NEW questions beside these; every id here is unchanged
-    ids = sorted(q["question_id"] for q in p["questions"] if q["kind"] != L.KIND)
+    # ...and so is the beamtime-wide potential-scale question (audit of 18 Nov 2026, finding 1): its own new id
+    ids = sorted(q["question_id"] for q in p["questions"]
+                 if q["kind"] != L.KIND and q["question_id"] != Q.potential_scale_question_id())
     # r8: the follows question is asked whenever a chain was held (informational here: it says why)
     assert sorted(q["label"] for q in p["questions"] if q["kind"] == L.KIND) == ["filter", "follows", "history",
                                                                                 "history", "sample_id", "tag"]

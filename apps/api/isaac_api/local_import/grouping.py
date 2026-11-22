@@ -701,6 +701,71 @@ def name_token_position(stem: str, locator: Any) -> int | None:
     return int(m.group(1)) + 1
 
 
+#: finding 12 (audit of 18 Nov 2026): the source types whose FILE NAME is never a reading of a run's conditions: the
+#: scientists' own merge / average of a run (a rough reference result, ``bundle.is_quick_merge``)
+PROCESSED_SOURCE_TYPES = frozenset({"processed_spectrum"})
+CARE_CODE = "conflicting_condition"
+CARE_SHOWN = 3
+
+
+def _witness_words(e: Mapping, processed: bool) -> str:
+    where = str(e.get("locator") or "")
+    if processed:
+        return f"the name of the scientists' own merge file {e.get('relative_path')}"
+    if where.startswith("filename token"):
+        return "the file name"
+    if "header" in where:
+        return "the scan header"
+    return "a file"
+
+
+def care_reasons(bundle: Mapping, group: Mapping) -> list[dict]:
+    """Why ``group`` carries the care flag (``needs_care``: a ``conflicting_condition`` split reason), one row per
+    condition: ``{"condition", "readings": [{"value", "from": [...]}], "why", "only_a_processed_output_name"}``.
+
+    ``from`` says where each reading is written (the file name, the scan header, the name of the scientists' own
+    merge file). ``only_a_processed_output_name`` is true when a reading is witnessed ONLY by the name of a
+    processed output: that is no reading of the run (a build since 1.13.0 never takes it as one), so the flag is an
+    artefact of an older import and a re-import drops it. Nothing is changed here; this only says why."""
+    conds = [sr for sr in group.get("split_reasons") or () if isinstance(sr, Mapping) and sr.get("code") == CARE_CODE]
+    if not conds:
+        return []
+    cand = {c["candidate_id"]: c for c in bundle.get("candidates") or ()}
+    processed = {s.get("source_id") for s in bundle.get("sources") or ()
+                 if ((s.get("classification") or {}).get("source_type")) in PROCESSED_SOURCE_TYPES}
+    processed |= {f.get("source_id") for po in bundle.get("processed_outputs") or () for f in po.get("files") or ()}
+    basis = {k: v for cat in ("sample", "technique", "environment", "conditions", "unclassified")
+             for k, v in ((group.get("basis") or {}).get(cat) or {}).items() if isinstance(v, Mapping)}
+    out = []
+    for sr in conds:
+        key = sr.get("condition")
+        by_value: dict[str, dict] = {}
+        for cid in (basis.get(key) or {}).get("candidate_ids") or ():
+            for e in (cand.get(cid) or {}).get("evidence") or ():
+                lit = _norm_literal(e.get("literal_value"))
+                if lit is None:
+                    continue
+                row = by_value.setdefault(lit, {"value": lit, "from": [], "_all_processed": True})
+                is_processed = e.get("source_id") in processed
+                row["_all_processed"] = row["_all_processed"] and is_processed
+                words = _witness_words(e, is_processed)
+                if words not in row["from"]:
+                    row["from"].append(words)
+        rows = sorted(by_value.values(), key=lambda r: r["value"])
+        only = [r["value"] for r in rows if r.pop("_all_processed")]
+        if not rows:  # the witnesses are not held (cut): the readings as the split reason gives them
+            rows = [{"value": str(v), "from": []} for v in sr.get("readings") or ()]
+        said = "; ".join(f"{r['value']!r}" + (f" ({', '.join(r['from'][:2])})" if r["from"] else "") for r in rows[:6])
+        why = f"{key}: its files read {said}"
+        if only and len(only) < len(rows):
+            why += (f". The reading {', '.join(repr(v) for v in only)} is only the name of the scientists' own merge "
+                    "file, which is no reading of the run: an older import took it as one, and importing the folder "
+                    "again with this build drops it")
+        out.append({"condition": key, "readings": rows, "why": why,
+                    "only_a_processed_output_name": bool(only) and len(only) < len(rows)})
+    return out
+
+
 def own_name_witnesses(candidate: Mapping, stem: str) -> list[Mapping]:
     """The candidate's evidence read from the run's OWN file name (a ``filename token`` locator on a file named
     ``stem``), not from a scan file's name inside its folder."""

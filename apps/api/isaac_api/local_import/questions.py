@@ -106,6 +106,8 @@ ALLOWED_DECISIONS: Mapping[str, tuple[str, ...]] = {
     "confirm_absorber": ("set_absorber", "defer"),
     # r6 I1: `confirm` records, for each group it reaches, the UTC instant that group's own file states
     "stated_utc_start_times": ("confirm",),
+    # finding 4 (audit of 18 Nov 2026): the beamtime-wide dose reading (isaac.xas.dose_damage.v2)
+    "dose_reading": (B.DOSE_READING_DECISION,),
 }
 #: A ``confirm_value`` question whose targets carry NO value (the files hold text, no value this
 #: build derives from it): there is nothing to confirm, so ``confirm`` is not offered. The kind —
@@ -123,7 +125,7 @@ VALUE_KINDS = ("missing_value", "optional_values", "confirm_value", "resolve_con
 #: The kinds an ANSWERED question of is still found under its id (``consolidate(include_answered=True)``):
 #: ``decide --question`` re-answers it and ``bundle show question`` shows it with ``status`` and its answers.
 RESOLVABLE_WHEN_ANSWERED = VALUE_KINDS + ("confirm_absorber", "naming_counter_positions", "clock_time_zone",
-                                          "stated_utc_start_times")
+                                          "stated_utc_start_times", "dose_reading")
 #: r6 I1: the beamtime-wide start-time question (:func:`_stated_utc_start_question`): one answer for every group whose
 #: start-time disagreement the files settle with an instant they state in UTC. Its targets are conflicts.
 STATED_UTC_START_KIND = "stated_utc_start_times"
@@ -273,7 +275,9 @@ def command_for_targets(payload: Mapping, target_ids: Sequence[str], path: str, 
     if not wanted:
         return None
     for q in payload["questions"]:
-        if q["kind"] not in VALUE_KINDS or q.get("informational"):
+        # a group's own question, never the beamtime-wide one that asks the same targets for many groups (the
+        # potential-scale question, finding 1 of the 18 Nov 2026 audit): this command is for ONE record's warning
+        if q["kind"] not in VALUE_KINDS or q.get("informational") or q.get("beamtime_wide"):
             continue
         for field, ids in _value_paths(q):
             if field == path and wanted.intersection(ids):
@@ -1483,9 +1487,13 @@ def consolidate(bundle: Mapping, *, compositions_out: dict | None = None, includ
         # (the beamtime-wide start-time question too: after the other disagreements, before the per-group ones by scope)
         start_time = (q["kind"] in ("resolve_conflict", STATED_UTC_START_KIND)
                       and (q["target_field_path"] or "").startswith("timestamps."))
-        return (first, q["tier"], start_time, bool(q.get("informational")), bool(q.get("deferred")), s,
+        # finding 1 (audit of 18 Nov 2026): the questions that put a DISTINGUISHING condition into a record
+        # (``completeness``) come right after the blocking ones and before every other, whatever their tier number
+        rank = 0 if q["tier"] == TIER_BLOCKING else (1 if q.get("completeness") else 2)
+        return (first, rank, q["tier"], start_time, bool(q.get("informational")), bool(q.get("deferred")), s,
                 q["target_field_path"] or "", q["question_id"])
 
+    completeness = None
     if has_groups:
         reports = compositions(bundle, decision_of=decisions)
         if compositions_out is not None:
@@ -1516,6 +1524,24 @@ def consolidate(bundle: Mapping, *, compositions_out: dict | None = None, includ
         from .labels import point_conflicts_at_labels
 
         point_conflicts_at_labels(questions, bundle, group_of)
+        # finding 1: ONE beamtime-wide question for the potential scale (its own id), reaching only the groups whose
+        # names or files state a potential; then the local completeness tier is marked on every question that fills
+        # a condition grouping used to keep two records apart
+        scale_q = _potential_scale_question(questions, bundle, groups, group_of, context)
+        if scale_q is not None:
+            questions.append(scale_q)
+        # finding 4: the dose-reading question of the processing results, asked ONCE for the beamtime (its own id)
+        dose_q = _dose_reading_question(bundle, groups, include_answered=include_answered)
+        if dose_q is not None:
+            questions.append(dose_q)
+        # finding 1: the local completeness gate per group, and its tier on the questions
+        from . import completeness as CP
+
+        gate_of = CP.gates(bundle, reports, decisions, [g["group_id"] for g in groups if g["group_id"] not in cannot_export])
+        for q in questions:
+            q.setdefault("allowed_decisions", list(ALLOWED_DECISIONS.get(q["kind"], ())))
+        CP.mark_questions(questions, bundle, gate_of, group_of)
+        completeness = {**CP.summary(gate_of), **CP.answers_needed(questions)}
     questions.sort(key=order)
     _quote_passing_once(questions, passing_of)
     for q in questions:
@@ -1526,7 +1552,204 @@ def consolidate(bundle: Mapping, *, compositions_out: dict | None = None, includ
         "bundle_id": bundle.get("bundle_id"),
         "blocking_basis": basis,
         "counts": question_counts(questions, fine_grained_v1=len(bundle.get("questions") or ())),
+        **({"record_completeness": completeness} if completeness is not None else {}),
         "questions": questions,
+    }
+
+
+#: finding 4 (audit of 18 Nov 2026): the processing rule isaac.xas.dose_damage.v2 asks, per result, whether a change
+#: after the first scan at each spot is beam damage or a first scan still settling, and a bulk approval refuses each
+#: such result. Before this it was only found by having a bulk approval refused. ONE experiment-scope question, its
+#: id from its kind and rule only (DEC-91); answered with ``set_dose_reading`` on the experiment.
+DOSE_QUESTION_KIND = "dose_reading"
+DOSE_RULE_ID = "isaac.xas.dose_damage.v2"
+DOSE_QUESTION_FLAG = "dose_reading_question"  # processing.engine_xas.DOSE_QUESTION_FLAG (processing is optional)
+DOSE_QUESTION_ID = _qid("experiment", DOSE_QUESTION_KIND, DOSE_RULE_ID)
+_DOSE_EXAMPLES = 3
+DOSE_READING_WORDS = {
+    "beam_damage": "the beam changes the sample at a spot: keep the first scan at each spot",
+    "first_scan_settling": "the first scan at a spot is still settling: drop the first scan at each spot",
+    "not_beam_damage": "neither: the rule drops nothing for it",
+}
+
+
+def dose_question_results(bundle: Mapping, groups: Sequence[Mapping] | None = None) -> list[tuple[Mapping, Mapping]]:
+    """``[(group, result)]``: each live group whose current curve (:func:`curve_result`) still carries the open
+    dose-reading question and that has no dose reading of its own (a group's ``set_dose_reading``)."""
+    own = {(d.get("target") or {}).get("id") for d in bundle.get("scientist_decisions") or ()
+           if d.get("decision") == B.DOSE_READING_DECISION and (d.get("target") or {}).get("kind") == "record_group"}
+    out = []
+    for g in (groups if groups is not None else live_groups(bundle)):
+        if g["group_id"] in own:
+            continue
+        r = curve_result(bundle, g["group_id"])
+        if r is None or r.get("state") == B.STATE_SCIENTIST_CONFIRMED:
+            continue
+        flags = set(r.get("review_flags") or ()) | set((r.get("qc") or {}).get("reasons") or ())
+        if DOSE_QUESTION_FLAG in flags or (isinstance(r.get("dose_damage"), Mapping)
+                                           and r["dose_damage"].get("outcome") == "question"):
+            out.append((g, r))
+    return out
+
+
+def beamtime_dose_reading(bundle: Mapping) -> Mapping | None:
+    """The scientist's latest ``set_dose_reading`` for the whole beamtime (target ``experiment``), or ``None``."""
+    return next((d for d in reversed(bundle.get("scientist_decisions") or ())
+                 if d.get("decision") == B.DOSE_READING_DECISION and (d.get("target") or {}).get("kind") == "experiment"),
+                None)
+
+
+def _dose_observation(result: Mapping) -> str:
+    """What the rule saw, without its command: the result's own sentence from "at N of M spots" to why it cannot tell."""
+    said = str((result.get("dose_damage") or {}).get("statement") or "")
+    said = said.split("QUESTION: ", 1)[-1]
+    return said.split(" Either it is", 1)[0].strip()
+
+
+def _dose_reading_question(bundle: Mapping, groups: Sequence[Mapping], *, include_answered: bool = False) -> dict | None:
+    """The beamtime-wide dose-reading question, or ``None``: asked while a live group's current result carries the
+    open question and no beamtime reading is recorded. Once answered it is kept only for ``include_answered`` (so
+    ``decide --question`` still resolves it and ``bundle show question`` shows it); the results processed before the
+    answer keep their flag until ``isaac process`` runs again, which the answer's reply says."""
+    open_ = dose_question_results(bundle, groups)
+    answered = beamtime_dose_reading(bundle)
+    if not open_ or (answered is not None and not include_answered):
+        return None
+    stem_of = {r["run_key"]: str(r.get("stem") or "") for r in bundle.get("runs") or ()}
+    first = {g["group_id"]: stem_of.get((g.get("member_run_keys") or [None])[0], g["group_id"]) for g, _ in open_}
+    hints = [{"kind": "processing_observation", "group_id": g["group_id"], "file": first[g["group_id"]],
+              "result_id": B.processing_id(r), "literal": _dose_observation(r),
+              "note": "What ISAAC's draft processing rule measured: an observation, never the answer."}
+             for g, r in open_[:_DOSE_EXAMPLES]]
+    runs = {k for g, _ in open_ for k in g.get("member_run_keys") or ()}
+    qid = DOSE_QUESTION_ID
+    values = "|".join(B.DOSE_READINGS)
+    example = f" For example {first[open_[0][0]['group_id']]}: {_dose_observation(open_[0][1])}." if open_ else ""
+    return {
+        "question_id": qid,
+        "partition": None,
+        "tier": TIER_OPTIONAL,
+        "blocking": False,
+        "why": ("Not a record field: it decides which scans the merged curve of these groups keeps. Until it is "
+                f"answered, a bulk approval refuses the {len(open_)} result(s) that carry it."),
+        "kind": DOSE_QUESTION_KIND,
+        "scope": "experiment",
+        "target_field_path": None,
+        "rule_id": DOSE_RULE_ID,
+        "group_ids": [g["group_id"] for g, _ in open_],
+        "text": (("Answered. " if answered is not None else "")
+                 + f"In {len(open_)} record group(s) the white line changes after the first scan at each spot, and the "
+                 f"processing rule cannot tell why.{example} Is it beam damage, or the first scan still settling? "
+                 + " ".join(f"`{k}`: {v}." for k, v in DOSE_READING_WORDS.items())
+                 + " One answer for the beamtime; a group that differs gets its own (the same decision with --target "
+                   "<group id>). Nothing is decided until a scientist says, a bulk approval refuses these results "
+                   "meanwhile, and after the answer `isaac process` must run again for the curves to follow it."),
+        "applies_to": {"groups": len(open_), "runs": len(runs), "targets": 1},
+        "targets": [{"kind": "experiment", "id": "experiment"}],
+        "per_scope_targets": {"experiment": ["experiment"]},
+        "hints": hints,
+        "allowed_values": list(B.DOSE_READINGS),
+        **({"answered": {"value": answered.get("value"), "decision_id": answered.get("decision_id")}}
+           if answered is not None else {}),
+        "answer_command": (f"isaac bundle decide <bundle_dir> --question {qid} --decision {B.DOSE_READING_DECISION} "
+                           f'--value {values} --by "<your name>"  &&  isaac process <bundle_dir> --source <the beamtime '
+                           "folder you imported>   # one group differs: isaac bundle decide <bundle_dir> --target "
+                           f'<group id> --decision {B.DOSE_READING_DECISION} --value {values} --by "<your name>"'),
+    }
+
+
+#: finding 1 (audit of 18 Nov 2026): the id of the beamtime-wide potential-scale question (DEC-91: from its scope,
+#: kind, field and partition only; a new id, no existing question changes).
+POTENTIAL_SCALE_PARTITION = "stated_potentials"
+#: Fewer groups than this stating a potential: each group's own question is the one question.
+_SCALE_MIN_GROUPS = 2
+_SCALE_EXAMPLES = 5
+
+
+def _states_a_potential(bundle: Mapping, group: Mapping, run_ids: Sequence[str]) -> list[str]:
+    """What says group ``group`` was held at a potential: the potential its grouping basis holds (read from its
+    file names or scan headers), else the potential tokens its files' names or headers state (``records``). ``[]``:
+    nothing states one (open circuit, dry, a reference), so the beamtime-wide scale question never reaches it."""
+    conds = (group.get("basis") or {}).get("conditions") if isinstance(group.get("basis"), Mapping) else None
+    conds = conds if isinstance(conds, Mapping) else {}
+    said = [(f"{v:g} V" if isinstance(v, (int, float)) and not isinstance(v, bool) else str(v))
+            for k in ("potential_magnitude", "scan_header_potential")
+            if isinstance(conds.get(k), Mapping) and (v := conds[k].get("value")) is not None]
+    if said:
+        return said
+    from .records import _stated_potentials
+
+    return [str(x.get("literal")) for x in _stated_potentials(bundle, set(run_ids)) if x.get("literal")]
+
+
+def potential_scale_question_id() -> str:
+    return _qid("experiment", "missing_value", SCALE_PATH, POTENTIAL_SCALE_PARTITION)
+
+
+def _potential_scale_question(questions: Sequence[Mapping], bundle: Mapping, groups: Sequence[Mapping],
+                              group_of: Mapping[str, str], context: Container[str] = ()) -> dict | None:
+    """ONE question for the beamtime: "all potential holds here are quoted against which reference scale?".
+
+    Its targets are exactly the potential-scale targets the per-group questions already ask (so an answer here is
+    the same decision on the same targets, and each group's question then no longer asks the scale), of the groups
+    whose names or files state a potential ONLY: a group that states none (open circuit, dry, a reference) is never
+    reached (DEC-90). ``None`` with fewer than :data:`_SCALE_MIN_GROUPS` such groups. Nothing is suggested unless
+    the groups' own questions already carry a hint: no file states a scale here, and none is invented."""
+    run_by_key = {r["run_key"]: r for r in bundle.get("runs") or ()}
+    members = {g["group_id"]: [run_by_key[k]["run_id"] for k in g.get("member_run_keys") or ()
+                               if k in run_by_key and run_by_key[k]["run_id"] not in context] for g in groups}
+    asked: dict[str, list[str]] = {}
+    hints: list[dict] = []
+    for q in questions:
+        scope = str(q.get("scope") or "")
+        if not scope.startswith("group:") or q.get("kind") not in VALUE_KINDS or q.get("outside_live_groups"):
+            continue
+        ids = dict(_value_paths(q)).get(SCALE_PATH)
+        if ids:
+            asked.setdefault(scope[len("group:"):], []).extend(i for i in ids if i not in asked.get(scope[len("group:"):], ()))
+            for h in ((q.get("field_hints") or {}).get(SCALE_PATH) or ())[:1]:
+                if len(hints) < _SCALE_EXAMPLES:
+                    hints.append({**h, "group_id": scope[len("group:"):]})
+    stated = {gid: said for g in groups if (gid := g["group_id"]) in asked
+              and (said := _states_a_potential(bundle, g, members.get(gid, ())))}
+    if len(stated) < _SCALE_MIN_GROUPS:
+        return None
+    qid = potential_scale_question_id()
+    stem_of = {r["run_id"]: str(r.get("stem") or "") for r in bundle.get("runs") or ()}
+    first = {gid: stem_of.get((members.get(gid) or [None])[0], gid) for gid in stated}
+    examples = [f"{first[gid]} ({stated[gid][0]})" for gid in list(stated)[:_SCALE_EXAMPLES]]
+    allowed = _eligible_values(SCALE_PATH)
+    not_reached = len([g for g in groups if g["group_id"] not in stated])
+    targets = [i for gid in stated for i in asked[gid]]
+    return {
+        "question_id": qid,
+        "partition": POTENTIAL_SCALE_PARTITION,
+        "tier": TIER_OPTIONAL,
+        "blocking": False,
+        "why": ("Optional for the schema, needed to say what was measured: a potential goes into a record only beside "
+                "the reference scale it is quoted against, and no file here states one."),
+        "kind": "missing_value",
+        "scope": "experiment",
+        "target_field_path": SCALE_PATH,
+        "beamtime_wide": True,
+        "text": (f"All potential holds in this beamtime are quoted against which reference scale? The names or scan "
+                 f"headers of {len(stated)} record groups state a potential (e.g. {'; '.join(examples)}), and none "
+                 "states the scale, so nothing is suggested and no record carries its potential until a scientist "
+                 f"says it. One answer here reaches those {len(stated)} groups only"
+                 + (f": the other {not_reached} (no potential stated: open circuit, dry, a reference) are not reached"
+                    if not_reached else "")
+                 + ". If some groups were quoted against another scale, answer those with --only group:<group id>, "
+                   "or each on its own question."
+                 + (f" Allowed values: {', '.join(map(str, allowed))}." if allowed else "")),
+        "applies_to": {"groups": len(stated), "runs": sum(len(members.get(g, ())) for g in stated), "targets": len(targets),
+                       "groups_not_reached": not_reached},
+        "targets": [{"kind": "missing_value", "id": i} for i in targets],
+        "per_scope_targets": {f"group:{gid}": list(asked[gid]) for gid in stated},
+        "hints": hints,
+        "allowed_values": allowed,
+        "allowed_decisions": list(VALUELESS_DECISIONS),
+        "answer_command": (f"isaac bundle decide <bundle_dir> --question {qid} --decision correct --value "
+                           f'<one of its allowed values> --by "<your name>"   # some groups only: add --only group:<group_id>'),
     }
 
 
@@ -2010,6 +2233,11 @@ def question_counts(questions: Sequence[Mapping], *, fine_grained_v1: int | None
         # targets a scientist answered with a value the record cannot take, asked again
         "asked_again": sum(len(q.get("asked_again") or ()) for q in questions),
     }
+    distinguishing = sum(1 for q in questions if q.get("completeness") and q["tier"] != TIER_BLOCKING)
+    if distinguishing:
+        # finding 1: questions (already counted above, in their own tier) whose answer puts a condition grouping
+        # used to keep two records apart into a record: listed right after the blocking ones
+        out["distinguishing"] = distinguishing
     if fine_grained_v1 is not None:
         out["fine_grained_v1"] = fine_grained_v1
     return out
@@ -2229,7 +2457,10 @@ _CANNOT_EXPORT_WORDS = {"no_scans": "none of its runs lists a scan",
                         "processing_not_applicable:no_xas_channel": (
                             "no energy axis or absorption signal was found in its columns; re-processing with the "
                             "channels named (`isaac process --params-file`, channels.*) can make it exportable"),
-                        "not_a_measurement_run": "every run is a reference standard, an alignment or a calibration scan"}
+                        "not_a_measurement_run": "every run is a reference standard, an alignment or a calibration scan",
+                        "processing_result_has_no_curve": (
+                            "every processing result it has made no curve, so there is nothing to approve; `bundle "
+                            "show <bundle_dir> group <id>` says why, and a result with a curve lifts it")}
 
 
 def _reasons_said(gids: Iterable[str], reasons: Mapping[str, str]) -> str:
@@ -3700,16 +3931,38 @@ def not_a_measurement_groups(bundle: Mapping, groups: Sequence[Mapping] | None =
     return out
 
 
+#: finding 11: the ``cannot_export_reason`` of a live group whose every processing result has no curve
+NO_CURVE_REASON = "processing_result_has_no_curve"
+
+
+def groups_with_no_curve(bundle: Mapping) -> dict[str, str]:
+    """``{group_id: why}`` for each record group that HAS processing results (ones the protocol applied to) and every
+    one of them FAILED with no curve (a ``failure`` and no output file), however many times processed. ``why`` is the
+    latest result's own cause (``mutations.no_curve_cause``). A group with no result yet is not one (it is simply not
+    processed), nor is one with any curve, even a rejected one (a curve is possible)."""
+    from .mutations import no_curve_cause
+
+    by_group: dict[str, list[Mapping]] = {}
+    for r in bundle.get("processing_results") or ():
+        if isinstance(r, Mapping) and not B.processing_not_applicable(r):
+            by_group.setdefault(r.get("group_id"), []).append(r)
+    return {gid: no_curve_cause(rs[-1]) for gid, rs in by_group.items()
+            if rs and all(r.get("failure") and not (r.get("outputs") or {}).get("files") for r in rs)}
+
+
 def cannot_export_reasons(bundle: Mapping, not_measured: Mapping[str, Sequence[str]] | None = None) -> dict[str, str]:
     """r6 I2: ``{group_id: cannot_export_reason}`` for every record group that can never export as it stands, in the ONE
     order ``bundle list <dir> groups`` and ``bundle group`` both say it: ``processing_not_applicable:<code>`` (no ISAAC
     processing protocol covers its data), else ``no_scans`` (none of its runs lists a scan; r7 J8: also once
     ``isaac process`` has recorded it as not applicable for that reason, so the code is the same before and after), else
-    ``not_a_measurement_run`` (:func:`not_a_measurement_groups`). ``not_measured``: that map, when the caller has it."""
+    ``not_a_measurement_run`` (:func:`not_a_measurement_groups`), else :data:`NO_CURVE_REASON` (finding 11 of the
+    18 Nov 2026 audit: every processing result it has made no curve). ``not_measured``: that map, when the caller has
+    it."""
     runs = {r["run_key"]: r for r in bundle.get("runs") or ()}
     blocked = B.processing_blocked_groups(bundle)
     if not_measured is None:
         not_measured = not_a_measurement_groups(bundle)
+    no_curve = groups_with_no_curve(bundle)
     out: dict[str, str] = {}
     for g in bundle.get("record_groups") or ():
         members = [runs[k] for k in g.get("member_run_keys") or () if k in runs]
@@ -3723,6 +3976,10 @@ def cannot_export_reasons(bundle: Mapping, not_measured: Mapping[str, Sequence[s
             out[g["group_id"]] = "no_scans"
         elif g["group_id"] in not_measured:
             out[g["group_id"]] = "not_a_measurement_run"
+        elif g["group_id"] in no_curve:
+            # finding 11 (audit of 18 Nov 2026): every processing result the group has made NO CURVE (a failure, such
+            # as a file with no energy axis): no record can be built from it as it stands, so nothing blocks for it
+            out[g["group_id"]] = NO_CURVE_REASON
     return out
 
 

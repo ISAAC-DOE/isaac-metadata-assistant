@@ -39,6 +39,18 @@ Open `validation/<group id>.json` only for a group those leave unexplained.
 | `portal_reject` | "The portal would reject this: …" | fix the stated value or leave it unexported |
 | `exportable` | "Passes every check." | export |
 
+**Record completeness** (`record_completeness`, gate `isaac.local.record_completeness.v1`) is a local gate beside the
+verdicts and never changes one. A condition grouping used to keep two records of one sample apart (the potential,
+the cycling history, the filter, which electrode) must be in the record or declined (`reject`) before `export` writes
+it; two records that would say the same thing are held too.
+- `validate` gives `ready_to_export`, what is open and `answer_first`. `bundle questions` lists those questions right
+  after the blocking ones (each has `completeness`).
+- `export` lists a held record under `refused` with `verdict: held_by_record_completeness` and
+  `official_validation: passed`. Say "it passes validation but would be written without its potential" (or "these N
+  records would be indistinguishable") and ask the question it names.
+- Only when the scientist says to export anyway: `export --allow-indistinguishable --by "<name>"`. That is recorded
+  in the bundle, so later exports keep those records.
+
 Exit 1 from `validate` means at least one draft is not exportable. That is information, not an error.
 After a fix, run `build-records` then `validate` again. Never hand-edit a draft or an evidence file. Never relax a check.
 
@@ -102,6 +114,8 @@ for exportable drafts only.
 - Do not read the `outcome` string out; it is long. Say: how many are ready, how many were refused and why
   (`refused_by_reason`, `missing_required_by_field`; `refused_every_summary_says` holds what every refused row repeats),
   then each warning kind with its record count ("87 records are written without their potential").
+- Warnings by kind: `warnings_by_code` says each warning code once (records, variants, one example, the question to
+  answer); relay those. `upload --dry-run` does the same in `notes_by_code`.
 - Warnings: `warnings_by_text` and `portal_warnings` say each one once with its record count; a warning on SOME of the
   ready records lists every one of their `group_ids`. `exported[].warnings` lists a record's own;
   `records_written_with_warnings` counts those written now, `records_ready_with_warnings` every ready one.
