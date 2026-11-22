@@ -179,8 +179,10 @@ scientist still approves each curve before it goes into a record.
   is shape; a uniformly weaker scan, or one on a background, is not: `intensity_not_shape`). A WITHIN-SPOT
   CHANGE (`isaac.xas.dose_damage.v3`; each scan normalised on its own with the same fixed windows, mean below E_edge - 10
   eV to 0 and mean above E_edge + 30 eV to 1, then compared over the white-line window; v2 fitted one noisy scan onto
-  the other, which made the later white line read low from counting noise alone; under 150 post-edge counts per point
-  at half or more of the repeated spots the rule says it cannot judge, `cannot_judge_low_counts`, and decides nothing): BEAM DAMAGE only when, at most spots measured three or more times (at least two), the change GROWS with
+  the other, which made the later white line read low from counting noise alone; spots under 150 post-edge counts per
+  point are left out and said, and when fewer than two repeated spots are at or above it the rule says it cannot judge,
+  `cannot_judge_low_counts`, and decides nothing, unless a scientist's set_dose_reading on the group decides it; a
+  beamtime-wide reading it cannot place is `override_not_applied`): BEAM DAMAGE only when, at most spots measured three or more times (at least two), the change GROWS with
   dose (scan 3 differs from scan 1 more than scan 2 does), goes the way the edge expects (the white line falls at Ir and
   Pt L3; elsewhere the one direction every spot shares, said) and a fresh spot recovers: the later scans are dropped,
   "beam damage at each spot: later scans at the same spot change shape". A FIRST SCAN STILL SETTLING when the later

@@ -191,8 +191,10 @@ A scan is dropped only for one of these reasons. Say the reason in these words:
 ### The dose question (ask it before any bulk approval)
 
 **When.** Some results carry `dose_reading_question`. The rule `isaac.xas.dose_damage.v3` saw the white line change
-between the first and the later scans at the same spot, at two or more spots, and cannot tell why. (At under 150
-post-edge counts per point the rule does not ask: it says it cannot judge, outcome `cannot_judge_low_counts`.)
+between the first and the later scans at the same spot, at two or more spots, and cannot tell why. (Spots under 150
+post-edge counts per point are left out and said; when fewer than two spots measured more than once are at or above
+it, the rule does not ask: it says it cannot judge, outcome `cannot_judge_low_counts`. A scientist's
+`set_dose_reading` on the group still applies there; a beamtime-wide one is shown as not applied.)
 A bulk approval refuses every such result. Ask once for the whole beamtime.
 
 **How.**

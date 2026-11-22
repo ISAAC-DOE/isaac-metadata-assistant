@@ -553,6 +553,8 @@ def test_a_transmission_standard_is_aligned_per_scan_and_normalised_as_the_sampl
     r = by_run(v1_results(bdir), "03_SYN_IrO2_std")
     assert r["protocol_id"] == "isaac.xas.v1" and r["qc"]["verdict"] != "fail", r["qc"]
     assert r["measurement_mode"]["mode"] == "transmission"
+    bt = json.loads((bdir / "processing" / "processing_results.json").read_text())[EX.BEAMTIME_KEY]
+    assert r["group_id"] in bt["transmission_standards_on_v1"] and r["group_id"] not in bt["out_of_scope_groups"]
     assert "no thickness, pinhole or harmonic correction" in r["measurement_mode"]["statement"]
     assert "measurement_mode_unknown" not in r["review_flags"] and "dose_damage" not in r
     rows = {x["scan_id"]: x for x in r[EX.SHIFTS_KEY]["rows"]}

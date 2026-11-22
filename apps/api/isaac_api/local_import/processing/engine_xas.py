@@ -336,7 +336,7 @@ def read_group(g: Mapping, ctx) -> dict:
             return out                     # a foil on I2 read on v0's reference channel: stays on v0, said there
         standard_in_transmission = True
         out["scope"] = (f"a standard measured in transmission (mu = {choice.signal_name}): not part of the beamtime "
-                        f"reference survey as a sample; reduced on v1 ({TRANSMISSION_RULE_ID})")
+                        f"reference survey as a sample (reduced on v1 by {TRANSMISSION_RULE_ID} when its scans read)")
     v1_recs: list[dict] = []
     for k, (entry, table, sa, code) in enumerate(attempts):
         code = code or C.unusable_reason(sa)
@@ -1299,7 +1299,9 @@ def beamtime_payload(bt: Mapping) -> dict:
     out["protocol_id"], out["engine_version"] = PROTOCOL_ID, engine_version()
     out["in_scope_groups"] = sorted(k for k, v in (bt.get("reads") or {}).items() if v.get("scope") is None)
     out["out_of_scope_groups"] = {k: v.get("scope") for k, v in sorted((bt.get("reads") or {}).items())
-                                  if v.get("scope") is not None}
+                                  if v.get("scope") is not None and not v.get("transmission_v1")}
+    # review of PR 345, M8: a standard in transmission is reduced on v1, so it is not listed as out of scope
+    out["transmission_standards_on_v1"] = sorted(k for k, v in (bt.get("reads") or {}).items() if v.get("transmission_v1"))
     return json.loads(json.dumps(out, default=str))
 
 
