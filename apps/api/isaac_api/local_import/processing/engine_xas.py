@@ -1544,7 +1544,7 @@ def process_group_v1(group: Mapping, ctx) -> list[dict]:
     except Exception:  # noqa: BLE001
         e0 = None
     if e0 is not None:
-        res["e0"] = e0_block(E, e0, absorber, np)
+        res["e0"] = e0_block(E, e0, absorber, np, transmission=transmission)
         e0 = res["e0"]["e0_eV"]
     res["steps"].append({"step": "normalize", "params": nm["params"],
                          "outcome": {"e0_eV": e0, "edge_step": nm["A_edge"], "model": nm["model"],
@@ -3080,19 +3080,20 @@ def acquisition_block(kept: Sequence[Mapping], E_edge: float | None, transmissio
 #: E0 AS REPORTED (processing-science audit of 18 Nov 2026, finding 5): larch find_e0 returns a GRID POINT (the
 #: maximum of the first derivative, no sub-grid interpolation), so it is reported to 0.01 eV with the grid step there
 #: as its resolution, and said apart from the tabulated edge the normalisation locks its step to.
-E0_DEFINITION = ("larch find_e0 on the merged raw IF/I0: the grid point of the maximum first derivative (no sub-grid "
+E0_DEFINITION = ("larch find_e0 on the merged raw {signal}: the grid point of the maximum first derivative (no sub-grid "
                  "interpolation; on a rising white line competing maxima can move it by about a grid step or more)")
 
 
-def e0_block(E, e0: float, absorber: Mapping, np) -> dict:
+def e0_block(E, e0: float, absorber: Mapping, np, *, transmission: bool = False) -> dict:
     E = np.asarray(E, float)
     k = int(np.argmin(np.abs(E - e0)))
     steps = np.diff(E[max(0, k - 2):k + 3])
     step = float(np.median(steps)) if steps.size else None
     tab = absorber.get("E_edge_eV")
-    out = {"e0_eV": round(float(e0), 2), "definition": E0_DEFINITION, "grid_step_eV": round(step, 3) if step else None,
+    definition = E0_DEFINITION.format(signal="ln(I0/I1)" if transmission else "IF/I0")
+    out = {"e0_eV": round(float(e0), 2), "definition": definition, "grid_step_eV": round(step, 3) if step else None,
            "tabulated_edge_eV": tab}
-    out["statement"] = (f"E0 {out['e0_eV']:.2f} eV: {E0_DEFINITION}; the grid step there is "
+    out["statement"] = (f"E0 {out['e0_eV']:.2f} eV: {definition}; the grid step there is "
                         + (f"{step:.2f} eV, its resolution" if step else "unknown")
                         + (f". The normalisation locks its step at the tabulated {absorber.get('element')} "
                            f"{absorber.get('edge')} edge, {tab:g} eV, a different definition"

@@ -565,6 +565,16 @@ def test_a_transmission_standard_is_aligned_per_scan_and_normalised_as_the_sampl
     m = np.genfromtxt(bdir / merged, delimiter=",", names=True, skip_header=1)
     pre = m["energy_eV"] < 11200
     assert np.median(m["mu_mean"][pre]) == pytest.approx(0.5 - np.log(gain), abs=0.02)   # ln(I0/I1) as measured
+    # review of PR 345, I4: the record speaks of ln(I0/I1), never of fluorescence IF/I0, and carries the disclosure
+    from isaac_api.local_import import provenance as PV
+
+    notes = PV.summary(r, merged_series_id="x_merged", merged_stderr="all")
+    assert "IF/I0" not in notes and "fluorescence" not in notes.replace("tender-fluorescence", ""), notes
+    assert "Merge: uniform mean of the raw ln(I0/I1)" in notes and "raw ln(I0/I1) units" in notes
+    assert "no thickness, pinhole or harmonic correction" in notes and "merged raw ln(I0/I1)" in notes
+    series, _, _ = PV.merged_series("x", bdir / merged, result=r)
+    assert series[0]["channels"][0]["notes"].startswith("Transmission ln(I0/I1)")
+    assert "IF/I0" not in json.dumps(series)
 
 
 def test_a_motor_scan_never_comes_out_as_a_spectrum(tmp_path):

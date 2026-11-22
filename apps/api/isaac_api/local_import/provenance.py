@@ -142,8 +142,18 @@ def _steps(result: Mapping) -> dict[str, Mapping]:
     return {s.get("step"): s for s in result.get("steps") or () if isinstance(s, Mapping)}
 
 
+def is_transmission(result: Mapping | None) -> bool:
+    """A v1 result of a standard measured in transmission (engine_xas.TRANSMISSION_RULE_ID): its signal is ln(I0/I1)."""
+    return ((result or {}).get("measurement_mode") or {}).get("mode") == "transmission"
+
+
+def signal_name(result: Mapping | None) -> str:
+    """The merged signal as the record names it (review of PR 345, I4): ln(I0/I1) in transmission, else IF/I0."""
+    return "ln(I0/I1)" if is_transmission(result) else "IF/I0"
+
+
 #: what the merged series' standard error is (processing-science audit of 18 Nov 2026, finding 3): disclosed, unchanged
-MERGE_STDERR_SAID = ("The standard error is the scan-to-scan spread of the raw IF/I0 at each energy (over the square "
+MERGE_STDERR_SAID = ("The standard error is the scan-to-scan spread of the raw {signal} at each energy (over the square "
                      "root of the scans merged): it includes the scans' edge-step differences (spot, loading, filter), "
                      "not only counting noise, and from two scans it is indicative only.")
 
@@ -162,7 +172,11 @@ def summary(result: Mapping, *, merged_series_id: str | None = None, merged_stde
     parts.append("Energy: " + cal[:1].lower() + cal[1:] + " " + story["alignment"]["statement"])
     parts.append(_decisions_sentence(result.get("scan_decisions") or {}))
     grid = f" on the energy grid of kept scan {merge['grid_from_scan']}" if merge.get("grid_from_scan") else ""
-    parts.append(f"Merge: uniform mean of the raw IF/I0 of the {merge.get('n_scans', '?')} merged scans{grid}"
+    sig = signal_name(result)
+    mm = (result.get("measurement_mode") or {}).get("statement")
+    if is_transmission(result) and mm:
+        parts.append(mm)
+    parts.append(f"Merge: uniform mean of the raw {sig} of the {merge.get('n_scans', '?')} merged scans{grid}"
                  + (f" (series {merged_series_id}" + {"all": ", with its standard error",
                                                        "partial": ", with its standard error where two or more scans "
                                                                   "contribute"}.get(merged_stderr, "") + ")"
@@ -172,7 +186,7 @@ def summary(result: Mapping, *, merged_series_id: str | None = None, merged_stde
     if cov.get("statement"):
         parts.append(cov["statement"])
     if merged_stderr in ("all", "partial"):
-        parts.append(MERGE_STDERR_SAID)
+        parts.append(MERGE_STDERR_SAID.format(signal=sig))
     w = nm.get("window_eV")
     windows = (f"pre-edge {w[0]:g}-{w[1]:g} eV, post-edge {w[2]:g}-{w[3]:g} eV"
                if isinstance(w, (list, tuple)) and len(w) == 4 else "windows not recorded")
@@ -188,7 +202,7 @@ def summary(result: Mapping, *, merged_series_id: str | None = None, merged_stde
         + f", {windows}" + (", tender-fluorescence options" if tender else "")
         + (f", glitch windows kept out of the fit ({excl})" if excl else "")
         + "; the post-edge follows the McMaster cross-section (not flattened to 1)"
-        + (f"; edge step {step} in raw IF/I0 units" + (f", spread {spread} over nearby windows" if spread else "")
+        + (f"; edge step {step} in raw {sig} units" + (f", spread {spread} over nearby windows" if spread else "")
            + f" ({EDGE_STEP_NOT_A_DESCRIPTOR})" if step else "") + ".")
     wl = (nm.get("uncertainty") or {}).get("white_line_statement")
     if wl:
@@ -256,7 +270,8 @@ def _read_columns(path: Path, names: Sequence[str]) -> dict[str, list[float | No
     return cols
 
 
-def merged_series(group_id: str, path: Path) -> tuple[list[dict] | None, str, str | None]:
+def merged_series(group_id: str, path: Path, *, result: Mapping | None = None
+                  ) -> tuple[list[dict] | None, str, str | None]:
     """``(series, what was used, stderr)`` for the merged RAW average, or ``(None, why not, None)``.
 
     ``stderr``: ``"all"`` (the standard error is a channel of the merged series), ``"partial"`` (only some points
@@ -273,7 +288,8 @@ def merged_series(group_id: str, path: Path) -> tuple[list[dict] | None, str, st
     defined = [i for i in range(len(E)) if n[i] >= 2 and err[i] is not None]
     stderr = "all" if len(defined) == len(E) else ("partial" if defined else None)
     channels = [{"name": "absorption", "unit": "arb", "role": "derived_signal", "values": mu,
-                 "notes": "Raw fluorescence IF/I0, the uniform mean over the merged scans; not normalised."}]
+                 "notes": ("Transmission ln(I0/I1)" if is_transmission(result) else "Raw fluorescence IF/I0")
+                          + ", the uniform mean over the merged scans; not normalised."}]
     if stderr == "all":
         channels.append({"name": "absorption_stderr", "unit": "arb", "role": "quality_monitor", "values": err,
                          "notes": STDERR_NOTE})
@@ -284,7 +300,7 @@ def merged_series(group_id: str, path: Path) -> tuple[list[dict] | None, str, st
         "independent_variables": [{"name": "incident_energy", "unit": "eV", "values": E}],
         "channels": channels,
         "notes": ("The merged raw average this record's normalised curve was made from: each kept scan shifted onto "
-                  "one beamtime energy reference and interpolated once onto one grid, then averaged (raw IF/I0). "
+                  "one beamtime energy reference and interpolated once onto one grid, then averaged (raw {signal_name(result)}). "
                   "It is normalised once, into the normalised series."
                   + {"all": "", "partial": f" Its standard error is series {group_id}_merged_stderr (only the "
                                            "energies where two or more scans contribute).",
