@@ -3026,10 +3026,32 @@ def _reference_view(bt, recs) -> dict:
             "beamtime_fingerprint": bt.get("fingerprint")}
 
 
-#: what ``applied_shift_eV`` 0.0 on a v1 result means: no ABSOLUTE calibration, because none is needed
-ABSOLUTE_CALIBRATION_SAID = ("No absolute energy calibration was applied (shift 0 eV), and none is needed: the "
-                             "monochromator was foil-calibrated by the beamline staff at the start of the beamtime. "
-                             "Energies are the beamline's calibrated energies.")
+#: what ``applied_shift_eV`` 0.0 on a v1 result means: no ABSOLUTE calibration was applied. The absolute scale is the
+#: staff's foil calibration of the mono, not traced to a tabulated energy nor across beamtimes (processing-science
+#: audit of 18 Nov 2026, finding 2: v1 said none "is needed", which overclaims).
+ABSOLUTE_CALIBRATION_SAID = ("No absolute energy calibration was applied (shift 0 eV). Every scan is aligned to one "
+                             "beamtime reference; the absolute scale rests on the beamline staff's foil calibration of "
+                             "the monochromator at the start of the beamtime ({set_point}). It is not traced to a "
+                             "tabulated energy, and not across beamtimes: energies from two beamtimes may differ by a "
+                             "constant offset.")
+SET_POINT_NONE = "the files state no mono reset line, so the set-point is not recorded here"
+
+
+def calibration_set_points(ref: Mapping) -> list[dict]:
+    """The ``mono reset from A to B`` lines of the beamtime's files (energy_reference.mono_reset_lines), as read."""
+    return [x for x in (ref or {}).get("mono_reset_lines") or ()
+            if isinstance(x, Mapping) and isinstance(x.get("to"), (int, float))]
+
+
+def absolute_calibration_said(ref: Mapping) -> str:
+    pts = calibration_set_points(ref)
+    said = "; ".join(f"`{x.get('axis') or 'mono'} reset from {x['from']:g} to {x['to']:g}`"
+                     + (f" at {x['time']}" if x.get("time") else "") for x in pts[:3])
+    if len(pts) > 3:
+        said += f"; and {len(pts) - 3} more"
+    return ABSOLUTE_CALIBRATION_SAID.format(set_point=(f"as the files state it: {said}" if pts else SET_POINT_NONE))
+
+
 _ROUTE_SAID = {"ref_foil": "an in-scan reference foil in transmission", "glitch_I0": "the I0 glitch",
                "foil_timeline": "separate foil scans over time", "none": "no energy reference"}
 
@@ -3040,7 +3062,8 @@ def energy_story(res: Mapping) -> dict:
 
     The two words mean two things (end-to-end test on real data, 17 Nov 2026: the calibration block said "no energy
     reference" while the energy reference showed an I0-glitch alignment of +67 to +72 meV). CALIBRATION is absolute
-    (onto tabulated energies): none, since the mono is staff-calibrated. ALIGNMENT is per scan: every scan shifted onto
+    (onto tabulated energies): none applied; the scale is the staff's foil calibration of the mono (its set-point said
+    when the files state it), not traced across beamtimes. ALIGNMENT is per scan: every scan shifted onto
     the ONE beamtime reference."""
     ref = res.get(REFERENCE_KEY) or {}
     route = (ref.get("routes") or [{}])[0] or {}
@@ -3072,8 +3095,11 @@ def energy_story(res: Mapping) -> dict:
             + f": {len(aligned)} of {len(rows)} scans aligned"
             + (f", shifts {shown(min(in_merge))} to {shown(max(in_merge))} ({alignment['shift_range_of']})"
                if in_merge else "") + ".")
-    return {"absolute_calibration": {"applied": False, "applied_shift_eV": 0.0, "needed": False,
-                                     "basis": "staff_foil_calibrated_mono", "statement": ABSOLUTE_CALIBRATION_SAID},
+    return {"absolute_calibration": {"applied": False, "applied_shift_eV": 0.0, "traced_across_beamtimes": False,
+                                     "basis": "staff_foil_calibrated_mono",
+                                     "set_points": [{k: x.get(k) for k in ("time", "axis", "from", "to")}
+                                                    for x in calibration_set_points(ref)],
+                                     "statement": absolute_calibration_said(ref)},
             "alignment": alignment}
 
 

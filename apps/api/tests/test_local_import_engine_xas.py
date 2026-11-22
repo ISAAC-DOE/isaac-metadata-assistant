@@ -1492,3 +1492,20 @@ def test_before_the_stable_window_within_the_noise_is_kept():
     row = _decide(recs, stability=stab)["by_id"]
     assert row["SYN_E#1"]["decision"] == "keep" and row["SYN_E#1"]["notes"][0]["code"] == "change_within_noise"
     assert row["SYN_E#2"]["decision"] == "drop" and row["SYN_E#2"]["reasons"][0]["code"] == "before_stable_window"
+
+
+# --- the absolute energy statement (audit 18 Nov, finding 2) ---------------------------------------------------------
+
+
+def test_the_absolute_energy_statement_states_the_set_point_and_never_says_none_is_needed():
+    ref = {"mono_reset_lines": [{"time": "Sat Apr 12 09:00:00 2025", "axis": "mono", "from": 11564.3, "to": 11563.5,
+                                 "file": "SYN_alignment"}],
+           "routes": [{"mode": "glitch_I0", "reference_anchor_eV": 11226.6, "reference_scans": 4}]}
+    story = EX.energy_story({EX.REFERENCE_KEY: ref})["absolute_calibration"]
+    said = story["statement"]
+    assert "none is needed" not in said and "calibrated energies" not in said
+    assert "`mono reset from 11564.3 to 11563.5` at Sat Apr 12 09:00:00 2025" in said
+    assert "aligned to one beamtime reference" in said and "not across beamtimes" in said
+    assert story["traced_across_beamtimes"] is False and story["set_points"][0]["to"] == 11563.5
+    bare = EX.energy_story({EX.REFERENCE_KEY: {"routes": ref["routes"]}})["absolute_calibration"]
+    assert EX.SET_POINT_NONE in bare["statement"] and bare["set_points"] == []
