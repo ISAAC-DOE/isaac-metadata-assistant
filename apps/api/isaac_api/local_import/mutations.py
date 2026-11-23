@@ -255,12 +255,31 @@ def merge_pending_exposures(bundle: dict, bundle_dir: Path) -> int:
     """Fold this bundle's pending exposures into ``bundle["exposures"]`` IN MEMORY, as :func:`record_exposure` records
     one (the first per target and command is kept, with the time it was shown); how many were added. Ids follow on,
     in the order recorded, so every load gives them the same ids and the next write keeps them."""
+    entries = [e for e in pending_exposures(bundle_dir) if e["bundle_id"] == bundle.get("bundle_id")]
+    if not entries:
+        return 0
+    # an exposure of a target this bundle no longer holds (a build before 1.17.0 wrote in between and regrouped) shows
+    # nothing any later reading could be blind to, and the validator refuses a dangling target: never folded in
+    live = _target_ids(bundle)
     added = 0
-    for e in pending_exposures(bundle_dir):
-        if e["bundle_id"] != bundle.get("bundle_id"):
-            continue
-        added += _append_exposure(bundle, e["target"]["kind"], e["target"]["id"], e["command"], e["at_utc"])
+    for e in entries:
+        if e["target"]["id"] in live.get(e["target"]["kind"], ()):
+            added += _append_exposure(bundle, e["target"]["kind"], e["target"]["id"], e["command"], e["at_utc"])
     return added
+
+
+def _target_ids(bundle: Mapping) -> dict[str, set]:
+    """The ids each target kind may name in this bundle (what ``bundle.validate_bundle`` resolves a target against)."""
+    def ids(section, key):
+        return {x.get(key) for x in bundle.get(section) or () if isinstance(x, Mapping)}
+
+    return {"candidate": ids("candidates", "candidate_id"), "missing_value": ids("missing_values", "value_id"),
+            "conflict": ids("conflicts", "conflict_id"), "source": ids("sources", "source_id"), "run": ids("runs", "run_id"),
+            "record_group": ids("record_groups", "group_id") | ids("superseded_record_groups", "group_id"),
+            "processing_result": {B.processing_id(r) for r in bundle.get("processing_results") or ()},
+            "experiment": {"experiment"},
+            "merge_candidate": ids("merge_candidates", "merge_candidate_id") | ids("superseded_merge_candidates",
+                                                                                  "merge_candidate_id")}
 
 
 def append_pending_exposures(bundle_dir: Path, bundle: Mapping, entries: Sequence[Mapping]) -> None:

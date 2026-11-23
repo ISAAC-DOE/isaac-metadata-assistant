@@ -588,12 +588,14 @@ def test_with_files_gives_a_file_to_open_only_inside_the_bundle_or_its_notes_fol
 
 def test_bundle_show_question_records_its_exposures_in_one_write(bdir, monkeypatch):
     env = _env(Q.consolidate(M.load(bdir))["questions"])
-    writes = []
-    real = M.save_bundle
-    monkeypatch.setattr(M, "save_bundle", lambda *a, **k: writes.append(1) or real(*a, **k))
+    writes, saves = [], []
+    real, real_save = M.append_pending_exposures, M.save_bundle
+    monkeypatch.setattr(M, "append_pending_exposures", lambda *a, **k: writes.append(1) or real(*a, **k))
+    monkeypatch.setattr(M, "save_bundle", lambda *a, **k: saves.append(1) or real_save(*a, **k))
     code, shown = _cli(["bundle", "show", bdir, "question", env["question_id"]])
     assert code == 0 and shown["context"]
-    assert len(writes) == 1
+    # one write of the exposures, beside bundle.json; bundle.json itself is not written (1.17.0, C7)
+    assert len(writes) == 1 and saves == []
     commands = {e["command"] for e in M.load(bdir)["exposures"]}
     assert QC.EXPOSURE_COMMAND in commands
 

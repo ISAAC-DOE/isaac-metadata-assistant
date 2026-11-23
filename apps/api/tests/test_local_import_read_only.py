@@ -147,6 +147,16 @@ def test_a_pending_exposure_of_another_bundle_is_never_folded_in(bdir, capsys):
     assert not M.exposures_for(M.load(bdir), "candidate", cand)
 
 
+def test_a_pending_exposure_of_a_target_no_longer_held_is_not_folded_in_and_writes_still_work(bdir):
+    b = M.load(bdir)
+    (bdir / M.PENDING_EXPOSURES_FILE).write_text(json.dumps(
+        {"bundle_id": b["bundle_id"], "target": {"kind": "record_group", "id": "rg-gone-since"}, "command": "bundle show group",
+         "at_utc": "2026-11-22T00:00:00Z"}) + "\n")
+    assert not M.exposures_for(M.load(bdir), "record_group", "rg-gone-since")
+    M.decide(bdir, target_ids=["experiment"], decision="defer", value=None, **BY)  # an older build regrouped: still writable
+    assert not (bdir / M.PENDING_EXPOSURES_FILE).exists()
+
+
 def test_an_unreadable_pending_exposure_line_is_refused_not_skipped(bdir):
     bid = M.load(bdir)["bundle_id"]
     good = {"bundle_id": bid, "target": {"kind": "candidate", "id": "c-1"}, "command": "bundle reveal",

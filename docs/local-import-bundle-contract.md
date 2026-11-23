@@ -1044,7 +1044,8 @@ C4 and C7 of the 22 Nov 2026 plan; skill audit of 18 Nov 2026, findings 10, 13 a
   `exposures.pending.jsonl` beside it (`mutations.record_exposures`), read back by every load and folded into
   `exposures[]` by the next write, which then removes the file. So two readers never trip "The bundle changed since it
   was read", and an older bundle is upgraded by the next write, never by a look. A line of another `bundle_id` (a
-  folder re-imported since) is never folded in; an unreadable line is refused, not skipped.
+  folder re-imported since), or naming a target the bundle no longer holds, is never folded in; an unreadable line is
+  refused, not skipped.
 - **`bundle list <dir> processing-results`** lists only the results of live record groups; the results of a group that
   no longer exists or is merged, rejected or split are counted in `not_listed` (`group_no_longer_live`) and listed with
   `--all`.
