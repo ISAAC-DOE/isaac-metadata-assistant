@@ -460,6 +460,28 @@ function noteValue() {
   return el ? el.value : '';
 }
 
+/** Long run names may break only after an underscore: <wbr> nodes, built through the DOM, never HTML. */
+function breakable(text) {
+  const parts = String(text).split('_');
+  const span = h('span');
+  parts.forEach((p, i) => {
+    span.append(document.createTextNode(i < parts.length - 1 ? `${p}_` : p));
+    if (i < parts.length - 1) span.append(h('wbr'));
+  });
+  return span;
+}
+
+const NUMBER_CELL = /^[-+−]?\d[\d.,]*(\s?[a-zA-Zµ°%/]{0,4})?$/;
+
+function cell(value) {
+  const text = value === null || value === undefined ? '' : String(value);
+  return h('td', { class: NUMBER_CELL.test(text.trim()) ? 'num' : null }, breakable(text));
+}
+
+function valuesTable(label, columns, rows) {
+  return h('div', { class: 'tablewrap', tabindex: 0, role: 'region', 'aria-label': label }, h('table', {}, h('thead', {}, h('tr', {}, (columns || []).map((col) => h('th', { scope: 'col', text: col })))), h('tbody', {}, rows.map((row) => h('tr', {}, row.map(cell))))));
+}
+
 /** Where a quote is, in plain words: "line 36", "lines 9–12", "the file name". The full locator stays in a tooltip. */
 function shortLocator(locator) {
   const text = String(locator || '').trim();
@@ -473,7 +495,7 @@ function shortLocator(locator) {
 function quoteBlock(item, alsoIn = 0) {
   const where = shortLocator(item.locator);
   const cite = [];
-  if (item.file) cite.push(h('span', { class: 'file', text: item.file }));
+  if (item.file) cite.push(h('span', { class: 'file' }, breakable(item.file)));
   if (where) cite.push(item.file ? `, ${where}` : where);
   if (alsoIn) cite.push(` · the same in ${alsoIn} more file${alsoIn === 1 ? '' : 's'}`);
   return h('blockquote', { class: 'quote' }, h('q', { text: item.quote }), cite.length ? h('cite', { title: item.locator || null }, cite) : null);
@@ -516,38 +538,40 @@ function moreBlock(c) {
   if (breakdown.length > 1) {
     out.push(
       h('h3', { text: `What one answer covers (${c.applies_to.count})` }),
-      h('div', { class: 'tablewrap', tabindex: 0, role: 'region', 'aria-label': 'What one answer covers' }, h('table', {}, h('thead', {}, h('tr', {}, h('th', { scope: 'col', text: 'Sample' }), h('th', { scope: 'col', text: 'Measurements' }), h('th', { scope: 'col', text: 'For example' }))), h('tbody', {}, breakdown.map((b) => h('tr', {}, h('td', { text: b.label }), h('td', { text: String(b.count) }), h('td', { text: b.example || '' })))))),
+      valuesTable('What one answer covers', ['Sample', 'Measurements', 'For example'], breakdown.map((b) => [b.label, b.count, b.example || ''])),
     );
   } else if ((c.applies_to?.items || []).length) {
     const items = c.applies_to.items.slice(0, 10);
     const left = c.applies_to.count - items.length;
-    out.push(h('h3', { text: `The measurements it covers (${c.applies_to.count})` }), h('p', { text: items.join(', ') + (left > 0 ? `, and ${left} more` : '') }));
+    out.push(h('h3', { text: `The measurements it covers (${c.applies_to.count})` }), h('ul', { class: 'names' }, items.map((x) => h('li', {}, breakable(x))), left > 0 ? h('li', { class: 'more-names', text: `and ${left} more` }) : null));
   }
+  let lastLabel = null;
+  const heading = (label) => {
+    const same = label === lastLabel;
+    lastLabel = label;
+    return same ? null : h('h3', { text: label });
+  };
   for (const item of (c.context || []).filter(Boolean)) {
     if (item.kind === 'quotes' && item.items?.length) {
-      out.push(h('h3', { text: item.label || 'From your files' }), ...item.items.map((q) => quoteBlock(q)));
+      out.push(heading(item.label || 'From your files'), ...item.items.map((q) => quoteBlock(q)));
     } else if (item.kind === 'values' && item.rows?.length) {
       if (breakdown.length > 1 && /one answer covers/i.test(item.label || '')) continue; // shown above
       out.push(
-        h('h3', { text: item.label || 'Values' }),
-        h(
-          'div',
-          { class: 'tablewrap', tabindex: 0, role: 'region', 'aria-label': item.label || 'Values' },
-          h('table', {}, h('thead', {}, h('tr', {}, (item.columns || []).map((col) => h('th', { scope: 'col', text: col })))), h('tbody', {}, item.rows.map((row) => h('tr', {}, row.map((cell) => h('td', { text: cell === null || cell === undefined ? '' : String(cell) })))))),
-        ),
+        heading(item.label || 'Values'),
+        valuesTable(item.label || 'Values', item.columns, item.rows),
         item.more ? h('p', { text: `and ${item.more} more` }) : null,
       );
     } else if (item.kind === 'image' && item.image) {
       const src = `/api/image?f=${encodeURIComponent(item.image)}`;
       out.push(
-        h('h3', { text: item.label || 'Picture' }),
+        heading(item.label || 'Picture'),
         h('figure', { class: 'figure' }, h('a', { href: src, target: '_blank', rel: 'noopener' }, h('img', { src, alt: item.alt || item.label || '', loading: 'lazy' })), item.alt ? h('figcaption', { text: item.alt }) : null),
       );
     }
   }
   const facts = state.site.beamtime?.facts || [];
   if (facts.length) {
-    out.push(h('h3', { text: 'About this beamtime, from its logbook' }), ...facts.map((f) => quoteBlock({ quote: `${f.label}: ${f.quote}`, file: f.file, locator: f.locator })));
+    out.push(h('h3', { text: 'About this beamtime, from its logbook' }), h('dl', { class: 'facts' }, facts.flatMap((f) => [h('dt', { text: f.label }), h('dd', {}, quoteBlock({ quote: f.quote, file: f.file, locator: f.locator }))])));
   }
   return out.length ? h('details', { class: 'details', id: 'more' }, h('summary', { text: 'Show the evidence and context' }), out) : null;
 }
@@ -597,9 +621,8 @@ function viewCard() {
       h(
         'section',
         { class: 'suggest', 'aria-label': 'Suggested answer' },
-        h('p', { class: 'label' }, 'Suggested answer', CONFIDENCE[suggestion.confidence] ? h('span', { class: 'confidence', text: ` · ${CONFIDENCE[suggestion.confidence]}` }) : null),
-        h('p', { class: 'suggest-value', text: suggestion.label ?? String(suggestion.value) }),
-        why ? h('p', { class: 'why', text: why }) : null,
+        h('p', { class: 'suggest-value' }, h('span', { class: 'suggest-prefix', text: 'Suggested: ' }), suggestion.label ?? String(suggestion.value)),
+        h('p', { class: 'why' }, CONFIDENCE[suggestion.confidence] ? h('strong', { class: 'confidence', text: `${CONFIDENCE[suggestion.confidence]}. ` }) : null, why || null),
         ...groups.map((g) => quoteBlock(g.item, g.more)),
         h(
           'button',
