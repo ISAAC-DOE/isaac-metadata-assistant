@@ -1,5 +1,5 @@
 """Audit of 18 Nov 2026, finding 4 (code half): the beamtime-wide dose-reading question (rule
-``isaac.xas.dose_damage.v2``) is ONE experiment-scope question of ``bundle questions``, with the processing plots in
+``isaac.xas.dose_damage.v3``; its id was first minted under v2 and is kept) is ONE experiment-scope question of ``bundle questions``, with the processing plots in
 its context, instead of being discovered when a bulk approval is refused. SYNTHETIC scans only (``SYN_`` files).
 """
 
@@ -101,3 +101,9 @@ def test_a_group_with_its_own_reading_is_not_asked_and_no_question_without_an_op
     with pytest.raises(M.MutationRefused) as exc:
         M.decide_question(bdir, question_id=Q.DOSE_QUESTION_ID, decision="confirm", value=None, **BY)
     assert "set_dose_reading" in str(exc.value) or "No open question" in str(exc.value)
+
+
+def test_the_dose_question_id_does_not_move_with_the_rule_version():
+    # first minted under isaac.xas.dose_damage.v2; the rule is now v3 and the question says so, but its id is kept
+    assert Q.DOSE_QUESTION_ID == "Q-362a024010"
+    assert Q.DOSE_RULE_ID == "isaac.xas.dose_damage.v3"
