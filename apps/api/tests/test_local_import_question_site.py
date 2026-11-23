@@ -1409,3 +1409,45 @@ def test_a_value_derived_by_a_rule_is_worded_with_its_evidence_never_an_empty_qu
     reason = S._derived_reason(cand, "HERFD-XAS")
     assert "9999.0 eV" in reason and "Likely, please check" in reason and "Your files write ." not in reason
     assert S._derived_evidence({"evidence": []}) == []
+
+
+# --- the header: where the data came from --------------------------------------------------------------------------
+
+
+def test_the_header_quotes_the_beamtime_logbook_with_file_and_line():
+    folder = "SYN_BL00_2100-01_Synthetic"
+    bundle = {
+        "generator": {"walker_id": "bl15.archive/v1"},
+        "experiment": {"context_candidate_ids": ["c1", "c2", "c3", "c4"],
+                       "element_evidence": [{"element": "Ir", "edge": "L3"}, {"element": "Ir", "edge": "L3"},
+                                            {"element": "Ir", "edge": None}]},
+        "candidates": [
+            {"candidate_id": "c1", "statement_key": "beamtime_dates", "observed_literals": ["Beam  March 1-3,\n 2100"],
+             "evidence": [{"relative_path": "notes/log.txt", "locator": "line 1"}]},
+            {"candidate_id": "c2", "statement_key": "spectrometer_configuration",
+             "observed_literals": [{"literal": "5x crystals"}, "4x crystals"],
+             "evidence": [{"relative_path": "/elsewhere/log.txt", "locator": "line 9"}]},  # outside the import: no file
+            {"candidate_id": "c3", "statement_key": "motor_position", "observed_literals": ["c8p 1"]},  # not a header fact
+            {"candidate_id": "c4", "statement_key": "beamtime_purpose", "observed_literals": ["   "]},  # nothing to quote
+            {"candidate_id": "c9", "statement_key": "beamsize", "observed_literals": ["1 mm"]},  # not the experiment's
+        ],
+    }
+    header, shown = S._beamtime(bundle, folder)
+    assert header == {
+        "folder": folder, "read_as": "SSRL BL15-2", "edges": ["Ir L3"],
+        "facts": [{"label": "Dates", "quote": "Beam March 1-3, 2100", "file": "notes/log.txt", "locator": "line 1", "more": 0},
+                  {"label": "Spectrometer", "quote": "5x crystals", "file": None, "locator": None, "more": 1}],
+    }
+    assert shown == [("candidate", "c1"), ("candidate", "c2")]  # recorded as shown, like the cards' values
+    assert S._beamtime({"generator": {"walker_id": "other/v1"}}, folder)[0] == {
+        "folder": folder, "read_as": None, "edges": [], "facts": []}
+
+
+def test_the_export_writes_the_header(base, tmp_path):
+    bdir = tmp_path / "bundle"
+    shutil.copytree(base, bdir)
+    out = tmp_path / "site"
+    S.export_site(bdir, out, site_template=tmp_path / "none")
+    data = json.loads((out / "data" / "site-data.json").read_text())
+    assert data["beamtime"]["folder"] == data["title"] == "SYN_BL00_2100-01_Synthetic"
+    assert set(data["beamtime"]) == {"folder", "read_as", "edges", "facts"}

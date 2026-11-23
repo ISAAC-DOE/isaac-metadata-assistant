@@ -147,6 +147,24 @@ These were added while the export and the import were built
 (`apps/api/isaac_api/local_import/question_site.py`, `question_site_import.py`, `question_site_hints.py`). A site
 written against the shapes above keeps working; it may ignore every key it does not know.
 
+### `beamtime`: where the data came from
+
+`site-data.json` carries a `beamtime` object for the site's header:
+
+```json
+"beamtime": {
+  "folder": "SSRL_BL152_2025-04_Example",
+  "read_as": "SSRL BL15-2",
+  "edges": ["Ir L3"],
+  "facts": [{"label": "Dates", "quote": "Beam April 11-14, 2025", "file": "notes.txt", "locator": "line 1", "more": 0}]
+}
+```
+
+- `folder` is the imported folder's name (the same as `title`).
+- `read_as` names the readers the files were read with (from the archive walker), or `null`. It says how the files were read, not a fact about them.
+- `edges` lists element and edge pairs named by the beamtime's own method macros.
+- `facts` quotes the beamtime's logbook lines (dates, purpose, spectrometer, mono calibration, beam size) as written, with their file and line. `file` is `null` when the line came from outside the import. `more` counts other readings of the same fact. The candidates shown are recorded as shown, like the cards' values.
+
 ### One answer never reaches groups whose honest answer could differ
 
 - A question the command line asks once for several record groups is one card **per sample the grouping

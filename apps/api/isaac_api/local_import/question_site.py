@@ -1147,6 +1147,48 @@ def _card_context(card: dict, view: _View, img_dir: Path, images: list[str], sho
 
 # --- the export ------------------------------------------------------------------------------------------------------
 
+#: The site's header says where the data came from: the beamtime's own logbook lines, quoted with file and line.
+_BEAMTIME_FACTS = (("beamtime_dates", "Dates"), ("beamtime_purpose", "Purpose"),
+                   ("spectrometer_configuration", "Spectrometer"), ("monochromator_calibration", "Mono calibration"),
+                   ("beamsize", "Beam size"))
+#: The readers that read the files, by the archive walker's id: what the files were read as, not a claim about them.
+_READ_AS = (("bl15.", "SSRL BL15-2"),)
+
+
+def _literal(x: Any) -> str | None:
+    text = x.get("literal") if isinstance(x, Mapping) else x
+    return " ".join(text.split()) if isinstance(text, str) and text.strip() else None
+
+
+def _beamtime(bundle: Mapping, folder: str) -> tuple[dict, list[tuple[str, str]]]:
+    """The header block of ``site-data.json`` and the candidates it shows (recorded as shown, like the cards')."""
+    exp = bundle.get("experiment") or {}
+    ids = set(exp.get("context_candidate_ids") or ())
+    wanted = dict(_BEAMTIME_FACTS)
+    found: dict[str, Mapping] = {}
+    for cand in bundle.get("candidates") or ():
+        key = cand.get("statement_key")
+        if cand.get("candidate_id") in ids and key in wanted and key not in found:
+            found[key] = cand
+    facts: list[dict] = []
+    shown: list[tuple[str, str]] = []
+    for key, label in _BEAMTIME_FACTS:
+        cand = found.get(key)
+        literals = [t for t in (_literal(x) for x in (cand or {}).get("observed_literals") or ()) if t]
+        if not literals:
+            continue
+        ev = next((e for e in cand.get("evidence") or () if H.in_import(e.get("relative_path"))
+                   and e.get("relative_path")), None)
+        facts.append({"label": label, "quote": literals[0][:300], "file": ev.get("relative_path") if ev else None,
+                      "locator": ev.get("locator") if ev else None, "more": len(literals) - 1})
+        shown.append(("candidate", str(cand["candidate_id"])))
+    edges = sorted({f"{e['element']} {e['edge']}" for e in exp.get("element_evidence") or ()
+                    if isinstance(e, Mapping) and e.get("element") and e.get("edge")})
+    walker = str((bundle.get("generator") or {}).get("walker_id") or "")
+    read_as = next((name for prefix, name in _READ_AS if walker.startswith(prefix)), None)
+    return {"folder": folder, "read_as": read_as, "edges": edges, "facts": facts}, shown
+
+
 def _now() -> str:
     return datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
 
@@ -1314,6 +1356,9 @@ def export_site(bundle_dir: Path, out: Path, *, suggestions: Path | None = None,
     exposed = [("candidate", h["candidate_id"]) for q in asked for h in q.get("hints") or () if h.get("candidate_id")]
     exposed += [("conflict", q["targets"][0]["id"]) for q in asked if q["kind"] == "resolve_conflict" and q.get("targets")]
     exposed += [("candidate", cid) for q in asked if q["kind"] == "confirm_value" for cid in Q.confirm_value_shown(bundle, q)]
+    title = str((bundle.get("source_root") or {}).get("label") or bundle_dir.name)
+    beamtime, header_shown = _beamtime(bundle, title)
+    shown += header_shown
     exposed += [x for x in shown if isinstance(x, (list, tuple)) and len(x) == 2]
     exposed = list(dict.fromkeys((str(k), str(i)) for k, i in exposed))
     if exposed:
@@ -1333,7 +1378,8 @@ def export_site(bundle_dir: Path, out: Path, *, suggestions: Path | None = None,
     site_data = {
         "format": FORMAT_ID, "format_version": FORMAT_VERSION, "bundle_id": bundle.get("bundle_id"),
         "bundle_version": M.bundle_version(bundle_dir),
-        "title": str((bundle.get("source_root") or {}).get("label") or bundle_dir.name),
+        "title": title,
+        "beamtime": beamtime,
         "generated_at": _now(),
         "totals": {"records": len(view.exportable), "cards": len(public),
                    "blocking_cards": sum(1 for c in public if c["blocking"])},
