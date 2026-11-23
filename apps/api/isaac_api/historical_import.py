@@ -3015,8 +3015,14 @@ def read_archive_at(
         # (2026-10-12) join its own candidates, so the same-field reconciliation below
         # compares them with the filename's dry-sample reading — and neither can win
         # silently.
+        # review of #352, finding 6: a measurement whose own name says it was dry (the dry-sample rule proposed ex situ)
+        dry = any(
+            c.candidate_id.endswith("::environment") and str(c.rule or "").startswith(rc.RULE_DRY_SAMPLE_IS_EX_SITU)
+            and c.proposed_value is not None
+            for c in unit_candidates.candidates
+        )
         logbook = rc.logbook_candidates(
-            unit_candidates.stem, per_unit.get("logbook_statements") or {}, source_id_map
+            unit_candidates.stem, per_unit.get("logbook_statements") or {}, source_id_map, dry=dry
         )
         for candidate in (*unit_candidates.candidates, *logbook):
             candidate_total += 1
@@ -3430,7 +3436,7 @@ def _archive_semantics(
     # sample's number (the convention's confirmed sample token, DEC-47) and, when the heading gives one, its name:
     # {sample number: [(sample name or None, item)]} per field, and [(number, name, row)] for the remarks.
     logbook_by_sample: dict[str, dict[int, list]] = {concept: {} for concept in cond.FIELDS}
-    quality_by_sample: list[tuple[int, str | None, dict]] = []
+    quality_by_sample: list[tuple[int, str | None, int | None, dict]] = []
     table_row_file: dict[tuple[str, int, int], int] = {}
     procedure_rows: list[tuple[str, tuple[int, int], Any]] = []
 
@@ -3500,12 +3506,12 @@ def _archive_semantics(
                                    and not isinstance(n, bool)]
                 sample_number = section.get("sample_number")
                 if number is None and section_numbers:
-                    # a remark about the whole sample, in a section that lists its file numbers (C6)
+                    # a remark about the whole sample, in a section that lists its file numbers (C6). Not a row of the
+                    # notes for any one file number, so never offered as one (review of #352, finding 8)
                     for n in section_numbers:
                         quality_by_number.setdefault(n, []).append(row)
-                        notes_by_number.setdefault(n, []).append(row)
                 elif number is None and isinstance(sample_number, int) and not isinstance(sample_number, bool):
-                    quality_by_sample.append((sample_number, section.get("sample_name"), row))
+                    quality_by_sample.append((sample_number, section.get("sample_name"), section.get("sample_sections"), row))
                 elif number is None:
                     unbound_quality.append(row)
                 else:
@@ -3549,7 +3555,7 @@ def _archive_semantics(
                 elif isinstance(value.get("sample_number"), int) and not isinstance(value.get("sample_number"), bool):
                     # C6: a section with no file-number rows: its own sample's measurements, by number and name
                     logbook_by_sample[concept].setdefault(value["sample_number"], []).append(
-                        (value.get("sample_name"), item))
+                        (value.get("sample_name"), value.get("sample_sections"), item))
     for path, key, item in procedure_rows:
         number = table_row_file.get((path, key[0], key[1]))
         if number is not None:
@@ -3589,15 +3595,24 @@ def _archive_semantics(
         if group is not None:
             stem_tokens_by_group.setdefault(group, []).append({t.casefold() for t in str(unit.stem).split("_") if t})
 
-    def _section_reaches(unit, sample_number: int, sample_name: Any) -> bool:
-        if _group_number(unit) != sample_number:
+    # (review of #352, finding 3) never a measurement the logbook lists in a section's rows: that row's section is its own
+    listed_numbers = set(table_row_file.values())
+
+    def _section_reaches(unit, sample_number: int, sample_name: Any, sections: Any) -> bool:
+        """A section with no file-number rows reaches ``unit`` when the unit's file name carries the section's sample
+        number (the heading's only link to the files when it names no sample), no section's rows list the unit's file
+        number, the number heads exactly ONE section of the document, and, when the heading names the sample, every
+        unit with that number carries that name."""
+        if _group_number(unit) != sample_number or sections != 1:
+            return False
+        if unit.legacy_number is not None and unit.legacy_number in listed_numbers:
             return False
         if not isinstance(sample_name, str) or not sample_name.strip():
             return True
         return all(sample_name.strip().casefold() in tokens for tokens in stem_tokens_by_group.get(sample_number, ()))
 
-    for sample_number, sample_name, row in quality_by_sample:
-        if not any(_section_reaches(u, sample_number, sample_name) for u in relationships.units):
+    for sample_number, sample_name, sections, row in quality_by_sample:
+        if not any(_section_reaches(u, sample_number, sample_name, sections) for u in relationships.units):
             unbound_quality.append(row)
     named_applies: dict[str, list[tuple[Any, frozenset[int]]]] = {c: [] for c in cond.FIELDS}
     for concept, items in logbook_named.items():
@@ -3653,8 +3668,8 @@ def _archive_semantics(
         # C6: a remark about the whole sample, from its section, reaches this measurement by its sample number
         quality += [
             {**row, "legacy_number_shared": shared}
-            for number, name, row in quality_by_sample
-            if _section_reaches(unit, number, name) and row not in quality
+            for number, name, sections, row in quality_by_sample
+            if _section_reaches(unit, number, name, sections)
         ]
         people = [
             {**row, "legacy_number_shared": shared}
@@ -3692,8 +3707,8 @@ def _archive_semantics(
                 or [
                     item
                     for number, items in logbook_by_sample[concept].items()
-                    for name, item in items
-                    if _section_reaches(unit, number, name)
+                    for name, sections, item in items
+                    if _section_reaches(unit, number, name, sections)
                 ]
                 or list(logbook_beamtime[concept])
                 + [
