@@ -615,14 +615,16 @@ def test_the_export_records_what_it_shows_and_nothing_else(base, tmp_path):
     bdir = tmp_path / "bundle"
     shutil.copytree(base, bdir)
     before = M.load(bdir)
+    raw = (bdir / "bundle.json").read_bytes()
     report = S.export_site(bdir, tmp_path / "site", site_template=tmp_path / "none")
+    assert (bdir / "bundle.json").read_bytes() == raw  # 1.17.0: the exposures are recorded beside it, never in it
     after = M.load(bdir)
     mine = [e for e in after["exposures"] if e["command"] == S.EXPOSURE_COMMAND]
     assert len(mine) == report["exposures_recorded"] > 0
     assert len(after["exposures"]) == len(before.get("exposures") or ()) + len(mine)
     for key in ("scientist_decisions", "candidates", "missing_values", "conflicts", "record_groups"):
         assert after.get(key) == before.get(key), key
-    assert sorted(p.name for p in bdir.iterdir() if p.name != ".bundle.lock") == sorted(
+    assert sorted(p.name for p in bdir.iterdir() if p.name not in (".bundle.lock", M.PENDING_EXPOSURES_FILE)) == sorted(
         p.name for p in base.iterdir() if p.name != ".bundle.lock")
     again = S.export_site(bdir, tmp_path / "site", site_template=tmp_path / "none")
     assert again["exposures_recorded"] == report["exposures_recorded"]
