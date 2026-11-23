@@ -45,13 +45,10 @@ def _corpus(tmp: Path) -> Path:
         (src / stem).write_text(text, encoding="utf-8")
         (src / f"{stem}_dir").mkdir()
         for dat in sorted((src / f"{TEMPLATE}_dir").glob("*.dat")):
+            # the chain's exports all record filter 10, as their names say (TEMPLATE's second export records 20: its
+            # own recordings disagree, so it stays the group whose files disagree about the filter)
             (src / f"{stem}_dir" / dat.name.replace(TEMPLATE, stem)).write_text(
-                dat.read_text(encoding="utf-8").replace(TEMPLATE, stem), encoding="utf-8")
-    # TEMPLATE stays the group whose files disagree about the filter: since C6 the filter its recordings agree on
-    # outranks its name's filter20 (bl15.resolution.recorded_filter_motor.v1), so its second scan export records another
-    # filter (after the chain copied its exports, so the chain's files still agree)
-    second = next(iter(sorted((src / f"{TEMPLATE}_dir").glob("*.dat"))[1:]))
-    second.write_text(second.read_text(encoding="utf-8").replace("filter=10", "filter=20"), encoding="utf-8")
+                dat.read_text(encoding="utf-8").replace(TEMPLATE, stem).replace("filter=20", "filter=10"), encoding="utf-8")
     mac = src / "run01.mac"
     mac.write_text(mac.read_text(encoding="utf-8") + "".join(f"newfile {s}\n" for s in (*CHAIN, OTHER)), encoding="utf-8")
     return src
