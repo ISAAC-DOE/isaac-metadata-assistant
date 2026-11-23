@@ -133,7 +133,10 @@ def test_asking_for_the_plain_page_records_the_same_exposures(grouped, tmp_path,
     shutil.copytree(grouped, a), shutil.copytree(grouped, b)
     _run(capsys, str(a), "--limit", "50")
     _run(capsys, str(b), "--plain", "--limit", "50")
-    assert M.load(a).get("exposures") == M.load(b).get("exposures")
+    def _no_clock(d):
+        return [{k: v for k, v in e.items() if k != "at_utc"} for e in M.load(d).get("exposures") or []]
+
+    assert _no_clock(a) == _no_clock(b)
 
 
 # --- the kinds the site does not ask: their asks are plain_questions' -----------------------------------------------
