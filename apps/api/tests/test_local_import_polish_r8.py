@@ -48,8 +48,10 @@ def _corpus(tmp: Path) -> Path:
         (out / stem).write_text(text.replace("#E 4102447200", f"#E {4102447200 + 3600 * (n + 1)}"), encoding="utf-8")
         (out / f"{stem}_dir").mkdir()
         for dat in sorted((SEMANTICS / f"{TEMPLATE}_dir").glob("*.dat")):
+            # every copy records filter 10, as its name says (TEMPLATE's second export records 20 since C6: its own
+            # recordings disagree, which is not what these copies are about)
             (out / f"{stem}_dir" / dat.name.replace(TEMPLATE, stem)).write_text(
-                dat.read_text(encoding="utf-8").replace(TEMPLATE, stem), encoding="utf-8")
+                dat.read_text(encoding="utf-8").replace(TEMPLATE, stem).replace("filter=20", "filter=10"), encoding="utf-8")
     (out / "run01.mac").write_text("# SYNTHETIC FIXTURE -- read as TEXT, never executed.\nqdo Zz_XAS.mac\n"
                                    + "".join(f"newfile {s}\n" for s in STEMS), encoding="utf-8")
     return out
