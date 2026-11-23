@@ -1,0 +1,2815 @@
+{
+ "format": "isaac.questions",
+ "format_version": "2.0.0",
+ "bundle_id": "01M82NNP032XKDKZ757BTBMN9C",
+ "blocking_basis": {
+  "schema": "vendored v1.05 (the pinned upstream validator is not installed)",
+  "source": "schema/isaac_record_v1.json",
+  "commit": null
+ },
+ "counts": {
+  "total": 37,
+  "blocking": 17,
+  "conflicts_affecting_a_record": 2,
+  "optional": 9,
+  "informational": 7,
+  "conflicts_without_a_record_field": 2,
+  "conflicts_covered_by_decisions": 0,
+  "outside_live_groups": 0,
+  "deferred": 0,
+  "asked_again": 0,
+  "fine_grained_v1": 43
+ },
+ "questions": [
+  {
+   "question_id": "Q-c8162306c2",
+   "partition": null,
+   "tier": 1,
+   "blocking": true,
+   "why": "The record cannot be exported without it: the target schema requires attribution.produced_by.group.",
+   "kind": "missing_value",
+   "scope": "experiment",
+   "target_field_path": "attribution.produced_by.group",
+   "text": "What is the group (attribution.produced_by.group)? No source in this import states it.",
+   "applies_to": {
+    "groups": 0,
+    "runs": 0,
+    "targets": 1,
+    "runs_outside_live_groups": 0
+   },
+   "targets": [
+    {
+     "kind": "missing_value",
+     "id": "miss-0001"
+    }
+   ],
+   "per_scope_targets": {
+    "experiment": [
+     "miss-0001"
+    ]
+   },
+   "hints": [
+    {
+     "kind": "folder_name",
+     "literal": "SYN_BL00_2100-31_Upgrade",
+     "locator": "the imported folder's name",
+     "note": "A PI or group name in a folder name is a HINT to ask about, never an answer."
+    }
+   ],
+   "allowed_values": null,
+   "answers_differ": false,
+   "answer_command": "isaac bundle decide <bundle_dir> --question Q-c8162306c2 --decision correct --value <value> --by \"<your name>\"",
+   "allowed_decisions": [
+    "confirm",
+    "correct",
+    "reject",
+    "defer"
+   ]
+  },
+  {
+   "question_id": "Q-9d10c7c6ef",
+   "partition": null,
+   "tier": 1,
+   "blocking": true,
+   "why": "The record cannot be exported without it: the target schema requires attribution.produced_by.organization.",
+   "kind": "missing_value",
+   "scope": "experiment",
+   "target_field_path": "attribution.produced_by.organization",
+   "text": "What is the organization (attribution.produced_by.organization)? No source in this import states it.",
+   "applies_to": {
+    "groups": 0,
+    "runs": 0,
+    "targets": 1,
+    "runs_outside_live_groups": 0
+   },
+   "targets": [
+    {
+     "kind": "missing_value",
+     "id": "miss-0002"
+    }
+   ],
+   "per_scope_targets": {
+    "experiment": [
+     "miss-0002"
+    ]
+   },
+   "hints": [
+    {
+     "kind": "folder_name",
+     "literal": "SYN_BL00_2100-31_Upgrade",
+     "locator": "the imported folder's name",
+     "note": "A PI or group name in a folder name is a HINT to ask about, never an answer."
+    }
+   ],
+   "allowed_values": null,
+   "answers_differ": false,
+   "answer_command": "isaac bundle decide <bundle_dir> --question Q-9d10c7c6ef --decision correct --value <value> --by \"<your name>\"",
+   "allowed_decisions": [
+    "confirm",
+    "correct",
+    "reject",
+    "defer"
+   ]
+  },
+  {
+   "question_id": "Q-f12b05fb72",
+   "partition": null,
+   "tier": 1,
+   "blocking": true,
+   "why": "The record cannot be exported without it: the target schema requires context.environment.",
+   "kind": "missing_value",
+   "scope": "experiment",
+   "target_field_path": "context.environment",
+   "text": "What is the environment (context.environment)? No source in this import states it. Applies to 4 run(s), not yet grouped — answer once, or per group. If none of the allowed values fits, never pick the nearest one: if the scientist keeps their own word, keep it as a vocabulary request (--value \"<their exact word>\" --as-said; it records no decision); use --decision defer only if they do not know.",
+   "applies_to": {
+    "groups": 0,
+    "runs": 4,
+    "targets": 4,
+    "runs_outside_live_groups": 0
+   },
+   "targets": [
+    {
+     "kind": "missing_value",
+     "id": "miss-0030"
+    },
+    {
+     "kind": "missing_value",
+     "id": "miss-0031"
+    },
+    {
+     "kind": "missing_value",
+     "id": "miss-0032"
+    },
+    {
+     "kind": "missing_value",
+     "id": "miss-0033"
+    }
+   ],
+   "per_scope_targets": {
+    "run:run-001": [
+     "miss-0030"
+    ],
+    "run:run-002": [
+     "miss-0031"
+    ],
+    "run:run-003": [
+     "miss-0032"
+    ],
+    "run:run-004": [
+     "miss-0033"
+    ]
+   },
+   "hints": [],
+   "allowed_values": [
+    "operando",
+    "in_situ",
+    "ex_situ",
+    "in_silico"
+   ],
+   "answers_differ": false,
+   "answer_command": "isaac bundle decide <bundle_dir> --question Q-f12b05fb72 --decision correct --value <value> --by \"<your name>\"   # per group: add --only group:<group_id>",
+   "allowed_decisions": [
+    "confirm",
+    "correct",
+    "reject",
+    "defer"
+   ]
+  },
+  {
+   "question_id": "Q-b7373c4500",
+   "partition": null,
+   "tier": 1,
+   "blocking": true,
+   "why": "The record cannot be exported without it: the target schema requires system.domain.",
+   "kind": "missing_value",
+   "scope": "experiment",
+   "target_field_path": "system.domain",
+   "text": "What is the domain (system.domain)? No source in this import states it. If none of the allowed values fits, never pick the nearest one: if the scientist keeps their own word, keep it as a vocabulary request (--value \"<their exact word>\" --as-said; it records no decision); use --decision defer only if they do not know.",
+   "applies_to": {
+    "groups": 0,
+    "runs": 0,
+    "targets": 1,
+    "runs_outside_live_groups": 0
+   },
+   "targets": [
+    {
+     "kind": "missing_value",
+     "id": "miss-0078"
+    }
+   ],
+   "per_scope_targets": {
+    "experiment": [
+     "miss-0078"
+    ]
+   },
+   "hints": [],
+   "allowed_values": [
+    "experimental",
+    "computational"
+   ],
+   "answers_differ": false,
+   "answer_command": "isaac bundle decide <bundle_dir> --question Q-b7373c4500 --decision correct --value <value> --by \"<your name>\"",
+   "allowed_decisions": [
+    "confirm",
+    "correct",
+    "reject",
+    "defer"
+   ]
+  },
+  {
+   "question_id": "Q-4c2d609f23",
+   "partition": null,
+   "tier": 1,
+   "blocking": true,
+   "why": "The record cannot be exported without it: the target schema requires system.technique.",
+   "kind": "missing_value",
+   "scope": "experiment",
+   "target_field_path": "system.technique",
+   "text": "What is the technique (system.technique)? No source in this import states it. If none of the allowed values fits, never pick the nearest one: if the scientist keeps their own word, keep it as a vocabulary request (--value \"<their exact word>\" --as-said; it records no decision); use --decision defer only if they do not know.",
+   "applies_to": {
+    "groups": 0,
+    "runs": 0,
+    "targets": 1,
+    "runs_outside_live_groups": 0
+   },
+   "targets": [
+    {
+     "kind": "missing_value",
+     "id": "miss-0099"
+    }
+   ],
+   "per_scope_targets": {
+    "experiment": [
+     "miss-0099"
+    ]
+   },
+   "hints": [],
+   "allowed_values": [
+    "XAS",
+    "HERFD-XAS",
+    "XES",
+    "RIXS",
+    "XPS",
+    "XRF",
+    "XRD",
+    "SAXS",
+    "WAXS",
+    "PDF",
+    "neutron_reflectometry",
+    "neutron_diffraction",
+    "SANS",
+    "cyclic_voltammetry",
+    "chronoamperometry",
+    "chronopotentiometry",
+    "EIS",
+    "linear_sweep_voltammetry",
+    "galvanostatic_cycling",
+    "TEM",
+    "SEM",
+    "AFM",
+    "STM",
+    "SECM",
+    "atom_probe_tomography",
+    "DFT",
+    "ab_initio_MD",
+    "classical_MD",
+    "kinetic_monte_carlo",
+    "microkinetic_modeling",
+    "machine_learning_potential",
+    "GC",
+    "HPLC",
+    "ICP_MS",
+    "ICP_OES",
+    "NMR",
+    "EPR",
+    "mass_spectrometry",
+    "FTIR",
+    "Raman",
+    "UV_Vis",
+    "TGA",
+    "chemisorption",
+    "physisorption",
+    "catalytic_reactor_test"
+   ],
+   "answers_differ": false,
+   "answer_command": "isaac bundle decide <bundle_dir> --question Q-4c2d609f23 --decision correct --value <value> --by \"<your name>\"",
+   "allowed_decisions": [
+    "confirm",
+    "correct",
+    "reject",
+    "defer"
+   ]
+  },
+  {
+   "question_id": "Q-8de9f25cd3",
+   "partition": null,
+   "tier": 1,
+   "blocking": true,
+   "why": "The record cannot be exported without it: the target schema requires context.temperature_K.",
+   "kind": "missing_value",
+   "scope": "run:run-001",
+   "target_field_path": "context.temperature_K",
+   "text": "What is the temperature K (context.temperature_K)? No source in this import states it.",
+   "applies_to": {
+    "groups": 0,
+    "runs": 1,
+    "targets": 1,
+    "runs_outside_live_groups": 0
+   },
+   "targets": [
+    {
+     "kind": "missing_value",
+     "id": "miss-0042"
+    }
+   ],
+   "per_scope_targets": {
+    "run:run-001": [
+     "miss-0042"
+    ]
+   },
+   "hints": [],
+   "allowed_values": null,
+   "answers_differ": false,
+   "answer_command": "isaac bundle decide <bundle_dir> --question Q-8de9f25cd3 --decision correct --value <value> --json --by \"<your name>\"",
+   "allowed_decisions": [
+    "confirm",
+    "correct",
+    "reject",
+    "defer"
+   ]
+  },
+  {
+   "question_id": "Q-36106ed842",
+   "partition": null,
+   "tier": 1,
+   "blocking": true,
+   "why": "The record cannot be exported without it: the target schema requires sample.material.name.",
+   "kind": "missing_value",
+   "scope": "run:run-001",
+   "target_field_path": "sample.material.name",
+   "text": "What is the name (sample.material.name)? No source in this import states it.",
+   "applies_to": {
+    "groups": 0,
+    "runs": 1,
+    "targets": 1,
+    "runs_outside_live_groups": 0
+   },
+   "targets": [
+    {
+     "kind": "missing_value",
+     "id": "miss-0066"
+    }
+   ],
+   "per_scope_targets": {
+    "run:run-001": [
+     "miss-0066"
+    ]
+   },
+   "hints": [],
+   "allowed_values": null,
+   "answers_differ": false,
+   "answer_command": "isaac bundle decide <bundle_dir> --question Q-36106ed842 --decision correct --value <value> --by \"<your name>\"",
+   "allowed_decisions": [
+    "confirm",
+    "correct",
+    "reject",
+    "defer"
+   ]
+  },
+  {
+   "question_id": "Q-9d5ac9103f",
+   "partition": null,
+   "tier": 1,
+   "blocking": true,
+   "why": "The record cannot be exported without it: the target schema requires sample.sample_form.",
+   "kind": "missing_value",
+   "scope": "run:run-001",
+   "target_field_path": "sample.sample_form",
+   "text": "What is the sample form (sample.sample_form)? No source in this import states it. If none of the allowed values fits, never pick the nearest one: if the scientist keeps their own word, keep it as a vocabulary request (--value \"<their exact word>\" --as-said; it records no decision); use --decision defer only if they do not know.",
+   "applies_to": {
+    "groups": 0,
+    "runs": 1,
+    "targets": 1,
+    "runs_outside_live_groups": 0
+   },
+   "targets": [
+    {
+     "kind": "missing_value",
+     "id": "miss-0074"
+    }
+   ],
+   "per_scope_targets": {
+    "run:run-001": [
+     "miss-0074"
+    ]
+   },
+   "hints": [],
+   "allowed_values": [
+    "powder",
+    "pellet",
+    "film",
+    "monolith",
+    "liquid",
+    "gas",
+    "single_crystal",
+    "nanoparticle",
+    "membrane_electrode_assembly",
+    "slab_model",
+    "cluster_model",
+    "unit_cell",
+    "fluids",
+    "molecule_model",
+    "continuum_model"
+   ],
+   "answers_differ": false,
+   "answer_command": "isaac bundle decide <bundle_dir> --question Q-9d5ac9103f --decision correct --value <value> --by \"<your name>\"",
+   "allowed_decisions": [
+    "confirm",
+    "correct",
+    "reject",
+    "defer"
+   ]
+  },
+  {
+   "question_id": "Q-053fe7781b",
+   "partition": null,
+   "tier": 1,
+   "blocking": true,
+   "why": "The record cannot be exported without it: the target schema requires context.temperature_K.",
+   "kind": "missing_value",
+   "scope": "run:run-002",
+   "target_field_path": "context.temperature_K",
+   "text": "What is the temperature K (context.temperature_K)? No source in this import states it.",
+   "applies_to": {
+    "groups": 0,
+    "runs": 1,
+    "targets": 1,
+    "runs_outside_live_groups": 0
+   },
+   "targets": [
+    {
+     "kind": "missing_value",
+     "id": "miss-0043"
+    }
+   ],
+   "per_scope_targets": {
+    "run:run-002": [
+     "miss-0043"
+    ]
+   },
+   "hints": [],
+   "allowed_values": null,
+   "answers_differ": false,
+   "answer_command": "isaac bundle decide <bundle_dir> --question Q-053fe7781b --decision correct --value <value> --json --by \"<your name>\"",
+   "allowed_decisions": [
+    "confirm",
+    "correct",
+    "reject",
+    "defer"
+   ]
+  },
+  {
+   "question_id": "Q-5f23f0459b",
+   "partition": null,
+   "tier": 1,
+   "blocking": true,
+   "why": "The record cannot be exported without it: the target schema requires sample.material.name.",
+   "kind": "missing_value",
+   "scope": "run:run-002",
+   "target_field_path": "sample.material.name",
+   "text": "What is the name (sample.material.name)? No source in this import states it.",
+   "applies_to": {
+    "groups": 0,
+    "runs": 1,
+    "targets": 1,
+    "runs_outside_live_groups": 0
+   },
+   "targets": [
+    {
+     "kind": "missing_value",
+     "id": "miss-0067"
+    }
+   ],
+   "per_scope_targets": {
+    "run:run-002": [
+     "miss-0067"
+    ]
+   },
+   "hints": [],
+   "allowed_values": null,
+   "answers_differ": false,
+   "answer_command": "isaac bundle decide <bundle_dir> --question Q-5f23f0459b --decision correct --value <value> --by \"<your name>\"",
+   "allowed_decisions": [
+    "confirm",
+    "correct",
+    "reject",
+    "defer"
+   ]
+  },
+  {
+   "question_id": "Q-ecce70710b",
+   "partition": null,
+   "tier": 1,
+   "blocking": true,
+   "why": "The record cannot be exported without it: the target schema requires sample.sample_form.",
+   "kind": "missing_value",
+   "scope": "run:run-002",
+   "target_field_path": "sample.sample_form",
+   "text": "What is the sample form (sample.sample_form)? No source in this import states it. If none of the allowed values fits, never pick the nearest one: if the scientist keeps their own word, keep it as a vocabulary request (--value \"<their exact word>\" --as-said; it records no decision); use --decision defer only if they do not know.",
+   "applies_to": {
+    "groups": 0,
+    "runs": 1,
+    "targets": 1,
+    "runs_outside_live_groups": 0
+   },
+   "targets": [
+    {
+     "kind": "missing_value",
+     "id": "miss-0075"
+    }
+   ],
+   "per_scope_targets": {
+    "run:run-002": [
+     "miss-0075"
+    ]
+   },
+   "hints": [],
+   "allowed_values": [
+    "powder",
+    "pellet",
+    "film",
+    "monolith",
+    "liquid",
+    "gas",
+    "single_crystal",
+    "nanoparticle",
+    "membrane_electrode_assembly",
+    "slab_model",
+    "cluster_model",
+    "unit_cell",
+    "fluids",
+    "molecule_model",
+    "continuum_model"
+   ],
+   "answers_differ": false,
+   "answer_command": "isaac bundle decide <bundle_dir> --question Q-ecce70710b --decision correct --value <value> --by \"<your name>\"",
+   "allowed_decisions": [
+    "confirm",
+    "correct",
+    "reject",
+    "defer"
+   ]
+  },
+  {
+   "question_id": "Q-2d666c4721",
+   "partition": null,
+   "tier": 1,
+   "blocking": true,
+   "why": "The record cannot be exported without it: the target schema requires context.temperature_K.",
+   "kind": "missing_value",
+   "scope": "run:run-003",
+   "target_field_path": "context.temperature_K",
+   "text": "What is the temperature K (context.temperature_K)? No source in this import states it.",
+   "applies_to": {
+    "groups": 0,
+    "runs": 1,
+    "targets": 1,
+    "runs_outside_live_groups": 0
+   },
+   "targets": [
+    {
+     "kind": "missing_value",
+     "id": "miss-0044"
+    }
+   ],
+   "per_scope_targets": {
+    "run:run-003": [
+     "miss-0044"
+    ]
+   },
+   "hints": [],
+   "allowed_values": null,
+   "answers_differ": false,
+   "answer_command": "isaac bundle decide <bundle_dir> --question Q-2d666c4721 --decision correct --value <value> --json --by \"<your name>\"",
+   "allowed_decisions": [
+    "confirm",
+    "correct",
+    "reject",
+    "defer"
+   ]
+  },
+  {
+   "question_id": "Q-f6879d84e2",
+   "partition": null,
+   "tier": 1,
+   "blocking": true,
+   "why": "The record cannot be exported without it: the target schema requires sample.material.name.",
+   "kind": "missing_value",
+   "scope": "run:run-003",
+   "target_field_path": "sample.material.name",
+   "text": "What is the name (sample.material.name)? No source in this import states it.",
+   "applies_to": {
+    "groups": 0,
+    "runs": 1,
+    "targets": 1,
+    "runs_outside_live_groups": 0
+   },
+   "targets": [
+    {
+     "kind": "missing_value",
+     "id": "miss-0068"
+    }
+   ],
+   "per_scope_targets": {
+    "run:run-003": [
+     "miss-0068"
+    ]
+   },
+   "hints": [],
+   "allowed_values": null,
+   "answers_differ": false,
+   "answer_command": "isaac bundle decide <bundle_dir> --question Q-f6879d84e2 --decision correct --value <value> --by \"<your name>\"",
+   "allowed_decisions": [
+    "confirm",
+    "correct",
+    "reject",
+    "defer"
+   ]
+  },
+  {
+   "question_id": "Q-a350f1f2e4",
+   "partition": null,
+   "tier": 1,
+   "blocking": true,
+   "why": "The record cannot be exported without it: the target schema requires sample.sample_form.",
+   "kind": "missing_value",
+   "scope": "run:run-003",
+   "target_field_path": "sample.sample_form",
+   "text": "What is the sample form (sample.sample_form)? No source in this import states it. If none of the allowed values fits, never pick the nearest one: if the scientist keeps their own word, keep it as a vocabulary request (--value \"<their exact word>\" --as-said; it records no decision); use --decision defer only if they do not know.",
+   "applies_to": {
+    "groups": 0,
+    "runs": 1,
+    "targets": 1,
+    "runs_outside_live_groups": 0
+   },
+   "targets": [
+    {
+     "kind": "missing_value",
+     "id": "miss-0076"
+    }
+   ],
+   "per_scope_targets": {
+    "run:run-003": [
+     "miss-0076"
+    ]
+   },
+   "hints": [],
+   "allowed_values": [
+    "powder",
+    "pellet",
+    "film",
+    "monolith",
+    "liquid",
+    "gas",
+    "single_crystal",
+    "nanoparticle",
+    "membrane_electrode_assembly",
+    "slab_model",
+    "cluster_model",
+    "unit_cell",
+    "fluids",
+    "molecule_model",
+    "continuum_model"
+   ],
+   "answers_differ": false,
+   "answer_command": "isaac bundle decide <bundle_dir> --question Q-a350f1f2e4 --decision correct --value <value> --by \"<your name>\"",
+   "allowed_decisions": [
+    "confirm",
+    "correct",
+    "reject",
+    "defer"
+   ]
+  },
+  {
+   "question_id": "Q-0247123296",
+   "partition": null,
+   "tier": 1,
+   "blocking": true,
+   "why": "The record cannot be exported without it: the target schema requires context.temperature_K.",
+   "kind": "missing_value",
+   "scope": "run:run-004",
+   "target_field_path": "context.temperature_K",
+   "text": "What is the temperature K (context.temperature_K)? No source in this import states it.",
+   "applies_to": {
+    "groups": 0,
+    "runs": 1,
+    "targets": 1,
+    "runs_outside_live_groups": 0
+   },
+   "targets": [
+    {
+     "kind": "missing_value",
+     "id": "miss-0045"
+    }
+   ],
+   "per_scope_targets": {
+    "run:run-004": [
+     "miss-0045"
+    ]
+   },
+   "hints": [],
+   "allowed_values": null,
+   "answers_differ": false,
+   "answer_command": "isaac bundle decide <bundle_dir> --question Q-0247123296 --decision correct --value <value> --json --by \"<your name>\"",
+   "allowed_decisions": [
+    "confirm",
+    "correct",
+    "reject",
+    "defer"
+   ]
+  },
+  {
+   "question_id": "Q-3ebd86baeb",
+   "partition": null,
+   "tier": 1,
+   "blocking": true,
+   "why": "The record cannot be exported without it: the target schema requires sample.material.name.",
+   "kind": "missing_value",
+   "scope": "run:run-004",
+   "target_field_path": "sample.material.name",
+   "text": "What is the name (sample.material.name)? No source in this import states it.",
+   "applies_to": {
+    "groups": 0,
+    "runs": 1,
+    "targets": 1,
+    "runs_outside_live_groups": 0
+   },
+   "targets": [
+    {
+     "kind": "missing_value",
+     "id": "miss-0069"
+    }
+   ],
+   "per_scope_targets": {
+    "run:run-004": [
+     "miss-0069"
+    ]
+   },
+   "hints": [],
+   "allowed_values": null,
+   "answers_differ": false,
+   "answer_command": "isaac bundle decide <bundle_dir> --question Q-3ebd86baeb --decision correct --value <value> --by \"<your name>\"",
+   "allowed_decisions": [
+    "confirm",
+    "correct",
+    "reject",
+    "defer"
+   ]
+  },
+  {
+   "question_id": "Q-3ec9492979",
+   "partition": null,
+   "tier": 1,
+   "blocking": true,
+   "why": "The record cannot be exported without it: the target schema requires sample.sample_form.",
+   "kind": "missing_value",
+   "scope": "run:run-004",
+   "target_field_path": "sample.sample_form",
+   "text": "What is the sample form (sample.sample_form)? No source in this import states it. If none of the allowed values fits, never pick the nearest one: if the scientist keeps their own word, keep it as a vocabulary request (--value \"<their exact word>\" --as-said; it records no decision); use --decision defer only if they do not know.",
+   "applies_to": {
+    "groups": 0,
+    "runs": 1,
+    "targets": 1,
+    "runs_outside_live_groups": 0
+   },
+   "targets": [
+    {
+     "kind": "missing_value",
+     "id": "miss-0077"
+    }
+   ],
+   "per_scope_targets": {
+    "run:run-004": [
+     "miss-0077"
+    ]
+   },
+   "hints": [],
+   "allowed_values": [
+    "powder",
+    "pellet",
+    "film",
+    "monolith",
+    "liquid",
+    "gas",
+    "single_crystal",
+    "nanoparticle",
+    "membrane_electrode_assembly",
+    "slab_model",
+    "cluster_model",
+    "unit_cell",
+    "fluids",
+    "molecule_model",
+    "continuum_model"
+   ],
+   "answers_differ": false,
+   "answer_command": "isaac bundle decide <bundle_dir> --question Q-3ec9492979 --decision correct --value <value> --by \"<your name>\"",
+   "allowed_decisions": [
+    "confirm",
+    "correct",
+    "reject",
+    "defer"
+   ]
+  },
+  {
+   "question_id": "Q-d5d1d9b7b0",
+   "partition": null,
+   "tier": 2,
+   "blocking": false,
+   "affects_record": true,
+   "why": "The sources disagree; a record built from these runs carries whichever reading you choose.",
+   "kind": "resolve_conflict",
+   "scope": "run:run-001",
+   "target_field_path": "timestamps.acquired_start_utc",
+   "text": "The sources disagree (field_disagreement, timestamps.acquired_start_utc). These readings are local clock times with no time zone (read at line 3 header #D, line 10 header #D (scan 1), line 25 header #D (scan 2)), so they cannot be recorded: timestamps.acquired_start_utc takes only a UTC instant, and `confirm --value <one reading>` is refused. The bundle already holds 1 UTC reading(s) for this run (utc_readings): 2001-09-09T01:46:40+00:00 (cand-0002, from '1000000000' at SYN_cat_1200mV @ line 2 header #E, rule bl15.spec.epoch_to_utc_iso.v1). If that is the start, answer with it (correct); otherwise give the UTC start yourself.",
+   "applies_to": {
+    "groups": 0,
+    "runs": 1,
+    "targets": 1
+   },
+   "targets": [
+    {
+     "kind": "conflict",
+     "id": "conf-001"
+    }
+   ],
+   "per_scope_targets": {
+    "run:run-001": [
+     "conf-001"
+    ]
+   },
+   "hints": [
+    {
+     "kind": "reading",
+     "literal": "Mon Sep  9 01:46:40 2001",
+     "locator": "line 3 header #D",
+     "source_id": "src-0003",
+     "relative_path": "SYN_cat_1200mV",
+     "fits_field": false
+    },
+    {
+     "kind": "reading",
+     "literal": "Mon Sep  9 01:46:48 2001",
+     "locator": "line 10 header #D (scan 1)",
+     "source_id": "src-0003",
+     "relative_path": "SYN_cat_1200mV",
+     "fits_field": false
+    },
+    {
+     "kind": "reading",
+     "literal": "Mon Sep  9 02:00:00 2001",
+     "locator": "line 25 header #D (scan 2)",
+     "source_id": "src-0003",
+     "relative_path": "SYN_cat_1200mV",
+     "fits_field": false
+    },
+    {
+     "kind": "reading",
+     "literal": "Mon Sep  9 02:10:00 2001",
+     "locator": "line 38 header #D (scan 3)",
+     "source_id": "src-0003",
+     "relative_path": "SYN_cat_1200mV",
+     "fits_field": false
+    },
+    {
+     "kind": "utc_reading",
+     "literal": "2001-09-09T01:46:40+00:00",
+     "candidate_id": "cand-0002",
+     "locator": "line 2 header #E",
+     "source_id": "src-0003",
+     "relative_path": "SYN_cat_1200mV",
+     "observed_literal": "1000000000",
+     "note": "A UTC instant this bundle already holds for the same run, from another statement in the files. A hint: record it only once the scientist says it is the start."
+    }
+   ],
+   "allowed_values": null,
+   "readings_that_fit_the_field": 0,
+   "utc_readings": [
+    {
+     "candidate_id": "cand-0002",
+     "value": "2001-09-09T01:46:40+00:00",
+     "run_id": "run-001",
+     "observed_literal": "1000000000",
+     "locator": "line 2 header #E",
+     "source_id": "src-0003",
+     "relative_path": "SYN_cat_1200mV",
+     "rule_id": "bl15.spec.epoch_to_utc_iso.v1",
+     "value_state": "candidate_extracted"
+    }
+   ],
+   "answer_command": "isaac bundle decide <bundle_dir> --question Q-d5d1d9b7b0 --decision correct --value <UTC instant, YYYY-MM-DDTHH:MM:SSZ> --by \"<your name>\"   # the UTC reading(s) this bundle holds (utc_readings): 2001-09-09T01:46:40+00:00 (cand-0002)",
+   "allowed_decisions": [
+    "confirm",
+    "correct",
+    "reject",
+    "defer"
+   ]
+  },
+  {
+   "question_id": "Q-078c781366",
+   "partition": null,
+   "tier": 2,
+   "blocking": false,
+   "affects_record": true,
+   "why": "The sources disagree; a record built from these runs carries whichever reading you choose.",
+   "kind": "resolve_conflict",
+   "scope": "run:run-002",
+   "target_field_path": "timestamps.acquired_start_utc",
+   "text": "The sources disagree (field_disagreement, timestamps.acquired_start_utc). These readings are local clock times with no time zone (read at line 3 header #D, line 10 header #D (scan 1), line 25 header #D (scan 2)), so they cannot be recorded: timestamps.acquired_start_utc takes only a UTC instant, and `confirm --value <one reading>` is refused. The bundle already holds 1 UTC reading(s) for this run (utc_readings): 2001-09-09T01:46:40+00:00 (cand-0019, from '1000000000' at SYN_cat_m600mV @ line 2 header #E, rule bl15.spec.epoch_to_utc_iso.v1). If that is the start, answer with it (correct); otherwise give the UTC start yourself.",
+   "applies_to": {
+    "groups": 0,
+    "runs": 1,
+    "targets": 1
+   },
+   "targets": [
+    {
+     "kind": "conflict",
+     "id": "conf-003"
+    }
+   ],
+   "per_scope_targets": {
+    "run:run-002": [
+     "conf-003"
+    ]
+   },
+   "hints": [
+    {
+     "kind": "reading",
+     "literal": "Mon Sep  9 01:46:40 2001",
+     "locator": "line 3 header #D",
+     "source_id": "src-0006",
+     "relative_path": "SYN_cat_m600mV",
+     "fits_field": false
+    },
+    {
+     "kind": "reading",
+     "literal": "Mon Sep  9 01:46:48 2001",
+     "locator": "line 10 header #D (scan 1)",
+     "source_id": "src-0006",
+     "relative_path": "SYN_cat_m600mV",
+     "fits_field": false
+    },
+    {
+     "kind": "reading",
+     "literal": "Mon Sep  9 02:00:00 2001",
+     "locator": "line 25 header #D (scan 2)",
+     "source_id": "src-0006",
+     "relative_path": "SYN_cat_m600mV",
+     "fits_field": false
+    },
+    {
+     "kind": "reading",
+     "literal": "Mon Sep  9 02:10:00 2001",
+     "locator": "line 38 header #D (scan 3)",
+     "source_id": "src-0006",
+     "relative_path": "SYN_cat_m600mV",
+     "fits_field": false
+    },
+    {
+     "kind": "utc_reading",
+     "literal": "2001-09-09T01:46:40+00:00",
+     "candidate_id": "cand-0019",
+     "locator": "line 2 header #E",
+     "source_id": "src-0006",
+     "relative_path": "SYN_cat_m600mV",
+     "observed_literal": "1000000000",
+     "note": "A UTC instant this bundle already holds for the same run, from another statement in the files. A hint: record it only once the scientist says it is the start."
+    }
+   ],
+   "allowed_values": null,
+   "readings_that_fit_the_field": 0,
+   "utc_readings": [
+    {
+     "candidate_id": "cand-0019",
+     "value": "2001-09-09T01:46:40+00:00",
+     "run_id": "run-002",
+     "observed_literal": "1000000000",
+     "locator": "line 2 header #E",
+     "source_id": "src-0006",
+     "relative_path": "SYN_cat_m600mV",
+     "rule_id": "bl15.spec.epoch_to_utc_iso.v1",
+     "value_state": "candidate_extracted"
+    }
+   ],
+   "answer_command": "isaac bundle decide <bundle_dir> --question Q-078c781366 --decision correct --value <UTC instant, YYYY-MM-DDTHH:MM:SSZ> --by \"<your name>\"   # the UTC reading(s) this bundle holds (utc_readings): 2001-09-09T01:46:40+00:00 (cand-0019)",
+   "allowed_decisions": [
+    "confirm",
+    "correct",
+    "reject",
+    "defer"
+   ]
+  },
+  {
+   "question_id": "Q-308f52703b",
+   "tier": 3,
+   "blocking": false,
+   "why": "Optional: the record can be exported without these.",
+   "kind": "optional_values",
+   "scope": "experiment",
+   "partition": null,
+   "target_field_path": null,
+   "text": "11 optional field(s) no parser read a value for: context.electrochemistry.cell_type, context.electrochemistry.electrolyte.concentration_M, context.electrochemistry.electrolyte.name, context.electrochemistry.reaction, context.reaction.catalysis, context.reaction.drive, system.facility.beamline, system.facility.endstation, system.facility.facility_name, system.facility.organization, system.facility.site. Answer any you know. Of these, 5 a hint from the files (field_hints). The files' beamline hints disagree: the folder's name 'SYN_BL00_2100-31_Upgrade' names 'BL00', while the SPEC headers state the detector columns vortDT in 6 file(s), as in SSRL BL15-2 data. Neither is an answer: ask the scientist which beamline it was (system.facility.beamline).",
+   "asked_again": [],
+   "applies_to": {
+    "groups": 0,
+    "runs": 4,
+    "targets": 44,
+    "runs_outside_live_groups": 0
+   },
+   "targets": [
+    {
+     "kind": "missing_value",
+     "id": "miss-0003"
+    },
+    {
+     "kind": "missing_value",
+     "id": "miss-0004"
+    },
+    {
+     "kind": "missing_value",
+     "id": "miss-0005"
+    },
+    {
+     "kind": "missing_value",
+     "id": "miss-0006"
+    },
+    {
+     "kind": "missing_value",
+     "id": "miss-0007"
+    },
+    {
+     "kind": "missing_value",
+     "id": "miss-0008"
+    },
+    {
+     "kind": "missing_value",
+     "id": "miss-0009"
+    },
+    {
+     "kind": "missing_value",
+     "id": "miss-0010"
+    },
+    {
+     "kind": "missing_value",
+     "id": "miss-0011"
+    },
+    {
+     "kind": "missing_value",
+     "id": "miss-0012"
+    },
+    {
+     "kind": "missing_value",
+     "id": "miss-0013"
+    },
+    {
+     "kind": "missing_value",
+     "id": "miss-0014"
+    },
+    {
+     "kind": "missing_value",
+     "id": "miss-0026"
+    },
+    {
+     "kind": "missing_value",
+     "id": "miss-0027"
+    },
+    {
+     "kind": "missing_value",
+     "id": "miss-0028"
+    },
+    {
+     "kind": "missing_value",
+     "id": "miss-0029"
+    },
+    {
+     "kind": "missing_value",
+     "id": "miss-0034"
+    },
+    {
+     "kind": "missing_value",
+     "id": "miss-0035"
+    },
+    {
+     "kind": "missing_value",
+     "id": "miss-0036"
+    },
+    {
+     "kind": "missing_value",
+     "id": "miss-0037"
+    },
+    {
+     "kind": "missing_value",
+     "id": "miss-0038"
+    },
+    {
+     "kind": "missing_value",
+     "id": "miss-0039"
+    },
+    {
+     "kind": "missing_value",
+     "id": "miss-0040"
+    },
+    {
+     "kind": "missing_value",
+     "id": "miss-0041"
+    },
+    {
+     "kind": "missing_value",
+     "id": "miss-0079"
+    },
+    {
+     "kind": "missing_value",
+     "id": "miss-0080"
+    },
+    {
+     "kind": "missing_value",
+     "id": "miss-0081"
+    },
+    {
+     "kind": "missing_value",
+     "id": "miss-0082"
+    },
+    {
+     "kind": "missing_value",
+     "id": "miss-0083"
+    },
+    {
+     "kind": "missing_value",
+     "id": "miss-0084"
+    },
+    {
+     "kind": "missing_value",
+     "id": "miss-0085"
+    },
+    {
+     "kind": "missing_value",
+     "id": "miss-0086"
+    },
+    {
+     "kind": "missing_value",
+     "id": "miss-0087"
+    },
+    {
+     "kind": "missing_value",
+     "id": "miss-0088"
+    },
+    {
+     "kind": "missing_value",
+     "id": "miss-0089"
+    },
+    {
+     "kind": "missing_value",
+     "id": "miss-0090"
+    },
+    {
+     "kind": "missing_value",
+     "id": "miss-0091"
+    },
+    {
+     "kind": "missing_value",
+     "id": "miss-0092"
+    },
+    {
+     "kind": "missing_value",
+     "id": "miss-0093"
+    },
+    {
+     "kind": "missing_value",
+     "id": "miss-0094"
+    },
+    {
+     "kind": "missing_value",
+     "id": "miss-0095"
+    },
+    {
+     "kind": "missing_value",
+     "id": "miss-0096"
+    },
+    {
+     "kind": "missing_value",
+     "id": "miss-0097"
+    },
+    {
+     "kind": "missing_value",
+     "id": "miss-0098"
+    }
+   ],
+   "per_scope_targets": {
+    "run:run-001": [
+     "miss-0003",
+     "miss-0007",
+     "miss-0011",
+     "miss-0026",
+     "miss-0034",
+     "miss-0038",
+     "miss-0079",
+     "miss-0083",
+     "miss-0087",
+     "miss-0091",
+     "miss-0095"
+    ],
+    "run:run-002": [
+     "miss-0004",
+     "miss-0008",
+     "miss-0012",
+     "miss-0027",
+     "miss-0035",
+     "miss-0039",
+     "miss-0080",
+     "miss-0084",
+     "miss-0088",
+     "miss-0092",
+     "miss-0096"
+    ],
+    "run:run-003": [
+     "miss-0005",
+     "miss-0009",
+     "miss-0013",
+     "miss-0028",
+     "miss-0036",
+     "miss-0040",
+     "miss-0081",
+     "miss-0085",
+     "miss-0089",
+     "miss-0093",
+     "miss-0097"
+    ],
+    "run:run-004": [
+     "miss-0006",
+     "miss-0010",
+     "miss-0014",
+     "miss-0029",
+     "miss-0037",
+     "miss-0041",
+     "miss-0082",
+     "miss-0086",
+     "miss-0090",
+     "miss-0094",
+     "miss-0098"
+    ]
+   },
+   "fields": {
+    "context.electrochemistry.cell_type": [
+     "miss-0003",
+     "miss-0004",
+     "miss-0005",
+     "miss-0006"
+    ],
+    "context.electrochemistry.electrolyte.concentration_M": [
+     "miss-0007",
+     "miss-0008",
+     "miss-0009",
+     "miss-0010"
+    ],
+    "context.electrochemistry.electrolyte.name": [
+     "miss-0011",
+     "miss-0012",
+     "miss-0013",
+     "miss-0014"
+    ],
+    "context.electrochemistry.reaction": [
+     "miss-0026",
+     "miss-0027",
+     "miss-0028",
+     "miss-0029"
+    ],
+    "context.reaction.catalysis": [
+     "miss-0034",
+     "miss-0035",
+     "miss-0036",
+     "miss-0037"
+    ],
+    "context.reaction.drive": [
+     "miss-0038",
+     "miss-0039",
+     "miss-0040",
+     "miss-0041"
+    ],
+    "system.facility.beamline": [
+     "miss-0079",
+     "miss-0080",
+     "miss-0081",
+     "miss-0082"
+    ],
+    "system.facility.endstation": [
+     "miss-0083",
+     "miss-0084",
+     "miss-0085",
+     "miss-0086"
+    ],
+    "system.facility.facility_name": [
+     "miss-0087",
+     "miss-0088",
+     "miss-0089",
+     "miss-0090"
+    ],
+    "system.facility.organization": [
+     "miss-0091",
+     "miss-0092",
+     "miss-0093",
+     "miss-0094"
+    ],
+    "system.facility.site": [
+     "miss-0095",
+     "miss-0096",
+     "miss-0097",
+     "miss-0098"
+    ]
+   },
+   "field_allowed_values": {
+    "context.electrochemistry.cell_type": [
+     "flow_cell",
+     "microfluidic_flow_cell",
+     "h_cell",
+     "beaker_cell",
+     "gde_cell",
+     "mea_cell",
+     "zero_gap_cell",
+     "coin_cell",
+     "three_electrode",
+     "scanning_droplet_cell",
+     "not_reported"
+    ],
+    "context.electrochemistry.reaction": [
+     "CO2RR",
+     "CORR",
+     "OER",
+     "HER",
+     "ORR",
+     "NRR",
+     "N2RR",
+     "AOR",
+     "FOR",
+     "water_splitting",
+     "surface_oxidation",
+     "stripping_voltammetry",
+     "None",
+     "NO3RR",
+     "urea_synthesis"
+    ],
+    "context.reaction.catalysis": [
+     "heterogeneous",
+     "homogeneous",
+     "enzymatic",
+     "uncatalyzed"
+    ],
+    "context.reaction.drive": [
+     "electrochemical",
+     "thermal",
+     "photochemical",
+     "photoelectrochemical",
+     "plasma",
+     "mechanochemical",
+     "biochemical"
+    ]
+   },
+   "field_deprecated_values": {
+    "context.electrochemistry.cell_type": {
+     "three_electrode": "deprecated: use the cell body (beaker_cell, h_cell, flow_cell, …); three_electrode describes the wiring, not the cell (the portal validator warns DEPRECATED_CELL_TYPE)"
+    }
+   },
+   "hints": [],
+   "field_hints": {
+    "system.facility.beamline": [
+     {
+      "kind": "acquisition_system",
+      "literal": "SSRL BL15-2 SPEC scan exports — Vortex fluorescence channels",
+      "locator": "2 run(s)' scan headers have columns named vortDT (the column naming of: SSRL BL15-2 SPEC scan exports — Vortex fluorescence channels)",
+      "note": "Column names in the scan headers, nothing more: they match this acquisition system's naming, which is not proof of the beamline. A HINT about where the data were taken, never an answer."
+     },
+     {
+      "kind": "folder_name",
+      "literal": "SYN_BL00_2100-31_Upgrade",
+      "locator": "the imported folder's name",
+      "note": "A facility or beamline in a folder name is a HINT to ask about, never an answer. The SPEC headers' own fingerprint names another beamline: the two hints disagree, so ask the scientist which beamline it was."
+     }
+    ],
+    "system.facility.endstation": [
+     {
+      "kind": "acquisition_system",
+      "literal": "SSRL BL15-2 SPEC scan exports — Vortex fluorescence channels",
+      "locator": "2 run(s)' scan headers have columns named vortDT (the column naming of: SSRL BL15-2 SPEC scan exports — Vortex fluorescence channels)",
+      "note": "Column names in the scan headers, nothing more: they match this acquisition system's naming, which is not proof of the beamline. A HINT about where the data were taken, never an answer."
+     },
+     {
+      "kind": "folder_name",
+      "literal": "SYN_BL00_2100-31_Upgrade",
+      "locator": "the imported folder's name",
+      "note": "A facility or beamline in a folder name is a HINT to ask about, never an answer. The SPEC headers' own fingerprint names another beamline: the two hints disagree, so ask the scientist which beamline it was."
+     }
+    ],
+    "system.facility.facility_name": [
+     {
+      "kind": "acquisition_system",
+      "literal": "SSRL BL15-2 SPEC scan exports — Vortex fluorescence channels",
+      "locator": "2 run(s)' scan headers have columns named vortDT (the column naming of: SSRL BL15-2 SPEC scan exports — Vortex fluorescence channels)",
+      "note": "Column names in the scan headers, nothing more: they match this acquisition system's naming, which is not proof of the beamline. A HINT about where the data were taken, never an answer."
+     },
+     {
+      "kind": "folder_name",
+      "literal": "SYN_BL00_2100-31_Upgrade",
+      "locator": "the imported folder's name",
+      "note": "A facility or beamline in a folder name is a HINT to ask about, never an answer. The SPEC headers' own fingerprint names another beamline: the two hints disagree, so ask the scientist which beamline it was."
+     }
+    ],
+    "system.facility.organization": [
+     {
+      "kind": "acquisition_system",
+      "literal": "SSRL BL15-2 SPEC scan exports — Vortex fluorescence channels",
+      "locator": "2 run(s)' scan headers have columns named vortDT (the column naming of: SSRL BL15-2 SPEC scan exports — Vortex fluorescence channels)",
+      "note": "Column names in the scan headers, nothing more: they match this acquisition system's naming, which is not proof of the beamline. A HINT about where the data were taken, never an answer."
+     },
+     {
+      "kind": "folder_name",
+      "literal": "SYN_BL00_2100-31_Upgrade",
+      "locator": "the imported folder's name",
+      "note": "A facility or beamline in a folder name is a HINT to ask about, never an answer. The SPEC headers' own fingerprint names another beamline: the two hints disagree, so ask the scientist which beamline it was."
+     }
+    ],
+    "system.facility.site": [
+     {
+      "kind": "acquisition_system",
+      "literal": "SSRL BL15-2 SPEC scan exports — Vortex fluorescence channels",
+      "locator": "2 run(s)' scan headers have columns named vortDT (the column naming of: SSRL BL15-2 SPEC scan exports — Vortex fluorescence channels)",
+      "note": "Column names in the scan headers, nothing more: they match this acquisition system's naming, which is not proof of the beamline. A HINT about where the data were taken, never an answer."
+     },
+     {
+      "kind": "folder_name",
+      "literal": "SYN_BL00_2100-31_Upgrade",
+      "locator": "the imported folder's name",
+      "note": "A facility or beamline in a folder name is a HINT to ask about, never an answer. The SPEC headers' own fingerprint names another beamline: the two hints disagree, so ask the scientist which beamline it was."
+     }
+    ]
+   },
+   "allowed_values": null,
+   "answer_command": "isaac bundle decide <bundle_dir> --question Q-308f52703b --field <field path> --decision correct --value <value> --by \"<your name>\"   # a number (context.electrochemistry.electrolyte.concentration_M): add --json, e.g. --value -0.8 --json",
+   "allowed_decisions": [
+    "confirm",
+    "correct",
+    "reject",
+    "defer"
+   ]
+  },
+  {
+   "question_id": "Q-c5f717329d",
+   "tier": 3,
+   "blocking": false,
+   "why": "Optional: the record can be exported without these.",
+   "kind": "optional_values",
+   "scope": "run:run-001",
+   "partition": null,
+   "target_field_path": null,
+   "text": "8 optional field(s) no parser read a value for: context.electrochemistry.control_mode, context.electrochemistry.current_setpoint_mA_cm2, context.electrochemistry.pH, context.electrochemistry.potential_scale, context.thermodynamics.atmosphere, sample.material.formula, sample.material.provenance, timestamps.acquired_end_utc. Answer any you know.",
+   "asked_again": [],
+   "applies_to": {
+    "groups": 0,
+    "runs": 1,
+    "targets": 8,
+    "runs_outside_live_groups": 0
+   },
+   "targets": [
+    {
+     "kind": "missing_value",
+     "id": "miss-0015"
+    },
+    {
+     "kind": "missing_value",
+     "id": "miss-0019"
+    },
+    {
+     "kind": "missing_value",
+     "id": "miss-0046"
+    },
+    {
+     "kind": "missing_value",
+     "id": "miss-0062"
+    },
+    {
+     "kind": "missing_value",
+     "id": "miss-0070"
+    },
+    {
+     "kind": "missing_value",
+     "id": "miss-0100"
+    },
+    {
+     "kind": "missing_value",
+     "id": "miss-0105"
+    },
+    {
+     "kind": "missing_value",
+     "id": "miss-0109"
+    }
+   ],
+   "per_scope_targets": {
+    "run:run-001": [
+     "miss-0015",
+     "miss-0019",
+     "miss-0046",
+     "miss-0062",
+     "miss-0070",
+     "miss-0100",
+     "miss-0105",
+     "miss-0109"
+    ]
+   },
+   "fields": {
+    "context.electrochemistry.control_mode": [
+     "miss-0105"
+    ],
+    "context.electrochemistry.current_setpoint_mA_cm2": [
+     "miss-0109"
+    ],
+    "context.electrochemistry.pH": [
+     "miss-0015"
+    ],
+    "context.electrochemistry.potential_scale": [
+     "miss-0019"
+    ],
+    "context.thermodynamics.atmosphere": [
+     "miss-0046"
+    ],
+    "sample.material.formula": [
+     "miss-0062"
+    ],
+    "sample.material.provenance": [
+     "miss-0070"
+    ],
+    "timestamps.acquired_end_utc": [
+     "miss-0100"
+    ]
+   },
+   "field_allowed_values": {
+    "context.electrochemistry.control_mode": [
+     "potentiostatic",
+     "galvanostatic",
+     "potentiodynamic",
+     "open_circuit",
+     "mixed"
+    ],
+    "context.electrochemistry.potential_scale": [
+     "RHE",
+     "SHE",
+     "Ag/AgCl",
+     "SCE",
+     "Hg/HgO",
+     "Hg/HgSO4"
+    ],
+    "sample.material.provenance": [
+     "commercial",
+     "synthesized",
+     "fabricated",
+     "theoretical",
+     "literature",
+     "natural"
+    ]
+   },
+   "hints": [],
+   "field_hints": {},
+   "allowed_values": null,
+   "answer_command": "isaac bundle decide <bundle_dir> --question Q-c5f717329d --field <field path> --decision correct --value <value> --by \"<your name>\"   # a number (context.electrochemistry.current_setpoint_mA_cm2, context.electrochemistry.pH): add --json, e.g. --value -0.8 --json",
+   "allowed_decisions": [
+    "confirm",
+    "correct",
+    "reject",
+    "defer"
+   ]
+  },
+  {
+   "question_id": "Q-a82496b6c5",
+   "partition": null,
+   "tier": 3,
+   "blocking": false,
+   "affects_record": false,
+   "no_record_field": "assets[].uri, which no record field takes an answer for (an array path: the record builder composes it only from structured blocks (an approved processing result, the evidence sidecar), never from a confirmed value)",
+   "why": "The sources disagree about assets[].uri, which no record field takes an answer for (an array path: the record builder composes it only from structured blocks (an approved processing result, the evidence sidecar), never from a confirmed value): settling it records which reading is right, as evidence, and changes no record.",
+   "kind": "resolve_conflict",
+   "scope": "run:run-001",
+   "target_field_path": "assets[].uri",
+   "text": "The sources disagree (field_disagreement, assets[].uri). Which reading is right?",
+   "applies_to": {
+    "groups": 0,
+    "runs": 1,
+    "targets": 1
+   },
+   "targets": [
+    {
+     "kind": "conflict",
+     "id": "conf-002"
+    }
+   ],
+   "per_scope_targets": {
+    "run:run-001": [
+     "conf-002"
+    ]
+   },
+   "hints": [
+    {
+     "kind": "reading",
+     "literal": "ascan Sz -4 -3 10 0.500000",
+     "locator": "line 37 header #S (scan 3)",
+     "source_id": "src-0003",
+     "relative_path": "SYN_cat_1200mV"
+    },
+    {
+     "kind": "reading",
+     "literal": "gscan energy 1000 1020 5 1040 1 1100 2 0.500000",
+     "locator": "line 9 header #S (scan 1)",
+     "source_id": "src-0003",
+     "relative_path": "SYN_cat_1200mV"
+    }
+   ],
+   "allowed_values": null,
+   "answer_command": "isaac bundle decide <bundle_dir> --question Q-a82496b6c5 --decision confirm --value <one reading> --by \"<your name>\"",
+   "allowed_decisions": [
+    "confirm",
+    "correct",
+    "reject",
+    "defer"
+   ]
+  },
+  {
+   "question_id": "Q-1116b6497f",
+   "partition": null,
+   "tier": 3,
+   "blocking": false,
+   "why": "Optional: the record can be exported without it.",
+   "kind": "confirm_value",
+   "scope": "run:run-001",
+   "target_field_path": "context.electrochemistry.potential_setpoint_V",
+   "text": "Is the extracted potential setpoint V (context.electrochemistry.potential_setpoint_V) right? The files give `1.2` V (from: '1200mV'); `confirm` records exactly that. Confirm it, or correct it.",
+   "applies_to": {
+    "groups": 0,
+    "runs": 1,
+    "targets": 1,
+    "runs_outside_live_groups": 0
+   },
+   "targets": [
+    {
+     "kind": "candidate",
+     "id": "cand-0012"
+    }
+   ],
+   "per_scope_targets": {
+    "run:run-001": [
+     "cand-0012"
+    ]
+   },
+   "hints": [
+    {
+     "kind": "file_literal",
+     "candidate_id": "cand-0012",
+     "literal": "1200mV",
+     "locator": "filename token 2 [chars 8..14]",
+     "source_id": "src-0003",
+     "relative_path": "SYN_cat_1200mV",
+     "carries_value": true,
+     "note": "The text the file holds for this field, as written. A hint about what to answer, never the answer."
+    },
+    {
+     "kind": "related_reading",
+     "candidate_id": "cand-0041",
+     "literal": "m600mV",
+     "locator": "filename token 2 [chars 8..14]",
+     "source_id": "src-0006",
+     "of_this_question": false
+    },
+    {
+     "kind": "related_reading",
+     "candidate_id": "cand-0042",
+     "literal": "m600mV",
+     "locator": "filename token 2 [chars 8..14]",
+     "source_id": "src-0009",
+     "of_this_question": false
+    }
+   ],
+   "allowed_values": null,
+   "answers_differ": false,
+   "answer_command": "isaac bundle decide <bundle_dir> --question Q-1116b6497f --decision confirm --by \"<your name>\"",
+   "targets_without_a_value": 0,
+   "targets_with_an_unfit_value": 0,
+   "confirmable_scopes": [
+    "run:run-001"
+   ],
+   "lands_in_record": true,
+   "allowed_decisions": [
+    "confirm",
+    "correct",
+    "reject",
+    "defer"
+   ]
+  },
+  {
+   "question_id": "Q-42697d9fc8",
+   "tier": 3,
+   "blocking": false,
+   "why": "Optional: the record can be exported without these.",
+   "kind": "optional_values",
+   "scope": "run:run-002",
+   "partition": null,
+   "target_field_path": null,
+   "text": "8 optional field(s) no parser read a value for: context.electrochemistry.control_mode, context.electrochemistry.current_setpoint_mA_cm2, context.electrochemistry.pH, context.electrochemistry.potential_scale, context.thermodynamics.atmosphere, sample.material.formula, sample.material.provenance, timestamps.acquired_end_utc. Answer any you know.",
+   "asked_again": [],
+   "applies_to": {
+    "groups": 0,
+    "runs": 1,
+    "targets": 8,
+    "runs_outside_live_groups": 0
+   },
+   "targets": [
+    {
+     "kind": "missing_value",
+     "id": "miss-0016"
+    },
+    {
+     "kind": "missing_value",
+     "id": "miss-0020"
+    },
+    {
+     "kind": "missing_value",
+     "id": "miss-0047"
+    },
+    {
+     "kind": "missing_value",
+     "id": "miss-0063"
+    },
+    {
+     "kind": "missing_value",
+     "id": "miss-0071"
+    },
+    {
+     "kind": "missing_value",
+     "id": "miss-0101"
+    },
+    {
+     "kind": "missing_value",
+     "id": "miss-0106"
+    },
+    {
+     "kind": "missing_value",
+     "id": "miss-0110"
+    }
+   ],
+   "per_scope_targets": {
+    "run:run-002": [
+     "miss-0016",
+     "miss-0020",
+     "miss-0047",
+     "miss-0063",
+     "miss-0071",
+     "miss-0101",
+     "miss-0106",
+     "miss-0110"
+    ]
+   },
+   "fields": {
+    "context.electrochemistry.control_mode": [
+     "miss-0106"
+    ],
+    "context.electrochemistry.current_setpoint_mA_cm2": [
+     "miss-0110"
+    ],
+    "context.electrochemistry.pH": [
+     "miss-0016"
+    ],
+    "context.electrochemistry.potential_scale": [
+     "miss-0020"
+    ],
+    "context.thermodynamics.atmosphere": [
+     "miss-0047"
+    ],
+    "sample.material.formula": [
+     "miss-0063"
+    ],
+    "sample.material.provenance": [
+     "miss-0071"
+    ],
+    "timestamps.acquired_end_utc": [
+     "miss-0101"
+    ]
+   },
+   "field_allowed_values": {
+    "context.electrochemistry.control_mode": [
+     "potentiostatic",
+     "galvanostatic",
+     "potentiodynamic",
+     "open_circuit",
+     "mixed"
+    ],
+    "context.electrochemistry.potential_scale": [
+     "RHE",
+     "SHE",
+     "Ag/AgCl",
+     "SCE",
+     "Hg/HgO",
+     "Hg/HgSO4"
+    ],
+    "sample.material.provenance": [
+     "commercial",
+     "synthesized",
+     "fabricated",
+     "theoretical",
+     "literature",
+     "natural"
+    ]
+   },
+   "hints": [],
+   "field_hints": {},
+   "allowed_values": null,
+   "answer_command": "isaac bundle decide <bundle_dir> --question Q-42697d9fc8 --field <field path> --decision correct --value <value> --by \"<your name>\"   # a number (context.electrochemistry.current_setpoint_mA_cm2, context.electrochemistry.pH): add --json, e.g. --value -0.8 --json",
+   "allowed_decisions": [
+    "confirm",
+    "correct",
+    "reject",
+    "defer"
+   ]
+  },
+  {
+   "question_id": "Q-71cb3d82f3",
+   "partition": null,
+   "tier": 3,
+   "blocking": false,
+   "affects_record": false,
+   "no_record_field": "assets[].uri, which no record field takes an answer for (an array path: the record builder composes it only from structured blocks (an approved processing result, the evidence sidecar), never from a confirmed value)",
+   "why": "The sources disagree about assets[].uri, which no record field takes an answer for (an array path: the record builder composes it only from structured blocks (an approved processing result, the evidence sidecar), never from a confirmed value): settling it records which reading is right, as evidence, and changes no record.",
+   "kind": "resolve_conflict",
+   "scope": "run:run-002",
+   "target_field_path": "assets[].uri",
+   "text": "The sources disagree (field_disagreement, assets[].uri). Which reading is right?",
+   "applies_to": {
+    "groups": 0,
+    "runs": 1,
+    "targets": 1
+   },
+   "targets": [
+    {
+     "kind": "conflict",
+     "id": "conf-004"
+    }
+   ],
+   "per_scope_targets": {
+    "run:run-002": [
+     "conf-004"
+    ]
+   },
+   "hints": [
+    {
+     "kind": "reading",
+     "literal": "ascan Sz -4 -3 10 0.500000",
+     "locator": "line 37 header #S (scan 3)",
+     "source_id": "src-0006",
+     "relative_path": "SYN_cat_m600mV"
+    },
+    {
+     "kind": "reading",
+     "literal": "gscan energy 1000 1020 5 1040 1 1100 2 0.500000",
+     "locator": "line 9 header #S (scan 1)",
+     "source_id": "src-0006",
+     "relative_path": "SYN_cat_m600mV"
+    }
+   ],
+   "allowed_values": null,
+   "answer_command": "isaac bundle decide <bundle_dir> --question Q-71cb3d82f3 --decision confirm --value <one reading> --by \"<your name>\"",
+   "allowed_decisions": [
+    "confirm",
+    "correct",
+    "reject",
+    "defer"
+   ]
+  },
+  {
+   "question_id": "Q-e7bdcfb24f",
+   "partition": null,
+   "tier": 3,
+   "blocking": false,
+   "why": "Optional: the record can be exported without it.",
+   "kind": "confirm_value",
+   "scope": "run:run-002",
+   "target_field_path": "context.electrochemistry.potential_setpoint_V",
+   "text": "Is the extracted potential setpoint V (context.electrochemistry.potential_setpoint_V) right? The files give `-0.6` V (from: 'm600mV'); `confirm` records exactly that. Confirm it, or correct it.",
+   "applies_to": {
+    "groups": 0,
+    "runs": 1,
+    "targets": 1,
+    "runs_outside_live_groups": 0
+   },
+   "targets": [
+    {
+     "kind": "candidate",
+     "id": "cand-0041"
+    }
+   ],
+   "per_scope_targets": {
+    "run:run-002": [
+     "cand-0041"
+    ]
+   },
+   "hints": [
+    {
+     "kind": "file_literal",
+     "candidate_id": "cand-0041",
+     "literal": "m600mV",
+     "locator": "filename token 2 [chars 8..14]",
+     "source_id": "src-0006",
+     "relative_path": "SYN_cat_m600mV",
+     "carries_value": true,
+     "note": "The text the file holds for this field, as written. A hint about what to answer, never the answer."
+    },
+    {
+     "kind": "related_reading",
+     "candidate_id": "cand-0012",
+     "literal": "1200mV",
+     "locator": "filename token 2 [chars 8..14]",
+     "source_id": "src-0003",
+     "of_this_question": false
+    },
+    {
+     "kind": "related_reading",
+     "candidate_id": "cand-0042",
+     "literal": "m600mV",
+     "locator": "filename token 2 [chars 8..14]",
+     "source_id": "src-0009",
+     "of_this_question": false
+    }
+   ],
+   "allowed_values": null,
+   "answers_differ": false,
+   "answer_command": "isaac bundle decide <bundle_dir> --question Q-e7bdcfb24f --decision confirm --by \"<your name>\"",
+   "targets_without_a_value": 0,
+   "targets_with_an_unfit_value": 0,
+   "confirmable_scopes": [
+    "run:run-002"
+   ],
+   "lands_in_record": true,
+   "allowed_decisions": [
+    "confirm",
+    "correct",
+    "reject",
+    "defer"
+   ]
+  },
+  {
+   "question_id": "Q-2991ec8448",
+   "tier": 3,
+   "blocking": false,
+   "why": "Optional: the record can be exported without these.",
+   "kind": "optional_values",
+   "scope": "run:run-003",
+   "partition": null,
+   "target_field_path": null,
+   "text": "8 optional field(s) no parser read a value for: context.electrochemistry.control_mode, context.electrochemistry.current_setpoint_mA_cm2, context.electrochemistry.pH, context.electrochemistry.potential_scale, context.thermodynamics.atmosphere, sample.material.formula, sample.material.provenance, timestamps.acquired_end_utc. Answer any you know.",
+   "asked_again": [],
+   "applies_to": {
+    "groups": 0,
+    "runs": 1,
+    "targets": 8,
+    "runs_outside_live_groups": 0
+   },
+   "targets": [
+    {
+     "kind": "missing_value",
+     "id": "miss-0017"
+    },
+    {
+     "kind": "missing_value",
+     "id": "miss-0021"
+    },
+    {
+     "kind": "missing_value",
+     "id": "miss-0048"
+    },
+    {
+     "kind": "missing_value",
+     "id": "miss-0064"
+    },
+    {
+     "kind": "missing_value",
+     "id": "miss-0072"
+    },
+    {
+     "kind": "missing_value",
+     "id": "miss-0102"
+    },
+    {
+     "kind": "missing_value",
+     "id": "miss-0107"
+    },
+    {
+     "kind": "missing_value",
+     "id": "miss-0111"
+    }
+   ],
+   "per_scope_targets": {
+    "run:run-003": [
+     "miss-0017",
+     "miss-0021",
+     "miss-0048",
+     "miss-0064",
+     "miss-0072",
+     "miss-0102",
+     "miss-0107",
+     "miss-0111"
+    ]
+   },
+   "fields": {
+    "context.electrochemistry.control_mode": [
+     "miss-0107"
+    ],
+    "context.electrochemistry.current_setpoint_mA_cm2": [
+     "miss-0111"
+    ],
+    "context.electrochemistry.pH": [
+     "miss-0017"
+    ],
+    "context.electrochemistry.potential_scale": [
+     "miss-0021"
+    ],
+    "context.thermodynamics.atmosphere": [
+     "miss-0048"
+    ],
+    "sample.material.formula": [
+     "miss-0064"
+    ],
+    "sample.material.provenance": [
+     "miss-0072"
+    ],
+    "timestamps.acquired_end_utc": [
+     "miss-0102"
+    ]
+   },
+   "field_allowed_values": {
+    "context.electrochemistry.control_mode": [
+     "potentiostatic",
+     "galvanostatic",
+     "potentiodynamic",
+     "open_circuit",
+     "mixed"
+    ],
+    "context.electrochemistry.potential_scale": [
+     "RHE",
+     "SHE",
+     "Ag/AgCl",
+     "SCE",
+     "Hg/HgO",
+     "Hg/HgSO4"
+    ],
+    "sample.material.provenance": [
+     "commercial",
+     "synthesized",
+     "fabricated",
+     "theoretical",
+     "literature",
+     "natural"
+    ]
+   },
+   "hints": [],
+   "field_hints": {},
+   "allowed_values": null,
+   "answer_command": "isaac bundle decide <bundle_dir> --question Q-2991ec8448 --field <field path> --decision correct --value <value> --by \"<your name>\"   # a number (context.electrochemistry.current_setpoint_mA_cm2, context.electrochemistry.pH): add --json, e.g. --value -0.8 --json",
+   "allowed_decisions": [
+    "confirm",
+    "correct",
+    "reject",
+    "defer"
+   ]
+  },
+  {
+   "question_id": "Q-0480d061a9",
+   "partition": null,
+   "tier": 3,
+   "blocking": false,
+   "why": "Optional: the record can be exported without it.",
+   "kind": "confirm_value",
+   "scope": "run:run-003",
+   "target_field_path": "context.electrochemistry.potential_setpoint_V",
+   "text": "Is the extracted potential setpoint V (context.electrochemistry.potential_setpoint_V) right? The files give `-0.6` V (from: 'm600mV'); `confirm` records exactly that. Confirm it, or correct it.",
+   "applies_to": {
+    "groups": 0,
+    "runs": 1,
+    "targets": 1,
+    "runs_outside_live_groups": 0
+   },
+   "targets": [
+    {
+     "kind": "candidate",
+     "id": "cand-0042"
+    }
+   ],
+   "per_scope_targets": {
+    "run:run-003": [
+     "cand-0042"
+    ]
+   },
+   "hints": [
+    {
+     "kind": "file_literal",
+     "candidate_id": "cand-0042",
+     "literal": "m600mV",
+     "locator": "filename token 2 [chars 8..14]",
+     "source_id": "src-0009",
+     "relative_path": "averages/SYN_cat_m600mV_ave.dat",
+     "carries_value": true,
+     "note": "The text the file holds for this field, as written. A hint about what to answer, never the answer."
+    },
+    {
+     "kind": "related_reading",
+     "candidate_id": "cand-0012",
+     "literal": "1200mV",
+     "locator": "filename token 2 [chars 8..14]",
+     "source_id": "src-0003",
+     "of_this_question": false
+    },
+    {
+     "kind": "related_reading",
+     "candidate_id": "cand-0041",
+     "literal": "m600mV",
+     "locator": "filename token 2 [chars 8..14]",
+     "source_id": "src-0006",
+     "of_this_question": false
+    }
+   ],
+   "allowed_values": null,
+   "answers_differ": false,
+   "answer_command": "isaac bundle decide <bundle_dir> --question Q-0480d061a9 --decision confirm --by \"<your name>\"",
+   "targets_without_a_value": 0,
+   "targets_with_an_unfit_value": 0,
+   "confirmable_scopes": [
+    "run:run-003"
+   ],
+   "lands_in_record": true,
+   "allowed_decisions": [
+    "confirm",
+    "correct",
+    "reject",
+    "defer"
+   ]
+  },
+  {
+   "question_id": "Q-9f4b16ca56",
+   "partition": null,
+   "tier": 3,
+   "blocking": false,
+   "why": "Optional: the record can be exported without it.",
+   "kind": "confirm_value",
+   "scope": "run:run-003",
+   "target_field_path": "timestamps.acquired_start_utc",
+   "text": "What is the acquired start utc (timestamps.acquired_start_utc)? The files hold text for it (see the hints) but no value this build can carry: This time names no time zone, so it cannot go into a UTC field without guessing. It is kept as evidence. No value was read, so this asks for one (no_value): give the value yourself (correct), or reject or defer it.",
+   "applies_to": {
+    "groups": 0,
+    "runs": 1,
+    "targets": 1,
+    "runs_outside_live_groups": 0
+   },
+   "targets": [
+    {
+     "kind": "candidate",
+     "id": "cand-0035"
+    }
+   ],
+   "per_scope_targets": {
+    "run:run-003": [
+     "cand-0035"
+    ]
+   },
+   "hints": [
+    {
+     "kind": "file_literal",
+     "candidate_id": "cand-0035",
+     "literal": "Mon Sep  9 03:00:00 2001",
+     "locator": "line 2 header #D",
+     "source_id": "src-0009",
+     "relative_path": "averages/SYN_cat_m600mV_ave.dat",
+     "carries_value": false,
+     "note": "The text the file holds for this field, as written. A hint about what to answer, never the answer."
+    },
+    {
+     "kind": "related_reading",
+     "candidate_id": "cand-0002",
+     "literal": "1000000000",
+     "locator": "line 2 header #E",
+     "source_id": "src-0003",
+     "of_this_question": false
+    },
+    {
+     "kind": "related_reading",
+     "candidate_id": "cand-0004",
+     "literal": "Mon Sep  9 01:46:40 2001",
+     "locator": "line 3 header #D",
+     "source_id": "src-0003",
+     "of_this_question": false
+    },
+    {
+     "kind": "related_reading",
+     "candidate_id": "cand-0019",
+     "literal": "1000000000",
+     "locator": "line 2 header #E",
+     "source_id": "src-0006",
+     "of_this_question": false
+    },
+    {
+     "kind": "related_reading",
+     "candidate_id": "cand-0021",
+     "literal": "Mon Sep  9 01:46:40 2001",
+     "locator": "line 3 header #D",
+     "source_id": "src-0006",
+     "of_this_question": false
+    }
+   ],
+   "allowed_values": null,
+   "answers_differ": false,
+   "answer_command": "isaac bundle decide <bundle_dir> --question Q-9f4b16ca56 --decision correct --value <value> --by \"<your name>\"",
+   "targets_without_a_value": 1,
+   "targets_with_an_unfit_value": 0,
+   "confirmable_scopes": [],
+   "lands_in_record": true,
+   "allowed_decisions": [
+    "correct",
+    "reject",
+    "defer"
+   ],
+   "no_value": true
+  },
+  {
+   "question_id": "Q-a9092e983c",
+   "tier": 3,
+   "blocking": false,
+   "why": "Optional: the record can be exported without these.",
+   "kind": "optional_values",
+   "scope": "run:run-004",
+   "partition": null,
+   "target_field_path": null,
+   "text": "10 optional field(s) no parser read a value for: context.electrochemistry.control_mode, context.electrochemistry.current_setpoint_mA_cm2, context.electrochemistry.pH, context.electrochemistry.potential_scale, context.electrochemistry.potential_setpoint_V, context.thermodynamics.atmosphere, sample.material.formula, sample.material.provenance, timestamps.acquired_end_utc, timestamps.acquired_start_utc. Answer any you know.",
+   "asked_again": [],
+   "applies_to": {
+    "groups": 0,
+    "runs": 1,
+    "targets": 10,
+    "runs_outside_live_groups": 0
+   },
+   "targets": [
+    {
+     "kind": "missing_value",
+     "id": "miss-0018"
+    },
+    {
+     "kind": "missing_value",
+     "id": "miss-0022"
+    },
+    {
+     "kind": "missing_value",
+     "id": "miss-0025"
+    },
+    {
+     "kind": "missing_value",
+     "id": "miss-0049"
+    },
+    {
+     "kind": "missing_value",
+     "id": "miss-0065"
+    },
+    {
+     "kind": "missing_value",
+     "id": "miss-0073"
+    },
+    {
+     "kind": "missing_value",
+     "id": "miss-0103"
+    },
+    {
+     "kind": "missing_value",
+     "id": "miss-0104"
+    },
+    {
+     "kind": "missing_value",
+     "id": "miss-0108"
+    },
+    {
+     "kind": "missing_value",
+     "id": "miss-0112"
+    }
+   ],
+   "per_scope_targets": {
+    "run:run-004": [
+     "miss-0018",
+     "miss-0022",
+     "miss-0025",
+     "miss-0049",
+     "miss-0065",
+     "miss-0073",
+     "miss-0103",
+     "miss-0104",
+     "miss-0108",
+     "miss-0112"
+    ]
+   },
+   "fields": {
+    "context.electrochemistry.control_mode": [
+     "miss-0108"
+    ],
+    "context.electrochemistry.current_setpoint_mA_cm2": [
+     "miss-0112"
+    ],
+    "context.electrochemistry.pH": [
+     "miss-0018"
+    ],
+    "context.electrochemistry.potential_scale": [
+     "miss-0022"
+    ],
+    "context.electrochemistry.potential_setpoint_V": [
+     "miss-0025"
+    ],
+    "context.thermodynamics.atmosphere": [
+     "miss-0049"
+    ],
+    "sample.material.formula": [
+     "miss-0065"
+    ],
+    "sample.material.provenance": [
+     "miss-0073"
+    ],
+    "timestamps.acquired_end_utc": [
+     "miss-0103"
+    ],
+    "timestamps.acquired_start_utc": [
+     "miss-0104"
+    ]
+   },
+   "field_allowed_values": {
+    "context.electrochemistry.control_mode": [
+     "potentiostatic",
+     "galvanostatic",
+     "potentiodynamic",
+     "open_circuit",
+     "mixed"
+    ],
+    "context.electrochemistry.potential_scale": [
+     "RHE",
+     "SHE",
+     "Ag/AgCl",
+     "SCE",
+     "Hg/HgO",
+     "Hg/HgSO4"
+    ],
+    "sample.material.provenance": [
+     "commercial",
+     "synthesized",
+     "fabricated",
+     "theoretical",
+     "literature",
+     "natural"
+    ]
+   },
+   "hints": [],
+   "field_hints": {},
+   "allowed_values": null,
+   "answer_command": "isaac bundle decide <bundle_dir> --question Q-a9092e983c --field <field path> --decision correct --value <value> --by \"<your name>\"   # a number (context.electrochemistry.current_setpoint_mA_cm2, context.electrochemistry.pH, context.electrochemistry.potential_setpoint_V): add --json, e.g. --value -0.8 --json",
+   "allowed_decisions": [
+    "confirm",
+    "correct",
+    "reject",
+    "defer"
+   ]
+  },
+  {
+   "question_id": "Q-55d482c7dd",
+   "partition": null,
+   "tier": 3,
+   "blocking": false,
+   "why": "Informational: an array path: the record builder composes it only from structured blocks (an approved processing result, the evidence sidecar), never from a confirmed value.",
+   "kind": "confirm_value",
+   "scope": "run:run-001",
+   "target_field_path": "measurement.series[].channels[].name",
+   "text": "For information only: the files hold a reading for the name (measurement.series[].channels[].name), and no answer here can reach the record (an array path: the record builder composes it only from structured blocks (an approved processing result, the evidence sidecar), never from a confirmed value). The reading stays evidence; nothing is asked.",
+   "applies_to": {
+    "groups": 0,
+    "runs": 1,
+    "targets": 1,
+    "runs_outside_live_groups": 0
+   },
+   "targets": [
+    {
+     "kind": "candidate",
+     "id": "cand-0006"
+    }
+   ],
+   "per_scope_targets": {
+    "run:run-001": [
+     "cand-0006"
+    ]
+   },
+   "hints": [
+    {
+     "kind": "file_literal",
+     "candidate_id": "cand-0006",
+     "literal": "energy",
+     "locator": "line 19 header #L column 0 (scan 1)",
+     "source_id": "src-0003",
+     "relative_path": "SYN_cat_1200mV",
+     "carries_value": false,
+     "note": "The text the file holds for this field, as written. A hint about what to answer, never the answer."
+    },
+    {
+     "kind": "related_reading",
+     "candidate_id": "cand-0023",
+     "literal": "energy",
+     "locator": "line 19 header #L column 0 (scan 1)",
+     "source_id": "src-0006",
+     "of_this_question": false
+    },
+    {
+     "kind": "related_reading",
+     "candidate_id": "cand-0036",
+     "literal": "energy",
+     "locator": "line 7 header #L column 0 (scan 1)",
+     "source_id": "src-0009",
+     "of_this_question": false
+    }
+   ],
+   "allowed_values": null,
+   "answers_differ": false,
+   "answer_command": "# nothing to answer: no answer to Q-55d482c7dd can reach the record (an array path: the record builder composes it only from structured blocks (an approved processing result, the evidence sidecar), never from a confirmed value)",
+   "targets_without_a_value": 1,
+   "targets_with_an_unfit_value": 0,
+   "confirmable_scopes": [],
+   "lands_in_record": false,
+   "informational": true,
+   "allowed_decisions": []
+  },
+  {
+   "question_id": "Q-0dcedc6935",
+   "partition": null,
+   "tier": 3,
+   "blocking": false,
+   "why": "Informational: an array path: the record builder composes it only from structured blocks (an approved processing result, the evidence sidecar), never from a confirmed value.",
+   "kind": "confirm_value",
+   "scope": "run:run-001",
+   "target_field_path": "measurement.series[].independent_variables[].values",
+   "text": "For information only: the files hold a reading for the values (measurement.series[].independent_variables[].values), and no answer here can reach the record (an array path: the record builder composes it only from structured blocks (an approved processing result, the evidence sidecar), never from a confirmed value). The reading stays evidence; nothing is asked.",
+   "applies_to": {
+    "groups": 0,
+    "runs": 1,
+    "targets": 1,
+    "runs_outside_live_groups": 0
+   },
+   "targets": [
+    {
+     "kind": "candidate",
+     "id": "cand-0008"
+    }
+   ],
+   "per_scope_targets": {
+    "run:run-001": [
+     "cand-0008"
+    ]
+   },
+   "hints": [
+    {
+     "kind": "file_literal",
+     "candidate_id": "cand-0008",
+     "literal": "1000 1020 5 1040 1 1100 2",
+     "locator": "line 9 header #S (scan 1) gscan grid literal",
+     "source_id": "src-0003",
+     "relative_path": "SYN_cat_1200mV",
+     "carries_value": false,
+     "note": "The text the file holds for this field, as written. A hint about what to answer, never the answer."
+    },
+    {
+     "kind": "related_reading",
+     "candidate_id": "cand-0025",
+     "literal": "1000 1020 5 1040 1 1100 2",
+     "locator": "line 9 header #S (scan 1) gscan grid literal",
+     "source_id": "src-0006",
+     "of_this_question": false
+    }
+   ],
+   "allowed_values": null,
+   "answers_differ": false,
+   "answer_command": "# nothing to answer: no answer to Q-0dcedc6935 can reach the record (an array path: the record builder composes it only from structured blocks (an approved processing result, the evidence sidecar), never from a confirmed value)",
+   "targets_without_a_value": 1,
+   "targets_with_an_unfit_value": 0,
+   "confirmable_scopes": [],
+   "lands_in_record": false,
+   "informational": true,
+   "allowed_decisions": []
+  },
+  {
+   "question_id": "Q-0f9e40be24",
+   "partition": null,
+   "tier": 3,
+   "blocking": false,
+   "why": "Informational: an array path: the record builder composes it only from structured blocks (an approved processing result, the evidence sidecar), never from a confirmed value.",
+   "kind": "confirm_value",
+   "scope": "run:run-002",
+   "target_field_path": "measurement.series[].channels[].name",
+   "text": "For information only: the files hold a reading for the name (measurement.series[].channels[].name), and no answer here can reach the record (an array path: the record builder composes it only from structured blocks (an approved processing result, the evidence sidecar), never from a confirmed value). The reading stays evidence; nothing is asked.",
+   "applies_to": {
+    "groups": 0,
+    "runs": 1,
+    "targets": 1,
+    "runs_outside_live_groups": 0
+   },
+   "targets": [
+    {
+     "kind": "candidate",
+     "id": "cand-0023"
+    }
+   ],
+   "per_scope_targets": {
+    "run:run-002": [
+     "cand-0023"
+    ]
+   },
+   "hints": [
+    {
+     "kind": "file_literal",
+     "candidate_id": "cand-0023",
+     "literal": "energy",
+     "locator": "line 19 header #L column 0 (scan 1)",
+     "source_id": "src-0006",
+     "relative_path": "SYN_cat_m600mV",
+     "carries_value": false,
+     "note": "The text the file holds for this field, as written. A hint about what to answer, never the answer."
+    },
+    {
+     "kind": "related_reading",
+     "candidate_id": "cand-0006",
+     "literal": "energy",
+     "locator": "line 19 header #L column 0 (scan 1)",
+     "source_id": "src-0003",
+     "of_this_question": false
+    },
+    {
+     "kind": "related_reading",
+     "candidate_id": "cand-0036",
+     "literal": "energy",
+     "locator": "line 7 header #L column 0 (scan 1)",
+     "source_id": "src-0009",
+     "of_this_question": false
+    }
+   ],
+   "allowed_values": null,
+   "answers_differ": false,
+   "answer_command": "# nothing to answer: no answer to Q-0f9e40be24 can reach the record (an array path: the record builder composes it only from structured blocks (an approved processing result, the evidence sidecar), never from a confirmed value)",
+   "targets_without_a_value": 1,
+   "targets_with_an_unfit_value": 0,
+   "confirmable_scopes": [],
+   "lands_in_record": false,
+   "informational": true,
+   "allowed_decisions": []
+  },
+  {
+   "question_id": "Q-22f85be0b9",
+   "partition": null,
+   "tier": 3,
+   "blocking": false,
+   "why": "Informational: an array path: the record builder composes it only from structured blocks (an approved processing result, the evidence sidecar), never from a confirmed value.",
+   "kind": "confirm_value",
+   "scope": "run:run-002",
+   "target_field_path": "measurement.series[].independent_variables[].values",
+   "text": "For information only: the files hold a reading for the values (measurement.series[].independent_variables[].values), and no answer here can reach the record (an array path: the record builder composes it only from structured blocks (an approved processing result, the evidence sidecar), never from a confirmed value). The reading stays evidence; nothing is asked.",
+   "applies_to": {
+    "groups": 0,
+    "runs": 1,
+    "targets": 1,
+    "runs_outside_live_groups": 0
+   },
+   "targets": [
+    {
+     "kind": "candidate",
+     "id": "cand-0025"
+    }
+   ],
+   "per_scope_targets": {
+    "run:run-002": [
+     "cand-0025"
+    ]
+   },
+   "hints": [
+    {
+     "kind": "file_literal",
+     "candidate_id": "cand-0025",
+     "literal": "1000 1020 5 1040 1 1100 2",
+     "locator": "line 9 header #S (scan 1) gscan grid literal",
+     "source_id": "src-0006",
+     "relative_path": "SYN_cat_m600mV",
+     "carries_value": false,
+     "note": "The text the file holds for this field, as written. A hint about what to answer, never the answer."
+    },
+    {
+     "kind": "related_reading",
+     "candidate_id": "cand-0008",
+     "literal": "1000 1020 5 1040 1 1100 2",
+     "locator": "line 9 header #S (scan 1) gscan grid literal",
+     "source_id": "src-0003",
+     "of_this_question": false
+    }
+   ],
+   "allowed_values": null,
+   "answers_differ": false,
+   "answer_command": "# nothing to answer: no answer to Q-22f85be0b9 can reach the record (an array path: the record builder composes it only from structured blocks (an approved processing result, the evidence sidecar), never from a confirmed value)",
+   "targets_without_a_value": 1,
+   "targets_with_an_unfit_value": 0,
+   "confirmable_scopes": [],
+   "lands_in_record": false,
+   "informational": true,
+   "allowed_decisions": []
+  },
+  {
+   "question_id": "Q-52d4d07ae3",
+   "partition": null,
+   "tier": 3,
+   "blocking": false,
+   "why": "Informational: an array path: the record builder composes it only from structured blocks (an approved processing result, the evidence sidecar), never from a confirmed value.",
+   "kind": "confirm_value",
+   "scope": "run:run-003",
+   "target_field_path": "assets[].uri",
+   "text": "For information only: the files hold a reading for the uri (assets[].uri), and no answer here can reach the record (an array path: the record builder composes it only from structured blocks (an approved processing result, the evidence sidecar), never from a confirmed value). The reading stays evidence; nothing is asked.",
+   "applies_to": {
+    "groups": 0,
+    "runs": 1,
+    "targets": 1,
+    "runs_outside_live_groups": 0
+   },
+   "targets": [
+    {
+     "kind": "candidate",
+     "id": "cand-0038"
+    }
+   ],
+   "per_scope_targets": {
+    "run:run-003": [
+     "cand-0038"
+    ]
+   },
+   "hints": [
+    {
+     "kind": "file_literal",
+     "candidate_id": "cand-0038",
+     "literal": "(SYN_cat_m600mV 1.1 DTC + SYN_cat_m600mV 1.1 I1)/2",
+     "locator": "line 4 header #S (scan 1)",
+     "source_id": "src-0009",
+     "relative_path": "averages/SYN_cat_m600mV_ave.dat",
+     "carries_value": false,
+     "note": "The text the file holds for this field, as written. A hint about what to answer, never the answer."
+    },
+    {
+     "kind": "related_reading",
+     "candidate_id": "cand-0014",
+     "literal": "ascan Sz -4 -3 10 0.500000",
+     "locator": "line 37 header #S (scan 3)",
+     "source_id": "src-0003",
+     "of_this_question": false
+    },
+    {
+     "kind": "related_reading",
+     "candidate_id": "cand-0030",
+     "literal": "ascan Sz -4 -3 10 0.500000",
+     "locator": "line 37 header #S (scan 3)",
+     "source_id": "src-0006",
+     "of_this_question": false
+    }
+   ],
+   "allowed_values": null,
+   "answers_differ": false,
+   "answer_command": "# nothing to answer: no answer to Q-52d4d07ae3 can reach the record (an array path: the record builder composes it only from structured blocks (an approved processing result, the evidence sidecar), never from a confirmed value)",
+   "targets_without_a_value": 1,
+   "targets_with_an_unfit_value": 0,
+   "confirmable_scopes": [],
+   "lands_in_record": false,
+   "informational": true,
+   "allowed_decisions": []
+  },
+  {
+   "question_id": "Q-a0e34a90e9",
+   "partition": null,
+   "tier": 3,
+   "blocking": false,
+   "why": "Informational: an array path: the record builder composes it only from structured blocks (an approved processing result, the evidence sidecar), never from a confirmed value.",
+   "kind": "confirm_value",
+   "scope": "run:run-003",
+   "target_field_path": "links[].rel",
+   "text": "For information only: the files hold a reading for the rel (links[].rel), and no answer here can reach the record (an array path: the record builder composes it only from structured blocks (an approved processing result, the evidence sidecar), never from a confirmed value). The reading stays evidence; nothing is asked.",
+   "applies_to": {
+    "groups": 0,
+    "runs": 1,
+    "targets": 1,
+    "runs_outside_live_groups": 0
+   },
+   "targets": [
+    {
+     "kind": "candidate",
+     "id": "cand-0037"
+    }
+   ],
+   "per_scope_targets": {
+    "run:run-003": [
+     "cand-0037"
+    ]
+   },
+   "hints": [
+    {
+     "kind": "file_literal",
+     "candidate_id": "cand-0037",
+     "literal": "ave",
+     "locator": "filename token 3 [chars 15..18]",
+     "source_id": "src-0009",
+     "relative_path": "averages/SYN_cat_m600mV_ave.dat",
+     "carries_value": false,
+     "note": "The text the file holds for this field, as written. A hint about what to answer, never the answer."
+    }
+   ],
+   "allowed_values": [
+    "derived_from",
+    "intended_comparison_target",
+    "calibration_of",
+    "same_sample_as",
+    "replica_of",
+    "follows",
+    "validates",
+    "invalidates"
+   ],
+   "answers_differ": false,
+   "answer_command": "# nothing to answer: no answer to Q-a0e34a90e9 can reach the record (an array path: the record builder composes it only from structured blocks (an approved processing result, the evidence sidecar), never from a confirmed value)",
+   "targets_without_a_value": 1,
+   "targets_with_an_unfit_value": 0,
+   "confirmable_scopes": [],
+   "lands_in_record": false,
+   "informational": true,
+   "allowed_decisions": []
+  },
+  {
+   "question_id": "Q-c7af813858",
+   "partition": null,
+   "tier": 3,
+   "blocking": false,
+   "why": "Informational: an array path: the record builder composes it only from structured blocks (an approved processing result, the evidence sidecar), never from a confirmed value.",
+   "kind": "confirm_value",
+   "scope": "run:run-003",
+   "target_field_path": "measurement.series[].channels[].name",
+   "text": "For information only: the files hold a reading for the name (measurement.series[].channels[].name), and no answer here can reach the record (an array path: the record builder composes it only from structured blocks (an approved processing result, the evidence sidecar), never from a confirmed value). The reading stays evidence; nothing is asked.",
+   "applies_to": {
+    "groups": 0,
+    "runs": 1,
+    "targets": 1,
+    "runs_outside_live_groups": 0
+   },
+   "targets": [
+    {
+     "kind": "candidate",
+     "id": "cand-0036"
+    }
+   ],
+   "per_scope_targets": {
+    "run:run-003": [
+     "cand-0036"
+    ]
+   },
+   "hints": [
+    {
+     "kind": "file_literal",
+     "candidate_id": "cand-0036",
+     "literal": "energy",
+     "locator": "line 7 header #L column 0 (scan 1)",
+     "source_id": "src-0009",
+     "relative_path": "averages/SYN_cat_m600mV_ave.dat",
+     "carries_value": false,
+     "note": "The text the file holds for this field, as written. A hint about what to answer, never the answer."
+    },
+    {
+     "kind": "related_reading",
+     "candidate_id": "cand-0006",
+     "literal": "energy",
+     "locator": "line 19 header #L column 0 (scan 1)",
+     "source_id": "src-0003",
+     "of_this_question": false
+    },
+    {
+     "kind": "related_reading",
+     "candidate_id": "cand-0023",
+     "literal": "energy",
+     "locator": "line 19 header #L column 0 (scan 1)",
+     "source_id": "src-0006",
+     "of_this_question": false
+    }
+   ],
+   "allowed_values": null,
+   "answers_differ": false,
+   "answer_command": "# nothing to answer: no answer to Q-c7af813858 can reach the record (an array path: the record builder composes it only from structured blocks (an approved processing result, the evidence sidecar), never from a confirmed value)",
+   "targets_without_a_value": 1,
+   "targets_with_an_unfit_value": 0,
+   "confirmable_scopes": [],
+   "lands_in_record": false,
+   "informational": true,
+   "allowed_decisions": []
+  }
+ ]
+}

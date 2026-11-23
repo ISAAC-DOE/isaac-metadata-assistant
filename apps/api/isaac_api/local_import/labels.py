@@ -29,9 +29,11 @@ written without a scientist decision. No schema changes:
   ``sample.material.notes``: that is about the material, which is the same before and after cycling. The history
   is the electrochemical treatment the electrode had before this measurement, and the grouping already classes it
   as an electrochemical condition beside the potential, so it goes with the record's other electrochemical
-  conditions. The proposal only splits the file-name token into words (``after1500Cycling`` -> "after 1500
-  cycling"). It never says what the number is (millivolts or cycles): that is a domain question
-  (docs/bl15-2-domain-questions-2026-09-16.md), so the scientist words it.
+  conditions. The proposal splits the file-name token into words (``after1500Cycling`` -> "after 1500
+  cycling") and, since C6 (22 Nov 2026), words the number as the cycling's upper potential limit in mV
+  ("after cycling up to 1500 mV") only where the token or the beamtime's files say so, as cycles where a note says
+  that many cycles, and leaves it as written where nothing says which (:func:`history_reading`). It is a proposal:
+  the scientist confirms or rewords it (docs/bl15-2-domain-questions-2026-09-16.md).
 * ``links`` with rel ``follows``, basis ``same_sample_id`` — "after 1200" follows "before" and "after 1500"
   follows "after 1200", for one sample under otherwise equal conditions. The sample is the one the scientist
   confirmed (its ``sample.sample_id`` answer), else the electrode ISAAC proposes an id for. A stage is the
@@ -281,6 +283,99 @@ def history_words(literal: str) -> str | None:
     return " ".join(x for x in (m.group("side").casefold(), what, how) if x)
 
 
+# --- C6: what the number in a cycling token is ------------------------------------------------------------------
+#
+# The number in `after1200Cycling` was split into words and never interpreted ("after 1200 cycling"), which reads like
+# a cycle count. A re-read of a real beamtime found it is the cycling's upper potential limit in mV (the logbook's
+# activation CVs run to 1.2 V and then 1.5 V; `after1200mVCycling` writes the unit; the Notes say "After 1200mV CV").
+# So the number is worded as a potential limit WHERE THE FILES SAY SO: the token writes the unit, another cycling token
+# of the beamtime writes that number with mV, or a logbook note writes it with mV beside "cycling" or "CV". It is
+# worded as cycles where a note writes that number of cycles, and stays neutral where nothing says which (or both do).
+# Never a cycle count by default. Only the proposal's wording and its question's text change: the question id is the
+# token's partition, as before, and nothing is recorded until the scientist confirms or corrects it.
+
+_UNIT_IN_TOKEN = re.compile(r"^(?P<n>\d+(?:[.p]\d+)?)\s*(?P<u>mv|v)$", re.IGNORECASE)
+_BARE_NUMBER = re.compile(r"^\d+$")
+_NOTE_MV = re.compile(
+    r"(?P<n>\d+(?:\.\d+)?)\s*(?P<u>mV|V)\b[\s-]*(?:CVs?|cycl\w*|activation)"
+    r"|(?:cycl\w*|CVs?)\b[^.\n]{0,24}?\b(?:to|up\s+to|until)\s+(?P<n2>\d+(?:\.\d+)?)\s*(?P<u2>mV|V)\b",
+    re.IGNORECASE)
+_NOTE_CYCLES = re.compile(r"\b(?P<n>\d+)\s*(?:x\s*)?cycles\b", re.IGNORECASE)
+
+
+def _millivolts(number: str, unit: str) -> int | None:
+    try:
+        value = float(number.replace("p", ".").replace("P", "."))
+    except ValueError:
+        return None
+    mv = value if unit.casefold() == "mv" else value * 1000
+    return int(round(mv)) if mv > 0 else None
+
+
+def cycling_number_index(bundle: Mapping) -> dict[str, dict[int, list[str]]]:
+    """``{"mV": {n: [where]}, "cycles": {n: [where]}}``: where this beamtime's files say what a cycling number is —
+    another cycling token that writes ``n`` with its unit (``after1200mVCycling``), or a logbook note (a Data Quality
+    Note's text) that writes ``n mV`` beside "cycling"/"CV", or ``n cycles``."""
+    out: dict[str, dict[int, list[str]]] = {"mV": {}, "cycles": {}}
+    from . import grouping as G
+
+    for r in bundle.get("runs") or ():
+        for t in G._stem_tokens(PurePosixPath(str(r.get("stem") or "")).name):
+            m = _HISTORY.fullmatch(t)
+            u = _UNIT_IN_TOKEN.fullmatch(m.group("what").strip("_- ")) if m else None
+            if u and (mv := _millivolts(u.group("n"), u.group("u"))):
+                where = f"the file name token {t!r}"
+                if where not in out["mV"].setdefault(mv, []):
+                    out["mV"][mv].append(where)
+    for n in bundle.get("data_quality_notes") or ():
+        text = str(n.get("text") or "")
+        flat = " ".join(text.split())  # a multi-line Notes cell, quoted on one line
+        quote = flat if len(flat) <= 80 else flat[:79] + "…"
+        for m in _NOTE_MV.finditer(text):
+            mv = _millivolts(m.group("n") or m.group("n2"), m.group("u") or m.group("u2"))
+            if mv:
+                out["mV"].setdefault(mv, []).append(f"the logbook note {quote!r} ({n.get('locator')})")
+        for m in _NOTE_CYCLES.finditer(text):
+            out["cycles"].setdefault(int(m.group("n")), []).append(f"the logbook note {quote!r} ({n.get('locator')})")
+    return out
+
+
+def history_reading(literal: str, index: Mapping[str, Mapping[int, Sequence[str]]] | None = None) -> tuple[str, str] | None:
+    """``(wording, why)`` of a cycling token: the number as an upper potential limit in mV where the token or the
+    beamtime's files say so (:func:`cycling_number_index`), as cycles where a note says that many cycles, else the
+    token split into words (:func:`history_words`), with the reason in a sentence. ``None``: not a cycling token."""
+    words = history_words(literal)
+    if words is None:
+        return None
+    m = _HISTORY.fullmatch(str(literal).strip())
+    what = m.group("what").strip("_- ")
+    side = m.group("side").casefold()
+    index = index or {"mV": {}, "cycles": {}}
+    unit = _UNIT_IN_TOKEN.fullmatch(what)
+    if unit and (mv := _millivolts(unit.group("n"), unit.group("u"))):
+        return (f"{side} cycling up to {mv} mV",
+                f"The token writes the unit itself, so its number is the cycling's upper potential limit ({mv} mV), "
+                "not a cycle count.")
+    if not _BARE_NUMBER.fullmatch(what):
+        return words, ("It only splits the file-name token into words" + (
+            f" ({what!r} names a stage, not a quantity)." if what else "."))
+    n = int(what)
+    mv_where, cycles_where = list(index["mV"].get(n) or ()), list(index["cycles"].get(n) or ())
+    if mv_where and not cycles_where:
+        return (f"{side} cycling up to {n} mV",
+                f"The number is read as the cycling's upper potential limit in mV, not a cycle count: "
+                + "; ".join(mv_where[:3]) + f" write{'s' if len(mv_where) == 1 else ''} {n} with mV.")
+    if cycles_where and not mv_where:
+        return (f"{side} {n} cycles",
+                f"The number is read as a number of cycles: " + "; ".join(cycles_where[:3])
+                + f" write{'s' if len(cycles_where) == 1 else ''} {n} cycles.")
+    if mv_where and cycles_where:
+        return words, (f"The files say both: {n} mV ({'; '.join(mv_where[:2])}) and {n} cycles "
+                       f"({'; '.join(cycles_where[:2])}), so the number is left as written; say which.")
+    return words, (f"It only splits the file-name token into words: nothing in this beamtime's files says whether {n} "
+                   "is a potential limit or a number of cycles, so say which.")
+
+
 def _own_name(e: Mapping, stem: str) -> bool:
     return (str(e.get("locator") or "").startswith("filename token")
             and PurePosixPath(str(e.get("relative_path") or "")).name == stem)
@@ -449,7 +544,8 @@ class _Facts:
     __slots__ = ("gid", "runs", "keys", "electrode", "position", "sample", "names", "names_said", "filter", "filter_said",
                  "filter_from", "history", "history_canon", "why_not", "readings", "decided", "run_interval",
                  "time_interval", "loose_key", "full_key", "stems", "sid", "ident", "stage", "stage_from",
-                 "position_unsettled", "set_aside_at", "role", "time_why", "time_questions", "time_answers")
+                 "position_unsettled", "set_aside_at", "role", "time_why", "time_questions", "time_answers",
+                 "filter_overruled")
 
     def __init__(self, gid: str):
         self.gid = gid
@@ -466,6 +562,8 @@ class _Facts:
         self.run_interval = self.time_interval = self.loose_key = self.full_key = None
         self.sid = self.ident = self.stage = self.stage_from = None
         self.filter_from: set[str] = set()
+        #: review of #352, finding 4: the file-name filter(s) a standing rule outranked for this group, and the rule
+        self.filter_overruled: dict | None = None
         self.position_unsettled = False
         self.set_aside_at: tuple[int, str] | None = None  # the position and token the grouping set aside
         self.role: str | None = None
@@ -831,7 +929,17 @@ def _filter(ctx: _Ctx, f: _Facts, g: Mapping, own: Mapping, written) -> None:
     f.filter_said = sorted({x for x in written("filter")})
     for rid in f.runs:
         for c in own.get(rid, {}).get("filter", ()):
+            rule = (c.get("state_basis") or {}).get("resolved_by_rule")
+            if rule:
+                overruled = sorted({f"filter{filter_number(e.get('literal_value'))}" for e in c.get("evidence") or ()
+                                    if filter_number(e.get("literal_value")) not in (None, f.filter)
+                                    and str(e.get("locator") or "").startswith("filename")})
+                if overruled:
+                    f.filter_overruled = {"rule": rule, "file_name": sorted({*(f.filter_overruled or {}).get("file_name", ()),
+                                                                             *overruled})}
             for e in c.get("evidence") or ():
+                if filter_number(e.get("literal_value")) != f.filter:
+                    continue  # C6: a file name the recorded filter outranks is not where this number was read
                 loc = str(e.get("locator") or "")
                 f.filter_from.add("file name" if loc.startswith("filename") else
                                   "scan header" if "header" in loc else "other")
@@ -1188,12 +1296,15 @@ def proposals(bundle: Mapping, groups: Sequence[Mapping] | None = None) -> list[
         said = {"literals": f.filter_said, "from": sorted(f.filter_from)}
         if f.decided.get("filter"):
             said["from_decisions"] = list(f.decided["filter"])
+        if f.filter_overruled:
+            said["overruled"] = dict(f.filter_overruled)
         items.append({"group_id": f.gid, "run_ids": list(f.runs), "value": f"filter{f.filter}", "fill": {"filter": f.filter},
                       "said": said, "first_file": f.stems[0]})
     if items or held:
         out.append({"label": "filter", "partition": None, "items": items, "not_proposed": held})
     by_history: dict[str, list[dict]] = {}
     held_h = []
+    numbers = cycling_number_index(bundle)
     for f in facts:
         if f.history is None:
             if f.why_not.get("history") != "the file names state no cycling history":
@@ -1202,12 +1313,14 @@ def proposals(bundle: Mapping, groups: Sequence[Mapping] | None = None) -> list[
         said = {"token": f.history}
         if f.decided.get("history"):
             said["from_decisions"] = list(f.decided["history"])
+        wording, why = history_reading(f.history, numbers)
+        said["number"] = why
         by_history.setdefault(f.history_canon, []).append(
-            {"group_id": f.gid, "run_ids": list(f.runs), "value": history_words(f.history), "fill": {},
+            {"group_id": f.gid, "run_ids": list(f.runs), "value": wording, "fill": {},
              "said": said, "first_file": f.stems[0]})
     for canon, its in by_history.items():
         out.append({"label": "history", "partition": f"history={canon}", "items": its, "not_proposed": [],
-                    "token": its[0]["said"]["token"]})
+                    "token": its[0]["said"]["token"], "number": its[0]["said"]["number"]})
     if held_h:
         # the groups whose file names do not settle a history: asked on their own, one sentence per group
         out.append({"label": "history", "partition": "history=unsettled", "items": [], "not_proposed": held_h,
@@ -1388,20 +1501,28 @@ def _text(p: Mapping, n_groups: int, n_runs: int) -> str:
                     "file name" if "file name" in got else
                     f"the scan header's filter motor reads {i['fill']['filter']}" if "scan header" in got else "files")
         zero = sum(1 for i in items if i["fill"].get("filter") == 0)
+        settled = [i for i in items if (i.get("said") or {}).get("overruled")]
         text = (f"The filter for {n_groups} group(s) ({n_runs} run(s)), into system.configuration.beam_attenuator (the "
                 "portal vocabulary's key for it): the filter count a file name (rule bl15.filenames.filter_count.v1) "
                 f"or the scan headers' filter motor states, written filter<n> ({n_val} value(s)). "
                 + "; ".join(f"{i['first_file']} -> {i['value']!r} ({source(i)})" for i in ex)
                 + (f"; and {len(items) - len(ex)} more groups." if len(items) > len(ex) else ".") + more
                 + (f" filter0 ({zero} group(s)) is a count of 0: no filter in the beam." if zero else "")
+                + (f" {len(settled)} group(s) take the filter their acquisition files recorded over the one their file "
+                   "name states, by ISAAC's rule (" + settled[0]["said"]["overruled"]["rule"] + "), not yet confirmed "
+                   "by the scientist: " + "; ".join(
+                       f"{i['first_file']} -> {i['value']!r} (the file name says "
+                       + " or ".join(repr(v) for v in i["said"]["overruled"]["file_name"]) + ")" for i in settled)
+                   + ". Check these before confirming all; answer them on their own with --only group:<id>."
+                   if settled else "")
                 + " Confirm to record these, or give the scientist's own wording with --decision correct --value, using "
                 "{filter} for the number (e.g. \"{filter} filters\"); for the groups with no filter, their own words "
                 "with --only group:<id> (several --only in one call) --decision correct --value \"<words>\".")
     elif label == "history":
         text = (f"The sample's cycling history for {n_groups} group(s) ({n_runs} run(s)) whose file names write "
-                f"{p['token']!r}, into context.electrochemistry.notes. Proposed wording: {items[0]['value']!r}. It only "
-                "splits the file-name token into words; it does not say what the number is (millivolts or cycles). "
-                "Confirm it, or give your own sentence with --decision correct --value \"<sentence>\"." + more)
+                f"{p['token']!r}, into context.electrochemistry.notes. Proposed wording: {items[0]['value']!r}. "
+                + (p.get("number") or "It only splits the file-name token into words.")
+                + " Confirm it, or give your own sentence with --decision correct --value \"<sentence>\"." + more)
     elif label == "follows":
         text = (f"Links between records of the same sample measured in sequence ({len(items)} link(s) in "
                 f"{len(p.get('chains') or ())} chain(s)). For one sample (its confirmed sample id, else its electrode) "

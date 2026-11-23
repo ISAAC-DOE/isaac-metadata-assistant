@@ -320,8 +320,56 @@ RULE_DATA_QUALITY_NOTE = (
     "happens to hold a bare integer is not misread as the next row's step."
 )
 
+#: C6 (22 Nov 2026): a remark about the WHOLE sample, kept as a Data Quality Note of its section.
+RULE_SECTION_QUALITY_REMARK = (
+    "bl15.notes.section_quality_remark.v1: a short line directly under a `Sample N` heading (before the first blank "
+    "line) that says the sample failed — `did not work`, `failed`, `bad`, `broken`, `discard`, `no signal`, "
+    "`unusable` — is a remark about that whole sample when it names the sample (`sample`, `electrode`, `catalyst`, "
+    "the heading's own name) or names nothing else it could be about (the beam or ring current, a refill, dump or "
+    "injection, the weather, a reference foil, the detector, one particular scan, a sample that `works but` ...). It is reported VERBATIM as a Data Quality Note of the section, "
+    "like the heading's own `(bad)` qualifier, carrying the section, its sample number and name, and its file "
+    "numbers, so it can reach that sample's measurements. It is never a verdict: no qc.status is derived and no "
+    "measurement is dropped; the scientist is asked."
+)
+#: The words that make a line under a sample heading a remark that the sample failed (C6). A negated "not bad" is not.
+_FAILURE_REMARK = re.compile(
+    r"\b(?:did\s*n[o'’]?t\s+work|does\s*n[o'’]?t\s+work|not\s+working|nothing\s+work(?:s|ed)|failed|broken|bad|discard(?:ed)?|"
+    r"no\s+signal|unusable|not\s+usable|useless)\b",
+    re.IGNORECASE,
+)
+_NOT_BAD = re.compile(r"\bnot\s+(?:too\s+|that\s+|so\s+)?bad\b", re.IGNORECASE)
+#: ...nor a remark about something other than the sample: the beam or the ring current, a refill, dump or injection, the
+#: weather or a power cut, a reference foil, the I0, mono, shutter or detector, one particular scan, or a sample that
+#: "works but" has a fault (review of #352, finding 2; narrowed in the re-review so a plain failure is not dropped)
+_NOT_ABOUT_THE_SAMPLE = re.compile(
+    r"\b(?:beam\w*|refill\w*|top-?up|dump\w*|injection|weather|power\s+(?:cut|failure|outage|went)|ring\s+current|"
+    r"reference\s+foils?|foils?|i0|mono(?:chromator)?|shutter|detector|(?:first|second|last)\s+scans?|"
+    r"scans?\s*#?\d+|works\s+but)\b",
+    re.IGNORECASE,
+)
+#: a line that names the sample itself is about the sample, whatever else it mentions
+_NAMES_THE_SAMPLE = re.compile(r"\b(?:samples?|electrodes?|catalysts?)\b", re.IGNORECASE)
+#: the most words such a remark line may have (a sentence about something else is not a remark about the sample)
+SECTION_REMARK_MAX_WORDS = 8
+#: the qualifiers of a sample heading that say something is wrong with the sample (``good`` says nothing is)
+FAILURE_MARKERS: tuple[str, ...] = ("bad", "noisy", "failed", "discard")
+
+
+def is_failure_remark(text: str, sample_name: str | None = None) -> bool:
+    """True when ``text`` (a line under a sample heading, or the heading's qualifier) says the sample failed. A line that
+    names the sample ("sample", "electrode", "catalyst", or the heading's own ``sample_name``) is about the sample;
+    otherwise one that names something else (the beam, a refill, a reference foil, one scan ...) is not."""
+    text = str(text or "").strip()
+    if not text or len(text.split()) > SECTION_REMARK_MAX_WORDS or not _FAILURE_REMARK.search(text) or _NOT_BAD.search(text):
+        return False
+    names = bool(_NAMES_THE_SAMPLE.search(text)) or (
+        bool(sample_name) and re.search(rf"(?<![\w]){re.escape(str(sample_name))}(?![\w])", text, re.IGNORECASE) is not None)
+    return names or not _NOT_ABOUT_THE_SAMPLE.search(text)
+
+
 NORMALIZATION_RULES: frozenset[str] = frozenset(
     {
+        RULE_SECTION_QUALITY_REMARK,
         RULE_TEMPERATURE_STATEMENT,
         RULE_CONTRIBUTOR_STATEMENT,
         RULE_ENVIRONMENT_STATEMENT,
@@ -605,6 +653,19 @@ def read_beamtime_notes(
     #: file numbers by that number — so a beamtime sentence that NAMES samples can be
     #: checked against the sections the document itself numbers (review I3, 2026-10-12).
     section_sample_number: int | None = None
+    #: C6: the sample name the heading gives (``Sample 6 JK1 in base`` -> ``JK1``), and the section's own
+    #: remarks about the whole sample (the heading's qualifier, a "did not work!" line right under it), held until the
+    #: section's file numbers are known; ``under_heading`` is True until the first blank line after the heading
+    section_sample_name: str | None = None
+    section_remarks: list[tuple[str, str, str]] = []
+    under_heading = False
+    #: how many `Sample N` headings the document has for each N (review of #352, finding 3): a section that lists no
+    #: file numbers is matched to measurements by N only when N heads ONE section
+    headings_per_number: dict[int, int] = {}
+    for _raw in lines:
+        _m = _SAMPLE_HEADING.match(_raw.strip())
+        if _m:
+            headings_per_number[int(_m.group(1))] = headings_per_number.get(int(_m.group(1)), 0) + 1
     sections_by_number: dict[int, set[int]] = {}
     #: Beamtime-level sentences naming sample numbers, held until every section is read.
     named_beamtime: list[tuple[str, str, "cond.LexiconHit", tuple[int, ...]]] = []
@@ -628,6 +689,12 @@ def read_beamtime_notes(
                 **hit.to_state(),
                 "section": sample_label if numbers is not None else None,
                 "file_numbers": list(numbers or []),
+                # C6: which sample the section is about, so a section with no file-number rows can still reach the
+                # measurements whose file names carry that sample's number (and name)
+                "sample_number": section_sample_number if numbers is not None else None,
+                "sample_name": section_sample_name if numbers is not None else None,
+                "sample_sections": (headings_per_number.get(section_sample_number, 0)
+                                    if numbers is not None and section_sample_number is not None else None),
                 # A BEAMTIME sentence that names particular samples is about THOSE, and
                 # carries the file numbers the document's own sections give each — so a
                 # reader can apply it only where the mapping is deterministic.
@@ -699,6 +766,25 @@ def read_beamtime_notes(
         for locator, line, hit in section_conditions:
             emit_condition(locator, line, hit, numbers)
         section_conditions.clear()
+        for locator, literal, rule in section_remarks:
+            builder.add(
+                locator=locator,
+                raw_literal=literal,
+                concept=CONCEPT_QUALITY_NOTE,
+                determinism=DETERMINISM_NORMALIZED,
+                normalized_value={
+                    "remark": literal.casefold(),
+                    "about": "sample",
+                    "section": sample_label,
+                    "sample_number": section_sample_number,
+                    "sample_name": section_sample_name,
+                    "sample_sections": headings_per_number.get(section_sample_number, 0),
+                    "file_numbers": numbers,
+                },
+                normalization_rule=rule,
+                scope=SCOPE_SAMPLE_GROUP,
+            )
+        section_remarks.clear()
         for number, raw_line, label, name in section_contributors:
             builder.add(
                 locator=f"line {number} (in `{sample_label}`) contributor",
@@ -737,6 +823,7 @@ def read_beamtime_notes(
             # A blank line closes a Notes cell: its continuation lines sit directly
             # beneath it, and the next row is separated by blank lines.
             flush_note()
+            under_heading = False
             continue
 
         # --- the Notes cell of a file-number row, decided by POSITION -------------
@@ -822,6 +909,19 @@ def read_beamtime_notes(
             )
             continue
 
+        remark_taken = False
+        if (
+            under_heading
+            and sample_label is not None
+            and not _TABLE_CELL.match(raw)
+            and not _SAMPLE_HEADING.match(line)
+            and is_failure_remark(line, section_sample_name)
+        ):
+            # C6: "did not work!" right under the heading is a remark about the whole sample. The line still goes on to
+            # every other reader (review of #352, finding 1): a cell, an environment or a contributor on it is read too
+            section_remarks.append((f"{where} quality remark", line, RULE_SECTION_QUALITY_REMARK))
+            remark_taken = True
+
         sample_match = _SAMPLE_HEADING.match(line)
         if sample_match:
             flush_note()
@@ -858,15 +958,12 @@ def read_beamtime_notes(
                     normalization_rule=RULE_SAMPLE_HEADING,
                     scope=SCOPE_SAMPLE_GROUP,
                 )
+            section_sample_name = name or None
+            under_heading = True
             if parenthetical and parenthetical.strip().casefold() in QUALITY_MARKERS:
-                builder.add(
-                    locator=f"line {number} sample heading qualifier",
-                    raw_literal=parenthetical.strip(),
-                    concept=CONCEPT_QUALITY_NOTE,
-                    determinism=DETERMINISM_NORMALIZED,
-                    normalized_value=parenthetical.strip().casefold(),
-                    normalization_rule=RULE_SAMPLE_HEADING,
-                    scope=SCOPE_SAMPLE_GROUP,
+                # held with the section (C6), so it carries the section's sample number, name and file numbers
+                section_remarks.append(
+                    (f"line {number} sample heading qualifier", parenthetical.strip(), RULE_SAMPLE_HEADING)
                 )
             elif parenthetical:
                 unread.append((number, line))
@@ -1122,7 +1219,7 @@ def read_beamtime_notes(
             )
             claimed = True
 
-        if not claimed:
+        if not claimed and not remark_taken:
             unread.append((number, line))
 
     flush_note()

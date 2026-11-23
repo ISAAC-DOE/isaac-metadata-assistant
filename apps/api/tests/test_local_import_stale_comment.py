@@ -82,8 +82,17 @@ def _flags(data: dict, stem: str) -> list[dict]:
 
 def _cand(data: dict, stem: str, path: str) -> dict:
     rid = _run(data, stem)["run_id"]
-    [c] = [c for c in data["candidates"] if c["run_id"] == rid and c["target_field_path"] == path]
+    # the comment line's own candidate: since 1.16.0 a run's name may give a second one for the set-point
+    # (suggestions.NAME_POTENTIAL_RULE_ID, the scientists' rule that the potential is inferable from the experiment)
+    [c] = [c for c in data["candidates"] if c["run_id"] == rid and c["target_field_path"] == path
+           and B.is_header_comment_candidate(c)]
     return c
+
+
+def _name_cand(data: dict, stem: str) -> dict | None:
+    rid = _run(data, stem)["run_id"]
+    return next((c for c in data["candidates"] if c["run_id"] == rid and c["target_field_path"] == SETPOINT
+                 and c["rule"].startswith(S.NAME_POTENTIAL_RULE_ID)), None)
 
 
 def test_a_line_identical_to_an_earlier_runs_under_another_name_potential_is_flagged(bundle):
@@ -121,9 +130,15 @@ def test_the_flag_reaches_the_scientist_also_when_the_line_never_parsed_to_a_val
     capsys.readouterr()
     data = json.loads((tmp_path / "out" / "bundle.json").read_text())
     assert B.validate_bundle(data) == []
-    first, copy = _cand(data, "14_SYNZZ_1MKOH_0V_095", SETPOINT), _cand(data, "15_SYNZZ_1MKOH_m600mV_096", SETPOINT)
-    assert first["value"] is None and copy["value"] is None  # as before: no value is read from such a line
-    assert "possibly" not in first["state_basis"]["not_proposable_reason"]
+    copy = _cand(data, "15_SYNZZ_1MKOH_m600mV_096", SETPOINT)
+    assert copy["value"] is None  # as before: no value is read from such a line
+    # 1.16.0: the first run's name (0V) writes what its line mentions, so the NAME offers the set-point (the
+    # scientists' rule: the potential is inferable from the experiment) and the line no longer asks for it
+    first = _name_cand(data, "14_SYNZZ_1MKOH_0V_095")
+    assert first["value"] == 0.0 and "possibly" not in first["state_basis"]["not_proposable_reason"]
+    assert "confirms the reading" in first["state_basis"]["not_proposable_reason"]
+    # the copy's name writes another number than the line: the name offers nothing either
+    assert _name_cand(data, "15_SYNZZ_1MKOH_m600mV_096")["value"] is None
     reason = copy["state_basis"]["not_proposable_reason"]
     assert len(_flags(data, "15_SYNZZ_1MKOH_m600mV_096")) == 1
     assert "possibly left over" in reason and "14_SYNZZ_1MKOH_0V_095" in reason and "m600mV" in reason

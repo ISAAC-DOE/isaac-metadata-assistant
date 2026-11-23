@@ -379,6 +379,22 @@ def _energy_check(columns: list[str], rows: list[list[float | None]], first_row_
         "overall_direction": direction,
         "breaks": breaks,
     }
+    # the scanned range and its FINEST-STEP window (the longest run of steps within 1.5x the smallest one): what
+    # ``suggestions.SCANNED_EDGE_RULE_ID`` reads to suggest the absorbing edge, never a value on its own
+    steps = [b - a for (_, a), (_, b) in zip(values, values[1:])]
+    positive = [x for x in steps if x > 0]
+    if direction == "increasing" and not breaks and len(positive) >= 10:
+        smallest = min(positive)
+        best: list[int] = []
+        run: list[int] = []
+        for k, step in enumerate(steps):
+            run = (run + [k] if run and k == run[-1] + 1 else [k]) if 0 < step <= 1.5 * smallest else []
+            if len(run) > len(best):
+                best = run
+        result["range_eV"] = [values[0][1], values[-1][1]]
+        result["finest_step_eV"] = smallest
+        result["finest_window_eV"] = [values[best[0]][1], values[best[-1] + 1][1]]
+        result["finest_window_rows"] = [values[best[0]][0], values[best[-1] + 1][0]]
     if breaks:
         line = (first_row_line or 1) + (first_break or 0)
         result["first_break_row_index"] = first_break

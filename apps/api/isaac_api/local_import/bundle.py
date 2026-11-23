@@ -114,7 +114,18 @@ FORMAT_ID = "isaac.local-import-bundle"
 #: (``value``: ``{"body_sha256", "held_by"}``). Recorded by ``bundle export --allow-indistinguishable --by``; later
 #: exports honour it while the body is the same. A 1.14.0 validator refuses the new enum value, hence the version.
 #: Nothing becomes newly writable; the bundle's other shapes are unchanged.
-FORMAT_VERSION = "1.15.0"
+#: 1.16.0 (import rules only, and two additive enum values): readings a 1.15.0 build did not make at import — the
+#: potential an SSRL XDC run's NAME writes (``suggestions.NAME_POTENTIAL_RULE_ID``, a suggestion that needs review,
+#: compared with the run's comment lines; open circuit, ``suggestions.OPEN_CIRCUIT_RULE_ID``, suggests the control
+#: mode); a SPEC-format file whose scan title names the scans it was computed from is a processed output, kept by
+#: :data:`AVERAGE_TITLE_ORIGIN_RULE_ID` and linked by :data:`TITLE_LINK_RULE_ID` (new enum values: an additive schema
+#: change, so a 1.16.0 validator refuses such a bundle); a macro-driven run with no declaring block is no conflict
+#: (:data:`NOT_A_CONFLICT_RULES`). Only a re-import applies them; new candidates are numbered after every other, a
+#: comment-line candidate the name now answers keeps its id and targets no field, and a conflict no longer made keeps
+#: its number unused. A file that is no longer a run takes its run's ids with it, so run, candidate and value ids after
+#: it renumber (as at 1.11.0 and 1.13.0). Nothing becomes newly writable; the upgrade is disclosed
+#: (:data:`CHANGES_ADDED_IN`).
+FORMAT_VERSION = "1.16.0"
 #: The electrochemical control mode. Its allowed values are the official schema's enum (read at
 #: runtime by :func:`value_problem`); the schema's conditional rules key the set-point a record
 #: requires on it (:func:`required_record_paths`). Never defaulted, never derived.
@@ -140,7 +151,7 @@ VALUE_IDS_APPEND_FROM = "1.5.0"
 IMPORT_RULES_ADDED_IN: Mapping[str, tuple] = {
     "1.4.0": (("generic:ssrl_xdc_v1", "ssrl_xdc_scan_start_v1"),),
 }
-_VERSION_ORDER = ("1.0.0", "1.1.0", "1.2.0", "1.3.0", "1.4.0", "1.5.0", "1.6.0", "1.7.0", "1.8.0", "1.9.0", "1.10.0", "1.11.0", "1.12.0", "1.13.0", "1.14.0", "1.15.0")
+_VERSION_ORDER = ("1.0.0", "1.1.0", "1.2.0", "1.3.0", "1.4.0", "1.5.0", "1.6.0", "1.7.0", "1.8.0", "1.9.0", "1.10.0", "1.11.0", "1.12.0", "1.13.0", "1.14.0", "1.15.0", "1.16.0")
 #: A change a format version made that moves no eligibility and adds no import rule, but that the
 #: first save by a newer build still DISCLOSES in its ``format_upgrades`` entry (never silently).
 CHANGES_ADDED_IN: Mapping[str, str] = {
@@ -166,6 +177,16 @@ CHANGES_ADDED_IN: Mapping[str, str] = {
     "1.15.0": ("1.15.0 keeps the scientist's export_despite_completeness decision on a record group: a record the local "
                "record-completeness gate holds is exported anyway, for that record body, by `bundle export "
                "--allow-indistinguishable --by`"),
+    "1.16.0": ("1.16.0 reads at import, only on a re-import: an SSRL XDC run's name potential, a suggestion "
+               "(isaac.suggest.name_potential.v1, isaac.suggest.name_open_circuit.v1); a SPEC-format file whose scan "
+               "title names other scans is a processed output, never a run (bl15.classify.processed_scan_title.v1, "
+               "isaac.processed_output.link_by_title_scans.v0; later run, candidate, value and some question ids then "
+               "name other runs, and answers import refuses such a row as stale); no "
+               "conflict (its id kept, unused) for comment-line events (isaac.import.comment_lines_are_events.v1), "
+               "positions within motor resolution (isaac.import.position_within_motor_resolution.v1) or an "
+               "overwritten macro (isaac.import.macro_run_line.v1); suggestions only: the clock zone from #E/#D (isaac.suggest.clock_zone_from_epoch_pair.v1), a "
+               "BL4-3 standard's role (isaac.grouping.xdc_standard_name.v1), the scanned edge "
+               "(isaac.suggest.absorber_from_scanned_range.v1)"),
 }
 #: A field composed into a draft only beside another of the SAME run (interim decision for the
 #: set-point, pending domain-owner review; ``records.compose_group`` applies it). The CURRENT
@@ -530,9 +551,16 @@ def in_merge_folder(rel: Any) -> bool:
     return any(p.casefold() == MERGE_FOLDER_NAME for p in parts)
 
 
-def is_average_title(literal: Any) -> bool:
-    """True for a scan title that states an average of N spectra (:data:`AVERAGE_TITLE_ORIGIN_RULE_ID`)."""
-    return isinstance(literal, str) and bool(_AVERAGE_TITLE.match(literal.strip()))
+def is_average_title(literal: Any, *, widened: bool = True) -> bool:
+    """True for a scan title that names the scans it was computed from (:data:`AVERAGE_TITLE_ORIGIN_RULE_ID`): an
+    average of N spectra, and (1.16.0, ``bl15.classify.PROCESSED_TITLE_RULE_ID``) an arithmetic expression over named
+    scans or a normalised copy of one. The engine's own test, so a SPEC-format file and a PyMca ``.mca`` are judged
+    alike. ``widened=False``: the 1.13.0 test alone (``Average of N from``), for a bundle an older build imported
+    (review of PR 346, C1: the 1.16.0 rule is never applied to what an older build kept)."""
+    from ..bl15.classify import is_processed_scan_title
+
+    return isinstance(literal, str) and (bool(_AVERAGE_TITLE.match(literal.strip()))
+                                         or (widened and is_processed_scan_title(literal)))
 
 
 def merge_folder_note(rel: str) -> dict:
@@ -595,18 +623,49 @@ def quick_merge_runs(bundle: Mapping) -> list[str]:
             and all(type_of.get(s.get("source_id")) == ENGINE_PROCESSED_SOURCE_TYPE for s in r["scans"])]
 
 
-def average_title_runs(bundle: Mapping) -> list[str]:
+def average_title_runs(bundle: Mapping, *, widened: bool | None = None) -> list[str]:
     """Run ids of GENERIC runs every scan file of which states an average title (a run-scoped ``scan_title`` statement,
     :func:`is_average_title`), in a bundle that also holds SPEC acquisition runs: what
     :data:`AVERAGE_TITLE_ORIGIN_RULE_ID` makes processed outputs. Non-empty only for a bundle a build older than 1.13.0
-    imported (a 1.13.0 import holds none: the validator refuses one)."""
+    imported (a 1.13.0 import holds none: the validator refuses one). ``widened`` (default: the bundle was imported by
+    1.16.0 or later): whether the 1.16.0 title test applies, never to what an older build imported."""
+    if widened is None:
+        widened = _imported_by_at_least(bundle, "1.16.0")
     runs = bundle.get("runs") or ()
     if not quick_merges_apply(runs):
         return []
     titled = {(e.get("run_id"), e.get("relative_path")) for e in bundle.get("extended_context") or ()
-              if e.get("concept") == "scan_title" and is_average_title(e.get("raw_literal"))}
+              if e.get("concept") == "scan_title" and is_average_title(e.get("raw_literal"), widened=widened)}
     return [r["run_id"] for r in runs if str(r.get("source_type") or "").startswith("generic:") and r.get("scans")
             and all((r["run_id"], s.get("relative_path")) in titled for s in r["scans"])]
+
+
+_SCAN_LOCATOR = re.compile(r"^line (\d+) header #S \(scan (\S+)\)$")
+
+
+def processed_title_runs(bundle: Mapping) -> list[str]:
+    """1.16.0 (``bl15.classify.PROCESSED_TITLE_RULE_ID``): the runs of this bundle that a 1.16.0 import keeps as
+    processed outputs: generic runs whose scan title only the widened test reads as computed from other scans, and SPEC
+    runs whose FIRST ``#S`` title names other scans (its ``scan_command`` statement). Non-empty only for a bundle an
+    older build imported; the upgrade statement names them ("re-import to keep them as processed outputs")."""
+    from ..bl15.classify import is_processed_scan_title
+
+    runs = bundle.get("runs") or ()
+    if not quick_merges_apply(runs):
+        return []
+    generic = set(average_title_runs(bundle, widened=True)) - set(average_title_runs(bundle, widened=False))
+    first: dict[str, tuple[int, str]] = {}
+    for c in bundle.get("candidates") or ():
+        if c.get("statement_key") != "scan_command" or not c.get("run_id"):
+            continue
+        for e in c.get("evidence") or ():
+            m = _SCAN_LOCATOR.match(str(e.get("locator") or ""))
+            if m and isinstance(e.get("literal_value"), str):
+                line = int(m.group(1))
+                if c["run_id"] not in first or line < first[c["run_id"]][0]:
+                    first[c["run_id"]] = (line, f"{m.group(2)} {e['literal_value']}")
+    engine = {rid for rid, (_, title) in first.items() if is_processed_scan_title(title)}
+    return [r["run_id"] for r in runs if r["run_id"] in generic or r["run_id"] in engine]
 
 
 def _imported_by_at_least(bundle: Mapping, version: str) -> bool:
@@ -819,6 +878,66 @@ def _spec_file_scan_rows(root: Path | None, row: Mapping | None) -> tuple[tuple[
     return spec_file_scans(text), None
 
 
+def _spec_file_title(root: Path | None, row: Mapping | None) -> tuple[int, str] | None:
+    """``(line number, title)`` of the FIRST ``#S`` line of the file the walk listed as ``row`` (the text after
+    ``#S``), read as :func:`_spec_file_scan_rows` reads, or ``None``."""
+    if root is None or not row:
+        return None
+    from ..bl15 import archive
+    from ..bl15.inventory import ArchiveInventory, SourceRecord
+
+    try:
+        record = SourceRecord(archive_path=row["archive_path"], basename=row.get("basename") or "",
+                              extension=row.get("extension") or "", size_bytes=int(row.get("size_bytes") or 0),
+                              content_sha256=str(row.get("content_sha256") or ""), parent_dir=row.get("parent_dir") or "",
+                              depth=int(row.get("depth") or 0))
+        text, _refusal = archive.read_source_text(ArchiveInventory(root_label="", entries=(record,)), record.archive_path,
+                                                  source_root=root)
+    except Exception:  # never let one unreadable file stop the import
+        return None
+    for number, line in enumerate((text or "").splitlines()[:200], start=1):
+        if line.startswith("#S ") or line.startswith("#S\t"):
+            return number, line[2:].strip()[:MAX_STRING_CHARS]
+    return None
+
+
+def _titled_processed_output(row: Mapping, sid_of: Mapping, title: tuple[int, str]) -> tuple[dict, dict]:
+    """The processed output (and its one ``scan_title`` statement) of a SPEC-format file the engine classified as a
+    processed spectrum by its scan title (:func:`_spec_file_title`)."""
+    rel = row["archive_path"]
+    key = f"spec_title:{rel}"
+    po_id = "po-" + hashlib.sha256(f"processed:{key}".encode("utf-8")).hexdigest()[:16]
+    basename = str(row.get("basename") or PurePosixPath(rel).name)
+    ext = str(row.get("extension") or "")
+    stem = basename[: -(len(ext) + 1)] if ext and basename.endswith("." + ext) else basename
+    entry = {
+        "entry_id": f"{key}#p0", "concept": "scan_title", "raw_literal": title[1], "source_id": sid_of.get(rel),
+        "relative_path": _safe_relative(rel), "locator": f"line:{title[0]}", "normalized_value": None, "unit": None,
+        "normalization_rule_id": None, "parser_id": "bl15_content_led_classifier_v1", "scope": "processed_output",
+        "official_path": None, "value_state": STATE_SOURCE_RECORDED, "is_official_field_value": False, "run_id": None,
+        "processed_output_id": po_id,
+    }
+    po = {
+        "processed_output_id": po_id, "output_key": key, "label": stem,
+        "directory": str(row.get("parent_dir") or ""), "role": "reference_result", "is_acquisition": False,
+        "becomes_a_record": False,
+        "statement": ("The scientists' own processed spectrum in SPEC format, as its scan title states: it names the "
+                      "scans it was computed from (an average, a sum or a normalised copy), not a command. A rough "
+                      "reference result and evidence: never a run, never a record group, never preferred for a record."),
+        "reader": {"reader_id": "bl15_content_led_classifier_v1", "profile": "spec_scan_title",
+                   "profile_version": None, "statements_total": 1, "statements_kept": 1},
+        "files": [{
+            "source_id": sid_of.get(rel), "relative_path": rel, "sha256": row.get("content_sha256"),
+            "size_bytes": row.get("size_bytes"), "extension": ext, "columns": [], "points": None,
+            "processing_origin": average_title_processing_origin(),
+        }],
+        "states": {"processed_by": [], "element_symbol": [], "element_edge": [], "demeter_output_filetype": []},
+        "anomalies": [], "extended_context_entry_ids": [entry["entry_id"]], "proposed_links": [], "link_note": None,
+        "value_state": STATE_SOURCE_RECORDED,
+    }
+    return po, entry
+
+
 def _scan_dir_present_empty(root: Path | None, acquisition_path: str, stem: str) -> bool:
     """True only when the run's `<stem>_dir` folder is SEEN and holds no file but OS metadata files.
 
@@ -889,10 +1008,79 @@ def _selection_numbers(sel: str) -> set[int] | None:
     return set(range(lo, hi + 1))
 
 
-def propose_processed_links(processed_outputs: Sequence[dict], runs: Sequence[Mapping]) -> None:
+#: 1.16.0: a quick merge or average whose scan title NAMES the scans it was computed from (``A 3.1 X + A 1.1 X``,
+#: ``Average of 8 from A 1.1 X to A 8.1 X``: ``bl15.classify.processed_title_scans``) is linked to the ONE run with
+#: scans whose stem is that name and which has every scan named (its scan indices, else 1..scan_count). Content,
+#: never a folder or a file name; tried before :data:`LEGACY_LINK_RULE_ID`, which applies when the title names none.
+TITLE_LINK_RULE_ID = "isaac.processed_output.link_by_title_scans.v0"
+
+
+def processed_titles(entries: Iterable[Mapping]) -> dict[str, list[str]]:
+    """``{processed_output_id: [scan titles]}`` from the outputs' own ``scan_title`` statements (extended context)."""
+    out: dict[str, list[str]] = {}
+    for e in entries:
+        if e.get("processed_output_id") and e.get("concept") == "scan_title" and isinstance(e.get("raw_literal"), str):
+            out.setdefault(e["processed_output_id"], []).append(e["raw_literal"])
+    return out
+
+
+def _link_by_title_scans(po: dict, runs: Sequence[Mapping], titles: Sequence[str]) -> bool:
+    """:data:`TITLE_LINK_RULE_ID` for ONE output, in place: ``True`` when its titles name scans (the rule decided,
+    linked or not), ``False`` when they name none (another rule decides)."""
+    from ..bl15.classify import processed_title_scans
+
+    named = [t for title in titles for t in processed_title_scans(title)]
+    stems = list(dict.fromkeys(name for name, _ in named))
+    if not named or (len(stems) == 1 and not any(r.get("stem") == stems[0] for r in runs)):
+        return False  # it names no scan, or a file that is no run here (renamed since): the legacy rule decides
+    po["proposed_links"] = []
+    po["link_note"] = None
+    wanted = sorted({n for _, n in named})
+    literal = ",".join(str(n) for n in wanted)
+    if len(stems) > 1:
+        hits = [r for r in runs if r.get("stem") in stems]
+        po["link_note"] = {
+            "code": "spans_several_runs", "match": "title_scans", "run_keys": sorted(r["run_key"] for r in hits)[:20],
+            "detail": f"Its scan title combines scans of {len(stems)} files ({', '.join(stems[:4])}), so none is linked.",
+        }
+        return True
+    same = [r for r in runs if r.get("stem") == stems[0]]
+    fitting = []
+    for r in same:
+        have, why = _scan_numbers(r)
+        if r.get("run_candidate") and int(r.get("scan_count") or 0) > 0 and set(wanted) <= have:
+            fitting.append((r, why))
+    if len(fitting) == 1:
+        run, why = fitting[0]
+        po["proposed_links"].append({
+            "rule_id": TITLE_LINK_RULE_ID, "status": "proposed", "match": "title_scans",
+            "scan_selection_literal": literal, "scan_selection_basis": why,
+            "assumption": (f"its scan title names scans {literal} of {stems[0]}"
+                           + (f"; the run states no scan index, so its {int(run.get('scan_count') or 0)} scans are taken "
+                              f"to be numbered 1..{int(run.get('scan_count') or 0)}" if why == "scan_count" else "")),
+            "run_id": run["run_id"], "run_key": run["run_key"], "run_stem": run["stem"], "group_id": None,
+        })
+    elif len(fitting) > 1:
+        po["link_note"] = {
+            "code": "ambiguous", "match": "title_scans", "run_keys": sorted(r["run_key"] for r, _ in fitting)[:20],
+            "detail": f"{len(fitting)} runs are named {stems[0]} and have scans {literal}; none is chosen.",
+        }
+    else:
+        po["link_note"] = {
+            "code": "no_run_named_like_it", "match": "title_scans", "run_keys": sorted(r["run_key"] for r in same)[:20],
+            "detail": (f"Its scan title names scans {literal} of {stems[0]}, and no run with scans is named so and has "
+                       "them all; it stays unlinked."),
+        }
+    return True
+
+
+def propose_processed_links(processed_outputs: Sequence[dict], runs: Sequence[Mapping],
+                            context: Iterable[Mapping] = ()) -> None:
     """Fill each processed output's ``proposed_links`` / ``link_note`` in place by
     :data:`LINK_RULE_ID`. Deterministic; proposes only; never touches a run or a group.
-    The validator re-runs this over the stored runs and refuses a bundle that disagrees."""
+    The validator re-runs this over the stored runs and refuses a bundle that disagrees.
+    ``context``: the extended-context entries, whose ``scan_title`` statements :data:`TITLE_LINK_RULE_ID` reads."""
+    titles = processed_titles(context)
     named: dict[str, list[Mapping]] = {}
     for r in runs:
         if isinstance(r.get("stem"), str):
@@ -904,8 +1092,9 @@ def propose_processed_links(processed_outputs: Sequence[dict], runs: Sequence[Ma
     for po in processed_outputs:
         if is_quick_merge(po):
             # 1.11.0: an output the ENGINE classified is linked by its legacy number, never by its stem (1.13.0: and one
-            # kept by its MERGE folder)
-            _link_by_legacy_number(po, runs)
+            # kept by its MERGE folder); 1.16.0: by the scans its own title names first
+            if not _link_by_title_scans(po, runs, titles.get(po.get("processed_output_id")) or ()):
+                _link_by_legacy_number(po, runs)
             continue
         stem = po["label"]
         po["proposed_links"] = []
@@ -2152,8 +2341,15 @@ def is_xdc_comment_line(key: Any, locator: Any) -> bool:
         return False
 
 
+#: why a comment line's value-less set-point candidate targets no field once the run's NAME offers the set-point
+SETPOINT_IN_NAME_REASON = (
+    "The comment line mentions a potential in no form the reader takes a value from, and the file name of the same run "
+    "states the set-point (see that suggestion, where this line is shown too): this line no longer asks for it.")
+
+
 def _xdc_comment_candidates(g, run_scans: Sequence[Mapping], run_id: str, first_n: int, sid_of: Mapping,
-                            writable, *, stale: Sequence[Mapping] | None = None) -> list[dict]:
+                            writable, *, stale: Sequence[Mapping] | None = None,
+                            setpoint_withheld: str | None = None, setpoint_in_name: bool = False) -> list[dict]:
     """The :data:`XDC_COMMENT_RULE_ID` candidates of ONE ``ssrl_xdc_v1`` run (ids ``cand-<first_n>`` on), one per
     field its scans' comment lines state, in :data:`XDC_COMMENT_KEYS` order. Every scan stating it is evidence;
     scans that state DIFFERENT values give a candidate with no value (it says which). Built through the engine's
@@ -2161,7 +2357,14 @@ def _xdc_comment_candidates(g, run_scans: Sequence[Mapping], run_id: str, first_
 
     ``stale`` (``suggestions.stale_comment_flags``): the run's comment lines flagged as possibly left over from an
     earlier run. A potential (set-point, scale) read ONLY from such lines is not offered: the candidate has no value
-    and says why, also when the line was one the rule reads no value from anyway. Every other field is read as before."""
+    and says why, also when the line was one the rule reads no value from anyway. Every other field is read as before.
+
+
+    ``setpoint_withheld`` (``suggestions.comment_differs_reason``): the run's NAME writes another potential than its
+    comment line, so the line's set-point is not offered either; the reason names both and the scientist says which.
+    ``setpoint_in_name`` (``suggestions.name_setpoint_value``): the run's name offers the set-point, so a comment line
+    that only MENTIONS a potential (no value read from it) no longer asks for the same number: its candidate keeps its
+    id but targets no field (:data:`SETPOINT_IN_NAME_REASON`), and the line is evidence on the name's candidate."""
     from .. import historical_import as hist
     from . import suggestions as _suggest
     from .questions import header_comment_readings, header_unread_text
@@ -2186,6 +2389,11 @@ def _xdc_comment_candidates(g, run_scans: Sequence[Mapping], run_id: str, first_
                      if stale and path in _suggest.STALE_FIELDS else None)
         if left_over is not None:
             value = None
+        withheld = setpoint_withheld if path == SETPOINT_FIELD else None
+        if withheld is not None:
+            value = None
+        # the name's candidate holds the set-point: this value-less one stays (its id stands) as evidence only
+        named = path == SETPOINT_FIELD and value is None and setpoint_in_name and left_over is None and withheld is None
         bundle_cid = f"cand-{first_n + len(out):04d}"
         evidence = []
         for index, rel, loc, literal, reading in hits[:MAX_EVIDENCE_PER_CANDIDATE]:
@@ -2205,12 +2413,16 @@ def _xdc_comment_candidates(g, run_scans: Sequence[Mapping], run_id: str, first_
                                    "to": reading["value"], "unit": reading["unit"]}],
             })
         ambiguous = [h for h in hits if h[4].get("ambiguous")]
-        if left_over is not None and ambiguous:
+        if left_over is not None and ambiguous:  # a stale line's own reason names both potentials already
             _i, a_rel, a_loc, a_line, _reading = ambiguous[0]
             said = header_unread_text(path, a_line, a_loc, a_rel)
             reason = f"{left_over} As before: {said}."
         elif left_over is not None:
             reason = left_over
+        elif withheld is not None:
+            reason = withheld
+        elif named:
+            reason = SETPOINT_IN_NAME_REASON
         elif ambiguous:
             # r1d: the line mentions the field in no form the whitelist reads: it is quoted, and the scientist says
             _i, a_rel, a_loc, a_line, _reading = ambiguous[0]
@@ -2227,7 +2439,7 @@ def _xdc_comment_candidates(g, run_scans: Sequence[Mapping], run_id: str, first_
             determinism=hist.DETERMINISM_DETERMINISTIC,
             rule=XDC_COMMENT_RULE,
             supporting_source_ids=tuple(dict.fromkeys(h[1] for h in hits)),
-            target_field_path=path,
+            target_field_path=None if named else path,
             proposed_value=value,
             not_proposable_reason=reason,
             supporting_statement_total=len(hits),
@@ -2235,6 +2447,35 @@ def _xdc_comment_candidates(g, run_scans: Sequence[Mapping], run_id: str, first_
         )
         out.append(_candidate_record(engine, bundle_cid=bundle_cid, run_id=run_id, key=key, evidence=evidence,
                                      total=len(hits), writable=writable))
+    return out
+
+
+def scanned_edge_evidence(xdc_runs: Sequence[tuple], runs_by_id: Mapping[str, Mapping], sid_of: Mapping) -> list[dict]:
+    """``experiment.element_evidence`` entries of ``suggestions.SCANNED_EDGE_RULE_ID``: ONE per SSRL XDC run whose
+    scans that name an edge all name the same one (role ``scanned_range``, with the run's ``run_key`` and its first
+    such scan as the place)."""
+    from . import suggestions as _suggest
+
+    out = []
+    for run_id, g, run_scans in xdc_runs:
+        named = [(sc, e) for sc in g.scans if (e := _suggest.scanned_edge(sc.get("energy_check"))) is not None
+                 and sc.get("relative_path") in {s.get("relative_path") for s in run_scans}]
+        pairs = {(e["element"], e["edge"]) for _, e in named}
+        if len(pairs) != 1 or run_id not in runs_by_id:
+            continue
+        sc, e = named[0]
+        rows = (sc.get("energy_check") or {}).get("finest_window_rows") or [None, None]
+        out.append({
+            "element": e["element"], "edge": e["edge"], "source_path": sc["relative_path"],
+            "source_id": sid_of.get(sc["relative_path"]), "run_key": runs_by_id[run_id]["run_key"],
+            "locator": f"'Requested Energy' column, data rows {rows[0]}..{rows[1]}",
+            "literal": (f"finest steps ({e['step_eV']:g} eV) from {e['window_eV'][0]:g} to {e['window_eV'][1]:g} eV, "
+                        f"inside a scan from {e['range_eV'][0]:g} to {e['range_eV'][1]:g} eV"),
+            "role": _suggest.SCANNED_EDGE_ROLE, "scans_naming_it": len(named),
+            "rule": (f"{_suggest.SCANNED_EDGE_RULE_ID}: the finest-step window of the scan's energy grid brackets the "
+                     f"{e['element']} {e['edge']} edge ({e['energy_eV']:g} eV, readers.xray_tables), with a pre-edge "
+                     "and a post-edge region around it. A suggestion for the scientist to confirm, never a value."),
+        })
     return out
 
 
@@ -2468,12 +2709,112 @@ def local_clock_binding_problem(candidate: Mapping, decision: Mapping | None, zo
     return None
 
 
+# --- the clock's offset from a SPEC #E / #D pair (1.16.0; audit of 18 Nov 2026, rule 4) ------------------------------
+
+#: A SPEC header writes the file's creation instant twice: ``#E <unix epoch>`` (UTC by definition) and, on the next
+#: line, ``#D <local wall time>``. Their difference is the offset of the clock that wrote it. Where every pair of the
+#: import gives an offset one IANA zone has at that instant (its daylight-saving change included), and the SPEC
+#: headers name the facility (``acquisition_system.fingerprint``), the facility's zone is SUGGESTED for the clock-zone
+#: question, with the pairs as evidence. Never applied: the scientist confirms it. Pairs that fit no zone, or no
+#: facility, suggest nothing and the question asks as before.
+CLOCK_OFFSET_RULE_ID = "isaac.suggest.clock_zone_from_epoch_pair.v1"
+#: The zone of a facility the SPEC fingerprint names (``ACQUISITION_FINGERPRINTS``): a fact about the facility,
+#: offered only when the files' own offsets agree with it
+FACILITY_ZONES: Mapping[str, str] = {"SSRL": "America/Los_Angeles"}
+_EPOCH_LOCATOR = re.compile(r"^line (\d+) header #E$")
+_FILE_D_LOCATOR = re.compile(r"^line (\d+) header #D$")
+
+
+def spec_clock_pairs(bundle: Mapping) -> list[dict]:
+    """Every run's ``#E`` / ``#D`` pair (``#D`` on the line after ``#E`` of the same file): ``{run_id, relative_path,
+    epoch_literal, epoch_locator, utc, local_literal, local_locator, offset_minutes}``, the offset rounded to 15 min.
+    A ``#D`` that does not parse gives no pair."""
+    from datetime import datetime, timezone
+
+    epochs: dict[tuple, dict] = {}
+    locals_: dict[tuple, dict] = {}
+    for c in bundle.get("candidates") or ():
+        for e in c.get("evidence") or ():
+            loc, rel = str(e.get("locator") or ""), e.get("relative_path")
+            if c.get("statement_key") == "acquisition_epoch" and (m := _EPOCH_LOCATOR.match(loc)):
+                epochs.setdefault((c.get("run_id"), rel), {"line": int(m.group(1)), "e": e})
+            elif c.get("statement_key") == "acquisition_timestamp" and (m := _FILE_D_LOCATOR.match(loc)):
+                locals_.setdefault((c.get("run_id"), rel, int(m.group(1))), e)
+    out = []
+    for (run_id, rel), got in sorted(epochs.items(), key=lambda kv: (str(kv[0][0]), str(kv[0][1]))):
+        d = locals_.get((run_id, rel, got["line"] + 1))
+        try:
+            epoch = float(str(got["e"].get("literal_value")).strip())
+            utc = datetime.fromtimestamp(epoch, tz=timezone.utc)
+            local = datetime.strptime(" ".join(str(d.get("literal_value")).split()), _XDC_TIME_FORMAT) if d else None
+        except (TypeError, ValueError, OverflowError, OSError):
+            continue
+        if local is None:
+            continue
+        minutes = round((local - utc.replace(tzinfo=None)).total_seconds() / 900) * 15
+        out.append({"run_id": run_id, "relative_path": rel, "epoch_literal": f"#E {got['e'].get('literal_value')}",
+                    "epoch_locator": got["e"].get("locator"), "utc": utc.isoformat(),
+                    "local_literal": f"#D {d.get('literal_value')}", "local_locator": d.get("locator"),
+                    "offset_minutes": minutes})
+    return out
+
+
+def _zone_fits(zone: str, pairs: Sequence[Mapping]) -> bool:
+    from datetime import datetime
+    from zoneinfo import ZoneInfo
+
+    z = ZoneInfo(zone)
+    return all(datetime.fromisoformat(p["utc"]).astimezone(z).utcoffset().total_seconds() / 60 == p["offset_minutes"]
+               for p in pairs)
+
+
+def clock_zone_suggestion(bundle: Mapping, waiting: Sequence[Mapping] = ()) -> dict | None:
+    """:data:`CLOCK_OFFSET_RULE_ID`: ``{value, offsets, pairs, facility, reason}`` (``value`` ``None`` when nothing is
+    offered), or ``None`` when the import holds no ``#E`` / ``#D`` pair. ``waiting``: the start-time candidates the
+    clock-zone question waits on. A zone is offered only when the pairs come from the SAME acquisition system (run
+    source type) as those (review of PR 346, I4): one computer's clock is not another's, so otherwise the pairs are
+    shown as a labelled hint and nothing is suggested."""
+    pairs = spec_clock_pairs(bundle)
+    if not pairs:
+        return None
+    type_of = {r["run_id"]: r.get("source_type") for r in bundle.get("runs") or ()}
+    pair_systems = {type_of.get(p["run_id"]) for p in pairs}
+    waiting_systems = {type_of.get(c.get("run_id")) for c in waiting}
+    same_system = not waiting_systems or bool(pair_systems & waiting_systems)
+    offsets = sorted({p["offset_minutes"] for p in pairs})
+    said = ", ".join(f"{m / 60:+g} h" for m in offsets)
+    example = pairs[0]
+    seen = (f"{len(pairs)} SPEC file(s) write their creation instant both as UTC and as local clock time (e.g. "
+            f"{example['epoch_literal']!r} and {example['local_literal']!r} in {example['relative_path']}, "
+            f"{example['epoch_locator']} and {example['local_locator']}): the clock ran at {said} from UTC")
+    fp = (bundle.get("experiment") or {}).get("acquisition_system", {}).get("fingerprint") or {}
+    facilities = sorted({m.get("facility") for m in fp.get("matches") or () if m.get("facility")})
+    zone = FACILITY_ZONES.get(facilities[0]) if len(facilities) == 1 else None
+    value = zone if zone is not None and _zone_fits(zone, pairs) and same_system else None
+    if not same_system:
+        reason = (f"{seen}. Those are the SPEC computer's clock; the start times waiting on this answer were written by "
+                  "another instrument's clock, which may differ, so no zone is suggested from them.")
+    elif value is not None:
+        reason = (f"{seen}, which is exactly {value} on each of those dates (daylight saving included), and the SPEC "
+                  f"headers name {facilities[0]} (the beamline fingerprint). Suggested, not applied: confirm it, or "
+                  "give the zone the clock was set to.")
+    elif zone is not None:
+        reason = (f"{seen}, which {zone} (the zone of {facilities[0]}, which the SPEC headers name) does not give on "
+                  "every one of those dates, so no zone is suggested.")
+    else:
+        reason = f"{seen}; the SPEC headers name no single facility, so no zone is suggested."
+    return {"rule_id": CLOCK_OFFSET_RULE_ID, "value": value, "offsets_minutes": offsets, "pairs": pairs[:5],
+            "pairs_total": len(pairs), "facility": facilities[0] if len(facilities) == 1 else None, "reason": reason}
+
+
 def clock_zone_question(bundle: Mapping) -> dict | None:
     """THE ONE beamtime-scope question about the instrument clock's zone, or ``None`` when no
     start-time candidate waits on it or a ``set_clock_time_zone`` decision exists. It states how
     many runs the answer unblocks, ONE example literal with its file, that no file states a zone,
-    and the exact command. It suggests NO zone: guessing one from where the facility is would be
-    exactly the guess CLAUDE.md §5 forbids."""
+    and the exact command. It never guesses a zone from where the facility is (CLAUDE.md §5); 1.16.0
+    (:data:`CLOCK_OFFSET_RULE_ID`): where the import's own SPEC ``#E`` / ``#D`` pairs give the clock's offset and
+    it is the named facility's zone on every date, that zone is SUGGESTED (``suggestion``), with the pairs as
+    evidence, never applied."""
     if clock_zone_decision(bundle) is not None:
         return None
     waiting = [c for c in bundle.get("candidates") or () if is_local_clock_start(c)]
@@ -2491,9 +2832,16 @@ def clock_zone_question(bundle: Mapping) -> dict | None:
         f"for you to confirm: "
         f"{CLOCK_ZONE_COMMAND}"
     )
+    suggestion = clock_zone_suggestion(bundle, waiting)
+    if suggestion is not None:
+        text += f" {suggestion['reason']}"
+        if suggestion["value"] is not None:
+            text += (" To confirm it: isaac bundle decide <bundle_dir> --target experiment --decision "
+                     f'set_clock_time_zone --value {suggestion["value"]} --by "<your name>"')
     return {"text": text, "run_ids": runs, "candidate_ids": [c["candidate_id"] for c in waiting],
             "example": {"literal": example.get("literal_value"), "relative_path": example.get("relative_path"),
-                        "source_id": example.get("source_id"), "locator": example.get("locator")}}
+                        "source_id": example.get("source_id"), "locator": example.get("locator")},
+            "suggestion": suggestion}
 
 
 def local_clock_reconfirm(bundle: Mapping) -> list[dict]:
@@ -3820,6 +4168,81 @@ def _account_key(account: str) -> str:
     return account.replace("/", "\\").rsplit("\\", 1)[-1].strip().casefold()
 
 
+# --- what is not a disagreement (1.16.0; audit of 18 Nov 2026, rules 2 and 5) ------------------------------------------
+
+#: A SPEC ``#C`` line is an EVENT LOG entry: ``#C <date>.  do run3.mac.`` (a macro started), ``#C <date>.  gap reset
+#: from A to B.`` (a motor redefined). Two such lines are two events, never two readings of one field; the session
+#: line (``#C spec  User = <account>``) and any other line still state a reading, and two different ones still
+#: disagree.
+COMMENT_EVENT_RULE_ID = "isaac.import.comment_lines_are_events.v1"
+#: A position the header reads back and the macro commanded, equal within the motor's resolution (1e-3 of its unit:
+#: ``Sx -21.2782`` and ``Sx -21.27825``), is one position, not two. Positions further apart (another spot) still
+#: disagree, as before.
+POSITION_RESOLUTION_RULE_ID = "isaac.import.position_within_motor_resolution.v1"
+#: An acquisition whose own ``#C`` lines name a macro that ran it (``do run3.mac``) was macro-driven: when no macro in
+#: the import declares it (the macro's text may have been overwritten since; nothing here checks that), that is no
+#: "acquired, never declared" conflict.
+MACRO_RUN_LINE_RULE_ID = "isaac.import.macro_run_line.v1"
+NOT_A_CONFLICT_RULES = (COMMENT_EVENT_RULE_ID, POSITION_RESOLUTION_RULE_ID, MACRO_RUN_LINE_RULE_ID)
+POSITION_RESOLUTION = 1e-3
+NOT_A_CONFLICT_REASONS = {
+    COMMENT_EVENT_RULE_ID: (f"{COMMENT_EVENT_RULE_ID}: these SPEC comment lines are an event log (a macro started, a "
+                            "motor redefined), not competing readings of one value; they are kept as evidence."),
+    POSITION_RESOLUTION_RULE_ID: (f"{POSITION_RESOLUTION_RULE_ID}: the positions agree within the motor's resolution "
+                                  f"({POSITION_RESOLUTION:g} of its unit), so they are one position, kept as evidence."),
+    MACRO_RUN_LINE_RULE_ID: (f"{MACRO_RUN_LINE_RULE_ID}: a macro named in its own comment line ran it; no macro in the "
+                             "import declares it, which is not a conflict."),
+}
+#: ``counts`` key: the engine disagreements these rules do not make conflicts (their conflict ids stay unused)
+NOT_A_CONFLICT_COUNT = "disagreements_not_conflicts"
+
+
+def not_a_conflict_text(n: int) -> str:
+    return (f"{n} disagreement(s) the engine found are not conflicts ({', '.join(NOT_A_CONFLICT_RULES)}): comment lines "
+            "that are events, positions equal within motor resolution, macro-driven runs no macro still declares. "
+            "Their readings stay evidence on their candidates.")
+#: the event verbs, after the date: `do <macro>` and `<motor> reset from <a> to <b>` (review of PR 346, I2: any other
+#: dated line, `potential set to 1.2 V` or `changed sample to B`, is still a reading)
+_EVENT_LINE = re.compile(r"^\w{3}\s+\w{3}\s+\d{1,2}\s+\d{1,2}:\d{2}:\d{2}\s+\d{4}\.\s+"
+                         r"(?:do\s+\S+?\.?|\S+\s+reset\s+from\s+\S+\s+to\s+\S+?\.?)\s*$")
+_POSITION_READING = re.compile(r"^\s*(\S+)\s+([-+]?(?:\d+\.?\d*|\.\d+)(?:[eE][-+]?\d+)?)\s*$")
+_MACRO_RUN_LINE = re.compile(r"^\w{3}\s+\w{3}\s+\d{1,2}\s+\d{1,2}:\d{2}:\d{2}\s+\d{4}\.\s+do\s+\S+")
+
+
+def macro_driven_paths(evidence_by_source: Mapping[str, Sequence]) -> set[str]:
+    """The files whose own ``#C`` lines say a macro ran them (:data:`MACRO_RUN_LINE_RULE_ID`)."""
+    return {path for path, items in evidence_by_source.items()
+            if any(getattr(i, "concept", None) == "spec_user_string" and _MACRO_RUN_LINE.match(str(getattr(i, "raw_literal", "") or ""))
+                   for i in items)}
+
+
+def _one_position(numbers: Sequence[float]) -> bool:
+    """Whether ``numbers`` are one position: their whole spread (max - min) is under :data:`POSITION_RESOLUTION`
+    (never a chain of small steps: review of PR 346)."""
+    return max(numbers) - min(numbers) < POSITION_RESOLUTION - 1e-12
+
+
+def not_a_conflict(key: Any, readings: Sequence[Any], engine_conflict: Mapping | None = None, *,
+                   macro_driven: bool = False) -> str | None:
+    """The rule (:data:`NOT_A_CONFLICT_RULES`) by which an engine disagreement is NOT a conflict, or ``None``. The
+    readings stay evidence on their candidate; only the conflict (and its question) is not made."""
+    if isinstance(engine_conflict, Mapping) and engine_conflict.get("kind") == "acquired_never_declared":
+        return MACRO_RUN_LINE_RULE_ID if macro_driven else None
+    if key == "spec_user_string":
+        settings = {str(r) for r in readings if not _EVENT_LINE.match(str(r or ""))}
+        return COMMENT_EVENT_RULE_ID if len(settings) <= 1 else None
+    if key in ("sample_position", "motor_position"):
+        by_motor: dict[str, list[float]] = {}
+        for r in readings:
+            m = _POSITION_READING.match(str(r or ""))
+            if not m:
+                return None  # a reading that is not `<motor> <number>`: compared as the engine compared it
+            by_motor.setdefault(m.group(1), []).append(float(m.group(2)))
+        if by_motor and all(_one_position(v) for v in by_motor.values()):
+            return POSITION_RESOLUTION_RULE_ID
+    return None
+
+
 def acquisition_fingerprint(evidence_by_source: Mapping[str, Sequence]) -> dict | None:
     """``experiment.acquisition_system.fingerprint``: the SPEC accounts and the known fingerprints' detector
     columns the SPEC headers state, and each known fingerprint they match (:data:`ACQUISITION_FINGERPRINTS`).
@@ -4610,7 +5033,24 @@ def build_bundle(
             unread = [u for u in unread if u["relative_path"] not in generic_claimed]
     if source_kind == "zip":
         _zip_inside_zip_rows(generic, unread, sources)
-    propose_processed_links(processed_outputs, runs)
+    # 1.16.0 (bl15.classify.PROCESSED_TITLE_RULE_ID): a SPEC-format file the ENGINE classified as a processed spectrum
+    # because its scan title names the scans it was computed from (no generic reader reads it) is the scientists'
+    # average, kept by AVERAGE_TITLE_ORIGIN_RULE_ID beside SPEC acquisitions, as a PyMca .mca average is
+    if quick_merges_apply(runs):
+        kept = {f["relative_path"] for po in processed_outputs for f in po["files"]}
+        for row in manifest:
+            rel = row.get("archive_path")
+            if (row.get("source_type") != ENGINE_PROCESSED_SOURCE_TYPE or rel in kept or rel in generic_claimed
+                    or rel not in sid_of):
+                continue
+            title = _spec_file_title(source_root, row)
+            if title is None or not is_average_title(title[1]):
+                continue
+            po, entry = _titled_processed_output(row, sid_of, title)
+            processed_outputs.append(po)
+            generic_statements.append(entry)
+            unread = [u for u in unread if u.get("relative_path") != rel]
+    propose_processed_links(processed_outputs, runs, generic_statements)
     runs_by_id = {r["run_id"]: r for r in runs}
 
     # -- candidates -------------------------------------------------------------------
@@ -4618,6 +5058,19 @@ def build_bundle(
     out_candidates: list[dict] = []
     windows_truncated = [0]
     conflicts: list[dict] = []
+    # conflict ids are numbered by POSITION, counting a disagreement this build no longer reports (1.16.0: an event-log
+    # comment line, a position within motor resolution, a macro-driven run with no declaring block), so every other
+    # conflict keeps the id the build before gave it
+    conflict_seq = [0]
+
+    def _next_conflict_id() -> str:
+        conflict_seq[0] += 1
+        return f"conf-{conflict_seq[0]:03d}"
+
+    # 1.16.0 (NOT_A_CONFLICT_RULES): the acquisitions whose own `#C` lines say a macro ran them
+    macro_driven = macro_driven_paths(evidence_by_source)
+    acq_path_of = {s["source_id"]: s["relative_path"] for s in sources}
+    not_conflicts: dict[str, int] = {}
     named_techniques: list[tuple] = []  # the engine's technique candidates (suggestions.TECHNIQUE_RULE_ID below)
     late_conflicts: list[tuple] = []  # a newly read candidate's conflict takes its id after every other conflict
     newly_read_ids: set[str] = set()  # candidates the build before did not give (their slots keep their numbers)
@@ -4630,6 +5083,28 @@ def build_bundle(
             if statements and isinstance(statements[0].get("key"), str)
             else c.candidate_id.split("::", 1)[-1]
         )
+        engine_conflict = None
+        if "::conflict::" in c.candidate_id and run_id:
+            try:
+                idx = int(c.candidate_id.rsplit("::", 1)[-1])
+                engine_conflict = conflicts_of_run.get(run_id, [])[idx]
+            except (ValueError, IndexError):
+                engine_conflict = None
+        dropped = None
+        # only where no record field is at stake (a comment line, a stage position, a macro relationship): a value a
+        # record could carry is never moved by these rules
+        if c.disagreement and c.target_field_path is None:
+            run = runs_by_id.get(run_id) if run_id else None
+            dropped = not_a_conflict(key, [r.get("value") for r in c.disagreement], engine_conflict,
+                                     macro_driven=bool(run) and acq_path_of.get(run.get("acquisition_source_id")) in macro_driven)
+        if dropped is not None:
+            # 1.16.0 (NOT_A_CONFLICT_RULES): not a disagreement. The readings stay this candidate's evidence (the engine's
+            # window, its total said); the conflict id it took is kept, unused, so every later conflict keeps its own
+            not_conflicts[dropped] = not_conflicts.get(dropped, 0) + 1
+            c = dataclasses.replace(c, disagreement=(), unresolved_reason=None,
+                                    not_proposable_reason=NOT_A_CONFLICT_REASONS[dropped])
+            if not late:
+                _next_conflict_id()
         evidence, total = _evidence_for(
             c, bundle_cid, key, archive_paths, sid_of, ev_index
         )
@@ -4644,19 +5119,12 @@ def build_bundle(
         if c.disagreement and (extracted == STATE_CONFLICTING or c.resolved_by_rule):
             # A disagreement a STORED rule resolved is still a conflict entry (review
             # L4): every reading is kept, and the rule that chose is carried beside it.
-            engine_conflict = None
-            if "::conflict::" in c.candidate_id and run_id:
-                try:
-                    idx = int(c.candidate_id.rsplit("::", 1)[-1])
-                    engine_conflict = conflicts_of_run.get(run_id, [])[idx]
-                except (ValueError, IndexError):
-                    engine_conflict = None
             if late:
                 late_conflicts.append((c, bundle_cid, run_id, engine_conflict))
             else:
                 conflicts.append(
                     _conflict_from_candidate(
-                        f"conf-{len(conflicts) + 1:03d}", c, bundle_cid, run_id, engine_conflict,
+                        _next_conflict_id(), c, bundle_cid, run_id, engine_conflict,
                         archive_paths, sid_of,
                     )
                 )
@@ -4670,6 +5138,7 @@ def build_bundle(
     # NAME.NNN series), so a candidate an import by the earlier build gave keeps its id and a late run's only ADD ids.
     late_keys = set(getattr(generic, "late_run_keys", None) or ()) if generic is not None else set()
     not_read: set[str] = set()  # runs whose header comment lines are not read into candidates (c16-r M1)
+    comment_args: dict[str, tuple] = {}  # run_id -> how its comment-line candidates were built (first id, arguments)
     # suggestions.STALE_COMMENT_RULE_ID: a comment line identical to an earlier run's under another name potential is
     # flagged on the run, and the potential it states is not offered
     from . import suggestions as _suggest
@@ -4678,6 +5147,9 @@ def build_bundle(
     for run_id, flags in stale_comments.items():
         runs_by_id[run_id]["other_relationships"]["anomalies"] = (
             runs_by_id[run_id]["other_relationships"]["anomalies"] + flags)[:50]
+    # suggestions.NAME_POTENTIAL_RULE_ID: what each run's NAME states about the potential, beside its comment lines
+    name_reviews = _suggest.name_potential_review(
+        runs, {run_id: _suggest.xdc_comment_lines(g, run_scans) for run_id, g, run_scans in xdc_runs})
     for late in (False, True):
         phase = [t for t in xdc_runs if (t[1].run_key in late_keys) is late]
         for run_id, g, run_scans in phase:
@@ -4700,8 +5172,11 @@ def build_bundle(
             if not_read:
                 not_read.add(run_id)  # in run order: once one run is left out, every later one is too
                 continue
+            comment_args[run_id] = (g, run_scans, len(out_candidates) + 1, dict(
+                stale=stale_comments.get(run_id),
+                setpoint_withheld=_suggest.comment_differs_reason(name_reviews.get(run_id) or {})))
             cands = _xdc_comment_candidates(g, run_scans, run_id, len(out_candidates) + 1, sid_of, writable,
-                                            stale=stale_comments.get(run_id))
+                                            **comment_args[run_id][3])
             if len(out_candidates) + len(cands) > MAX_CANDIDATES:
                 not_read.add(run_id)
                 continue
@@ -4729,17 +5204,35 @@ def build_bundle(
         runs, _suggest.technique_readings(runs, out_candidates, xdc_runs),
         {s["source_id"]: s["relative_path"] for s in sources}, f"cand-{len(out_candidates) + 1:04d}", writable)
         if len(out_candidates) < MAX_CANDIDATES else None)
-    detargeted_ids: set[str] = set()  # macro-name candidates that targeted the technique for the build before
+    # candidate id -> the field it targeted for the build before and no longer does (macro-name candidates of the
+    # technique; a comment line's value-less set-point once the run's name offers one)
+    detargeted_ids: dict[str, str] = {}
     if technique is not None:
         out_candidates.append(technique)
         shared_bundle_ids.append(technique["candidate_id"])
         newly_read_ids.add(technique["candidate_id"])
         for ci, c, bundle_cid, run_id, key, evidence, total in named_techniques:
             if technique["value"] is not None and _suggest.is_code_named_technique(out_candidates[ci]):
-                detargeted_ids.add(bundle_cid)
+                detargeted_ids[bundle_cid] = "system.technique"
                 out_candidates[ci] = _candidate_record(
                     dataclasses.replace(c, target_field_path=None, not_proposable_reason=_suggest.NOT_A_TECHNIQUE_REASON),
                     bundle_cid=bundle_cid, run_id=run_id, key=key, evidence=evidence, total=total, writable=writable)
+    # after every other candidate, so each keeps its id; never past the bound (a name's reading is then not offered)
+    for cand in _suggest.name_potential_candidates(
+            runs, out_candidates, name_reviews, {s["source_id"]: s["relative_path"] for s in sources},
+            len(out_candidates) + 1, writable, room=max(0, MAX_CANDIDATES - len(out_candidates))):
+        out_candidates.append(cand)
+        newly_read_ids.add(cand["candidate_id"])
+        runs_by_id[cand["run_id"]]["candidate_ids"].append(cand["candidate_id"])
+        if cand["target_field_path"] == SETPOINT_FIELD and cand["value"] is not None and cand["run_id"] in comment_args:
+            # the run's comment candidates again, from the same first id: the same list, the set-point one detargeted
+            g, run_scans, first_n, kwargs = comment_args[cand["run_id"]]
+            for again in _xdc_comment_candidates(g, run_scans, cand["run_id"], first_n, sid_of, writable,
+                                                 setpoint_in_name=True, **kwargs):
+                at = int(again["candidate_id"].split("-")[1]) - 1
+                if out_candidates[at]["target_field_path"] != again["target_field_path"]:
+                    detargeted_ids[again["candidate_id"]] = out_candidates[at]["target_field_path"]
+                out_candidates[at] = again
     if len(out_candidates) > MAX_CANDIDATES:
         raise BundleBoundsExceeded(f"{len(out_candidates)} candidates exceeds the bound of {MAX_CANDIDATES}.")
 
@@ -4787,7 +5280,7 @@ def build_bundle(
             )
         conflicts.append(
             {
-                "conflict_id": f"conf-{len(conflicts) + 1:03d}",
+                "conflict_id": _next_conflict_id(),
                 "engine_conflict_id": cc.get("conflict_id"),
                 "kind": str(cc.get("kind") or "corpus_conflict"),
                 "subject": cc.get("subject"),
@@ -4823,7 +5316,7 @@ def build_bundle(
             )
         conflicts.append(
             {
-                "conflict_id": f"conf-{len(conflicts) + 1:03d}",
+                "conflict_id": _next_conflict_id(),
                 "engine_conflict_id": None,
                 "kind": "same_file_name_different_folders",
                 "subject": stem,
@@ -4843,9 +5336,9 @@ def build_bundle(
         )
     # r5f M7: a macro's declared name that states another set-point than the file acquired in its place
     for extra in _macro_setpoint_conflicts(runs, conflicts, out_candidates, sources):
-        conflicts.append({**extra, "conflict_id": f"conf-{len(conflicts) + 1:03d}"})
+        conflicts.append({**extra, "conflict_id": _next_conflict_id()})
     for c, bundle_cid, run_id, engine_conflict in late_conflicts:
-        conflicts.append(_conflict_from_candidate(f"conf-{len(conflicts) + 1:03d}", c, bundle_cid, run_id, engine_conflict,
+        conflicts.append(_conflict_from_candidate(_next_conflict_id(), c, bundle_cid, run_id, engine_conflict,
                                                   archive_paths, sid_of))
     for conflict in conflicts:
         for rid in conflict["run_ids"]:
@@ -4891,7 +5384,7 @@ def build_bundle(
     # candidate that build gave and this one does not target there: `detargeted_ids`) is numbered after every other.
     before_by_run: dict[str | None, set[str]] = {}
     for cand in out_candidates:
-        was = "system.technique" if cand["candidate_id"] in detargeted_ids else cand["target_field_path"]
+        was = detargeted_ids.get(cand["candidate_id"], cand["target_field_path"])
         if was and cand["candidate_id"] not in newly_read_ids:
             before_by_run.setdefault(cand["run_id"], set()).add(was)
     any_before = set().union(*before_by_run.values()) if before_by_run else set()
@@ -5028,6 +5521,7 @@ def build_bundle(
         "questions": len(questions),
         **processed_output_counts(processed_outputs),
         **({HEADER_COMMENT_RUNS_NOT_READ: comment_runs_not_read} if comment_runs_not_read else {}),
+        **({NOT_A_CONFLICT_COUNT: sum(not_conflicts.values())} if not_conflicts else {}),
     }
     eligible = sum(1 for c in out_candidates if c["eligibility_for_official_record"]["eligible"])
     readiness = {
@@ -5096,7 +5590,7 @@ def build_bundle(
             "element_evidence": [
                 {**dict(e), "source_id": sid_of.get(e.get("source_path"))}
                 for e in reading.element_evidence
-            ],
+            ] + scanned_edge_evidence(xdc_runs, runs_by_id, sid_of),
             "temperature_statements": [
                 {**dict(t), "source_id": sid_of.get(t.get("source_path"))}
                 for t in reading.temperature_statements
@@ -5910,7 +6404,7 @@ def import_rules_missing(bundle: Mapping) -> list[tuple[str, str]]:
 
 def upgrade_statement(from_version: str | None, newly_writable: Iterable[str],
                       rules_missing: Iterable[tuple[str, str]] = (), quick_merge_run_ids: Sequence[str] = (),
-                      average_title_run_ids: Sequence[str] = ()) -> str:
+                      average_title_run_ids: Sequence[str] = (), processed_title_run_ids: Sequence[str] = ()) -> str:
     """THE ONE SENTENCE every surface prints about an upgrade of an older bundle. ``quick_merge_run_ids``
     (:func:`quick_merge_runs`): runs an older build made of the scientists' quick merges, which only a re-import
     keeps as processed outputs (review L5); ``average_title_run_ids`` (:func:`average_title_runs`, 1.13.0) the same for
@@ -5935,6 +6429,11 @@ def upgrade_statement(from_version: str | None, newly_writable: Iterable[str],
         text += (f"; {len(folder)} of its runs ({', '.join(folder[:5])}{', ...' if len(folder) > 5 else ''}) are files whose "
                  "scan title states an average, beside SPEC acquisitions (the scientists' averages), kept as runs by the build that "
                  "imported it — re-import to keep them as processed outputs")
+    titled = [i for i in processed_title_run_ids if i not in ids and i not in folder]
+    if titled:
+        text += (f"; {len(titled)} of its runs ({', '.join(titled[:5])}{', ...' if len(titled) > 5 else ''}) are files whose "
+                 "scan title names the scans it was computed from (1.16.0), kept as runs by the build that imported it "
+                 "— re-import to keep them as processed outputs")
     return text
 
 
@@ -5953,7 +6452,7 @@ def record_format_upgrade(bundle: dict, *, from_version: str | None, to_version:
         "decisions_before": int(decisions_before),
         "newly_writable_paths": newly,
         "statement": upgrade_statement(from_version, newly, import_rules_missing(bundle), quick_merge_runs(bundle),
-                                       average_title_runs(bundle)),
+                                       average_title_runs(bundle), processed_title_runs(bundle)),
     }
     bundle.setdefault("format_upgrades", []).append(entry)
     return entry
@@ -6299,6 +6798,10 @@ def validate_bundle(bundle: Any, *, max_errors: int = 50, encoded: bytes | None 
         for rid in quick_merge_runs(bundle):
             errors.append(f"consistency: run {rid} is a file the engine classifies {ENGINE_PROCESSED_SOURCE_TYPE} beside "
                           f"SPEC acquisition runs, which {ENGINE_ORIGIN_RULE_ID} keeps as a processed output, never a run")
+    if _imported_by_at_least(bundle, "1.16.0"):
+        for rid in processed_title_runs(bundle):
+            errors.append(f"consistency: run {rid} is a file whose scan title names the scans it was computed from, "
+                          f"which {AVERAGE_TITLE_ORIGIN_RULE_ID} keeps as a processed output, never a run")
     if _imported_by_at_least(bundle, "1.13.0"):
         for rid in average_title_runs(bundle):
             errors.append(f"consistency: run {rid} is a file whose scan title states an average beside SPEC acquisition "
@@ -6333,14 +6836,20 @@ def validate_bundle(bundle: Any, *, max_errors: int = 50, encoded: bytes | None 
     # what `propose_processed_links` gives over the stored runs (the derived group_id aside).
     if bundle.get("processed_outputs"):
         again = json.loads(json.dumps(bundle["processed_outputs"]))
-        propose_processed_links(again, bundle["runs"])
+        # TITLE_LINK_RULE_ID is re-run only for a bundle a 1.16.0 build imported: an older one keeps the links it was
+        # given (review of PR 346, C1)
+        propose_processed_links(again, bundle["runs"],
+                                bundle["extended_context"] if _imported_by_at_least(bundle, "1.16.0") else ())
 
         def _bare(links):
             return [{k: v for k, v in link.items() if k != "group_id"} for link in links]
 
         for po, e in zip(bundle["processed_outputs"], again):
             if _bare(po["proposed_links"]) != _bare(e["proposed_links"]) or po["link_note"] != e["link_note"]:
-                rule = LEGACY_LINK_RULE_ID if is_quick_merge(po) else LINK_RULE_ID
+                by_title = any((x.get("link_note") or {}).get("match") == "title_scans"
+                               or any(link.get("rule_id") == TITLE_LINK_RULE_ID for link in x.get("proposed_links") or ())
+                               for x in (po, e))
+                rule = (TITLE_LINK_RULE_ID if by_title else LEGACY_LINK_RULE_ID) if is_quick_merge(po) else LINK_RULE_ID
                 errors.append(f"consistency: processed output {po['processed_output_id']} link is not what {rule} gives over the stored runs")
     # A RUN IS IN AT MOST ONE LIVE GROUP (proposed / confirmed / merged); rejected and split
     # groups are history and do not hold their runs.

@@ -97,7 +97,8 @@ def _write_run(root: Path, stem: str, epoch: int) -> None:
     (root / stem).write_text("\n".join(lines))
     (root / f"{stem}_dir").mkdir()
     for scan in sorted((FIXTURE / f"{src}_dir").iterdir()):
-        (root / f"{stem}_dir" / scan.name.replace(src, stem)).write_text(scan.read_text())
+        # every copy records filter 10 (unit 04's second export records 20 since C6; not what these runs are about)
+        (root / f"{stem}_dir" / scan.name.replace(src, stem)).write_text(scan.read_text().replace("filter=20", "filter=10"))
 
 
 def _corpus(tmp_path: Path, *, acquired=None, declared=None, macros=None, name="corpus") -> Path:

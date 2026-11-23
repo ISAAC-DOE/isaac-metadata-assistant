@@ -108,6 +108,9 @@ ALLOWED_DECISIONS: Mapping[str, tuple[str, ...]] = {
     "stated_utc_start_times": ("confirm",),
     # finding 4 (audit of 18 Nov 2026): the beamtime-wide dose reading (isaac.xas.dose_damage.v2)
     "dose_reading": (B.DOSE_READING_DECISION,),
+    # C6: keep the records despite the logbook's remark (confirm the groups, recorded WITH this question's id), or leave
+    # them out (reject). No `defer`: a group's defer makes it a proposal again, which is a grouping act, not this answer
+    "logbook_quality_remark": ("confirm", "reject"),
 }
 #: A ``confirm_value`` question whose targets carry NO value (the files hold text, no value this
 #: build derives from it): there is nothing to confirm, so ``confirm`` is not offered. The kind —
@@ -125,7 +128,7 @@ VALUE_KINDS = ("missing_value", "optional_values", "confirm_value", "resolve_con
 #: The kinds an ANSWERED question of is still found under its id (``consolidate(include_answered=True)``):
 #: ``decide --question`` re-answers it and ``bundle show question`` shows it with ``status`` and its answers.
 RESOLVABLE_WHEN_ANSWERED = VALUE_KINDS + ("confirm_absorber", "naming_counter_positions", "clock_time_zone",
-                                          "stated_utc_start_times", "dose_reading")
+                                          "stated_utc_start_times", "dose_reading", "logbook_quality_remark")
 #: r6 I1: the beamtime-wide start-time question (:func:`_stated_utc_start_question`): one answer for every group whose
 #: start-time disagreement the files settle with an instant they state in UTC. Its targets are conflicts.
 STATED_UTC_START_KIND = "stated_utc_start_times"
@@ -1392,9 +1395,16 @@ def consolidate(bundle: Mapping, *, compositions_out: dict | None = None, includ
                 "targets": [{"kind": "experiment", "id": "experiment"}],
                 "per_scope_targets": {"experiment": ["experiment"]},
                 "hints": [{"kind": "local_clock_literal", **zq["example"],
-                           "note": "The header's own words: a local clock time with no zone. A hint about WHAT is asked, never an answer."}],
+                           "note": "The header's own words: a local clock time with no zone. A hint about WHAT is asked, never an answer."}]
+                + [{"kind": "clock_offset_pair", "rule_id": B.CLOCK_OFFSET_RULE_ID, **p,
+                    "note": ("A SPEC header writes one instant as UTC (#E) and as local clock time (#D): their difference "
+                             "is the offset of the clock that wrote it."
+                             + ("" if (zq.get("suggestion") or {}).get("value") is not None else
+                                " It is the SPEC computer's clock; the clock this question asks about may differ."))}
+                   for p in ((zq.get("suggestion") or {}).get("pairs") or ())],
                 "allowed_values": None,
-                "suggested_value": None,
+                "suggested_value": (zq.get("suggestion") or {}).get("value"),
+                **({"suggestion": {k: v for k, v in zq["suggestion"].items() if k != "pairs"}} if zq.get("suggestion") else {}),
                 "answer_command": (f'isaac bundle decide <bundle_dir> --question {qid} --decision {B.CLOCK_ZONE_DECISION} '
                                    '--value <IANA time-zone name> --by "<your name>"'),
                 **({"deferred": deferred} if (deferred := _clock_zone_deferral(bundle)) else {}),
@@ -1468,6 +1478,8 @@ def consolidate(bundle: Mapping, *, compositions_out: dict | None = None, includ
         )
 
     questions += _absorber_questions(bundle, groups, include_answered=include_answered)
+    if has_groups:
+        questions += _quality_remark_questions(bundle, groups, include_answered=include_answered)
 
     def order(q):
         scope = q["scope"]
@@ -3871,6 +3883,14 @@ def _absorber_hints(items: Sequence[tuple[Mapping, dict]]) -> list[dict]:
         hints.append({"kind": "processed_output_header", "literal": f"{el or '?'} {ed or '?'}",
                       "locator": po[0].get("locator"), "relative_path": po[0].get("relative_path"), "source_id": po[0].get("source_id"),
                       "note": f"from {n} linked processed output(s) (e.g. this one; an output can be linked to runs of several groups); links are proposed by name, not confirmed"})
+    scanned = [w for _, s in items for w in s["witnesses"] if w["kind"] == "scanned_range"]
+    if scanned:
+        w = scanned[0]
+        hints.append({"kind": "scanned_range", "literal": f"{w.get('element') or '?'} {w.get('edge') or '?'}",
+                      "locator": w.get("locator"), "relative_path": w.get("relative_path"), "source_id": w.get("source_id"),
+                      "rule_id": w.get("rule_id"),
+                      "note": (f"from the energy grid of {len(scanned)} run(s)' own scans (e.g. this one: "
+                               f"{w.get('literal')}): the finest steps bracket this edge")})
     seen = set()
     for _, s in items:
         for w in s["witnesses"]:
@@ -3992,11 +4012,19 @@ def _absorber_questions(bundle: Mapping, groups: Sequence[Mapping], *, include_a
             own = sum(1 for _, s in items if s['group_specific_statements'])
             statements = items[0][1]['beamtime_wide_statements']
             # r4-b L3: the rest counted in groups, the statements apart ("the rest (2, …)" read as two groups of eight)
-            text = (f"The files state element {element}, edge {edge} for {len(items)} group(s), and no file disagrees: "
-                    f"{own} of them from processed outputs linked to their runs, "
-                    f"the rest only from beamtime-wide statements: {len(items) - own} group(s), from {statements} "
-                    "statement(s) (e.g. an acquisition macro's name). "
-                    "Is that the absorber? Answer once, or per group (a reference foil or blank cell may differ).")
+            only_grid = all(w["kind"] == "scanned_range" for _, s in items for w in s["witnesses"])
+            text = (f"Element {element}, edge {edge} is suggested from the scans' energy grid for {len(items)} group(s) "
+                    "(the finest energy steps of each group's own scans bracket that edge; no file states the absorber), "
+                    "and no scan disagrees. "
+                    "Is that the absorber? Answer once, or per group (a reference foil or blank cell may differ)."
+                    if only_grid else
+                    f"The files state element {element}, edge {edge} for {len(items)} group(s), and no file disagrees: "
+                    f"{own} of them from processed outputs linked to their runs"
+                    + (" or from their own scans' energy grid" if any(w["kind"] == "scanned_range" for _, s in items for w in s["witnesses"]) else "")
+                    + (", "
+                       f"the rest only from beamtime-wide statements: {len(items) - own} group(s), from {statements} "
+                       "statement(s) (e.g. an acquisition macro's name). " if own < len(items) else ". ")
+                    + "Is that the absorber? Answer once, or per group (a reference foil or blank cell may differ).")
         else:
             partial = sum(1 for _, s in items for r in s["ai_readings"] if r.get("read_for"))
             text = (f"Element {element}, edge {edge} is suggested for {len(items)} group(s): "
@@ -4068,6 +4096,120 @@ def _absorber_questions(bundle: Mapping, groups: Sequence[Mapping], *, include_a
             "hints": _absorber_hints([(g, sug)]) + before,
             "allowed_values": None,
             "answer_command": f'isaac bundle decide <bundle_dir> --question {qid} --decision set_absorber --element <El> --edge <K|L1-L3|M1-M5> --by "<your name>"',
+        })
+    return out
+
+
+# --- C6: a logbook remark that a SAMPLE failed is a QC question on that sample's record groups --------------------
+
+#: The kind of the question (a new kind, with its own ids; no other question changes).
+QUALITY_REMARK_KIND = "logbook_quality_remark"
+#: The key a "keep them" answer's value carries: the question it answers (review of #352, finding 5). A group confirmed
+#: for any other reason (a bulk confirm of the grouping) has not answered the remark, so the question stays open.
+QUALITY_REMARK_ANSWER_KEY = "answers_logbook_remark"
+_QUALITY_REMARK_WHY = ("The logbook has a remark under this sample's heading that may say it failed or was bad. Whether "
+                       "its records are kept is the scientist's decision: nothing is dropped until they say so.")
+
+
+def quality_remark_answered(bundle: Mapping, qid: str) -> set[str]:
+    """The group ids kept in answer to question ``qid``: a confirm carrying its id, not undone since by a reject, split,
+    merge or defer of the group. A later plain confirm (of the grouping) does not undo it (re-review of #352, B)."""
+    kept: set[str] = set()
+    for d in bundle.get("scientist_decisions") or ():
+        t = d.get("target") or {}
+        if t.get("kind") != "record_group":
+            continue
+        if (d.get("decision") == "confirm" and isinstance(d.get("value"), Mapping)
+                and d["value"].get(QUALITY_REMARK_ANSWER_KEY) == qid):
+            kept.add(t.get("id"))
+        elif d.get("decision") in ("reject", "split", "merge", "defer"):
+            kept.discard(t.get("id"))
+    return kept
+
+
+def quality_remark_question_id(source: str, locator: str) -> str:
+    """The id of the QC question about the sample a logbook remark is about: from the kind and the remark's own source
+    and locator (the first of its section), as the import recorded them (DEC-91), never from an answer."""
+    return _qid("experiment", QUALITY_REMARK_KIND, f"{source}|{locator}")
+
+
+def _line_of(locator: Any) -> int:
+    m = re.match(r"lines? (\d+)", str(locator or ""))
+    return int(m.group(1)) if m else 10 ** 9
+
+
+def sample_failure_notes(bundle: Mapping) -> list[Mapping]:
+    """The data-quality notes that say a whole SAMPLE failed and reach runs: a sample heading's qualifier that is a
+    failure marker (``(bad)``), and a short line right under the heading that says the sample failed ("did not
+    work!", ``bl15.notes.section_quality_remark.v1``). A row's Notes cell is about one file, and is not one of them."""
+    from ..bl15 import notes as N
+
+    out = []
+    for n in bundle.get("data_quality_notes") or ():
+        loc, text = str(n.get("locator") or ""), str(n.get("text") or "")
+        if not n.get("run_ids"):
+            continue
+        if loc.endswith("sample heading qualifier") and text.strip().casefold() in N.FAILURE_MARKERS:
+            out.append(n)
+        elif loc.endswith(") quality remark") and text.strip():
+            out.append(n)  # the notes reader kept it only because it is such a remark (bl15.notes.section_quality_remark.v1)
+    return out
+
+
+def _quality_remark_questions(bundle: Mapping, groups: Sequence[Mapping], *, include_answered: bool = False) -> list[dict]:
+    """One question per sample the logbook says failed: its remarks quoted, where they are, and the live record groups
+    holding its runs as targets. ``confirm`` keeps them as records, ``reject`` leaves them out (no record is built; the
+    runs and their files stay in the bundle), ``defer`` says "I don't know". A group a scientist already confirmed is
+    answered (``include_answered`` keeps it, under the same id); a rejected one is no longer live."""
+    notes = sample_failure_notes(bundle)
+    if not notes:
+        return []
+    path_of = {src.get("source_id"): src.get("relative_path") for src in bundle.get("sources") or ()}
+    key_of = {r["run_id"]: r["run_key"] for r in bundle.get("runs") or ()}
+    stem_of = {r["run_id"]: r.get("stem") for r in bundle.get("runs") or ()}
+    by_sample: dict[tuple, list[Mapping]] = {}
+    for n in notes:
+        by_sample.setdefault((n.get("source_id"), tuple(sorted(n["run_ids"]))), []).append(n)
+    out = []
+    for (source_id, run_ids), its in by_sample.items():
+        its = sorted(its, key=lambda n: _line_of(n.get("locator")))
+        keys = {key_of[r] for r in run_ids if r in key_of}
+        source = str(path_of.get(source_id) or source_id or "the logbook")
+        qid = quality_remark_question_id(source, str(its[0].get("locator")))
+        answered = quality_remark_answered(bundle, qid)
+        targets = [g for g in groups if keys & set(g.get("member_run_keys") or ())
+                   and (include_answered or g["group_id"] not in answered)]
+        if not targets:
+            continue
+        quotes = "; ".join(f"{_quoted(str(n.get('text') or ''))} ({n.get('locator')})" for n in its)
+        files = [stem_of[r] for r in run_ids if stem_of.get(r)]
+        shown = ", ".join(files[:4]) + (f" and {len(files) - 4} more" if len(files) > 4 else "")
+        text = (f"The logbook ({source}) has this remark under the sample's heading: {quotes}. It may say the sample "
+                f"failed or was bad. It reaches {len(run_ids)} measurement(s) ({shown}) in {len(targets)} record "
+                "group(s). Nothing has been dropped. Keep them as records despite the remark (confirm: this also confirms the "
+                "grouping of those runs), or leave them out "
+                "(reject: no record is built from them, and the runs and their files stay in the bundle). Answer once, "
+                "or per group. A group confirmed for any other reason has not answered this. To keep a group with a QC "
+                "status, approve its processing result with --qc-status and a --qc-note in the scientist's words.")
+        out.append({
+            "question_id": qid,
+            "partition": None,
+            "tier": TIER_CONFLICT,
+            "blocking": False,
+            "why": _QUALITY_REMARK_WHY,
+            "kind": QUALITY_REMARK_KIND,
+            "scope": "experiment",
+            "target_field_path": None,
+            "text": text,
+            "applies_to": {"groups": len(targets), "runs": sum(_measured_runs(g) for g in targets),
+                           "targets": len(targets)},
+            "targets": [{"kind": "record_group", "id": g["group_id"]} for g in targets],
+            "per_scope_targets": {f"group:{g['group_id']}": [g["group_id"]] for g in targets},
+            "hints": [{"kind": "logbook_remark", "literal": n.get("text"), "locator": n.get("locator"),
+                       "source": source, "note_id": n.get("note_id")} for n in its],
+            "allowed_values": None,
+            "answer_command": (f'isaac bundle decide <bundle_dir> --question {qid} --decision <confirm|reject> '
+                               '--by "<your name>"   # per group: add --only group:<group_id>'),
         })
     return out
 
@@ -5192,10 +5334,14 @@ def stated_potentials_beyond_candidates(bundle: Mapping, member_ids: set) -> lis
         if (e.get("run_id") in run_ids and B.is_xdc_comment_line(e.get("concept"), e.get("locator"))
                 and isinstance(e.get("raw_literal"), str) and (e["run_id"], e.get("relative_path"), e.get("locator")) not in held):
             headers.setdefault(e["run_id"], []).append(e)
+    # a name token a candidate holds (``suggestions.NAME_POTENTIAL_RULE_ID``) is stated by that candidate
+    named = {(c.get("run_id"), e.get("literal_value")) for c in bundle.get("candidates") or ()
+             if c.get("run_id") in run_ids and c.get("target_field_path") == "context.electrochemistry.potential_setpoint_V"
+             for e in c.get("evidence") or () if str(e.get("locator") or "").startswith("filename token")}
     for r in runs:
         first = next((sc.get("relative_path") for sc in r.get("scans") or () if sc.get("relative_path")), None)
         found = [("file name", tok, first, "file name", None, _token_volts(tok))
-                 for tok in _name_tokens(r) if _POTENTIAL_TOKEN.match(tok)]
+                 for tok in _name_tokens(r) if _POTENTIAL_TOKEN.match(tok) and (r["run_id"], tok) not in named]
         for e in headers.get(r["run_id"], ()):
             for got in header_potentials_in_line(e["raw_literal"]):  # `-0.3 V vs RHE` as well as `0.5Vrhe`
                 found.append(("scan header", got["literal"], e.get("relative_path"), e.get("locator"), got["scale"], got["volts"]))
@@ -5229,11 +5375,14 @@ def stated_potential_notes(w: Mapping) -> str:
     lits = list(dict.fromkeys(stated_literal(s) for s in header))
     held = all(s.get("candidate_id") for s in header)  # c16b: the comment rule's candidates hold the lines
     read = held and any(s.get("read_as_V") is not None for s in header)  # r1d: a value, read from a plain form
+    withheld = held and not read and any(s.get("withheld") for s in header)  # 1.16.0: plain, but not offered
     text = (f" {', '.join(lits[:3])}{', …' if len(lits) > 3 else ''} {'is' if len(lits) == 1 else 'are'} written in the "
             "scan header (a comment line), not the file name"
             + ((f", with the scale ({', '.join(scales)})" if scales else "")
                + "; read from that free-text line, the set-point" + (" and the scale" if scales else "")
                + " need your review (confirm or correct)" if read else
+               "; its value is not offered (the file name writes another number, or the line is possibly an earlier "
+               "run's), so the set-point is asked: the value held during the scan" if withheld else
                "; no value is read from that free-text line (not written in a plain form), so the set-point is asked: "
                "the value held during the scan" if held else
                f", with the scale ({', '.join(scales)}); no reader reads the set-point or the scale from it, so both "

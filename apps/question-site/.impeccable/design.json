@@ -1,0 +1,152 @@
+{
+  "schemaVersion": 2,
+  "generatedAt": "2026-11-23T00:00:00Z",
+  "title": "Design System: ISAAC questions",
+  "extensions": {
+    "colorMeta": {
+      "action": { "role": "primary", "displayName": "Form Blue", "canonical": "#1d5bd1", "dark": "#7aa7f5", "tonalRamp": ["#0b1f47", "#143f92", "#184cb0", "#1d5bd1", "#4f80dd", "#8fb0ea", "#c4d6f5", "#ebf1fc"] },
+      "ok": { "role": "secondary", "displayName": "Saved Green", "canonical": "#1d6a42", "dark": "#7fd1a2", "tonalRamp": ["#0c2c1c", "#144a2e", "#1d6a42", "#2f8a5a", "#5aaa7f", "#93cbab", "#b9dfc9", "#e9f5ee"] },
+      "warn": { "role": "tertiary", "displayName": "Unsure Amber", "canonical": "#7f5300", "dark": "#e8c171", "tonalRamp": ["#352300", "#583a00", "#7f5300", "#a46f12", "#c79a45", "#e0c27f", "#ead39b", "#fbf3e1"] },
+      "bad": { "role": "tertiary", "displayName": "Error Red", "canonical": "#9a2a20", "dark": "#f2a299", "tonalRamp": ["#3e100c", "#6a1d16", "#9a2a20", "#bd4a3f", "#d9786e", "#eca8a0", "#f0c3bd", "#fcecea"] },
+      "ground": { "role": "neutral", "displayName": "Soft Grey Ground", "canonical": "#f4f5f7", "dark": "#101317" },
+      "card": { "role": "neutral", "displayName": "Card White", "canonical": "#ffffff", "dark": "#181c22" },
+      "sunk": { "role": "neutral", "displayName": "Sunk", "canonical": "#f7f8fa", "dark": "#1d2229" },
+      "line": { "role": "neutral", "displayName": "Hairline", "canonical": "#e2e5e9", "dark": "#2a3039" },
+      "line-strong": { "role": "neutral", "displayName": "Strong Hairline", "canonical": "#cfd4da", "dark": "#39414c" },
+      "control-line": { "role": "neutral", "displayName": "Control Edge", "canonical": "#858e99", "dark": "#7b8592" },
+      "ink": { "role": "neutral", "displayName": "Ink", "canonical": "#14181d", "dark": "#eef1f4", "tonalRamp": ["#14181d", "#2a313a", "#444d59", "#59626e", "#858e99", "#cfd4da", "#e2e5e9", "#f4f5f7"] },
+      "ink-2": { "role": "neutral", "displayName": "Ink 2", "canonical": "#444d59", "dark": "#c3cad3" },
+      "ink-3": { "role": "neutral", "displayName": "Ink 3", "canonical": "#59626e", "dark": "#a5aeb9" }
+    },
+    "typographyMeta": {
+      "headline": { "displayName": "Question", "purpose": "The question heading and list greeting; 24px under 640px." },
+      "title": { "displayName": "Suggested value", "purpose": "The suggestion's value, tabular numerals." },
+      "section": { "displayName": "Section", "purpose": "List section headings." },
+      "body": { "displayName": "Body", "purpose": "Lead and reason sentences, 64ch max; 17px under 640px." },
+      "control": { "displayName": "Control", "purpose": "Buttons, links, disclosure summaries, inputs." },
+      "label": { "displayName": "Label", "purpose": "Sentence-case labels above answer groups and fields." },
+      "meta": { "displayName": "Meta", "purpose": "Top line, scope, citations, hints, captions." },
+      "quote": { "displayName": "Quoted line", "purpose": "A line lifted verbatim from the scientist's files." }
+    },
+    "shadows": [
+      { "name": "card-ambient", "value": "0 1px 2px rgba(16, 24, 40, 0.05), 0 6px 20px rgba(16, 24, 40, 0.06)", "purpose": "Cards and the list panel only." },
+      { "name": "card-ambient-dark", "value": "0 1px 2px rgba(0, 0, 0, 0.35)", "purpose": "Dark-mode card edge." }
+    ],
+    "motion": [
+      { "name": "control-state", "value": "120ms ease-out", "purpose": "Button background and border changes." },
+      { "name": "chevron", "value": "transform 160ms ease-out", "purpose": "Disclosure chevron rotation." },
+      { "name": "ease-out-expo", "value": "cubic-bezier(0.16, 1, 0.3, 1)", "purpose": "Progress fill (300ms) and toast rise (220ms)." },
+      { "name": "reduced-motion", "value": "transition: none", "purpose": "All transitions removed under prefers-reduced-motion." }
+    ],
+    "breakpoints": [
+      { "name": "phone", "value": "640px" }
+    ],
+    "focus": { "value": "outline: 2px solid var(--focus); outline-offset: 2px", "purpose": "Every focusable element; inputs use 1px offset, list rows -2px." }
+  },
+  "components": [
+    {
+      "name": "Primary Button",
+      "kind": "button",
+      "refersTo": "button-primary",
+      "description": "The one blue action per view, e.g. accepting the suggestion.",
+      "html": "<button class=\"ds-btn ds-btn-primary\">Yes, that’s right <span class=\"ds-kbd\">Y</span></button>",
+      "css": ".ds-btn { display: inline-flex; align-items: center; justify-content: center; gap: 10px; min-height: 46px; padding: 10px 18px; border: 1px solid var(--control-line); border-radius: var(--radius-control); background: var(--card); color: var(--ink); font: 550 16px/1.3 var(--font); cursor: pointer; transition: background-color 120ms ease-out, border-color 120ms ease-out; } .ds-btn-primary { background: var(--action); border-color: var(--action); color: var(--on-action); font-weight: 600; } .ds-btn-primary:hover { background: var(--action-hover); border-color: var(--action-hover); } .ds-btn-primary:active { background: var(--action-press); } .ds-btn:focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; } .ds-kbd { font: 12px/1 var(--mono); padding: 3px 6px; border: 1px solid currentColor; border-radius: 5px; }"
+    },
+    {
+      "name": "Answer Button",
+      "kind": "button",
+      "refersTo": "button",
+      "description": "Alternative answers and navigation; white with a control-edge border.",
+      "html": "<button class=\"ds-btn\">XAS</button>",
+      "css": ".ds-btn { display: inline-flex; align-items: center; justify-content: center; gap: 10px; min-height: 46px; padding: 10px 18px; border: 1px solid var(--control-line); border-radius: var(--radius-control); background: var(--card); color: var(--ink); font: 550 16px/1.3 var(--font); cursor: pointer; transition: background-color 120ms ease-out, border-color 120ms ease-out; } .ds-btn:hover { background: var(--sunk); border-color: var(--ink-3); } .ds-btn:active { background: var(--line); } .ds-btn:focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; }"
+    },
+    {
+      "name": "Chosen Answer",
+      "kind": "button",
+      "refersTo": "button-chosen",
+      "description": "A saved answer: green triple with a drawn check.",
+      "html": "<button class=\"ds-btn ds-chosen\" aria-pressed=\"true\">XES</button>",
+      "css": ".ds-btn { display: inline-flex; align-items: center; gap: 10px; min-height: 46px; padding: 10px 18px; border: 1px solid var(--control-line); border-radius: var(--radius-control); font: 550 16px/1.3 var(--font); cursor: pointer; } .ds-chosen { background: var(--ok-bg); border-color: var(--ok); color: var(--ok); } .ds-chosen::before { content: ''; width: 14px; height: 8px; border-left: 2px solid currentColor; border-bottom: 2px solid currentColor; transform: translateY(-2px) rotate(-45deg); flex: none; } .ds-btn:focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; }"
+    },
+    {
+      "name": "Text Input",
+      "kind": "input",
+      "refersTo": "input",
+      "description": "Typed answer or note.",
+      "html": "<input class=\"ds-input\" placeholder=\"Or type it in your own words\">",
+      "css": ".ds-input { min-height: 46px; padding: 10px 14px; border: 1px solid var(--control-line); border-radius: var(--radius-control); background: var(--card); color: var(--ink); font: 16px var(--font); caret-color: var(--action); } .ds-input::placeholder { color: var(--ink-3); } .ds-input:focus-visible { outline: 2px solid var(--focus); outline-offset: 1px; }"
+    },
+    {
+      "name": "Disclosure",
+      "kind": "custom",
+      "description": "Blue summary with a drawn chevron; hides extra answers, the note and the evidence.",
+      "html": "<details class=\"ds-details\"><summary>Show the evidence and context</summary><p>Hidden context.</p></details>",
+      "css": ".ds-details > summary { display: inline-flex; align-items: center; gap: 8px; cursor: pointer; color: var(--action); font: 550 16px var(--font); list-style: none; padding: 4px 0; } .ds-details > summary::-webkit-details-marker { display: none; } .ds-details > summary::before { content: ''; width: 7px; height: 7px; border-right: 2px solid currentColor; border-bottom: 2px solid currentColor; transform: rotate(-45deg); transition: transform 160ms ease-out; } .ds-details[open] > summary::before { transform: rotate(45deg) translate(-2px, -2px); } .ds-details > summary:hover { color: var(--action-hover); text-decoration: underline; text-underline-offset: 3px; } .ds-details > summary:focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; border-radius: 4px; }"
+    },
+    {
+      "name": "Question Card",
+      "kind": "card",
+      "refersTo": "card",
+      "description": "One card, one question, the suggestion and its quoted evidence.",
+      "html": "<section class=\"ds-card\"><h1 class=\"ds-q\">Is the technique this one?</h1><p class=\"ds-scope\">Applies to all records</p><p class=\"ds-val\"><span>Suggested: </span>Value</p><figure class=\"ds-quote\"><q>quoted line 1.0</q><cite>file_name, line 1</cite></figure></section>",
+      "css": ".ds-card { background: var(--card); border: 1px solid var(--line); border-radius: var(--radius); box-shadow: var(--shadow); padding: 36px 40px 32px; color: var(--ink); font: 18px/1.6 var(--font); } .ds-q { margin: 0; font-size: 30px; line-height: 1.3; font-weight: 650; letter-spacing: -0.012em; text-wrap: balance; } .ds-scope { margin: 8px 0 0; color: var(--ink-3); font-size: 16px; } .ds-val { margin: 28px 0 0; font-size: 24px; line-height: 1.3; font-weight: 650; font-variant-numeric: tabular-nums; } .ds-val span { font-weight: 500; color: var(--ink-2); } .ds-quote { margin: 14px 0 0; } .ds-quote q { display: block; font: 15px/1.55 var(--mono); quotes: none; white-space: pre-wrap; } .ds-quote cite { display: block; margin-top: 4px; font-style: normal; font-size: 14px; color: var(--ink-3); }"
+    },
+    {
+      "name": "Saved Line",
+      "kind": "custom",
+      "refersTo": "saved-line",
+      "description": "Status after a save; amber variant for don't know.",
+      "html": "<div class=\"ds-saved\" role=\"status\"><strong>Saved: Value</strong><span>by Name, date</span></div>",
+      "css": ".ds-saved { padding: 12px 16px; border: 1px solid var(--ok-line); background: var(--ok-bg); color: var(--ok); border-radius: 10px; display: flex; flex-wrap: wrap; gap: 4px 16px; align-items: baseline; justify-content: space-between; font: 18px/1.6 var(--font); } .ds-saved span { color: var(--ink-2); font-size: 15px; }"
+    },
+    {
+      "name": "Values Table",
+      "kind": "custom",
+      "description": "Tabular numerals, right-aligned numeric columns, horizontal scroll wrapper.",
+      "html": "<div class=\"ds-tw\"><table class=\"ds-t\"><thead><tr><th>Sample</th><th class=\"num\">Measurements</th></tr></thead><tbody><tr><td>sample_a</td><td class=\"num\">12</td></tr><tr><td>sample_b</td><td class=\"num\">4</td></tr></tbody></table></div>",
+      "css": ".ds-tw { overflow-x: auto; border: 1px solid var(--line); border-radius: 10px; } .ds-t { width: 100%; border-collapse: collapse; font: 15px var(--font); font-variant-numeric: tabular-nums; color: var(--ink); } .ds-t th, .ds-t td { text-align: left; padding: 8px 12px; border-bottom: 1px solid var(--line); } .ds-t th { font-weight: 600; color: var(--ink-2); background: var(--sunk); } .ds-t tr:last-child td { border-bottom: 0; } .ds-t .num { text-align: right; white-space: nowrap; }"
+    },
+    {
+      "name": "Question Row",
+      "kind": "nav",
+      "description": "List row with a status dot; panel of rows with hairline separators.",
+      "html": "<ul class=\"ds-rows\"><li><button class=\"ds-row\"><i class=\"ds-dot\"></i><span>Which material is this sample?</span><span class=\"ds-meta\">12 measurements</span></button></li><li><button class=\"ds-row\"><i class=\"ds-dot done\"></i><span>Is the technique this one?</span><span class=\"ds-meta\">Saved</span></button></li></ul>",
+      "css": ".ds-rows { list-style: none; margin: 0; padding: 0; background: var(--card); border: 1px solid var(--line); border-radius: var(--radius); overflow: hidden; } .ds-rows li + li { border-top: 1px solid var(--line); } .ds-row { width: 100%; display: grid; grid-template-columns: 18px 1fr; column-gap: 14px; align-items: baseline; padding: 14px 20px; background: none; border: 0; text-align: left; cursor: pointer; font: 550 18px/1.6 var(--font); color: var(--ink); } .ds-row:hover { background: var(--sunk); } .ds-row:focus-visible { outline: 2px solid var(--focus); outline-offset: -2px; } .ds-meta { grid-column: 2; font-size: 15px; font-weight: 400; color: var(--ink-3); } .ds-dot { width: 12px; height: 12px; border-radius: 50%; border: 2px solid var(--control-line); } .ds-dot.done { background: var(--ok); border-color: var(--ok); }"
+    }
+  ],
+  "narrative": {
+    "northStar": "The Plain Form",
+    "overview": "A category-standard form played straight: a white card on a soft grey ground, near-black text, one blue for the thing to do next, and green only once something is saved. Nothing decorates. The page is one centered column (760px shell, about 720px of card) holding one question at a time; everything that is not the question, the suggestion, its evidence line and the answer controls sits behind a single disclosure.\n\nDensity is low and type is large: 18px body at 1.6 line height, a 30px question, 46px controls. The system reads as calm and finished rather than branded; the only identity is the plain text wordmark \"ISAAC\" in the top line. Light and dark are both first-class, switched by `prefers-color-scheme` with every role re-declared on `:root`.\n\nValues from the scientist's own files are shown in monospace and tabular numerals so they read as quoted data, not interface.",
+    "keyCharacteristics": [
+      "One card per screen; the question is the largest text on the page.",
+      "One blue action colour; green is reserved for saved state; amber for \"don't know\" and changed suggestions; red for errors.",
+      "System sans throughout; monospace only for quoted file lines and key hints.",
+      "Flat surfaces with one soft ambient shadow on cards; hairline borders do the structural work.",
+      "Disclosures marked by a CSS-drawn chevron that rotates open.",
+      "Tables with tabular numerals and right-aligned numeric columns."
+    ],
+    "rules": [
+      { "name": "The One Blue Rule", "body": "Blue means \"you can act here\" and nothing else. One filled blue button per view (the suggestion's \"Yes, that's right\", the list's \"Answer the next N\", sign-in); every other action is a white bordered button or a blue text link.", "section": "colors" },
+      { "name": "The Green Means Saved Rule", "body": "Green appears only after a save succeeds. A suggestion, a likely answer or a confidence level is never green.", "section": "colors" },
+      { "name": "The Tabular Values Rule", "body": "Any number a scientist might compare (suggested values, counts, progress, \"Question 3 of 10\", table cells) uses tabular numerals.", "section": "typography" },
+      { "name": "The Sentence Case Rule", "body": "Labels are short sentences in sentence case at 15px/600. No uppercase tracking, no category words above headings.", "section": "typography" },
+      { "name": "The Hairline First Rule", "body": "Structure comes from 1px borders and the grey ground, not from shadow. Do not add elevation to buttons, rows or status lines.", "section": "elevation" }
+    ],
+    "dos": [
+      "Do keep one filled blue button per view and make every other action a bordered white button or a blue text link.",
+      "Do reserve green for saved answers and amber for \"don't know\" or a changed suggestion.",
+      "Do set every colour through the `:root` custom properties and give each new role a dark-mode value in the `prefers-color-scheme` block.",
+      "Do use tabular numerals for counts and values, and right-align numeric table columns including their headers.",
+      "Do draw marks (chevrons, checks) with 2px CSS borders in currentColor.",
+      "Do keep controls at 46px minimum height and text at or above 4.5:1."
+    ],
+    "donts": [
+      "Don't add a second accent colour or colour a suggestion by confidence.",
+      "Don't put labels in uppercase tracking or place category words above the question.",
+      "Don't load web fonts, icon fonts or remote images; the CSP forbids them and the system stack is the type.",
+      "Don't use official ISAAC, SSRL or DOE logos or colours; the wordmark is plain text.",
+      "Don't raise anything but cards and the toast; no shadows on buttons, rows or status lines.",
+      "Don't stack context panels or chips on the card; extra context goes behind the one evidence disclosure."
+    ]
+  }
+}

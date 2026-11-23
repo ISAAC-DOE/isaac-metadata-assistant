@@ -83,7 +83,7 @@ def test_show_question_without_parser_values_records_no_exposure(bdir, capsys):
     assert code == 0 and not M.load(bdir).get("exposures")
 
 
-# --- 2. Athena projects are said to be read by processing --------------------------------------------
+# --- 2. Athena projects are said to be listed, never read --------------------------------------------
 
 
 @pytest.fixture()
@@ -97,15 +97,15 @@ def with_prj(tmp_path, capsys):
     return out, capsys.readouterr().out
 
 
-def test_import_output_says_athena_projects_are_read_by_process(with_prj):
+def test_import_output_says_athena_projects_are_listed_and_never_read(with_prj):
     _, printed = with_prj
-    assert "4 Athena projects are read by `isaac process`, not at import" in printed
+    assert "4 Athena projects are listed as files and never read" in printed
 
 
-def test_summary_says_athena_projects_are_read_by_process_and_not_unread(with_prj):
+def test_summary_says_athena_projects_are_listed_and_never_read(with_prj):
     out, _ = with_prj
     text = (out / "summary.md").read_text(encoding="utf-8")
-    assert "4 Athena projects are read by `isaac process`, not at import" in text
+    assert "4 Athena projects are listed as files and never read" in text
     assert "no_reader_for_source_type" not in "\n".join(line for line in text.splitlines() if ".prj" in line)
     assert len(text.encode("utf-8")) <= cli.SUMMARY_TARGET_BYTES
 

@@ -58,10 +58,21 @@ from isaac_api.local_import import cli  # noqa: E402
 
 
 def test_a_bulk_confirm_names_the_groups_confirmed_with_a_care_flag_and_why(tmp_path, capsys):
-    """The SYN scan headers state filter 10; one run's NAME says filter20: its group carries the care flag."""
+    """The SYN scan headers state filter 10; one run's NAME says filter20 and its second scan header records 20: its
+    group carries the care flag. (Since C6 a name alone against recordings that agree is settled by the recorded filter,
+    bl15.resolution.recorded_filter_motor.v1, so the disagreement here is also between the run's own recordings.)"""
     runs = [("01_SYN_ZZ1_060mV", 9, [T.scan_cols(10 + k) for k in range(2)]),
             ("02_SYN_ZZ2_filter20_060mV", 11, [T.scan_cols(60 + k) for k in range(2)])]
-    bdir, _ = T.imported(tmp_path, runs, process=False)
+    root = tmp_path / "SYN_beamtime"
+    T.write_beamtime(root, runs)
+    second = root / "02_SYN_ZZ2_filter20_060mV_dir" / "02_SYN_ZZ2_filter20_060mV_002.dat"
+    second.write_text(second.read_text().replace("filter=10", "filter=20"))
+    acquisition = root / "02_SYN_ZZ2_filter20_060mV"
+    head, _, rest = acquisition.read_text().partition("#S 2 ")
+    acquisition.write_text(head + "#S 2 " + rest.replace("filter=10", "filter=20"))
+    bdir = tmp_path / "out"
+    assert cli.main(["import", str(root), "--out", str(bdir)]) == 0
+    M.group(bdir)
     b = M.load(bdir)
     flagged = [g for g in b["record_groups"] if G.care_reasons(b, g)]
     assert len(flagged) == 1 and flagged[0]["member_run_keys"][0].startswith("02_SYN_ZZ2_filter20")

@@ -14,10 +14,13 @@ Read this at Step 7. Open another file only on its trigger:
 
 ## What the list gives you
 
-`<isaac> bundle questions <bundle> --blocking-only --limit 10` (add `--no-context` for a large page).
+`<isaac> bundle questions <bundle> --blocking-only --limit 10` (add `--no-context` for a large page). Read the JSON page. `--plain` (`--plain --detail`) prints the asks as text for a person reading the terminal; it leaves out `minimum_for_one_group`, the counts, the answer commands, the context and the evidence, so do not work from it.
 
 - Shared questions are asked ONCE (experiment scope). Run questions are collapsed to their group. Blocking ones come first.
-- Each question has a `question_id`, `text`, `why` (why it blocks export), `hints`, a `context`, and an `answer_command`.
+- Each question has a `question_id`, an `ask` (one sentence, to say to the scientist as it is), its `answer` (the options),
+  a `suggested` value with its reason when there is one, and `about` (what it reaches). The JSON page also keeps the
+  full `text`, `why` (why it blocks export), `hints`, a `context`, and an `answer_command`. A question with no `ask`
+  (counted in `plain_asks.without_ask`) has only its `text`: put it in your own words.
 - Allowed values sit once, in `allowed_values_by_field`. Default decisions sit in `allowed_decisions_by_kind`.
 - `counts` are the numbers to quote (`blocking`, `optional`, `informational`, `deferred`, …). Never quote `summary.md`'s "Questions: N".
 - A question blocks only when a live group's record needs one of its fields.

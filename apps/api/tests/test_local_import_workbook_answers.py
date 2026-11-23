@@ -582,9 +582,17 @@ def test_med1_an_answer_that_would_replace_a_later_decision_is_refused_and_named
 
 
 def test_med2_ok_on_a_confirm_proposal_only_confirms_the_value_the_files_give_now(bdir, tmp_path, capsys):
-    pot = [q for q in _qs(bdir) if q["kind"] == "confirm_value"
-           and q.get("target_field_path") == "context.electrochemistry.potential_setpoint_V"]
     path = "context.electrochemistry.potential_setpoint_V"
+    # picked by the run each question is about, not by list position: the groups' order moved in C6 (the
+    # recorded-filter rule settled units 05-08's filter), and no id did
+    b = M.load(bdir)
+    stem_of = {c["candidate_id"]: next(r["stem"] for r in b["runs"] if r["run_id"] == c["run_id"]) for c in b["candidates"]
+               if c.get("target_field_path") == path}
+    by_stem = {stem_of[q["targets"][0]["id"]]: q for q in _qs(bdir)
+               if q["kind"] == "confirm_value" and q.get("target_field_path") == path}
+    pot = {2: by_stem["03_01_ZZ1_acid_after500Cycling_filter10_400mV"],
+           3: by_stem["04_02_ZZ2_base_after500Cycling_filter20_800mV"],
+           4: by_stem["05_02_ZZ2_base_after400Cycling_filter20_800mV"]}
     xlsx = tmp_path / "SYN_confirm.xlsx"
     _workbook(bdir, xlsx, extra=[
         ("SYN proposals 2", PHEAD, [
@@ -688,3 +696,41 @@ def test_low5_collapsed_rows_yes_without_a_suggestion_and_per_record_precedence(
     (o,) = [p for p in rep["not_applied"] if p["problem"] == "overridden"]
     assert o["ref"] == "S-G001" and o["for_row"] == "S-0001" and "takes precedence" in o["reason"]
     assert not [p for p in rep["not_applied"] if "answered differently" in p["reason"]]
+
+
+# --- review of PR 346, I3: a row whose question now targets other runs is stale, never applied --------------------
+
+
+def test_a_row_made_for_other_runs_than_its_question_targets_now_is_refused_as_stale(bdir, tmp_path, capsys):
+    """A re-import by a newer build can give the same question id other runs (files that became processed outputs
+    take their runs' places). The row's ``Record (run names)`` / ``File`` say which runs it was made for: when none of
+    them is a run the question targets now, nothing is recorded."""
+    temp = [q for q in _qs(bdir) if q["kind"] == "missing_value" and q.get("target_field_path") == "context.temperature_K"
+            and q["scope"].startswith("group:")]
+    b = M.load(bdir)
+    stem_of = {r["run_key"]: r["stem"] for r in b["runs"]}
+    members = {g["group_id"]: [stem_of[k] for k in g["member_run_keys"]] for g in b["record_groups"]}
+    q0, q1 = temp[0], temp[1]
+    own, other = members[q0["scope"][len("group:"):]][0], members[q1["scope"][len("group:"):]][0]
+    assert own != other
+    xlsx = tmp_path / "SYN_stale.xlsx"
+    topic = "Temperature (K)"
+    rows = [
+        {"Ref": "S-1", "Folder": FOLDER, "Topic": topic, "Record (run names)": other,
+         "YOUR ANSWER": "298 K", "ISAAC question ID": q0["question_id"]},                       # made for another run
+        {"Ref": "S-2", "Folder": FOLDER, "Topic": topic, "Record (run names)": own,
+         "YOUR ANSWER": "298 K", "ISAAC question ID": q0["question_id"]},                       # its own run: applied
+        {"Ref": "S-3", "Folder": FOLDER, "Topic": topic, "File (inside the beamtime folder)": f"{other}_dir/{other}_001.dat",
+         "YOUR ANSWER": "298 K", "ISAAC question ID": q0["question_id"]},                       # a file of another run
+        {"Ref": "S-4", "Folder": FOLDER, "Topic": topic,
+         "YOUR ANSWER": "298 K", "ISAAC question ID": q1["question_id"]},                       # names no run: not checked
+    ]
+    _workbook(bdir, xlsx, extra=[("SYN stale", QHEAD, rows)])
+    code, rep, _ = _run(bdir, xlsx, capsys)
+    assert code == 0
+    problems = {p["ref"]: p for p in rep["not_applied"]}
+    for ref in ("S-1", "S-3"):
+        assert problems[ref]["problem"] == "stale", problems.get(ref)
+        assert "now targets" in problems[ref]["reason"] and "not applied" in problems[ref]["reason"]
+    planned = {p["ref"] for p in rep["decisions"]}
+    assert {"S-2", "S-4"} <= planned and not {"S-1", "S-3"} & planned

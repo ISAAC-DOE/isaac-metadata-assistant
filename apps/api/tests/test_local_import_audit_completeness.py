@@ -134,7 +134,9 @@ def pristine(tmp_path_factory):
         tmp = tmp_path_factory.mktemp("completeness")
         runs = [("01_SYN_ZZ1_base_060mV", 9, [T.scan_cols(10 + k) for k in range(4)]),
                 ("02_SYN_ZZ1_base_120mV", 10, [T.scan_cols(40 + k) for k in range(4)]),
-                ("03_SYN_ZZ1_base_OCV", 11, [T.scan_cols(60 + k) for k in range(4)])]
+                # no OCV token: since 1.16.0 an OCV name suggests the control mode open_circuit, a condition that
+                # keeps this group apart of its own (isaac.suggest.name_open_circuit.v1); this group states none
+                ("03_SYN_ZZ1_base", 11, [T.scan_cols(60 + k) for k in range(4)])]
         root = tmp / "SYN_beamtime"
         T.write_beamtime(root, runs)
         out = tmp / "out"
@@ -198,7 +200,7 @@ def test_one_beamtime_question_asks_the_potential_scale_of_the_groups_that_state
     q = Q.question(payload, Q.potential_scale_question_id())
     g060, g120, gocv = (_group_of(bdir, p) for p in ("01_", "02_", "03_"))
     assert q["scope"] == "experiment" and q["kind"] == "missing_value" and q["target_field_path"] == SCALE
-    assert set(q["per_scope_targets"]) == {f"group:{g060}", f"group:{g120}"}       # never the open-circuit group
+    assert set(q["per_scope_targets"]) == {f"group:{g060}", f"group:{g120}"}       # never the group whose name states none
     assert q["applies_to"]["groups"] == 2 and q["applies_to"]["groups_not_reached"] == 1
     assert "confirm" not in q["allowed_decisions"] and q["hints"] == []            # nothing is suggested: no file states it
     assert "RHE" in q["allowed_values"] and "01_SYN_ZZ1_base_060mV" in q["text"]
@@ -352,11 +354,22 @@ def test_a_record_whose_body_changed_since_export_anyway_is_held_again_and_its_w
 
 @pytest.fixture()
 def filter_disagreement(tmp_path):
-    """Two SYN groups of one sample at one potential. The second run's NAME says filter20, its scan headers say 10:
-    its group carries the care flag, and the filter is what keeps the two records apart."""
+    """Two SYN groups of one sample at one potential. The second run's NAME says filter20, its first scan header 10
+    and its second 20: its group carries the care flag, and the filter is what keeps the two records apart. (Since C6 a
+    name alone against recordings that agree is settled by the recorded filter, bl15.resolution.recorded_filter_motor.v1,
+    so the run's own recordings disagree here.)"""
     runs = [("01_SYN_ZZ1_filter10_060mV", 9, [T.scan_cols(10 + k) for k in range(2)]),
             ("02_SYN_ZZ1_filter20_060mV", 11, [T.scan_cols(60 + k) for k in range(2)])]
-    bdir, _ = T.imported(tmp_path, runs, process=False)
+    root = tmp_path / "SYN_beamtime"
+    T.write_beamtime(root, runs)
+    stem = "02_SYN_ZZ1_filter20_060mV"
+    second = root / f"{stem}_dir" / f"{stem}_002.dat"
+    second.write_text(second.read_text().replace("filter=10", "filter=20"))
+    head, _, rest = (root / stem).read_text().partition("#S 2 ")
+    (root / stem).write_text(head + "#S 2 " + rest.replace("filter=10", "filter=20"))
+    bdir = tmp_path / "out"
+    assert cli.main(["import", str(root), "--out", str(bdir)]) == 0
+    M.group(bdir)
     b = M.load(bdir)
     M.decide(bdir, target_ids=[g["group_id"] for g in b["record_groups"]], decision="confirm", value=None, **BY)
     held = next(g["group_id"] for g in M.load(bdir)["record_groups"]
