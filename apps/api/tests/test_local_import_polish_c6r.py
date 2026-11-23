@@ -211,7 +211,8 @@ def test_the_cli_and_the_web_page_agree_on_an_older_bundle(older, tmp_path, monk
     assert listing["counts"]["needs_review"] == loaded["counts"]["needs_review"]
     assert listing["readiness"]["blocking"]["needs_review"] == loaded["readiness"]["blocking"]["needs_review"]
     assert M.bundle_version(older) == v0  # the reads wrote nothing more
-    page = client.get("/api/local-bundles/older/questions").json()
+    # C3: the questions no answer takes to a record are counted, not listed, unless asked for
+    page = client.get("/api/local-bundles/older/questions", params={"include_unreachable": True}).json()
     assert {q["question_id"] for q in page["questions"]} == {q["question_id"] for q in Q.consolidate(loaded)["questions"]}
     assert held  # the held candidates are asked about on both
     asked = {t["id"] for q in page["questions"] if q["kind"] == "confirm_value" and q["target_field_path"] == CELL

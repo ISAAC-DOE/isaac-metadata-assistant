@@ -60,7 +60,9 @@ def stems(stems_pristine, tmp_path):
 
 
 def _sample_questions(payload, path):
-    return [q for q in payload["questions"] if q["kind"] == "missing_value" and q["target_field_path"] == path]
+    """The per-group sample questions (C1: not the sample questions that ask each batch once, ``sample_family``)."""
+    return [q for q in payload["questions"] if q["kind"] == "missing_value" and q["target_field_path"] == path
+            and not q.get("sample_family")]
 
 
 def _stem_of(b, q):
@@ -119,11 +121,17 @@ def test_groups_whose_names_share_every_sample_token_share_one_same_reading_grou
     assert {m["file_name"] for m in q["same_reading_members"]} == {s for s in STEMS if s.startswith("Q4")}
     # name and form are batched apart
     assert q["same_reading_group"] not in {x.get("same_reading_group") for x in _sample_questions(p, FORM)}
+    # C1: each batch is also asked ONCE, by a sample question of its own (Q4's three, Q5's two; never Q3 alone)
+    fams = [x for x in p["questions"] if x.get("sample_family") and x["target_field_path"] == NAME]
+    assert sorted(len(x["sample_family"]["member_questions"]) for x in fams) == [2, 3]
+    assert q["asked_for_sample_by"] in {x["question_id"] for x in fams}
 
 
 def test_question_ids_scopes_and_targets_do_not_move(stems, monkeypatch):
     b = M.load(stems)
-    after = {q["question_id"]: (q["scope"], q["targets"]) for q in Q.consolidate(b)["questions"]}
+    # (C1: the sample questions a batch is asked by are NEW questions beside these)
+    after = {q["question_id"]: (q["scope"], q["targets"]) for q in Q.consolidate(b)["questions"]
+             if not q.get("sample_family")}
     monkeypatch.setattr(Q, "_note_shared_sample_tokens", lambda questions, bundle: None)
     before = {q["question_id"]: (q["scope"], q["targets"]) for q in Q.consolidate(b)["questions"]}
     assert after == before

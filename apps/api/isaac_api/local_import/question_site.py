@@ -226,6 +226,11 @@ class _View:
         return can or [g for g in self.live if g in wanted] or sorted(wanted)
 
 
+def _members(q: Mapping) -> list[str]:
+    """C1: the per-electrode or per-measurement questions a sample question asks once (``[]`` for any other)."""
+    return list((q.get("sample_family") or {}).get("member_questions") or ())
+
+
 def _scopes(q: Mapping) -> list[str]:
     return [k for k in (q.get("per_scope_targets") or {}) if k.startswith("group:")]
 
@@ -312,7 +317,7 @@ def _scope_parts(view: _View, q: Mapping, scopes: Sequence[str]) -> list[tuple[l
     part of its own (``lone``): nothing says its answer is any other group's. ``(None, False)``: the question as it
     is asked (one identity, or one group). A question whose files name no sample at all (``sample=unrecorded``), or
     whose earlier answers differ, is one part per group."""
-    if len(scopes) <= 1:
+    if len(scopes) <= 1 or q.get("sample_family"):  # C1: a sample question is ONE sample by construction
         return [(None, False)]
     if q.get("partition") == "sample=unrecorded" or q.get("answers_differ"):
         return [([sc], True) for sc in scopes]
@@ -605,6 +610,9 @@ def _subject(view: _View, unit: Mapping, groups: Sequence[str], path: str | None
     "this measurement"; ``None`` for the whole beamtime), whether that is several things, and the sample as the files
     write it ("ZZ1 (no. 01)") when the card is about one sample."""
     q = unit["named"]
+    family = (q.get("sample_family") or {}).get("sample")
+    if family and not unit["only_scopes"]:  # C1: a sample question names its sample as the files write it
+        return f"sample {family}", False, str(family)
     if unit.get("identified") and groups:  # one stated sample of a question (or reading) that spans several
         name = _identity_said(view, groups[0])
         if name:
@@ -760,7 +768,8 @@ def _value_card(view: _View, unit: Mapping) -> dict:
             "field": unit["field"], "on_accept": dict(on_accept) if on_accept else None,
             "on_value": {"decision": "correct"},
             "on_dont_know": {"decision": "defer"} if "defer" in named["allowed_decisions"] else None, "target": None,
-            "questions": [m["question_id"] for m in answers],
+            # C1: a sample question's answer is recorded on every target of its members: it answers them too
+            "questions": list(dict.fromkeys([q for m in answers for q in [m["question_id"], *_members(m)]])),
         }
 
     # a part of a same-reading group is answered question by question: one call each, the same answer
@@ -1223,6 +1232,10 @@ def export_site(bundle_dir: Path, out: Path, *, suggestions: Path | None = None,
         raise SiteRefused(str(exc), code=exc.code) from exc
     payload = Q.consolidate(bundle)
     rows, outside = Q.hide_outside_live_groups(payload["questions"], scope=None, include=False)
+    # C1: a sample question asks once what its members (per electrode or per measurement) ask: one card, whose cover
+    # answers them all; each member keeps its id, so an answer given under it on an earlier export still imports
+    families = {q["question_id"] for q in rows if q.get("sample_family")}
+    rows = [q for q in rows if q.get("asked_for_sample_by") not in families]
     rows = AM.annotate(rows, bundle)
     view = _View(bundle, bundle_dir, {**payload, "questions": rows})
 
@@ -1311,6 +1324,7 @@ def export_site(bundle_dir: Path, out: Path, *, suggestions: Path | None = None,
 
     # the parser values the cards show are exposures, recorded before anything is written for a reader
     asked = [q for c in cards for q in c["_questions"]]
+    answered_ids = {qid for c in cards for cover in c["covers"] for qid in cover.get("questions") or ()}
     exposed = [("candidate", h["candidate_id"]) for q in asked for h in q.get("hints") or () if h.get("candidate_id")]
     exposed += [("conflict", q["targets"][0]["id"]) for q in asked if q["kind"] == "resolve_conflict" and q.get("targets")]
     exposed += [("candidate", cid) for q in asked if q["kind"] == "confirm_value" for cid in Q.confirm_value_shown(bundle, q)]
@@ -1359,8 +1373,13 @@ def export_site(bundle_dir: Path, out: Path, *, suggestions: Path | None = None,
         shutil.copytree(template, out, dirs_exist_ok=True, ignore=skip)
         copied = True
 
-    covered = {q["question_id"] for c in cards for q in c["_questions"]}
-    blocking_total = sum(1 for q in payload["questions"] if q.get("blocking"))
+    # C1: each question a sample question asks once is counted as that one (as `bundle questions` counts it)
+    sample_ids = {q["question_id"] for q in payload["questions"] if q.get("sample_family")}
+    counted = [q for q in payload["questions"] if q.get("asked_for_sample_by") not in sample_ids]
+    counted_ids = {q["question_id"] for q in counted}
+    covered = ({q["question_id"] for c in cards for q in c["_questions"]} | answered_ids) & counted_ids
+    blocking_ids = {q["question_id"] for q in counted if q.get("blocking")}
+    blocking_total = len(blocking_ids)
     by_section = Counter(c["section"] for c in public)
     return {
         "format": "isaac.question_site_export", "format_version": FORMAT_VERSION, "out": str(out),
@@ -1368,9 +1387,11 @@ def export_site(bundle_dir: Path, out: Path, *, suggestions: Path | None = None,
         "title": site_data["title"], "include": list(include), "quotes_from_outside_the_import_dropped": leaked,
         "cards": len(public), "blocking_cards": site_data["totals"]["blocking_cards"],
         "cards_by_section": {s["id"]: by_section[s["id"]] for s in SECTIONS if by_section.get(s["id"])},
-        "questions_open": len(payload["questions"]), "questions_blocking": blocking_total,
+        "questions_open": len(counted), "questions_blocking": blocking_total,
+        **({"asked_once_per_sample": len(payload["questions"]) - len(counted)} if len(counted) < len(payload["questions"])
+           else {}),
         "questions_covered": len(covered),
-        "blocking_questions_covered": len({q["question_id"] for q in asked if q.get("blocking")}),
+        "blocking_questions_covered": len(({q["question_id"] for q in asked} | answered_ids) & blocking_ids),
         "left_out": dict(sorted(left.items(), key=lambda kv: (-kv[1], kv[0]))),
         "with_suggestion": sum(1 for c in public if c["suggestion"]),
         "suggestions_file": suggestion_report, "suggestions_dropped": dropped_suggestions,

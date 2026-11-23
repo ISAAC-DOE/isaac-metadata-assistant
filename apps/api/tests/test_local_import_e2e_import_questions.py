@@ -310,7 +310,9 @@ def counters(tmp_path, capsys):
 
 
 def _sample_questions(payload, path="sample.material.name"):
-    return [q for q in payload["questions"] if q.get("target_field_path") == path and q["kind"] == "missing_value"]
+    """The per-group sample questions (C1: not a sample question that asks a batch of them once)."""
+    return [q for q in payload["questions"] if q.get("target_field_path") == path and q["kind"] == "missing_value"
+            and not q.get("sample_family")]
 
 
 def test_before_any_answer_the_sample_question_does_not_call_the_number_an_electrode(counters):

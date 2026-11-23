@@ -236,7 +236,11 @@ def test_reading_the_questions_records_at_least_the_cli_exposures(client, root, 
 
 def test_every_suggestion_is_marked_not_confirmed_and_hints_cannot_be_accepted(client):
     body = client.get("/api/local-bundles/alpha/questions").json()
-    assert body["counts"]["total"] == body["total"] and body["identity"] == "local_unverified"
+    # C3: the questions no answer takes to a record are counted in one line, not listed
+    # C1: and each question a sample question asks once is counted as that one (listed here, beside it)
+    assert (body["counts"]["total"] + body["counts"].get("asked_once_per_sample", 0)
+            == body["total"] + body.get("not_listed", 0))
+    assert body["identity"] == "local_unverified"
     for q in body["questions"]:
         d = q["display"]
         assert d["folder"] == "alpha" and d["beamtime"] == "multi_operator_corpus"
@@ -848,7 +852,10 @@ def test_a_refusal_message_naming_the_directory_is_scrubbed(root):
 
 def test_an_informational_question_is_shown_with_nothing_to_answer(client):
     # a path no answer can reach the record from is listed for information only (never answerable)
-    r = client.get("/api/local-bundles/alpha/questions", params={"limit": 200})
+    # C3: counted, not listed, by default; include_unreachable lists them
+    hidden = client.get("/api/local-bundles/alpha/questions", params={"limit": 200}).json()
+    assert not any(q.get("informational") for q in hidden["questions"]) and hidden["not_listed"]
+    r = client.get("/api/local-bundles/alpha/questions", params={"limit": 200, "include_unreachable": True})
     assert r.status_code == 200
     qs = r.json()["questions"]
     info = [q for q in qs if q.get("informational")]

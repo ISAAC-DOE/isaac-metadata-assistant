@@ -1518,6 +1518,9 @@ def consolidate(bundle: Mapping, *, compositions_out: dict | None = None, includ
         beamtime_start = _stated_utc_start_question(questions, bundle, group_of, run_by_id, decisions)
         if beamtime_start is not None:
             questions.append(beamtime_start)
+        # C1: a sample field asked once per electrode or once per run is asked ONCE per sample (its own id; every
+        # member keeps its id and stays answerable)
+        questions += _sample_family_questions(questions, bundle, sample_written_of_group)
         # the condition labels (labels.py): new questions, each with its own id; no other question changes
         questions += label_questions(bundle, decisions=decisions, groups=groups, include_answered=include_answered)
         # r8 MED 5: a disagreement on a reading a label is proposed from points at that label's question (its why only)
@@ -2103,25 +2106,43 @@ def without_answered_at_once(q: Mapping) -> Mapping:
 def fold_answered_at_once(questions: Sequence[Mapping], *, scope: str | None, include: bool) -> tuple[list, list]:
     """r6 I1: ``(listed, folded)``: with no ``--scope``, a per-group question that a listed beamtime-wide question
     answers at once (``answered_at_once_by``) is counted, not listed — unless ``include`` asks for each one. It keeps
-    its id and stays answerable (``decide --question``, ``bundle show question``, ``--scope group:<id>``)."""
-    if include or scope:
+    its id and stays answerable (``decide --question``, ``bundle show question``, ``--scope group:<id>``).
+
+    C1: so is a per-electrode or per-group sample question that a listed sample question asks once
+    (``asked_for_sample_by``), with no ``--scope`` or with ``--scope experiment``."""
+    if include or (scope and scope != "experiment"):
         return list(questions), []
-    listed_ids = {q["question_id"] for q in questions if q.get("kind") == STATED_UTC_START_KIND}
-    folded = [q for q in questions if q.get("answered_at_once_by") in listed_ids]
+    listed_ids = {q["question_id"] for q in questions
+                  if (q.get("kind") == STATED_UTC_START_KIND and not scope) or q.get("sample_family")}
+    folded = [q for q in questions
+              if q.get("answered_at_once_by") in listed_ids or q.get("asked_for_sample_by") in listed_ids]
     gone = {q["question_id"] for q in folded}
     return [q for q in questions if q["question_id"] not in gone], folded
 
 
 def folded_answered_at_once(folded: Sequence[Mapping], flag: str) -> dict:
-    """The count and statement of a page that folds per-group questions into a beamtime-wide one, or ``{}``."""
+    """The count and statement of a page that folds per-group questions into a beamtime-wide one, or ``{}``; C1: and
+    of the sample questions it folds into one per sample (``asked_once_per_sample``)."""
     if not folded:
         return {}
-    by = sorted({str(q.get("answered_at_once_by")) for q in folded})
-    return {"answered_at_once": len(folded),
-            "answered_at_once_statement": (
-                f"{len(folded)} per-group start-time question(s) are not listed: question {', '.join(by)} answers them "
-                f"all at once (each group keeps the UTC instant its own file states). Each keeps its id and stays "
-                f"answerable; {flag} lists them.")}
+    out: dict = {}
+    starts = [q for q in folded if q.get("answered_at_once_by")]
+    if starts:
+        by = sorted({str(q.get("answered_at_once_by")) for q in starts})
+        out.update({"answered_at_once": len(starts),
+                    "answered_at_once_statement": (
+                        f"{len(starts)} per-group start-time question(s) are not listed: question {', '.join(by)} answers "
+                        f"them all at once (each group keeps the UTC instant its own file states). Each keeps its id and "
+                        f"stays answerable; {flag} lists them.")})
+    samples = [q for q in folded if q.get("asked_for_sample_by") and not q.get("answered_at_once_by")]
+    if samples:
+        by = sorted({str(q["asked_for_sample_by"]) for q in samples})
+        out.update({"asked_once_per_sample": len(samples),
+                    "asked_once_per_sample_statement": (
+                        f"{len(samples)} sample question(s) asked once per electrode or per measurement are not listed: "
+                        f"{len(by)} question(s) ask each sample once instead (one answer is recorded for every run of "
+                        f"the sample). Each keeps its id and stays answerable; {flag} lists them.")})
+    return out
 
 
 def _covered_by_run_decisions(questions: list[dict], covered: Mapping[str, Sequence[str]],
@@ -2208,7 +2229,14 @@ def _fold_into_file_restart(questions: list[dict], bundle: Mapping, decisions: M
 def question_counts(questions: Sequence[Mapping], *, fine_grained_v1: int | None = None) -> dict:
     """The counts of a list of consolidated questions (the whole bundle's, or one scope's). The tier-3 ones are
     split so none is counted twice: informational > a conflict its runs' own decisions cover > a conflict no record
-    field holds > outside every live group > optional. ``deferred`` overlaps the others: a deferred question is still counted where it is."""
+    field holds > outside every live group > optional. ``deferred`` overlaps the others: a deferred question is still counted where it is.
+
+    C1: a member of a sample question in the same list (``asked_for_sample_by``) is counted once, as that sample
+    question, and the members under ``asked_once_per_sample``."""
+    families = {q["question_id"] for q in questions if q.get("sample_family")}
+    asked_once = sum(1 for q in questions if q.get("asked_for_sample_by") in families)
+    if asked_once:
+        questions = [q for q in questions if q.get("asked_for_sample_by") not in families]
     rest = [q for q in questions if q["tier"] == TIER_OPTIONAL and not q.get("informational")]
     covered = [q for q in rest if q.get("covered_by_decisions")]
     rest = [q for q in rest if not q.get("covered_by_decisions")]
@@ -2238,6 +2266,8 @@ def question_counts(questions: Sequence[Mapping], *, fine_grained_v1: int | None
         # finding 1: questions (already counted above, in their own tier) whose answer puts a condition grouping
         # used to keep two records apart into a record: listed right after the blocking ones
         out["distinguishing"] = distinguishing
+    if asked_once:
+        out["asked_once_per_sample"] = asked_once
     if fine_grained_v1 is not None:
         out["fine_grained_v1"] = fine_grained_v1
     return out
@@ -2679,6 +2709,205 @@ def _say_the_one_group(questions: list[dict]) -> None:
                 q["scope"] = only
 
 
+#: C1 (audit of 18 Nov 2026, finding 5; other beamtimes, rule 1): the kind tag a sample question's id is hashed with,
+#: so it can never be the id of a question built per sample reading or per group
+SAMPLE_FAMILY_TAG = "sample_family"
+#: the sample fields that name the specimen, not the material: never asked once for several electrodes or runs
+SAMPLE_FAMILY_EXCLUDED = frozenset({"sample.sample_id"})
+
+
+def asked_for_sample_sentence(qid: str) -> str:
+    """The sentence a per-electrode or per-group sample question adds when a sample question asks it once."""
+    return f" Or answer the whole sample at once: question {qid}."
+
+
+def _group_sample_identity(group: Mapping) -> str | None:
+    """A record group's sample as the grouping recorded it, WITHOUT its electrode or specimen number: the canonical
+    sample reading (``sample_name`` plus any other sample part, e.g. a loading), or ``None`` when the group states no
+    sample name or a conflicting part. The number names the object measured, not the material (as the question
+    site's sample identity, ``question_site._group_identity``)."""
+    from .grouping import SAMPLE_NUMBER_KEY
+
+    sample = (group.get("basis") or {}).get("sample")
+    if not isinstance(sample, Mapping) or not sample:
+        return None
+    parts: dict[str, Any] = {}
+    for key, part in sample.items():
+        if key == SAMPLE_NUMBER_KEY:
+            continue
+        if isinstance(part, Mapping):
+            if part.get("kind") == "conflicting":
+                return None
+            part = part.get("value")
+        parts[key] = part
+    name = parts.get("sample_name")
+    if name in (None, "") or isinstance(name, (list, dict)):
+        return None
+    return json.dumps(parts, sort_keys=True, default=str)
+
+
+def _asks_for_a_value(q: Mapping) -> bool:
+    """A value question about one sample field that takes ONE answer for all its targets (a missing value, or a
+    confirm question none of whose targets carries a value), with nothing that keeps it apart."""
+    path, kind = q.get("target_field_path"), q.get("kind")
+    if kind not in ("missing_value", "confirm_value") or not isinstance(path, str) or not path.startswith("sample."):
+        return False
+    if path in SAMPLE_FAMILY_EXCLUDED or "[]" in path or not q.get("targets"):
+        return False
+    # (``answers_differ`` is not a reason: it says answers to OTHER samples differ, which a sample question expects)
+    if any(q.get(flag) for flag in ("informational", "outside_live_groups", "all_groups_cannot_export",
+                                    "covered_by_decisions", "asked_by_question", "answered_at_once_by", "asked_again")):
+        return False
+    if "correct" not in (q.get("allowed_decisions") or ALLOWED_DECISIONS.get(kind, ())):
+        return False
+    if kind == "confirm_value":
+        total = len(q["targets"])
+        return bool(q.get("no_value")) or int(q.get("targets_without_a_value") or 0) >= total
+    return True
+
+
+def _sample_family_questions(questions: list[dict], bundle: Mapping,
+                             sample_written_of_group: Mapping[str, Sequence[tuple]]) -> list[dict]:
+    """C1: ONE question per sample for a sample field asked once per electrode or once per run.
+
+    A sample field (the form, the material's name) was asked once per sample READING, and the reading holds the
+    electrode or specimen number (``JK2`` no. 02, 03, 04: three questions for one fact), or once per record group
+    (every run's own ``JK3``: eight questions batched with ``--same-reading``). The questions of one field that ask
+    for a value about groups of ONE sample (:func:`_group_sample_identity`: the grouping's sample reading without
+    the number; or, where the files state no sample name, the same shared sample tokens of the file names,
+    ``shared_sample_tokens``) become one question with its own id. Answered, it records the value on every target
+    of every run of the sample, each run's own (``decide --question``, as any question asked for several groups).
+
+    ID STABILITY (DEC-91): no existing question changes its id, scope, kind or targets. Each member keeps its id,
+    stays answerable (``decide --question <member>``; an answer the site recorded under it imports as before) and
+    carries ``asked_for_sample_by`` naming the sample question, which lists it instead (:func:`fold_answered_at_once`).
+    The sample question's id is hashed from the field, the kind and the sample (read from the grouping, never from
+    an answer), so it stays the same while its members are answered one by one. Never across two samples, two
+    loadings or two fields; a question that names a group whose sample is not stated is never a member. Answers
+    already given to ANOTHER sample (``answers_differ``) keep no question out: one answer per sample is what this
+    asks."""
+    groups = {g["group_id"]: g for g in live_groups(bundle)}
+    identity = {gid: _group_sample_identity(g) for gid, g in groups.items()}
+    families: dict[tuple[str, str, str], list[dict]] = {}
+    for q in questions:
+        if not _asks_for_a_value(q):
+            continue
+        gids = {s[len("group:"):] for s in q.get("per_scope_targets") or () if s.startswith("group:")}
+        if not gids or not gids <= set(groups):
+            continue
+        keys = {identity[g] for g in gids}
+        if len(keys) == 1 and None not in keys:
+            key = "sample=" + next(iter(keys))
+        elif keys == {None} and q.get("shared_sample_tokens") and q.get("same_reading_group"):
+            key = "tokens=" + json.dumps([str(t).casefold() for t in q["shared_sample_tokens"]])
+        else:
+            continue
+        families.setdefault((q["target_field_path"], q["kind"], key), []).append(q)
+    out: list[dict] = []
+    for (path, kind, key), members in families.items():
+        if len(members) < 2:
+            continue
+        members.sort(key=lambda m: m["question_id"])
+        qid = _qid("experiment", SAMPLE_FAMILY_TAG, kind, path, key)
+        targets: list[dict] = []
+        per_scope: dict[str, list[str]] = {}
+        for m in members:
+            for t in m["targets"]:
+                if t not in targets:
+                    targets.append(t)
+            for sc, ids in (m.get("per_scope_targets") or {}).items():
+                per_scope.setdefault(sc, []).extend(i for i in ids if i not in per_scope.get(sc, ()))
+        gids = [sc[len("group:"):] for sc in per_scope if sc.startswith("group:")]
+        runs = sum(int((m.get("applies_to") or {}).get("runs") or 0) for m in members)
+        # the sample as the FILES write it (the key above is lowercased); the number, when the files state one
+        spelled: dict[str, list[str]] = {"sample_name": [], "loading_or_thickness": []}
+        numbers: list[str] = []
+        for g in gids:
+            for entry in sample_written_of_group.get(g) or ():
+                if len(entry) == 2 and entry[0] in spelled:
+                    if entry[1] not in spelled[entry[0]]:
+                        spelled[entry[0]].append(entry[1])
+                elif entry[1] not in numbers:
+                    numbers.append(entry[1])
+        names = spelled["sample_name"] + spelled["loading_or_thickness"]  # the name first ("IrTiO2, 2nm")
+        numbers.sort()
+        if key.startswith("tokens="):
+            said = " ".join(str(t) for t in members[0]["shared_sample_tokens"])
+        else:
+            said = ", ".join(names) if names else json.loads(key[len("sample="):]).get("sample_name")
+        blocking = [m for m in members if m.get("blocking")]
+        hints: list[dict] = []
+        seen: set = set()
+        for m in members:
+            for h in m.get("hints") or ():
+                hkey = (h.get("kind"), str(h.get("literal")), h.get("source_id"), h.get("locator"))
+                if hkey not in seen and h.get("kind") != "related_reading":
+                    seen.add(hkey)
+                    hints.append(h)
+        ai = list(dict.fromkeys(str(h["literal"]) for h in hints if h.get("kind") == "ai_suggestion"))
+        numbered = (f" (the files number them {', '.join(_quoted(n) for n in numbers[:8])}"
+                    + ("…" if len(numbers) > 8 else "") + ")") if len(numbers) > 1 else ""
+        text = (f"What is the {_label(path)} ({path}) of sample {said}? "
+                + ("No source in this import states it. " if kind == "missing_value" else
+                   "The files hold text for it (see the hints) but no value this build can carry. ")
+                + f"Asked ONCE for the sample: {len(gids)} group(s), {runs} run(s), of sample {said}{numbered}. "
+                "One answer is recorded for every run of the sample, each run keeping it as its own value. If one of "
+                "them differs, answer it on its own: add --only group:<group_id>, or answer its own question ("
+                + ", ".join(m["question_id"] for m in members[:5]) + (", …" if len(members) > 5 else "")
+                + "; `bundle questions --each-group` lists them).")
+        if kind == "missing_value" and members[0].get("allowed_values"):
+            text += (" If none of the allowed values fits, never pick the nearest one: if the scientist keeps "
+                     "their own word, keep it as a vocabulary request (--value \"<their exact word>\" --as-said; "
+                     "it records no decision); use --decision defer only if they do not know.")
+        if ai:
+            text += (" An AI reading of the files suggests " + " or ".join(_quoted(a) for a in ai[:3])
+                     + " (not file evidence: it needs your confirmation; see the hints).")
+        fam: dict[str, Any] = {
+            "question_id": qid,
+            "tier": min(m["tier"] for m in members),
+            "blocking": bool(blocking),
+            "why": (blocking or members)[0].get("why"),
+            "kind": kind,
+            "scope": "experiment",
+            "partition": f"{SAMPLE_FAMILY_TAG}={key}",
+            "target_field_path": path,
+            "text": text,
+            "applies_to": {"groups": len(gids), "runs": runs, "targets": len(targets), "runs_outside_live_groups": 0},
+            "targets": targets,
+            "per_scope_targets": per_scope,
+            "hints": hints[:_HINTS_PER_QUESTION],
+            "allowed_values": members[0].get("allowed_values"),
+            "allowed_decisions": list(members[0].get("allowed_decisions") or ALLOWED_DECISIONS.get(kind, ())),
+            "answers_differ": False,
+            "answer_command": (f'isaac bundle decide <bundle_dir> --question {qid} --decision correct --value <value> '
+                               '--by "<your name>"   # one group differs: add --only group:<group_id>'),
+            "sample_family": {"sample": said, "basis": key.split("=", 1)[0], "numbers": numbers,
+                              "member_questions": [m["question_id"] for m in members]},
+            "answers_at_once": len(members),
+        }
+        for k in ("deprecated_values", "lands_in_record"):
+            if k in members[0]:
+                fam[k] = members[0][k]
+        if kind == "confirm_value":
+            fam.update(no_value=True, targets_without_a_value=len(targets), targets_with_an_unfit_value=0,
+                       confirmable_scopes=[])
+        ids = [g for m in blocking for g in m.get("blocks_group_ids") or ()]
+        if blocking:
+            fam["blocks_group_ids"] = list(dict.fromkeys(ids))
+            fam["blocks_groups"] = len(fam["blocks_group_ids"])
+        held = list(dict.fromkeys(g for m in members for g in m.get("cannot_export_groups") or ()))
+        if held:
+            fam["cannot_export_groups"] = held
+            fam["applies_to"]["groups_that_can_export"] = len(gids) - len(held)
+        if all(m.get("deferred") for m in members):
+            fam["deferred"] = {**members[0]["deferred"], "targets": len(targets)}
+        for m in members:
+            m["asked_for_sample_by"] = qid
+            m["text"] += asked_for_sample_sentence(qid)
+        out.append(fam)
+    return out
+
+
 def live_groups(bundle: Mapping) -> list[Mapping]:
     """The record groups that can still become records: not rejected, and not replaced by a split
     or a merge. Questions, and the nearest group to export, are only ever about these."""
@@ -2861,6 +3090,53 @@ def hidden_outside_live_groups(hidden: Sequence[Mapping], flag: str) -> dict:
                 f"{len(hidden)} question(s) whose answer would reach no live record group are not listed (their runs "
                 "are in none, e.g. a rejected group's, or the value is asked once for the beamtime on a field each "
                 f"record takes from its own runs; no record is built from it): {flag} lists them")}
+
+
+#: C3 (audit of 18 Nov 2026, finding 8): why a question that no answer takes to a record is counted, not listed, in
+#: the order a question is judged (the first that holds is its reason)
+NOT_LISTED_REASONS: tuple[tuple[str, str], ...] = (
+    ("informational", "no answer here can reach the record"),
+    ("no_record_field", "about a value no record field holds"),
+    ("covered_by_decisions", "settled already by decisions given for its runs"),
+    ("asked_by_question", "answered through another question"),
+    ("all_groups_cannot_export", "only about groups that cannot become a record as they stand"),
+)
+
+
+def not_listed_reason(q: Mapping) -> str | None:
+    """C3: why ``q`` is counted rather than listed (:data:`NOT_LISTED_REASONS`), or ``None`` when an answer to it
+    can reach a record. A question that blocks a record is always listed."""
+    if q.get("blocking"):
+        return None
+    for flag, reason in NOT_LISTED_REASONS:
+        if flag == "no_record_field" and q.get("kind") != "resolve_conflict":
+            continue
+        if q.get(flag):
+            return reason
+    return None
+
+
+def hide_not_reaching_a_record(questions: Sequence[Mapping], *, include: bool) -> tuple[list, list]:
+    """C3: ``(listed, hidden)``: a question no answer takes to a record (:func:`not_listed_reason`) is counted, not
+    listed — unless ``include`` asks for them. Each keeps its id and stays answerable and shown
+    (``decide --question``, ``bundle show question``). ONE rule for ``isaac bundle questions`` and the local
+    questions screen."""
+    if include:
+        return list(questions), []
+    hidden = [q for q in questions if not_listed_reason(q)]
+    gone = {q["question_id"] for q in hidden}
+    return [q for q in questions if q["question_id"] not in gone], hidden
+
+
+def not_listed(hidden: Sequence[Mapping], flag: str) -> dict:
+    """The ``not_listed`` count, its reasons and its ONE-line statement for a page that hides them, or ``{}``."""
+    if not hidden:
+        return {}
+    by: Counter = Counter(not_listed_reason(q) for q in hidden)
+    order = [reason for _, reason in NOT_LISTED_REASONS if by.get(reason)]
+    return {"not_listed": len(hidden), "not_listed_by_reason": {r: by[r] for r in order},
+            "not_listed_statement": (f"{len(hidden)} not listed: " + "; ".join(f"{by[r]} {r}" for r in order)
+                                     + f". No answer to them reaches a record; {flag} lists them.")}
 
 
 #: r3a M6: how a question that shares a reading with others is answered with them all at once (``decide
@@ -3764,7 +4040,7 @@ def filter_questions(payload: Mapping, *, scope: str | None = None, blocking_onl
             qs = [
                 q for q in qs
                 if q["scope"] == scope
-                or (q["scope"] == "experiment" and q.get("kind") != STATED_UTC_START_KIND
+                or (q["scope"] == "experiment" and q.get("kind") != STATED_UTC_START_KIND and not q.get("sample_family")
                     and (scope in q["per_scope_targets"] or "experiment" in q["per_scope_targets"]))
             ]
             # c10-m: and it leads with the AI suggestion read for THIS group's runs
