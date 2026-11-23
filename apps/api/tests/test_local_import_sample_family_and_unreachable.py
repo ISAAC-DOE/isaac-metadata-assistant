@@ -383,3 +383,57 @@ def test_finding_6_the_not_listed_line_says_what_holds_for_each_reason():
     said = Q.not_listed([{"all_groups_cannot_export": True}, {"informational": True}], "--x")["not_listed_statement"]
     assert "some can after processing again" in said and "As the bundle stands" in said
     assert "No answer to them reaches a record" not in said
+
+
+# --- re-review of #350 ---------------------------------------------------------------------------------------------
+
+
+def _site_answer(tmp_path, data, card, value, name, at="2100-02-01T10:00:00Z"):
+    from isaac_api.local_import import question_site_import as SI
+
+    path = tmp_path / name
+    path.write_text(json.dumps({
+        "format": SI.ANSWERS_FORMAT_ID, "format_version": "1.0.0", "bundle_id": data["bundle_id"],
+        "bundle_version": data["bundle_version"], "exported_at": "2100-02-01T10:00:00Z", "log": [],
+        "answers": [{"card_id": card["card_id"], "action": "value", "value": value, "typed": True, "note": "",
+                     "by": WHO, "at": at}]}))
+    return path
+
+
+def test_a_site_answer_records_on_the_last_open_member_and_never_over_an_own_answer(grouped, tmp_path):
+    """Leftover 1: once only one member is open the sample question leaves the open list; a site answer to its card
+    still records on that member (as decide --question does), and never on the ones answered on their own."""
+    from isaac_api.local_import import question_site_import as SI
+
+    S.export_site(grouped, tmp_path / "site", site_template=tmp_path / "no-template")
+    site_data = tmp_path / "site" / "data" / "site-data.json"
+    data = json.loads(site_data.read_text())
+    fam, members = _zz1(grouped)
+    card = next(c for c in data["cards"] if c["covers"][0]["question_id"] == fam["question_id"])
+    for m, value in zip(members[:2], ("SYN first", "SYN second")):
+        M.decide_question(grouped, question_id=m["question_id"], decision="correct", value=value, by=WHO, orcid=None)
+    assert fam["question_id"] not in {q["question_id"] for q in Q.consolidate(M.load(grouped))["questions"]}
+    rep = SI.import_answers(grouped, _site_answer(tmp_path, data, card, "SYN site oxide", "a.json"),
+                            site_data=site_data, apply=True)
+    assert rep["answers"][0]["outcome"] == "recorded", rep["answers"][0]
+    assert [_latest_value(grouped, m["targets"][0]["id"]) for m in members] == ["SYN first", "SYN second",
+                                                                               "SYN site oxide"]
+    # every member answered: another answer is reported, never recorded over theirs
+    rep = SI.import_answers(grouped, _site_answer(tmp_path, data, card, "SYN later oxide", "b.json", at="2100-02-02T10:00:00Z"),
+                            site_data=site_data, apply=True)
+    assert rep["answers"][0]["outcome"] == "no_longer_asked"
+    assert rep["answers"][0]["reason"] == "it was answered since with another answer, which is kept"
+    assert _latest_value(grouped, members[2]["targets"][0]["id"]) == "SYN site oxide"
+
+
+def test_a_card_names_file_name_numbers_as_the_question_does():
+    """Leftover 2: numbers nobody said are electrodes are listed on the card too, never left out."""
+    qs, bundle, written = _hand_family("sample.sample_form", ["02", "03"], settled=False)
+    (fam,) = Q._sample_family_questions(qs, bundle, written)
+    assert fam["sample_family"]["named"] == "sample JK2 (file-name numbers 02, 03)"
+    subject, plural, sample = S._subject(None, {"named": fam, "only_scopes": None}, [], "sample.sample_form")
+    assert (subject, plural, sample) == ("sample JK2 (file-name numbers 02, 03)", False, "JK2")
+    qs, bundle, written = _hand_family("sample.sample_form", ["02", "03"])
+    (fam,) = Q._sample_family_questions(qs, bundle, written)
+    assert S._subject(None, {"named": fam, "only_scopes": None}, [], "sample.sample_form")[:2] == (
+        "the JK2 electrodes (no. 02, 03)", True)

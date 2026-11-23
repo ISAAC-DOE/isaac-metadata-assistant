@@ -2867,11 +2867,12 @@ def _sample_family_questions(questions: list[dict], bundle: Mapping,
         shown_numbers = ", ".join(numbers[:8]) + (", …" if len(numbers) > 8 else "")
         objects = f"the {said} electrodes (no. {shown_numbers})" if len(numbers) > 1 and settled else None
         if objects:
-            subject = objects
+            named = subject = objects
         elif len(numbers) > 1:
+            named = f"sample {said} (file-name numbers {shown_numbers})"
             subject = f"sample {said} (file-name numbers {shown_numbers}; whether they name electrodes is not yet said)"
         else:
-            subject = f"sample {said}"
+            named = subject = f"sample {said}"
         own = ", ".join(m["question_id"] for m in members[:5]) + (", …" if len(members) > 5 else "")
         text = (f"What is the {_label(path)} ({path}) of {subject}? "
                 + ("No source in this import states it. " if kind == "missing_value" else
@@ -2908,6 +2909,7 @@ def _sample_family_questions(questions: list[dict], bundle: Mapping,
                                '--by "<your name>"   # one group differs: add --only group:<group_id>'),
             "sample_family": {"sample": said, "basis": key.split("=", 1)[0], "numbers": numbers,
                               "numbers_name_electrodes": bool(numbers) and settled, "objects": objects,
+                              "named": named,
                               "member_questions": [m["question_id"] for m in members]},
             "answers_at_once": len(members),
         }

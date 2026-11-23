@@ -613,7 +613,9 @@ def _subject(view: _View, unit: Mapping, groups: Sequence[str], path: str | None
     family = q.get("sample_family") or {}
     if family.get("sample") and not unit["only_scopes"]:
         # C1: a sample question names what one answer reaches: "the JK2 electrodes (no. 02, 03, 04)" (finding 4)
-        return str(family.get("objects") or f"sample {family['sample']}"), bool(family.get("objects")), str(family["sample"])
+        # ...and file-name numbers nobody said are electrodes as the question does ("sample X (file-name numbers 02, 03)")
+        named = family.get("objects") or family.get("named") or f"sample {family['sample']}"
+        return str(named), bool(family.get("objects")), str(family["sample"])
     if unit.get("identified") and groups:  # one stated sample of a question (or reading) that spans several
         name = _identity_said(view, groups[0])
         if name:
