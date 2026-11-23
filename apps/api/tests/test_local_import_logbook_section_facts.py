@@ -103,7 +103,7 @@ def _notes(*, heading_3: str = "Sample 3 ZZ3 in base (bad)", heading_4: str = "S
         # FACT 3: a section with an empty File Number column that states the cell
         heading_4, "Cell: H-cell", *_table([(1, "", "Sets the working potential to 0.1 V", "")]), "",
         "Sample 5 ZZ5 in base",
-        *_table([(1, "10", "Sets the working potential to 0.1 V after 500 cycles", "")]), "",
+        *_table([(1, "10", "Sets the working potential to 0.1 V", "measured after 500 cycles")]), "",
     ]
 
 
