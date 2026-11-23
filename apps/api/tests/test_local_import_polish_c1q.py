@@ -220,7 +220,8 @@ def test_questions_only_about_runs_in_no_live_group_do_not_block_and_are_not_cou
     gone = [q for q in after["questions"] if q["scope"].startswith("run:")]
     assert gone and not any(q["blocking"] for q in gone)
     assert all(q["outside_live_groups"] for q in gone if q["kind"] == "missing_value")
-    assert after["counts"]["blocking"] == sum(q["blocking"] for q in after["questions"])
+    # (C1: a question a sample question asks once is counted as that one)
+    assert after["counts"]["blocking"] == sum(q["blocking"] for q in after["questions"] if not q.get("asked_for_sample_by"))
     env = next(q for q in after["questions"] if q["target_field_path"] == "context.environment" and q["kind"] == "missing_value")
     assert env["applies_to"]["groups"] == len(Q.live_groups(b))
     assert env["applies_to"]["runs_outside_live_groups"] >= 1 and "in no live record group" in env["text"]
@@ -247,7 +248,9 @@ def test_the_cli_page_is_compact_by_default_and_full_with_targets(pristine_bundl
         if big["kind"] == "optional_values":
             assert small["fields"] == {f: len(ids) for f, ids in big["fields"].items()}
     # the counts are the scope's; the whole bundle's are under their own key
-    assert compact["counts"]["total"] == compact["total"] and compact["counts_whole_bundle"]["total"] > compact["total"]
+    # (C3: the questions no answer takes to a record are counted in not_listed, not listed)
+    assert compact["counts"]["total"] == compact["total"] + compact.get("not_listed", 0)
+    assert compact["counts_whole_bundle"]["total"] > compact["total"]
     assert cli.main(["bundle", "questions", str(bdir), "--scope", f"group:{gid}", "--blocking-only"]) == 0
     assert compact["counts"]["blocking"] == json.loads(capsys.readouterr().out)["total"]  # blocking for THIS group
     assert len(json.dumps(compact)) < len(json.dumps(full))
@@ -266,7 +269,8 @@ def test_a_deferred_question_is_marked_sorted_last_and_can_be_left_out(pristine_
     p = Q.consolidate(M.load(bdir))
     q = Q.question(p, first["question_id"])
     assert q["blocking"] and q["deferred"]["by"] == BY["by"] and q["deferred"]["decided_utc"]
-    assert p["counts"]["deferred"] == 1 and p["counts"]["blocking"] == sum(x["blocking"] for x in p["questions"])
+    assert p["counts"]["deferred"] == 1  # (C1: a question a sample question asks once is counted as that one)
+    assert p["counts"]["blocking"] == sum(x["blocking"] for x in p["questions"] if not x.get("asked_for_sample_by"))
     blocking = [x["question_id"] for x in p["questions"] if x["blocking"]]
     assert blocking[-1] == first["question_id"]  # still blocking, still counted: asked after the others
     assert cli.main(["bundle", "questions", str(bdir), "--blocking-only", "--skip-deferred", "--limit", "200"]) == 0

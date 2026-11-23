@@ -398,7 +398,15 @@ def test_a_question_blocking_only_a_group_that_cannot_export_is_not_blocking(gro
         assert "cannot become a record" in now["why"]
     basis = after["blocking_basis"]["record_composer"]
     assert gid in basis["groups_that_cannot_export"] and "No question counts as blocking" in basis["cannot_export_statement"]
-    assert after["counts"]["blocking"] < payload["counts"]["blocking"]
+    family = blocking[0].get("asked_for_sample_by")
+    if family:
+        # C1: a question a sample question asks once is counted as that one, which still blocks the sample's other
+        # groups; the group that cannot export is no longer among them
+        assert gid in Q.question(payload, family)["blocks_group_ids"]
+        assert gid not in (Q.question(after, family).get("blocks_group_ids") or [])
+        assert after["counts"]["blocking"] <= payload["counts"]["blocking"]
+    else:
+        assert after["counts"]["blocking"] < payload["counts"]["blocking"]
     # ids unchanged
     assert sorted(q["question_id"] for q in after["questions"]) == sorted(q["question_id"] for q in payload["questions"])
 

@@ -1,7 +1,7 @@
 #S 2 gscan 1000 1100 5 0.5
 #D Sat Jan 02 00:00:00 2100
 #T 0.5  (Seconds)
-#P0 dummy0=0 synenergy=1000.0 emiss=900.0 filter=10
+#P0 dummy0=0 synenergy=1000.0 emiss=900.0 filter=20
 #N 7
 #L synenergy  I0  vortDT  vortDT2  vortDT3  vortDT4  absev
 1000.0 10000 102 0 0 0 1000.5

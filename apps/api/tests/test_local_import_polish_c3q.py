@@ -90,9 +90,20 @@ def _conflict_q(payload, conflict_id):
 def test_every_question_id_of_the_synthetic_grouped_bundle_is_unchanged(grouped):
     # the condition labels (labels.py) are new questions beside these: every id here is unchanged
     # ...and so is the beamtime-wide potential-scale question (audit of 18 Nov 2026, finding 1): its own new id
-    ids = sorted(q["question_id"] for q in Q.consolidate(M.load(grouped))["questions"]
-                 if q["kind"] != L.KIND and q["question_id"] != Q.potential_scale_question_id())
+    # ...and so is each sample question (C1: a sample field asked ONCE per sample, `sample_family`): its own new id
+    questions = Q.consolidate(M.load(grouped))["questions"]
+    ids = sorted(q["question_id"] for q in questions
+                 if q["kind"] != L.KIND and q["question_id"] != Q.potential_scale_question_id()
+                 and not q.get("sample_family"))
     assert (len(ids), hashlib.sha256("\n".join(ids).encode()).hexdigest()) == GOLDEN_IDS
+    # each sample question asks only questions above, every one of which keeps its id (ZZ1, ZZ2, ZZ3: three each)
+    families = [q for q in questions if q.get("sample_family")]
+    assert sorted(f["sample_family"]["sample"] for f in families) == ["ZZ1", "ZZ2", "ZZ3"]
+    # ...under ids pinned here too, so a change to how a sample question's id is derived is caught
+    assert {f["sample_family"]["sample"]: f["question_id"] for f in families} == {
+        "ZZ1": "Q-e14aacf5ce", "ZZ2": "Q-194ae171d9", "ZZ3": "Q-5d70725e6f"}
+    assert all(len(f["sample_family"]["member_questions"]) == 3 and set(f["sample_family"]["member_questions"]) <= set(ids)
+               for f in families)
 
 
 # --- 1. a start-time conflict of local clock times is answerable ------------------------------------------------

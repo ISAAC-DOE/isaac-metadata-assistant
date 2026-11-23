@@ -88,9 +88,11 @@ def xdc(tmp_path):
 
 def _ids(payload) -> list[str]:
     # the condition labels (labels.py) are new questions beside these, never one of them; so is the beamtime-wide
-    # potential-scale question (audit of 18 Nov 2026, finding 1), which has its own new id
+    # potential-scale question (audit of 18 Nov 2026, finding 1), which has its own new id; and so is each sample
+    # question (C1, `sample_family`), whose members are all here under their own ids
     return sorted(q["question_id"] for q in payload["questions"]
-                  if q["kind"] != L.KIND and q["question_id"] != Q.potential_scale_question_id())
+                  if q["kind"] != L.KIND and q["question_id"] != Q.potential_scale_question_id()
+                  and not q.get("sample_family"))
 
 
 def _absorber_argv(bdir, element="Fe", edge="K", *extra):

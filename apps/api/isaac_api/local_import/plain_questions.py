@@ -170,6 +170,14 @@ FIELD_ASK_ABOUT: Mapping[str, str] = {
     "sample.sample_id": "What is the sample ID of {subject}?",
 }
 
+#: ...and about several things named at once ("the JK2 electrodes (no. 02, 03, 04)": a sample question, C1).
+FIELD_ASK_ABOUT_SEVERAL: Mapping[str, str] = {
+    "sample.sample_form": "What form were {subject} in?",
+    "sample.material.name": "What material are {subject}?",
+    "sample.material.formula": "What is the chemical formula of {subject}?",
+    "sample.material.provenance": "Where did {subject} come from?",
+}
+
 #: A choice field asked about something named: ``(one thing, several things)``, of a sample and of a measurement.
 CHOICE_ASK_ABOUT: Mapping[str, tuple[str, str]] = {"context.environment": ("Was {subject} measured", "Were {subject} measured")}
 CHOICE_ASK_OF_MEASUREMENT: Mapping[str, tuple[str, str]] = {"context.environment": ("Was {subject} done", "Were {subject} done")}
@@ -265,6 +273,8 @@ def ask_for(path: str, allowed: Sequence[Any] | None = None, *, subject: str | N
         asks = CHOICE_ASK_ABOUT if names_sample else CHOICE_ASK_OF_MEASUREMENT
         lead = asks[path][1 if plural else 0].format(subject=subject)
         return f"{lead} {or_list([value_words(v) for v in values])}?"
+    if names_sample and plural and path in FIELD_ASK_ABOUT_SEVERAL:
+        return FIELD_ASK_ABOUT_SEVERAL[path].format(subject=subject)
     if path in FIELD_ASK_ABOUT:
         return FIELD_ASK_ABOUT[path].format(subject=subject if names_sample else f"the sample of {subject}")
     base = _base_ask(path, allowed)

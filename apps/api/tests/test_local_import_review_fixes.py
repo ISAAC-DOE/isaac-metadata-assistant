@@ -205,7 +205,12 @@ GOLDEN = {
     "bl15_synthetic_mini_corpus": ("cc9240192e5bd1151d9b09dc128bcb8c1385d906ecc1a339ce89a6132e222342", 5, 100),
     # re-pinned 17 Nov 2026: the corpus's .dat exports gained an `absev` column (pq-001); this build reproduces the
     # main digest acf0ba4a… exactly on the corpus as it was, so only the fixture bytes moved it
-    "bl15_synthetic_semantics_corpus": ("1315342ab102c548730215984795cddd72420e4bc7c6bcde40682f17ce191ab9", 9, 200),
+    # re-pinned 23 Nov 2026 (C6), and NOT reproduced from main: this build reads the corpus differently on purpose. The
+    # recorded-filter rule settles units 05-08's name-against-recording filter disagreements, logbook statements carry
+    # their section's sample number and name, and a heading qualifier is held with its section; and the fixture moved
+    # (unit 04's second export records filter 20). With the fixture as it was, this build gives 40476bc2…, so the code
+    # alone moves it; the mini corpus above is unchanged.
+    "bl15_synthetic_semantics_corpus": ("36b54aeee2ec8f375ad27e769851f007ea368d14b336774d42ab3a30c784f2e8", 9, 200),
 }
 
 

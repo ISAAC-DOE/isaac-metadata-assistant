@@ -245,9 +245,11 @@ def test_context_attaches_per_the_rules_and_every_item_is_bounded_and_says_its_s
 def test_the_context_is_additive_ids_counts_text_and_the_minimum_are_unchanged(bdir, tmp_path):
     other = tmp_path / "copy"
     shutil.copytree(bdir, other)
-    code, with_ctx = _cli(["bundle", "questions", bdir, "--limit", "200", "--with-targets"])
+    # every open question listed (C1, C3: none counted instead of listed)
+    every = ["--each-group", "--include-unreachable"]
+    code, with_ctx = _cli(["bundle", "questions", bdir, "--limit", "200", "--with-targets", *every])
     assert code == 0
-    code, without = _cli(["bundle", "questions", other, "--limit", "200", "--with-targets", "--no-context"])
+    code, without = _cli(["bundle", "questions", other, "--limit", "200", "--with-targets", "--no-context", *every])
     assert code == 0
     assert any(q.get("context") for q in with_ctx["questions"])
     assert not any("context" in q for q in without["questions"]) and "context_note" not in without

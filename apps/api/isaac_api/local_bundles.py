@@ -1638,6 +1638,15 @@ def get_local_bundle_questions(
     include_outside_live_groups: bool = Query(
         False, description="Also list the questions whose answer reaches no live record group (counted, not listed, "
                            "by default, as `isaac bundle questions` does; a `run:` scope lists them)."),
+    include_unreachable: bool = Query(
+        False, description="Also list the questions no answer takes to a record (for information only, a "
+                           "disagreement about a value no record field holds, one settled already, one only about "
+                           "groups that cannot become a record): counted in one line, not listed, by default, as "
+                           "`isaac bundle questions` does."),
+    each_group: bool = Query(
+        False, description="Also list each per-electrode or per-measurement sample question a sample question asks "
+                           "once (counted, not listed, by default, as `isaac bundle questions` does; each stays "
+                           "answerable by its id)."),
 ):
     from .local_import import answer_memory as AM
     from .local_import import mutations as M
@@ -1664,6 +1673,11 @@ def get_local_bundle_questions(
                                                      if q.get("answered_at_once_by") else {})} for q in rows]
         # r3c LOW-3: hidden by default, counted, as `isaac bundle questions` hides them
         rows, outside = Q.hide_outside_live_groups(rows, scope=scope, include=include_outside_live_groups)
+        # C3: a question no answer takes to a record is counted in one line, as `isaac bundle questions` counts it
+        rows, unreachable = Q.hide_not_reaching_a_record(rows, include=include_unreachable)
+        # C1: a per-electrode or per-measurement sample question a listed sample question asks once is counted, as
+        # `isaac bundle questions` counts it (the per-group start-time questions stay listed: this screen nests them)
+        rows, folded = Q.fold_answered_at_once(rows, scope=scope, include=each_group, starts=False)
         page = rows[offset: offset + limit]
         # EARLIER ANSWERS (answer_memory, opt-in): an additive hint, after the counts and the paging (nothing when off)
         page = AM.annotate(page, data)
@@ -1676,6 +1690,11 @@ def get_local_bundle_questions(
         shown += [("conflict", q["targets"][0]["id"]) for q in page if q["kind"] == "resolve_conflict"]
         # ...and every candidate whose value a confirm question's TEXT states (questions.confirm_value_shown)
         shown += [("candidate", cid) for q in page for cid in Q.confirm_value_shown(data, q)]
+        # ...and every disagreement a condition-label question's not_proposed rows quote (r8), as the CLI records
+        # them: the label question is returned whole, readings included, even when the conflict's own question is
+        # not listed (C3)
+        shown += [("conflict", r["conflict_id"]) for q in page if q.get("kind") == "condition_label"
+                  for h in q.get("not_proposed") or () for r in h.get("readings") or () if r.get("conflict_id")]
         out_questions = []
         idx = BundleIndex(data)
         by_id = {x["question_id"]: x for x in payload["questions"]}
@@ -1733,6 +1752,8 @@ def get_local_bundle_questions(
         "omitted_before": min(offset, len(rows)),
         "omitted_after": max(0, len(rows) - offset - len(page)),
         **Q.hidden_outside_live_groups(outside, "include_outside_live_groups=true"),
+        **Q.not_listed(unreachable, "include_unreachable=true"),
+        **Q.folded_answered_at_once(folded, "each_group=true"),
         "minimum_for_one_group": with_page_words(minimum),
         "questions": out_questions,
         "group_names": group_names(data, [

@@ -2777,6 +2777,28 @@ def decide_question(
                 found, slots_added, override = got
             if asked["kind"] == "confirm_absorber" and decision == "set_absorber" and only is None:
                 found, kept_overrides = _keep_absorber_overrides(bundle, found)
+            if asked.get("sample_family"):
+                # C1 (review of #350, finding 2): a sample question answered again, or once only one of its members is
+                # still open, records on the targets still OPEN, never on one answered already (an electrode answered
+                # on its own question keeps its answer); with none open there is nothing for it to record
+                still_open = {t["id"] for q in (open_payload or {}).get("questions") or () for t in q.get("targets") or ()}
+                found = [t for t in found if t in still_open]
+                if not found:
+                    # review of 162bd039: an electrode asked again (its earlier answer the record cannot take) is kept
+                    # apart from the sample question; when it is what is still open, name it, and only it
+                    open_ids = {q["question_id"] for q in (open_payload or {}).get("questions") or ()}
+                    again = [q for q in asked["sample_family"].get("kept_apart") or () if q in open_ids]
+                    if again:
+                        raise MutationRefused(
+                            f"Every target sample question {question_id} records on is answered already, and it never "
+                            f"changes an answer. Still open: question {', '.join(again)} (asked again: its earlier "
+                            "answer cannot go into the record); answer it on its own question (`isaac bundle decide "
+                            f"<bundle_dir> --question {again[0]} ...`). Nothing was recorded.", code=6)
+                    own = ", ".join(asked["sample_family"].get("member_questions") or ())
+                    raise MutationRefused(
+                        f"Every target of sample question {question_id} is answered already, and it never changes an "
+                        f"answer: to change one, answer that electrode's or measurement's own question ({own}). "
+                        "Nothing was recorded.", code=6)
         if (asked_now or {}).get("kind") == Q.STATED_UTC_START_KIND:
             given = [flag for flag, v in (("--value", value), ("--field", field), ("--split-into", split_into),
                                           ("--merge-with", merge_with), ("--qc-status", qc_status), ("--element", element),
@@ -2802,6 +2824,14 @@ def decide_question(
             if value is not None:
                 raise MutationRefused(EXPERIMENT_DEFER_VALUE_REFUSAL)
             value, clock_defer = CLOCK_ZONE_DEFER_VALUE, True
+        if (asked_now or {}).get("kind") == Q.QUALITY_REMARK_KIND:
+            # review of #352, finding 5: "keep them despite the remark" is recorded WITH this question's id, so a group
+            # confirmed for any other reason has not answered it
+            if value is not None:
+                raise MutationRefused(f"Question {question_id} takes no --value: confirm keeps the groups, reject "
+                                      "leaves them out. Nothing was recorded.")
+            if decision == "confirm":
+                value = {Q.QUALITY_REMARK_ANSWER_KEY: question_id}
         params = dict(
             target_ids=list(extra_targets) + found, decision=decision, value=value, by=by, orcid=orcid, note=note,
             split_into=split_into, merge_with=merge_with, qc_status=qc_status, qc_note=qc_note,

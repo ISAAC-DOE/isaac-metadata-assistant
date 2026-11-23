@@ -2186,6 +2186,8 @@ def cmd_bundle_questions(args) -> int:
         # r3a L5: a question about runs no live record group holds builds no record: counted, listed on request (or
         # when a run's own scope is asked for); the local questions screen hides them the same way (r3c LOW-3)
         kept, outside = Q.hide_outside_live_groups(kept, scope=args.scope, include=args.include_outside_live_groups)
+        # C3: a question no answer takes to a record is counted in one line, listed on request
+        kept, unreachable = Q.hide_not_reaching_a_record(kept, include=getattr(args, "include_unreachable", False))
         # r6 I1: a per-group question a listed beamtime-wide question answers at once is counted, listed on request
         kept, folded = Q.fold_answered_at_once(kept, scope=args.scope, include=getattr(args, "each_group", False))
         page = kept[args.offset : args.offset + args.limit]
@@ -2233,6 +2235,7 @@ def cmd_bundle_questions(args) -> int:
             **_more(len(kept) - args.offset - len(page), args.offset + len(page)),
             **({"skipped_deferred": sum(1 for q in rows if q.get("deferred"))} if args.skip_deferred else {}),
             **Q.hidden_outside_live_groups(outside, "--include-outside-live-groups"),
+            **Q.not_listed(unreachable, "--include-unreachable"),
             **Q.folded_answered_at_once(folded, "--each-group"),
             "minimum_for_one_group": minimum,
             **({} if no_context else {"context_note": QC.NOTE + " `bundle show <dir> question <id>` shows the "
@@ -3204,7 +3207,12 @@ def build_parser(prog: str = "isaac") -> argparse.ArgumentParser:
                         "group's runs: no record is built from them); by default they are counted, not listed")
     q.add_argument("--each-group", action="store_true",
                    help="also list each per-group question a beamtime-wide question answers at once (e.g. the start "
-                        "time); by default they are counted, not listed")
+                        "time), and each per-electrode or per-measurement sample question a sample question asks once; "
+                        "by default they are counted, not listed")
+    q.add_argument("--include-unreachable", action="store_true",
+                   help="also list the questions no answer takes to a record (for information only, a disagreement "
+                        "about a value no record field holds, one settled already, one only about groups that cannot "
+                        "become a record); by default they are counted in one line (not_listed), not listed")
     q.add_argument("--distinguishing-only", action="store_true",
                    help="only the questions that put a condition into a record that keeps it apart from another record "
                         "of its sample (the local completeness tier: after the blocking ones, before the optional ones)")

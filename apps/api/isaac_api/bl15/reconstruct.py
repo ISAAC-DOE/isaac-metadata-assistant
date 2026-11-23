@@ -699,7 +699,7 @@ def _standing_resolution(
     not reach. See :data:`bl15.resolution.STANDING_RESOLUTIONS`.
 
     IT REACHES ONLY A DISAGREEMENT BETWEEN EXACTLY ITS TWO ROLES — a plan and a
-    recording — and only when the RECORDINGS AGREE AMONG THEMSELVES at the concept's own
+    recording, or (the filter, C6) a file name and a recording — and only when the RECORDINGS AGREE AMONG THEMSELVES at the concept's own
     cardinality. Two acquisition files recording different positions for the same motor
     of the same scan is not a plan-versus-recording question, so the rule says nothing
     and the conflict stays open. Every reading stays a source fact; the readings the
@@ -1580,6 +1580,8 @@ def logbook_candidates(
     stem: str,
     statements: Mapping[str, Sequence[ev.SourceEvidence]],
     source_ids: Mapping[str, str],
+    *,
+    dry: bool = False,
 ) -> list[SemanticCandidate]:
     """ONE candidate per field the LOGBOOK speaks to for this measurement. See
     :mod:`bl15.conditions`.
@@ -1620,11 +1622,22 @@ def logbook_candidates(
             for item, value in readings
             if not (value.get("status") == cond.STATUS_MEMBER and value.get("member") in allowed)
         ]
-        scope = (
-            "the sample section that lists this measurement"
-            if any(value.get("section") for _item, value in readings)
-            else "the whole beamtime (no sample section says otherwise)"
-        )
+        by_number = next((value for _item, value in readings if value.get("section") and not value.get("file_numbers")
+                          and isinstance(value.get("sample_number"), int)), None)
+        if by_number is not None:
+            # C6: a section that lists no file numbers reaches this measurement by its sample number only: say so
+            named = by_number.get("sample_name")
+            scope = (
+                f"the logbook section `{by_number.get('section')}`, which lists no file numbers; it is applied to this "
+                f"measurement because its file name carries sample number {by_number['sample_number']}"
+                + (f" and the name {named}" if named else " (the heading names no sample, so the number is the only link)")
+            )
+        else:
+            scope = (
+                "the sample section that lists this measurement"
+                if any(value.get("section") for _item, value in readings)
+                else "the whole beamtime (no sample section says otherwise)"
+            )
         common = dict(
             candidate_id=f"{stem}::{concept}",
             kind=CANDIDATE_KIND_FIELD,
@@ -1671,6 +1684,22 @@ def logbook_candidates(
             term = next(
                 str(value.get("term")) for _item, value in readings if value.get("member") == members[0]
             )
+            if dry and concept == ev.CONCEPT_CELL_TYPE_STATEMENT:
+                # review of #352, finding 6: a measurement whose own name says it was dry or had no electrolyte may not
+                # have been in the cell at all, so the logbook's cell is a suggestion for a person, never a value
+                why = (
+                    f"The logbook says “{term}” ({statement_locator(first)}), the schema's {name} option "
+                    f"`{members[0]}`, in {scope}; but this measurement's own name says it was dry or had no "
+                    "electrolyte, so whether it was measured in that cell is not something this build decides."
+                )
+                out.append(
+                    SemanticCandidate(
+                        **common,
+                        rule=f"{rule_id}: {why}",
+                        not_proposable_reason=f"{why} It is left for a person to say.",
+                    )
+                )
+                continue
             out.append(
                 SemanticCandidate(
                     **common,
@@ -1723,6 +1752,9 @@ def logbook_candidates(
                 f"The logbook says “{term}”, which is not one of the {name} options the "
                 "official schema offers, so nothing is filled in."
             )
+        if by_number is not None:
+            # re-review of #352, C: say how a section with no file-number rows reached this measurement
+            why += f" It is stated in {scope}."
         out.append(
             SemanticCandidate(
                 **common,
