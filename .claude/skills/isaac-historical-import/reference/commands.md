@@ -52,7 +52,7 @@ Every list returns one page (`--limit` at most 200): follow its `more` line unti
 
 | Purpose | Command |
 |---|---|
-| The questions (use these) | `<isaac> bundle questions <bundle> [--scope experiment\|group:<id>\|run:<id>] [--blocking-only] [--distinguishing-only] [--plain [--detail]] [--limit N] [--offset M] [--skip-deferred] [--with-targets] [--include-outside-live-groups] [--each-group] [--no-context]` |
+| The questions (use these) | `<isaac> bundle questions <bundle> [--scope experiment\|group:<id>\|run:<id>] [--blocking-only] [--distinguishing-only] [--plain [--detail]] [--limit N] [--offset M] [--skip-deferred] [--with-targets] [--include-outside-live-groups] [--include-unreachable] [--each-group] [--no-context]` |
 | A decision | `<isaac> bundle decide <bundle> (--target <id> [--target <id> ...] \| --targets-file <file> \| --question <Q> [--only group:<id> ...] [--field <path>] [--same-reading]) --decision <d> [--value <v> [--as-said]] [--json] --by "<name>" [--orcid 0000-0000-0000-0000] [--note "<text>"]` |
 | …more `decide` flags | `[--split-into '<json of run keys>'] [--merge-with <group ids> [--same-conditions]] [--qc-status <word> [--qc-note "<text>"]] [--element <symbol> --edge <edge> [--accept-shift <eV>]] [--scans "<scan id>,..."] [--positions N,N or last] [--same-sample [--names-differ-ok]] [--from-earlier-answer <entry id>]` |
 | The metadata template | `<isaac> bundle template export <bundle> --out <file.xlsx> [--force] [--no-suggestions] [--json]` · `<isaac> bundle template import <bundle> <file.xlsx> --by "<name>" [--orcid ...] [--apply] [--supersede] [--full] [--json]` · `<isaac> bundle template adopt <bundle> <their.xlsx> --out <file.xlsx> [--by "<name>"] [--force] [--no-suggestions] [--json]` |

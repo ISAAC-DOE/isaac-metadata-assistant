@@ -146,7 +146,10 @@ def test_every_blocking_question_is_on_a_card_and_blocking_cards_come_first_wide
     bdir, _out, report, data = exported
     blocking = {q["question_id"] for q in _open(bdir) if q.get("blocking")}
     covered = {qid for c in data["cards"] for cover in c["covers"] for qid in cover["questions"]}
-    assert blocking <= covered and report["blocking_questions_covered"] == len(blocking)
+    assert blocking <= covered  # every one, the members of a sample question too (its cover names them)
+    # C1: counted as `bundle questions` counts them, each member of a sample question as that one question
+    members = {q["question_id"] for q in _open(bdir) if q.get("asked_for_sample_by")}
+    assert report["blocking_questions_covered"] == report["questions_blocking"] == len(blocking - members)
     order = [(not c["blocking"], -c["unblocks"]) for c in data["cards"]]
     assert order == sorted(order)
     assert all(c["blocking"] for c in data["cards"])  # the default export: only what blocks (and the dose question)
@@ -158,11 +161,14 @@ def test_a_same_reading_group_is_one_card_answered_by_one_call(exported):
     groups = {q["same_reading_group"] for q in qs}
     cards = [c for c in data["cards"] if (c["field"] or {}).get("path") == MATERIAL]
     assert len(qs) == 9 and len(groups) == 3 and len(cards) == 3  # nine questions, three asks
+    by_id = {q["question_id"]: q for q in _open(bdir)}
     for c in cards:
         (cover,) = c["covers"]
         members = [q["question_id"] for q in qs if q["question_id"] in cover["questions"]]
-        assert cover["same_reading"] is True and cover["only_scopes"] is None and len(members) == 3
-        assert cover["question_id"] == sorted(members)[0]
+        # C1: the one call is the sample question, which asks the sample once and answers its three members
+        family = by_id[cover["question_id"]]
+        assert family["sample_family"]["member_questions"] == sorted(members) and len(members) == 3
+        assert cover["same_reading"] is False and cover["only_scopes"] is None
         assert c["applies_to"]["count"] == 3 and c["unblocks"] == 3 and c["section"] == "samples"
         assert cover["on_value"] == {"decision": "correct"} and cover["on_dont_know"] == {"decision": "defer"}
 
@@ -456,10 +462,13 @@ def test_every_cover_is_a_call_the_decide_path_would_record(exported, tmp_path):
     tmp = tmp_path / "copy"
     tmp.mkdir()
     shutil.copy2(bdir / "bundle.json", tmp / "bundle.json")
+    # C1: a sample question's cover also names its members, whose targets are its own
+    members = {m for q in _open(bdir) for m in (q.get("sample_family") or {}).get("member_questions") or ()}
     for c in data["cards"]:
         for cover in c["covers"]:
             got = S.run_call(S.cover_call(cover, cover["on_dont_know"]), tmp, by=WHO, note=None, dry_run=True)
-            assert got["dry_run"] is True and len(got["recorded"]) >= len(cover["questions"]), c["title"]
+            asked = [q for q in cover["questions"] if q not in members]
+            assert got["dry_run"] is True and len(got["recorded"]) >= len(asked), c["title"]
             value = c["answer"]["options"][0]["value"] if c["answer"]["options"] else "SYN value"
             got = S.run_call(S.cover_call(cover, cover["on_value"], value), tmp, by=WHO, note=None, dry_run=True)
             assert got["recorded"], c["title"]
@@ -1014,7 +1023,9 @@ def test_the_preview_writes_nothing(work, tmp_path, capsys):
     assert cli.main(["bundle", "site", "import", str(bdir), str(answers), "--site-data", str(site_data)]) == 0
     out = capsys.readouterr().out
     assert "preview: nothing written" in out and "Would be applied (4)" in out and "Notes to read" not in out
-    assert "--same-reading" in out and "--as-said" in out and _digest(bdir) == before
+    # C1: the sample's material card is ONE question (the sample question), so its call needs no --same-reading
+    material = _card(data, MATERIAL, title_has="ZZ1")["covers"][0]["question_id"]
+    assert material in out and "--as-said" in out and _digest(bdir) == before
 
 
 def test_apply_records_the_right_decisions_under_the_right_name_with_the_cards_note(work, tmp_path):
@@ -1056,7 +1067,8 @@ def test_dont_know_records_defer_for_every_question_of_the_card(work, tmp_path):
     assert all(asked[qid].get("deferred") and asked[qid]["blocking"] for qid in card["covers"][0]["questions"])
     # deferred questions are not asked again by default; --include deferred asks them
     report = S.export_site(bdir, tmp_path / "site", site_template=tmp_path / "none")
-    assert report["left_out"]["answered \"I don't know\" earlier (add --include deferred to ask again)"] == 3
+    # C1: one question (the sample question; its three members are counted as it)
+    assert report["left_out"]["answered \"I don't know\" earlier (add --include deferred to ask again)"] == 1
     again = S.export_site(bdir, tmp_path / "site2", include=("deferred",), site_template=tmp_path / "none")
     assert again["cards"] == report["cards"] + 1 and not [k for k in again["left_out"] if "earlier" in k]
 
@@ -1118,7 +1130,7 @@ def test_a_card_the_bundle_no_longer_asks_is_reported_not_applied(work, tmp_path
     # answered since on the command line, with other values than the site's answers give
     M.decide_question(bdir, question_id=form["covers"][0]["question_id"], decision="correct", value="film", by="SYN Other", orcid=None)
     M.decide_question(bdir, question_id=material["covers"][0]["question_id"], decision="correct", value="SYN oxide",
-                      by="SYN Other", orcid=None, same_reading=True)
+                      by="SYN Other", orcid=None)  # C1: the sample question answers the whole sample
     before = _digest(bdir)
     answers = _answers_file(tmp_path, data, [_answer(form, "value", "pellet"), _answer(material, "value", "SYN nitride", typed=True),
                                              _answer(material, "dont_know", at="2100-01-01T00:00:00Z"),
@@ -1325,7 +1337,7 @@ def test_the_commands_run_end_to_end(base, tmp_path, capsys):
     assert cli.main(["bundle", "site", "export", str(bdir), "--out", str(out), "--site-template", str(tmp_path / "none")]) == 0
     printed = capsys.readouterr()
     assert "Question site export: SYN_BL00_2100-01_Synthetic" in printed.out and "Cards by section:" in printed.out
-    assert "13 card(s), 13 blocking; they cover 17 of 130 open question(s) (17 of 17 blocking)." in printed.out
+    assert "13 card(s), 13 blocking; they cover 11 of 124 open question(s) (11 of 11 blocking)." in printed.out  # C1: 9 per-measurement sample-name questions are 3 sample questions
     assert "checking card 1 of 13" in printed.err
     assert cli.main(["bundle", "site", "export", str(bdir), "--out", str(out), "--include", "optional", "--json",
                      "--site-template", str(tmp_path / "none")]) == 0

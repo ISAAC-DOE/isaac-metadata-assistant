@@ -99,6 +99,7 @@ class _Ctx:
         self.open = Q.consolidate(bundle)
         self.schema, _ = Q._target_schema()
         self._rules: dict[str, dict] = {}
+        self._answered: dict | None = None
 
     def rule(self, path: str | None) -> dict | None:
         if not path:
@@ -114,10 +115,21 @@ class _Ctx:
         qid, field = cover.get("question_id"), cover.get("field")
         q = Q.question(self.open, qid)
         if q is None:
-            return False
+            # C1: a sample question leaves the open list once only one of its electrodes is open; its answer still
+            # records on the ones still open (decide --question: never on one answered on its own question)
+            return self.sample_question(qid) and any(Q.question(self.open, m) is not None
+                                                     for m in cover.get("questions") or () if m != qid)
         if q["kind"] == "condition_label":  # its targets are the runs still proposed a label
             return bool(q.get("proposals"))
         return all(bool(Q.targets_for(self.open, qid, sc, field)) for sc in list(cover.get("only_scopes") or ()) or [None])
+
+    def sample_question(self, qid: str | None) -> bool:
+        """Whether ``qid`` is a sample question (C1: ``sample_family``), open or answered."""
+        from . import questions as Q
+
+        if self._answered is None:
+            self._answered = Q.consolidate(self.bundle, include_answered=True, explain_counter=False)
+        return bool((Q.question(self._answered, qid) or {}).get("sample_family"))
 
     def request_kept(self, plan: Mapping, cover: Mapping, by: str, note: str) -> bool:
         """A vocabulary request this very answer already left: the same word, by the same name, with the same note."""
@@ -256,7 +268,8 @@ def _judge(plan: Mapping, ctx: _Ctx, tmp: Path, *, by: str, note: str) -> dict:
     got = _outcome(alone, tmp, by=by, note=note, dry_run=True)
     if got["outcome"] == "already_recorded":
         return got
-    if got["outcome"] == "would_record":
+    if got["outcome"] == "would_record" or (got["outcome"] == "refused" and ctx.sample_question(cover.get("question_id"))):
+        # (C1: a sample question whose electrodes are all answered on their own questions refuses to change them)
         return {"outcome": "no_longer_asked", "reason": "it was answered since with another answer, which is kept"}
     return {"outcome": "no_longer_asked", "reason": "the bundle no longer asks it (export the site again)"}
 
