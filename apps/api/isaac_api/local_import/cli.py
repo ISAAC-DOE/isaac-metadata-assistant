@@ -40,6 +40,17 @@ COMMANDS
 ``isaac bundle check <dir>``
     Re-validate the bundle against v1: schema, bounds, references, and the state rule.
 
+``isaac bundle status <dir> [--json]``
+    Where the import stands, in about seven plain lines (``status.py``): who, consent, runs and groups, records
+    exportable at the last validate, open questions, the last processing, and what to do next. Reads only.
+
+``isaac bundle consent <dir> --by "<name>" [--withdraw] [--note TEXT]``
+    Record the scientist's answer to whether Claude may read this beamtime's files (1.17.0 ``consents``), so a later
+    session reads it with ``bundle status`` instead of asking again.
+
+A COMMAND THAT ONLY READS NEVER WRITES ``bundle.json`` (1.17.0): the parser values it prints are recorded in
+``exposures.pending.jsonl`` beside it and folded in by the next write (``mutations.record_exposures``).
+
 ``isaac bundle propose-terms <dir> [--out FILE] [--force | --merge]``
     Values outside a fixed list (the vendored schema's enum or the portal vocabulary
     snapshot's list), grouped by field with counts and file/locator citations, and one
@@ -1040,6 +1051,12 @@ def _merge_candidate_view(bundle: Mapping, obj: Mapping) -> dict:
     }
 
 
+#: ``bundle list <dir> processing-results``: the ``not_listed`` reason of a result whose record group no longer exists or
+#: is no longer live (C7), and what it means.
+GROUP_NOT_LIVE = "group_no_longer_live"
+GROUP_NOT_LIVE_NOTE = ("results of record groups that no longer exist or are no longer live (a regroup replaced them, or "
+                       "they were merged, rejected or split): nothing to review; pass --all to list them")
+
 _LIST_SECTION = {
     "groups": "record_groups",
     "merge-candidates": "merge_candidates",
@@ -1155,8 +1172,19 @@ def cmd_bundle_list(args) -> int:
             rows += kept
         elif kept:
             not_listed[B.NOT_OPENED_REASON_CODE] = len(kept)
-    elif args.all and args.kind not in ("groups", "merge-candidates"):
-        _err("--all applies only to `groups`, `merge-candidates` and `unread`.")
+    elif args.kind == "processing-results" and not args.all:
+        # C7 (skill audit of 18 Nov 2026, finding 13): a result of a group that no longer exists (a regroup replaced it)
+        # or is no longer live (merged, rejected, split) is the history of a decision, not a curve to review: counted
+        # here, listed with --all, and still shown by `bundle show <dir> processing-result <id>`
+        from . import bundle as B
+
+        live = {g["group_id"] for g in bundle.get("record_groups") or () if g.get("status") in B.LIVE_GROUP_STATUSES}
+        dead = [r for r in rows if r.get("group_id") not in live]
+        if dead:
+            not_listed[GROUP_NOT_LIVE] = len(dead)
+            rows = [r for r in rows if r.get("group_id") in live]
+    elif args.all and args.kind not in ("groups", "merge-candidates", "processing-results"):
+        _err("--all applies only to `groups`, `merge-candidates`, `processing-results` and `unread`.")
         return EXIT_USAGE
     if args.state:
         if args.kind not in ("candidates", "processing-results"):
@@ -1226,6 +1254,7 @@ def cmd_bundle_list(args) -> int:
             "not_listed_note": ("groups that are decision history (merged, rejected, split), not records: pass --all to list them"
                                 if args.kind == "groups" else
                                 NOT_OPENED_NOTE if args.kind == "unread" else
+                                GROUP_NOT_LIVE_NOTE if args.kind == "processing-results" else
                                 "merge candidates with fewer than two live groups left (the others were rejected, split or "
                                 "merged): they propose nothing and are not asked; pass --all to list them")}
            if not_listed else {}),
@@ -2031,6 +2060,32 @@ def _read_findings(path: str) -> Any:
         raise M.MutationRefused(f"The findings file cannot be read as JSON: {type(exc).__name__}", code=EXIT_NOT_FOUND) from exc
 
 
+def cmd_bundle_status(args) -> int:
+    """``isaac bundle status <dir> [--json]``: where the import stands (:mod:`.status`). Reads only: nothing is written,
+    and nothing it prints is a parser value."""
+    from . import mutations as M
+    from . import status as ST
+
+    try:
+        out = ST.status(Path(args.bundle_dir).expanduser(), shown_as=args.bundle_dir)
+    except M.MutationRefused as exc:
+        _err(str(exc))
+        return exc.code
+    if args.json:
+        _print(out)
+    else:
+        print("\n".join(out["lines"]))
+    return EXIT_OK
+
+
+def cmd_bundle_consent(args) -> int:
+    """``isaac bundle consent <dir> --by "<name>" [--withdraw] [--note ...]`` (1.17.0, ``mutations.record_consent``)."""
+    from . import mutations as M
+
+    return _mutation(lambda: M.record_consent(Path(args.bundle_dir).expanduser(), by=args.by, withdraw=args.withdraw,
+                                              note=args.note))
+
+
 def cmd_bundle_check_readings(args) -> int:
     """``isaac bundle check-readings <dir> <findings.json> [--root <folder>]``: every finding's quote held against the
     file it cites (:mod:`.reading_check`), the report ``annotate --from-readings`` prints. Reads only. Exit 0 when
@@ -2195,18 +2250,7 @@ def _expose_each(bundle_dir: Path, batches) -> None:
     batches = [(list(targets), command) for targets, command in batches if targets]
     if not batches:
         return
-
-    def change(bundle):
-        for targets, command in batches:
-            for kind, tid in targets:
-                M.record_exposure(bundle, kind, tid, command)
-                if kind == "conflict":
-                    _, conflict = M.resolve_target(bundle, tid)
-                    if conflict.get("candidate_id"):
-                        M.record_exposure(bundle, "candidate", conflict["candidate_id"], command)
-        return bundle
-
-    M.mutate(bundle_dir, change)
+    M.record_exposures(bundle_dir, batches)  # 1.17.0: beside bundle.json, which a read never writes
 
 
 def _minimum_with_files(minimum, bundle_dir: Path):
@@ -3003,6 +3047,7 @@ def build_parser(prog: str = "isaac") -> argparse.ArgumentParser:
     q.add_argument("--no-values", action="store_true", help="candidates only: omit parser values (records no exposure)")
     q.add_argument("--all", action="store_true", help="groups: also list merged, rejected and split groups (decision history); "
                    "merge-candidates: also list those with fewer than two live groups (they propose nothing); "
+                   "processing-results: also list the results of groups that no longer exist or are not live; "
                    "unread: also list the files a run reader kept without opening them (companions, binaries)")
     q.set_defaults(func=cmd_bundle_list)
     q = bsub.add_parser("show", help="one object by id")
@@ -3016,6 +3061,20 @@ def build_parser(prog: str = "isaac") -> argparse.ArgumentParser:
     q = bsub.add_parser("check", help="re-validate a bundle against v1")
     q.add_argument("bundle_dir")
     q.set_defaults(func=cmd_bundle_check)
+
+    q = bsub.add_parser("status", help="where this import stands, in a few plain lines: who, consent, runs, records, "
+                                       "open questions, processing, what to do next (reads only)")
+    q.add_argument("bundle_dir")
+    q.add_argument("--json", action="store_true", help="print the facts behind the lines as JSON")
+    q.set_defaults(func=cmd_bundle_status)
+
+    q = bsub.add_parser("consent", help="record the scientist's answer: may Claude read this beamtime's files (ISAAC "
+                                        "usage agreement), and the name it was given under")
+    q.add_argument("bundle_dir")
+    q.add_argument("--by", required=True, help="the scientist's name, as they gave it")
+    q.add_argument("--withdraw", action="store_true", help="record that the consent is withdrawn (it holds from now on)")
+    q.add_argument("--note", help="optional: what they said, in a few words (e.g. a limit on what may be read)")
+    q.set_defaults(func=cmd_bundle_consent)
 
     q = bsub.add_parser("annotate", help="record an AI interpretation (never above needs_review)")
     q.add_argument("bundle_dir")

@@ -44,7 +44,6 @@ def _vendored_schema_basis(monkeypatch, tmp_path):
 def pristine(tmp_path_factory):
     out = tmp_path_factory.mktemp("ro") / "bundle"
     assert cli.main(["import", str(SEMANTICS), "--out", str(out)]) == 0
-    M.group(out)
     _add_group(out)  # a record group with a processing result (g1 / p1)
     return out
 
@@ -129,7 +128,8 @@ def test_the_values_a_read_prints_are_recorded_beside_the_bundle_and_folded_in_b
     seen = M.exposures_for(M.load(bdir), "candidate", cand)  # every load reads it back
     assert [e["command"] for e in seen] == ["bundle reveal"]
     # the blind protocol holds: a reading given after the value was shown is not blind
-    M.annotate(bdir, target_id=cand, value="anything", model_id="synthetic-model", basis="synthetic", blind=True)
+    M.annotate(bdir, target_id=cand, value="anything", excerpt_locator=None, source_id=None, model_id="synthetic-model",
+               blind=True, rationale="synthetic")
     reading = M.load(bdir)["ai_interpretations"][-1]
     assert reading["blind"] is False
     # that write folded the pending exposures into bundle.json, kept their ids, and removed the file
@@ -148,10 +148,15 @@ def test_a_pending_exposure_of_another_bundle_is_never_folded_in(bdir, capsys):
 
 
 def test_an_unreadable_pending_exposure_line_is_refused_not_skipped(bdir):
-    (bdir / M.PENDING_EXPOSURES_FILE).write_text("{not json\n")
-    with pytest.raises(M.MutationRefused) as exc:
-        M.load(bdir)
-    assert M.PENDING_EXPOSURES_FILE in str(exc.value)
+    bid = M.load(bdir)["bundle_id"]
+    good = {"bundle_id": bid, "target": {"kind": "candidate", "id": "c-1"}, "command": "bundle reveal",
+            "at_utc": "2026-11-22T00:00:00Z"}
+    for line in ("{not json", json.dumps({**good, "at_utc": "yesterday"}), json.dumps({**good, "target": {"kind": "x", "id": "1"}}),
+                 json.dumps({**good, "target": {"kind": "candidate", "id": ""}}), json.dumps(["a list"])):
+        (bdir / M.PENDING_EXPOSURES_FILE).write_text(json.dumps(good) + "\n" + line + "\n")
+        with pytest.raises(M.MutationRefused) as exc:
+            M.load(bdir)
+        assert M.PENDING_EXPOSURES_FILE in str(exc.value) and "(2)" in str(exc.value), line  # names the bad line
 
 
 def test_an_older_bundle_is_upgraded_by_the_next_write_never_by_a_look(bdir, capsys):
@@ -170,7 +175,12 @@ def test_an_older_bundle_is_upgraded_by_the_next_write_never_by_a_look(bdir, cap
 
 def test_results_of_groups_that_no_longer_exist_are_counted_not_listed(bdir, capsys):
     b = M.load(bdir)
-    b["record_groups"] = [g for g in b["record_groups"] if g["group_id"] != "g1"]  # a regroup dropped g1
+    gone = [g for g in b["record_groups"] if g["group_id"] == "g1"]
+    b["record_groups"] = [g for g in b["record_groups"] if g["group_id"] != "g1"]  # a regroup replaced g1
+    b.setdefault("superseded_record_groups", []).extend(
+        {"group_id": g["group_id"], "member_run_keys": g["member_run_keys"], "status": "proposed",
+         "superseded_utc": "2026-11-22T00:00:00Z", "reason": "synthetic regroup", "processing_result_ids": ["p1"]}
+        for g in gone)
     M.save_bundle(bdir, b)
     assert cli.main(["bundle", "list", str(bdir), "processing-results"]) == 0
     page = json.loads(capsys.readouterr().out)

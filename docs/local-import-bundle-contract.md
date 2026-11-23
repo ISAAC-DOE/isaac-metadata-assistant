@@ -1,6 +1,6 @@
 # ISAAC Local Import Bundle — contract v1
 
-Status: **v1.16.0** (the second round of the 18 Nov 2026 audit's import rules: the potential an SSRL XDC run's name writes, as a suggestion that needs review; a scan title naming other scans makes a processed output, never a run; an overwritten macro, two comment-line events and a position within motor resolution are no conflicts; the clock zone an #E / #D pair gives is suggested; a BL4-3 standard named as one proposes the role reference and the scanned range a witness for the absorber, 2026-11-22, §9 "What 1.16.0 added"; v1.15.0 the `export_despite_completeness` record-group decision: a record the local record-completeness gate holds is exported anyway, for that record body, and later exports keep it, 2026-11-22, §9 "What 1.15.0 added"; v1.14.0 four import rules of the 18 Nov 2026 audit: a signed potential token in a file name, the technique from the instrument configuration, pellet-standard fields asked only where mentioned, and a comment line left over from an earlier run flagged; every id an earlier build gave stands on a re-import, 2026-11-19, §9 "What 1.14.0 added"; v1.13.0 a file whose own scan title states an average beside SPEC acquisitions — the scientists' averages, such as a PyMca `.mca` — is a processed output linked by legacy number, never a run; a `MERGE` folder alone only flags a run; and a processed product's file name is no longer read as a condition or sample reading of its run, 2026-11-18, §9 "What 1.13.0 added"; v1.12.0 a reading pass's quotes are checked against the cited file when it is loaded, and its notes about a run's scans are kept as `scan_notes`, AI readings never decisions, 2026-11-17, §9 "What 1.12.0 added"; v1.11.0 a file the engine classifies `processed_spectrum` — the scientists' quick merges — is a processed output linked by legacy number, never a run, 2026-11-09, §9 "What 1.11.0 added"; v1.10.0 an answer refused only because it is not on its field's list is kept as a vocabulary request, `vocabulary_requests`, and `bundle propose-terms` drafts it, 2026-10-30, §9 "What 1.10.0 added", §29; v1.9.0 (`set_counter_positions` may name the LAST file-name token, `--positions last`, and a scientist's merge has a working path, 2026-10-30, §9 "What 1.9.0 added", §27; v1.8.0 the bounds on `scientist_decisions` and `ai_interpretations` raised to 200,000, so an append-only log can no longer lock a bundle; decide refuses a value its field refuses, 2026-10-29, §9 "What 1.8.0 added", §25; v1.7.0 `context.electrochemistry.current_setpoint_mA_cm2` answerable, so a confirmed galvanostatic record can complete, 2026-10-29, §9 "What 1.7.0 added", DEC-92; v1.6.0 capture decisions — keep apart, the Athena result of record, "no counter" — a merge decision applied as one combined group, and question ids that survive answers, 2026-10-29, §9 "What 1.6.0 added"; v1.5.0 control mode answerable the same day; v1.4.0 the SSRL XDC scan start time, the instrument clock's time zone and its binding, 2026-10-29, §9 "What 1.4.0 added"; v1.3.0 absorber readings on record groups, a larger writable set and STALE bundles, the same day; v1.2.0 processed outputs 2026-10-28; v1.1.0 LOCAL-2 and v1.0.0 LOCAL-1 the same day). Machine contract:
+Status: **v1.17.0** (the scientist's consent to Claude reading the files, and their name, kept in `consents` so a second session reads it with `isaac bundle status` instead of asking again; a command that only reads never writes `bundle.json`, and the values it prints are recorded beside it in `exposures.pending.jsonl`, 2026-11-23, §9 "What 1.17.0 added"; v1.16.0 the second round of the 18 Nov 2026 audit's import rules: the potential an SSRL XDC run's name writes, as a suggestion that needs review; a scan title naming other scans makes a processed output, never a run; an overwritten macro, two comment-line events and a position within motor resolution are no conflicts; the clock zone an #E / #D pair gives is suggested; a BL4-3 standard named as one proposes the role reference and the scanned range a witness for the absorber, 2026-11-22, §9 "What 1.16.0 added"; v1.15.0 the `export_despite_completeness` record-group decision: a record the local record-completeness gate holds is exported anyway, for that record body, and later exports keep it, 2026-11-22, §9 "What 1.15.0 added"; v1.14.0 four import rules of the 18 Nov 2026 audit: a signed potential token in a file name, the technique from the instrument configuration, pellet-standard fields asked only where mentioned, and a comment line left over from an earlier run flagged; every id an earlier build gave stands on a re-import, 2026-11-19, §9 "What 1.14.0 added"; v1.13.0 a file whose own scan title states an average beside SPEC acquisitions — the scientists' averages, such as a PyMca `.mca` — is a processed output linked by legacy number, never a run; a `MERGE` folder alone only flags a run; and a processed product's file name is no longer read as a condition or sample reading of its run, 2026-11-18, §9 "What 1.13.0 added"; v1.12.0 a reading pass's quotes are checked against the cited file when it is loaded, and its notes about a run's scans are kept as `scan_notes`, AI readings never decisions, 2026-11-17, §9 "What 1.12.0 added"; v1.11.0 a file the engine classifies `processed_spectrum` — the scientists' quick merges — is a processed output linked by legacy number, never a run, 2026-11-09, §9 "What 1.11.0 added"; v1.10.0 an answer refused only because it is not on its field's list is kept as a vocabulary request, `vocabulary_requests`, and `bundle propose-terms` drafts it, 2026-10-30, §9 "What 1.10.0 added", §29; v1.9.0 (`set_counter_positions` may name the LAST file-name token, `--positions last`, and a scientist's merge has a working path, 2026-10-30, §9 "What 1.9.0 added", §27; v1.8.0 the bounds on `scientist_decisions` and `ai_interpretations` raised to 200,000, so an append-only log can no longer lock a bundle; decide refuses a value its field refuses, 2026-10-29, §9 "What 1.8.0 added", §25; v1.7.0 `context.electrochemistry.current_setpoint_mA_cm2` answerable, so a confirmed galvanostatic record can complete, 2026-10-29, §9 "What 1.7.0 added", DEC-92; v1.6.0 capture decisions — keep apart, the Athena result of record, "no counter" — a merge decision applied as one combined group, and question ids that survive answers, 2026-10-29, §9 "What 1.6.0 added"; v1.5.0 control mode answerable the same day; v1.4.0 the SSRL XDC scan start time, the instrument clock's time zone and its binding, 2026-10-29, §9 "What 1.4.0 added"; v1.3.0 absorber readings on record groups, a larger writable set and STALE bundles, the same day; v1.2.0 processed outputs 2026-10-28; v1.1.0 LOCAL-2 and v1.0.0 LOCAL-1 the same day). Machine contract:
 [`apps/api/isaac_api/local_import/bundle-v1.schema.json`](../apps/api/isaac_api/local_import/bundle-v1.schema.json)
 (JSON Schema draft 2020-12) plus the checks in
 [`bundle.py`](../apps/api/isaac_api/local_import/bundle.py) `validate_bundle` that JSON
@@ -36,6 +36,7 @@ objects. The vendored schema is located by one resolver, `isaac_api/schema_locat
 | `summary.md` | Compact, scientist-readable (target ≤ 6 KB; 3.0 KB on the 9-run fixture). Says it is not a validated official record. |
 | `runs.json`, `conflicts.json`, `questions.json`, `unread_files.json` | Sections of `bundle.json` with their `total`, for direct reading. |
 | `reading.full.json` | The raw engine state (`ArchiveReading.to_state()` + every candidate's `to_state()`), for lookup. Not the contract. |
+| `exposures.pending.jsonl` | **1.17.0.** Present only after a command that only reads printed parser values: one exposure per line (`bundle_id`, `target`, `command`, `at_utc`), read back by every load and folded into `exposures[]` by the next write, which removes it (§11). Not written by `import`. |
 
 `--force` overwrites only these seven files and deletes nothing. `--out` inside the folder
 being read is refused (the next import would read the bundle as a source).
@@ -63,6 +64,7 @@ being read is refused (the next import would read the bundle as a source).
 | `questions[]` | what a scientist is asked: one per conflict, one per needs-review value that has a field | — |
 | `ai_interpretations[]` | **empty in v1 output**; schema defined now for a later slice | extraction-interpretation |
 | `scientist_decisions[]` | **empty in v1 output**; schema defined now for a later slice | scientist confirmation |
+| `consents[]` | **1.17.0, optional.** The scientist's answer to whether Claude may read this beamtime's files (ISAAC usage agreement), the name it was given under, when, and the folder; append-only, the latest entry holds (§9, "What 1.17.0 added") | scientist's own word |
 | `validation` | bundle-schema result at write time; `official_record_validation: not_applicable` | deterministic validation |
 | `readiness`, `counts`, `bounds`, `authorities` | derived summaries; see §7 for bounds | — |
 
@@ -1019,6 +1021,41 @@ click; nothing scientific is filled in silently.
 - **The upgrade is disclosed**: the first write of an older bundle appends one `format_upgrades` entry whose
   statement includes `bundle.CHANGES_ADDED_IN["1.16.0"]`.
 
+### What 1.17.0 added (consent kept; a read writes nothing)
+
+C4 and C7 of the 22 Nov 2026 plan; skill audit of 18 Nov 2026, findings 10, 13 and 15.
+
+- **One optional section, `consents[]`** (`$defs/consent`). Each entry: `consent_id` (`consent-NNNN`), `answer`
+  (`given` or `withdrawn`), `scope` (the constant `claude_reads_files`: Claude may read the imported folder's files and
+  every command output on this bundle, flow B of the skill's `data-flow-and-consent.md`), `agreement` (the constant
+  `ISAAC usage agreement`), `given_by` (the name, `self_reported_local_user`, `local_unverified`: a claim, never an
+  identity), `folder` (the imported folder's name), `recorded_utc`, `command`, optional `note`. Append-only; the LATEST
+  entry holds (`bundle.current_consent`), so a withdrawal never erases the consent before it.
+- **Recorded only by `isaac bundle consent <dir> --by "<name>" [--withdraw] [--note ...]`**
+  (`mutations.record_consent`). The same answer under the same name as the entry that holds records nothing and writes
+  nothing.
+- **`isaac bundle status <dir> [--json]`** (`status.py`) says in about seven plain lines where an import stands: the
+  folder and format (an upgrade pending is said, not made), the scientist and the consent, runs and live record groups,
+  records exportable at the last `bundle validate`, open questions (blocking, disagreements affecting a record,
+  optional), the last processing, and the one thing to do next. It reads only and prints no parser value.
+- **A command that only reads never writes `bundle.json`** (`list`, `show`, `questions`, `check`, `status`,
+  `crosscheck-plan`, `excerpt`, `reveal`, `check-readings`, `propose-terms`, `site export`, `template export`, and the
+  Local Imports page's progress and questions routes). The parser values it prints are still recorded first (§11), in
+  `exposures.pending.jsonl` beside it (`mutations.record_exposures`), read back by every load and folded into
+  `exposures[]` by the next write, which then removes the file. So two readers never trip "The bundle changed since it
+  was read", and an older bundle is upgraded by the next write, never by a look. A line of another `bundle_id` (a
+  folder re-imported since) is never folded in; an unreadable line is refused, not skipped.
+- **`bundle list <dir> processing-results`** lists only the results of live record groups; the results of a group that
+  no longer exists or is merged, rejected or split are counted in `not_listed` (`group_no_longer_live`) and listed with
+  `--all`.
+- **`format_upgrades[].statement` may be up to 4000 characters** (3000 before): the statement of an older bundle's
+  upgrade appends each later version's note, and a 1.7.0 bundle's passed 3000 with this one.
+- **A 1.17.0 validator accepts 1.0.0–1.16.0 bundles;** a 1.16.0 validator refuses a 1.17.0 one (the label, the
+  section when present, and a longer statement). Nothing becomes newly writable; `processed_outputs` is required at 1.17.0 as at 1.2.0–1.16.0.
+  An older build that writes a bundle with a pending exposures file ignores the file; this build folds it in later.
+- **The upgrade is disclosed**: the first write of an older bundle appends one `format_upgrades` entry whose
+  statement includes `bundle.CHANGES_ADDED_IN["1.17.0"]`.
+
 ## 10. Exit codes (`isaac import` / `isaac bundle`)
 
 0 ok · 1 `check` found the bundle invalid, or STALE (stored by an older build, §9 "What 1.3.0
@@ -1040,7 +1077,9 @@ Install for use from any directory: `scripts/install_local_cli.sh` (creates or r
 candidate whose value a confirm question's text states — `questions.confirm_value_shown`, all of
 them, not only the hinted ones; polish c6-r);
 the exposure is written BEFORE anything is printed, and if it cannot be written nothing is
-printed. `summary.md` shows no non-conflicting parser value. `bundle annotate --blind` is
+printed. Since 1.17.0 a command that only reads writes it to `exposures.pending.jsonl` beside `bundle.json`, never to
+`bundle.json` itself; every load reads it back, and the next write folds it into `exposures[]` (§9, "What 1.17.0
+added"). `summary.md` shows no non-conflicting parser value. `bundle annotate --blind` is
 honoured only when no exposure exists for that target; otherwise the interpretation is
 stored `blind: false` with the reason. `bundle list candidates --no-values` and
 `bundle excerpt` (raw source text, re-read through the guarded walk, refused if the file's

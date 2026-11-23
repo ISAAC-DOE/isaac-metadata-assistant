@@ -10,6 +10,8 @@ Every list returns one page (`--limit` at most 200): follow its `more` line unti
 |---|---|
 | Read a folder or ZIP | `<isaac> import <folder> --out <bundle> [--profile auto\|<id>] [--force] [--record-local-root]` |
 | Is the bundle sound | `<isaac> bundle check <bundle>` |
+| Where things stand (start of a later session) | `<isaac> bundle status <bundle> [--json]` (reads only; no file value) |
+| Record the scientist's consent and name | `<isaac> bundle consent <bundle> --by "<name>" [--withdraw] [--note "<their words>"]` |
 | A page of items | `<isaac> bundle list <bundle> runs\|conflicts\|candidates\|questions\|unread\|groups\|merge-candidates\|processed-outputs\|processing-results\|scan-notes [--limit N] [--offset M] [--state S] [--no-values] [--all]` |
 | One item | `<isaac> bundle show <bundle> run\|conflict\|candidate\|source\|question\|group\|merge-candidate\|processed-output\|processing-result <id> [--full]` |
 | Pull text and images out of a document | `<python> -m isaac_api.local_import.extract <file> --out <dir> [--root <folder>] [--sheet <name> --rows-offset N --rows-limit M] [--show-limits] [--blocks]` |
@@ -17,7 +19,7 @@ Every list returns one page (`--limit` at most 200): follow its `more` line unti
 - `import --force` overwrites the bundle files in a used `--out`: every answer and approval in it is lost. Never offer it for a bundle that holds decisions (Step 2).
 - `list --state`: for `candidates` (value state) and `processing-results` (`needs_review`, `scientist_confirmed`, `rejected`).
 - `list --no-values`: `candidates` only; lists them without printing, so without exposing, any value.
-- `list --all`: `groups` adds rejected, merged and split ones; `merge-candidates` those that propose nothing; `unread` the files a run reader kept beside a run without opening them.
+- `list --all`: `groups` adds rejected, merged and split ones; `merge-candidates` those that propose nothing; `processing-results` the results of groups that no longer exist or are not live; `unread` the files a run reader kept beside a run without opening them.
 - `unread` is the files no reader claimed. Athena projects are listed there as files; nothing ever reads them.
 - `show` prints values. `show question` takes the `Q-…` ids `bundle questions` prints; an answered one shows who answered and when (`current_answers`).
 - `show source`: which reader read the file and what it gave.
