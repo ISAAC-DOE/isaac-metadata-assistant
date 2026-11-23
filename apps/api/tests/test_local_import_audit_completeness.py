@@ -354,11 +354,22 @@ def test_a_record_whose_body_changed_since_export_anyway_is_held_again_and_its_w
 
 @pytest.fixture()
 def filter_disagreement(tmp_path):
-    """Two SYN groups of one sample at one potential. The second run's NAME says filter20, its scan headers say 10:
-    its group carries the care flag, and the filter is what keeps the two records apart."""
+    """Two SYN groups of one sample at one potential. The second run's NAME says filter20, its first scan header 10
+    and its second 20: its group carries the care flag, and the filter is what keeps the two records apart. (Since C6 a
+    name alone against recordings that agree is settled by the recorded filter, bl15.resolution.recorded_filter_motor.v1,
+    so the run's own recordings disagree here.)"""
     runs = [("01_SYN_ZZ1_filter10_060mV", 9, [T.scan_cols(10 + k) for k in range(2)]),
             ("02_SYN_ZZ1_filter20_060mV", 11, [T.scan_cols(60 + k) for k in range(2)])]
-    bdir, _ = T.imported(tmp_path, runs, process=False)
+    root = tmp_path / "SYN_beamtime"
+    T.write_beamtime(root, runs)
+    stem = "02_SYN_ZZ1_filter20_060mV"
+    second = root / f"{stem}_dir" / f"{stem}_002.dat"
+    second.write_text(second.read_text().replace("filter=10", "filter=20"))
+    head, _, rest = (root / stem).read_text().partition("#S 2 ")
+    (root / stem).write_text(head + "#S 2 " + rest.replace("filter=10", "filter=20"))
+    bdir = tmp_path / "out"
+    assert cli.main(["import", str(root), "--out", str(bdir)]) == 0
+    M.group(bdir)
     b = M.load(bdir)
     M.decide(bdir, target_ids=[g["group_id"] for g in b["record_groups"]], decision="confirm", value=None, **BY)
     held = next(g["group_id"] for g in M.load(bdir)["record_groups"]

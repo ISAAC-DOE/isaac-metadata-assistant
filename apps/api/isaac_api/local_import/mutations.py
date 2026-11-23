@@ -2600,6 +2600,14 @@ def decide_question(
             if value is not None:
                 raise MutationRefused(EXPERIMENT_DEFER_VALUE_REFUSAL)
             value, clock_defer = CLOCK_ZONE_DEFER_VALUE, True
+        if (asked_now or {}).get("kind") == Q.QUALITY_REMARK_KIND:
+            # review of #352, finding 5: "keep them despite the remark" is recorded WITH this question's id, so a group
+            # confirmed for any other reason has not answered it
+            if value is not None:
+                raise MutationRefused(f"Question {question_id} takes no --value: confirm keeps the groups, reject "
+                                      "leaves them out. Nothing was recorded.")
+            if decision == "confirm":
+                value = {Q.QUALITY_REMARK_ANSWER_KEY: question_id}
         params = dict(
             target_ids=list(extra_targets) + found, decision=decision, value=value, by=by, orcid=orcid, note=note,
             split_into=split_into, merge_with=merge_with, qc_status=qc_status, qc_note=qc_note,
