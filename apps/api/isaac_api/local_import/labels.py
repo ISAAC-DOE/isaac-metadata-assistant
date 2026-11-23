@@ -329,7 +329,8 @@ def cycling_number_index(bundle: Mapping) -> dict[str, dict[int, list[str]]]:
                     out["mV"][mv].append(where)
     for n in bundle.get("data_quality_notes") or ():
         text = str(n.get("text") or "")
-        quote = text if len(text) <= 80 else text[:79] + "…"
+        flat = " ".join(text.split())  # a multi-line Notes cell, quoted on one line
+        quote = flat if len(flat) <= 80 else flat[:79] + "…"
         for m in _NOTE_MV.finditer(text):
             mv = _millivolts(m.group("n") or m.group("n2"), m.group("u") or m.group("u2"))
             if mv:
