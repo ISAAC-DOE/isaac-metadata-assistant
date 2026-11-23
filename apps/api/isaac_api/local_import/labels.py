@@ -372,7 +372,7 @@ def history_reading(literal: str, index: Mapping[str, Mapping[int, Sequence[str]
         return words, (f"The files say both: {n} mV ({'; '.join(mv_where[:2])}) and {n} cycles "
                        f"({'; '.join(cycles_where[:2])}), so the number is left as written; say which.")
     return words, (f"It only splits the file-name token into words: nothing in this beamtime's files says whether {n} "
-                   "is a potential limit in mV (the usual meaning) or a number of cycles, so say which.")
+                   "is a potential limit or a number of cycles, so say which.")
 
 
 def _own_name(e: Mapping, stem: str) -> bool:
