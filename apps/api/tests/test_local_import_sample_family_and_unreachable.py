@@ -280,7 +280,10 @@ def test_finding_2_once_one_member_is_left_the_sample_question_records_on_it_alo
     for m, value in zip(members[:2], ("SYN first", "SYN second")):
         assert _run(capsys, "bundle", "decide", grouped, "--question", m["question_id"], "--decision", "correct",
                     "--value", value, "--by", WHO)[0] == 0
-    assert fam["question_id"] not in {q["question_id"] for q in Q.consolidate(M.load(grouped))["questions"]}
+    # DEC-91: a partly answered question keeps its id: the sample question is still open, on the one member left
+    left = Q.question(Q.consolidate(M.load(grouped)), fam["question_id"])
+    assert left is not None and left["sample_family"]["member_questions"] == [members[2]["question_id"]]
+    assert left["targets"] == members[2]["targets"]
     code, _out, err = _run(capsys, "bundle", "decide", grouped, "--question", fam["question_id"], "--decision",
                            "correct", "--value", "SYN last", "--by", WHO)
     assert code == 0, err
@@ -401,8 +404,9 @@ def _site_answer(tmp_path, data, card, value, name, at="2100-02-01T10:00:00Z"):
 
 
 def test_a_site_answer_records_on_the_last_open_member_and_never_over_an_own_answer(grouped, tmp_path):
-    """Leftover 1: once only one member is open the sample question leaves the open list; a site answer to its card
-    still records on that member (as decide --question does), and never on the ones answered on their own."""
+    """Leftover 1: once only one member is open the sample question keeps its id (DEC-91), asking only that member; a
+    site answer to its card records on that member (as decide --question does), and never on the ones answered on
+    their own."""
     from isaac_api.local_import import question_site_import as SI
 
     S.export_site(grouped, tmp_path / "site", site_template=tmp_path / "no-template")
@@ -412,7 +416,8 @@ def test_a_site_answer_records_on_the_last_open_member_and_never_over_an_own_ans
     card = next(c for c in data["cards"] if c["covers"][0]["question_id"] == fam["question_id"])
     for m, value in zip(members[:2], ("SYN first", "SYN second")):
         M.decide_question(grouped, question_id=m["question_id"], decision="correct", value=value, by=WHO, orcid=None)
-    assert fam["question_id"] not in {q["question_id"] for q in Q.consolidate(M.load(grouped))["questions"]}
+    left = Q.question(Q.consolidate(M.load(grouped)), fam["question_id"])
+    assert left is not None and left["targets"] == members[2]["targets"]
     rep = SI.import_answers(grouped, _site_answer(tmp_path, data, card, "SYN site oxide", "a.json"),
                             site_data=site_data, apply=True)
     assert rep["answers"][0]["outcome"] == "recorded", rep["answers"][0]

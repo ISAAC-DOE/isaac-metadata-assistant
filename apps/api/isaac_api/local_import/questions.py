@@ -1519,8 +1519,15 @@ def consolidate(bundle: Mapping, *, compositions_out: dict | None = None, includ
         if beamtime_start is not None:
             questions.append(beamtime_start)
         # C1: a sample field asked once per electrode or once per run is asked ONCE per sample (its own id; every
-        # member keeps its id and stays answerable)
-        questions += _sample_family_questions(questions, bundle, sample_written_of_group)
+        # member keeps its id and stays answerable). Which sample questions exist, and which members they have, is
+        # read from the bundle WITH its answered targets back in (DEC-91): a sample question answered for some of its
+        # members keeps its id, and an answer never makes a new one appear
+        universe = None
+        if not include_answered and _sample_family_field_answered(bundle):
+            universe = {q["question_id"]: q for q in consolidate(bundle, include_answered=True,
+                                                                 explain_counter=False)["questions"]
+                        if q.get("sample_family")}
+        questions += _sample_family_questions(questions, bundle, sample_written_of_group, universe=universe)
         # the condition labels (labels.py): new questions, each with its own id; no other question changes
         questions += label_questions(bundle, decisions=decisions, groups=groups, include_answered=include_answered)
         # r8 MED 5: a disagreement on a reading a label is proposed from points at that label's question (its why only)
@@ -2769,8 +2776,11 @@ def _asks_for_a_value(q: Mapping) -> bool:
     if "[]" in path or not q.get("targets"):
         return False
     # (``answers_differ`` is not a reason: it says answers to OTHER samples differ, which a sample question expects)
-    if any(q.get(flag) for flag in ("informational", "outside_live_groups", "all_groups_cannot_export",
-                                    "covered_by_decisions", "asked_by_question", "answered_at_once_by", "asked_again")):
+    # ID STABILITY (DEC-91): nothing that an answer or a processing result can change keeps a member out. A member
+    # whose groups cannot export as they stand (``all_groups_cannot_export``), or whose answer the record could not
+    # take (``asked_again``), stays a member, so the sample question keeps its id and its targets
+    if any(q.get(flag) for flag in ("informational", "outside_live_groups", "covered_by_decisions",
+                                    "asked_by_question", "answered_at_once_by")):
         return False
     if "correct" not in (q.get("allowed_decisions") or ALLOWED_DECISIONS.get(kind, ())):
         return False
@@ -2780,8 +2790,17 @@ def _asks_for_a_value(q: Mapping) -> bool:
     return True
 
 
+def _sample_family_field_answered(bundle: Mapping) -> bool:
+    """Whether a scientist answered any value of a :data:`SAMPLE_FAMILY_FIELDS` field (so the open questions alone
+    no longer show every member a sample question was built from)."""
+    return any(o.get("target_field_path") in SAMPLE_FAMILY_FIELDS
+               and o.get("value_state") in (B.STATE_SCIENTIST_CONFIRMED, B.STATE_REJECTED)
+               for o in (*(bundle.get("candidates") or ()), *(bundle.get("missing_values") or ())))
+
+
 def _sample_family_questions(questions: list[dict], bundle: Mapping,
-                             sample_written_of_group: Mapping[str, Sequence[tuple]]) -> list[dict]:
+                             sample_written_of_group: Mapping[str, Sequence[tuple]], *,
+                             universe: Mapping[str, Mapping] | None = None) -> list[dict]:
     """C1: ONE question per sample for a sample field asked once per electrode or once per run.
 
     A sample field (the form, the material's name) was asked once per sample READING, and the reading holds the
@@ -2799,13 +2818,31 @@ def _sample_family_questions(questions: list[dict], bundle: Mapping,
     an answer), so it stays the same while its members are answered one by one. Never across two samples, two
     loadings or two fields; a question that names a group whose sample is not stated is never a member. Answers
     already given to ANOTHER sample (``answers_differ``) keep no question out: one answer per sample is what this
-    asks."""
+    asks.
+
+    WHICH sample questions exist is read with the answered members back in: ``universe`` (the sample questions of
+    ``consolidate(include_answered=True)``, by id; ``None`` when no sample-field value is answered, so the open
+    questions are every member). A sample question exists here only if it exists there, and lists only members it
+    has there: so one answered for some of its members keeps its id while one member is still open, and an answer
+    never makes a new sample question appear (or a member move to one)."""
     from .grouping import SAMPLE_NUMBER_KEY
 
     groups = {g["group_id"]: g for g in live_groups(bundle)}
     identity = {gid: _group_sample_identity(g) for gid, g in groups.items()}
     families: dict[tuple[str, str, str], list[dict]] = {}
-    for q in questions:
+    if universe is not None:
+        # the members are the ones each sample question has with the answered members back in, by id: what keeps a
+        # member in (its field, kind and sample; for the ``tokens`` basis the shared file-name tokens, which an open
+        # member alone may no longer show once the others are answered) is read there, never from what is still open
+        family_of: dict[str, tuple[str, str, str]] = {}
+        for fq in universe.values():
+            fkey = (fq["target_field_path"], fq["kind"], str(fq["partition"])[len(SAMPLE_FAMILY_TAG) + 1:])
+            for mid in fq["sample_family"]["member_questions"]:
+                family_of[mid] = fkey
+        for q in questions:
+            if q["question_id"] in family_of and not q.get("sample_family"):
+                families.setdefault(family_of[q["question_id"]], []).append(q)
+    for q in questions if universe is None else ():
         if not _asks_for_a_value(q):
             continue
         gids = {s[len("group:"):] for s in q.get("per_scope_targets") or () if s.startswith("group:")}
@@ -2821,10 +2858,10 @@ def _sample_family_questions(questions: list[dict], bundle: Mapping,
         families.setdefault((q["target_field_path"], q["kind"], key), []).append(q)
     out: list[dict] = []
     for (path, kind, key), members in families.items():
-        if len(members) < 2:
+        qid = _qid("experiment", SAMPLE_FAMILY_TAG, kind, path, key)
+        if universe is None and len(members) < 2:
             continue
         members.sort(key=lambda m: m["question_id"])
-        qid = _qid("experiment", SAMPLE_FAMILY_TAG, kind, path, key)
         targets: list[dict] = []
         per_scope: dict[str, list[str]] = {}
         for m in members:
@@ -2852,7 +2889,9 @@ def _sample_family_questions(questions: list[dict], bundle: Mapping,
                         numbers.append(entry[1])
         names = spelled["sample_name"] + spelled["loading_or_thickness"]  # the name first ("IrTiO2, 2nm")
         numbers.sort()
-        if key.startswith("tokens="):
+        if universe is not None:
+            said = universe[qid]["sample_family"]["sample"]
+        elif key.startswith("tokens="):
             said = " ".join(str(t) for t in members[0]["shared_sample_tokens"])
         else:
             said = ", ".join(names) if names else json.loads(key[len("sample="):]).get("sample_name")
@@ -2931,10 +2970,15 @@ def _sample_family_questions(questions: list[dict], bundle: Mapping,
         if held:
             fam["cannot_export_groups"] = held
             fam["applies_to"]["groups_that_can_export"] = len(gids) - len(held)
+        if held and all(m.get("all_groups_cannot_export") for m in members):
+            # (C3: then no answer to it reaches a record as the bundle stands, as for each of its members)
+            fam["all_groups_cannot_export"] = True
         if all(m.get("deferred") for m in members):
             fam["deferred"] = {**members[0]["deferred"], "targets": len(targets)}
         for m in members:
-            m["asked_for_sample_by"] = qid
+            # a member whose answer the record could not take stays listed on its own, with why (its id unchanged)
+            if not m.get("asked_again"):
+                m["asked_for_sample_by"] = qid
             m["text"] += asked_for_sample_sentence(qid)
         out.append(fam)
     return out
