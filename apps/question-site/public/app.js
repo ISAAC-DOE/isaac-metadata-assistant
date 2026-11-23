@@ -227,7 +227,7 @@ function viewSignin() {
   return h(
     'form',
     {
-      class: 'panel signin',
+      class: 'card signin',
       onsubmit: async (ev) => {
         ev.preventDefault();
         button.disabled = true;
@@ -245,13 +245,12 @@ function viewSignin() {
         }
       },
     },
-    h('p', { class: 'brand', text: 'ISAAC' }),
-    h('h1', { class: 'title', text: 'A few questions about your beamtime' }),
-    h('p', { class: 'subtitle', text: 'Answer as many as you like, whenever you have a few minutes. Every answer saves as you go.' }),
+    h('h1', { class: 'q', text: 'A few questions about your beamtime' }),
+    h('p', { class: 'lead', text: 'Answer as many as you like. Every answer saves as you go, so you can stop any time.' }),
     h('label', { class: 'field' }, h('span', { text: 'Your name' }), name),
     h('label', { class: 'field' }, h('span', { text: 'Site password' }), password),
     error,
-    h('div', { class: 'field' }, button),
+    button,
   );
 }
 
@@ -265,13 +264,26 @@ async function signOut() {
   window.location.reload(); // drops everything the page held in memory
 }
 
-function topbar() {
+function topbar(where) {
   return h(
-    'div',
+    'header',
     { class: 'topbar' },
-    h('span', { class: 'brand', text: 'ISAAC questions' }),
-    h('span', { class: 'who' }, 'Signed in as ', typedText(state.name), ' · ', h('button', { class: 'linklike', type: 'button', id: 'sign-out', onclick: signOut, text: 'Sign out' })),
+    h('span', { class: 'brand', text: 'ISAAC' }),
+    where ? h('span', { class: 'where', text: where }) : null,
+    h('span', { class: 'who' }, h('span', { class: 'who-name' }, typedText(state.name), ' · '), h('button', { class: 'linklike', type: 'button', id: 'sign-out', onclick: signOut, text: 'Sign out' })),
   );
+}
+
+/** One line under the top bar: which beamtime this is, from its own files. */
+function sourceLine() {
+  const b = state.site.beamtime || null;
+  const parts = [];
+  if (b && b.read_as) parts.push(b.read_as);
+  if (b && b.edges && b.edges.length) parts.push(`${b.edges.join(', ')} edge`);
+  const dates = b && (b.facts || []).find((f) => f.label === 'Dates');
+  if (dates) parts.push(dates.quote);
+  const folder = (b && b.folder) || state.site.title;
+  return h('p', { class: 'source' }, parts.length ? h('b', { text: parts.join(' · ') }) : null, h('span', { class: 'folder' }, typedText(folder)));
 }
 
 // ---- home ------------------------------------------------------------------------------------------------------
@@ -290,7 +302,7 @@ function progressBlock(label, done, total, unsure = 0) {
   return h(
     'div',
     { class: 'progress' },
-    h('div', { class: 'progress-line' }, h('span', {}, h('strong', { text: `${done} of ${total}` }), ` ${label}${aside}`), h('span', { text: `${pct}%` })),
+    h('div', { class: 'progress-line' }, h('span', {}, `${done} of ${total} ${label}${aside}`), h('span', { text: `${pct}%` })),
     h('div', { class: 'bar', role: 'progressbar', 'aria-valuemin': 0, 'aria-valuemax': total, 'aria-valuenow': done, 'aria-label': label }, fill),
   );
 }
@@ -322,20 +334,19 @@ function viewHome() {
 
   const hero = h(
     'section',
-    { class: 'panel' },
-    h('h1', { class: 'title' }, allDone ? null : ['Hello ', typedText(first), '. '], headline),
-    h('p', { class: 'beamtime', text: state.site.title }),
-    t.needed ? progressBlock('needed questions done', t.neededDone, t.needed, t.neededUnsure) : null,
-    t.optional ? progressBlock('nice-to-have questions done', t.optionalDone, t.optional) : null,
+    { class: 'card' },
+    h('h1', { class: 'hello' }, allDone ? null : ['Hi ', typedText(first), '. '], headline),
+    h('p', { class: 'lead', text: 'Most answers are one click. You can stop any time and change an answer later.' }),
+    t.needed ? progressBlock('needed questions answered', t.neededDone, t.needed, t.neededUnsure) : null,
+    t.optional ? progressBlock('optional questions answered', t.optionalDone, t.optional) : null,
     allDone
       ? null
       : h(
           'div',
           { class: 'start' },
           h('button', { class: 'btn btn-primary', type: 'button', id: 'start', onclick: () => startRun(next), text: next.length === 1 ? 'Answer the next question' : `Answer the next ${next.length}` }),
-          h('label', { for: 'run-size' }, 'Questions per sitting: ', size),
+          h('label', { for: 'run-size' }, 'Questions per sitting ', size),
         ),
-    h('p', { class: 'note-small', text: 'Most answers are one click. Every answer saves as you go, so you can stop any time and come back later. You can change an answer whenever you like.' }),
   );
 
   const sections = [];
@@ -346,7 +357,7 @@ function viewHome() {
     if (!cards.length) continue;
     const done = cards.filter((c) => standing(c, state.answers)).length;
     sections.push(
-      h('div', { class: 'section-head' }, h('h2', { text: `${section.title} (${done} of ${cards.length})` }), section.blurb ? h('p', { text: section.blurb }) : null),
+      h('div', { class: 'section-head' }, h('h2', {}, section.title, ' ', h('span', { class: 'count', text: `${done} of ${cards.length}` })), section.blurb ? h('p', { text: section.blurb }) : null),
       h(
         'ul',
         { class: 'rows' },
@@ -357,7 +368,7 @@ function viewHome() {
           let meta;
           if (a) meta = [typedText(describeAnswer(c, a), a.action === 'dont_know' ? '' : 'row-answer'), ' · ', typedText(a.by), `, ${day(a.at)}`];
           else if (saved) meta = ['The suggestion changed since it was accepted. Please look again.'];
-          else meta = ['Not answered yet', c.applies_to?.summary ? ` · ${c.applies_to.summary}` : ''];
+          else meta = [c.applies_to?.summary || 'Not answered yet'];
           return h(
             'li',
             {},
@@ -375,7 +386,7 @@ function viewHome() {
   }
 
   const footer = h('div', { class: 'footer' }, h('a', { href: '/api/answers', download: '', text: 'Download all answers (for the ISAAC team)' }));
-  return [topbar(), hero, ...sections, footer];
+  return [topbar(), sourceLine(), hero, ...sections, footer];
 }
 
 // ---- one question ----------------------------------------------------------------------------------------------
@@ -449,31 +460,82 @@ function noteValue() {
   return el ? el.value : '';
 }
 
-function quoteBlock(item) {
-  const where = [item.file, item.locator].filter(Boolean).join(' · ');
-  return h('blockquote', { class: 'quote' }, h('q', { text: item.quote }), where ? h('cite', { text: where }) : null);
+/** Where a quote is, in plain words: "line 36", "lines 9–12", "the file name". The full locator stays in a tooltip. */
+function shortLocator(locator) {
+  const text = String(locator || '').trim();
+  if (!text) return '';
+  const lines = /^lines?\s+(\d+)(?:\s*\.\.\s*(\d+))?/i.exec(text);
+  if (lines) return lines[2] && lines[2] !== lines[1] ? `lines ${lines[1]}–${lines[2]}` : `line ${lines[1]}`;
+  if (/^file ?name token/i.test(text)) return 'the file name';
+  return text.split(/\s[([]/)[0];
 }
 
-function contextBlock(c) {
-  const items = (c.context || []).filter(Boolean);
-  if (!items.length) return null;
-  const out = [h('h2', { text: 'What your files say' })];
-  for (const item of items) {
+function quoteBlock(item, alsoIn = 0) {
+  const where = shortLocator(item.locator);
+  const cite = [];
+  if (item.file) cite.push(h('span', { class: 'file', text: item.file }));
+  if (where) cite.push(item.file ? `, ${where}` : where);
+  if (alsoIn) cite.push(` · the same in ${alsoIn} more file${alsoIn === 1 ? '' : 's'}`);
+  return h('blockquote', { class: 'quote' }, h('q', { text: item.quote }), cite.length ? h('cite', { title: item.locator || null }, cite) : null);
+}
+
+/** The same quoted value in several files reads as one line: "… the same in 2 more files". */
+function groupedQuotes(items) {
+  const groups = [];
+  for (const item of items || []) {
+    if (!item || !item.quote) continue;
+    const g = groups.find((x) => x.item.quote === item.quote);
+    if (g) g.more += 1;
+    else groups.push({ item, more: 0 });
+  }
+  return groups;
+}
+
+/** The suggestion's reason without the confidence words the label already shows. */
+function reasonText(s) {
+  const label = CONFIDENCE[s.confidence];
+  let text = String(s.reason || '').trim();
+  if (label) text = text.replace(new RegExp(`[;,.]?\\s*${label.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\.?$`, 'i'), '.').trim();
+  return text.replace(/\.\.$/, '.');
+}
+
+function lowerFirst(text) {
+  return text ? text.charAt(0).toLowerCase() + text.slice(1) : text;
+}
+
+function moreBlock(c) {
+  const out = [];
+  // the detail repeats the suggestion's reason; only what it adds is shown here
+  let rest = String(c.detail || '').trim();
+  if (c.suggestion?.reason) rest = rest.replace(String(c.suggestion.reason).trim(), '').trim();
+  rest = rest.replace(/^(Likely, please check\.|Well supported\.|A guess, please check\.)\s*/, '').trim();
+  if (rest && c.suggestion) out.push(h('p', { text: rest }));
+  const evidence = c.suggestion?.evidence || [];
+  if (evidence.length > 1) out.push(h('h3', { text: 'All the lines behind the suggestion' }), ...groupedQuotes(evidence).map((g) => quoteBlock(g.item, g.more)));
+  const breakdown = c.applies_to?.breakdown || [];
+  if (breakdown.length > 1) {
+    out.push(
+      h('h3', { text: `What one answer covers (${c.applies_to.count})` }),
+      h('div', { class: 'tablewrap', tabindex: 0, role: 'region', 'aria-label': 'What one answer covers' }, h('table', {}, h('thead', {}, h('tr', {}, h('th', { scope: 'col', text: 'Sample' }), h('th', { scope: 'col', text: 'Measurements' }), h('th', { scope: 'col', text: 'For example' }))), h('tbody', {}, breakdown.map((b) => h('tr', {}, h('td', { text: b.label }), h('td', { text: String(b.count) }), h('td', { text: b.example || '' })))))),
+    );
+  } else if ((c.applies_to?.items || []).length) {
+    const items = c.applies_to.items.slice(0, 10);
+    const left = c.applies_to.count - items.length;
+    out.push(h('h3', { text: `The measurements it covers (${c.applies_to.count})` }), h('p', { text: items.join(', ') + (left > 0 ? `, and ${left} more` : '') }));
+  }
+  for (const item of (c.context || []).filter(Boolean)) {
     if (item.kind === 'quotes' && item.items?.length) {
-      out.push(h('h3', { text: item.label || 'From the files' }), ...item.items.map(quoteBlock));
+      out.push(h('h3', { text: item.label || 'From your files' }), ...item.items.map((q) => quoteBlock(q)));
     } else if (item.kind === 'values' && item.rows?.length) {
+      if (breakdown.length > 1 && /one answer covers/i.test(item.label || '')) continue; // shown above
       out.push(
         h('h3', { text: item.label || 'Values' }),
         h(
           'div',
           { class: 'tablewrap', tabindex: 0, role: 'region', 'aria-label': item.label || 'Values' },
-          h(
-            'table',
-            {},
-            h('thead', {}, h('tr', {}, (item.columns || []).map((col) => h('th', { scope: 'col', text: col })))),
-            h('tbody', {}, item.rows.map((row) => h('tr', {}, row.map((cell) => h('td', { text: cell === null || cell === undefined ? '' : String(cell) }))))),
-          ),
+          h('table', {}, h('thead', {}, h('tr', {}, (item.columns || []).map((col) => h('th', { scope: 'col', text: col })))), h('tbody', {}, item.rows.map((row) => h('tr', {}, row.map((cell) => h('td', { text: cell === null || cell === undefined ? '' : String(cell) })))))),
         ),
+        item.more ? h('p', { text: `and ${item.more} more` }) : null,
       );
     } else if (item.kind === 'image' && item.image) {
       const src = `/api/image?f=${encodeURIComponent(item.image)}`;
@@ -483,7 +545,11 @@ function contextBlock(c) {
       );
     }
   }
-  return out.length > 1 ? h('section', { class: 'panel context' }, out) : null;
+  const facts = state.site.beamtime?.facts || [];
+  if (facts.length) {
+    out.push(h('h3', { text: 'About this beamtime, from its logbook' }), ...facts.map((f) => quoteBlock({ quote: `${f.label}: ${f.quote}`, file: f.file, locator: f.locator })));
+  }
+  return out.length ? h('details', { class: 'details', id: 'more' }, h('summary', { text: 'Show the evidence and context' }), out) : null;
 }
 
 function viewCard() {
@@ -503,32 +569,9 @@ function viewCard() {
   const optionButton = (o, i) =>
     h('button', { class: `btn${chosen(o.value) ? ' is-chosen' : ''}`, type: 'button', id: `opt-${i}-${String(o.value).slice(0, 40)}`, disabled: busy, 'aria-pressed': chosen(o.value) ? 'true' : 'false', onclick: () => pick(o.value), text: o.label ?? String(o.value) });
 
-  const parts = [];
-  parts.push(
-    h(
-      'div',
-      { class: 'chips' },
-      h('span', { class: c.blocking ? 'chip' : 'chip quiet', text: c.blocking ? 'Needed before export' : 'Nice to have' }),
-      c.audience === 'processing' ? h('span', { class: 'chip quiet', text: 'About the data processing' }) : null,
-      c.unblocks ? h('span', { class: 'chip quiet', text: `Covers ${c.unblocks} record${c.unblocks === 1 ? '' : 's'}` }) : null,
-    ),
-    h('h1', { class: 'title', text: c.title }),
-    c.detail ? h('p', { class: 'detail', text: c.detail }) : null,
-  );
-
-  if (c.applies_to?.summary) {
-    const items = c.applies_to.items || [];
-    parts.push(
-      items.length
-        ? h(
-            'details',
-            { class: 'applies' },
-            h('summary', { text: `Applies to: ${c.applies_to.summary}` }),
-            h('ul', {}, items.map((x) => h('li', { text: x })), c.applies_to.count > items.length ? h('li', { text: `… and ${c.applies_to.count - items.length} more` }) : null),
-          )
-        : h('p', { class: 'applies', text: `Applies to: ${c.applies_to.summary}` }),
-    );
-  }
+  const parts = [h('h1', { class: 'q', text: c.title })];
+  if (c.applies_to?.summary) parts.push(h('p', { class: 'scope', text: `Applies to ${lowerFirst(c.applies_to.summary)}${c.blocking ? '' : ' · optional'}` }));
+  if (!suggestion && c.detail) parts.push(h('p', { class: 'lead', text: c.detail }));
 
   if (state.cardError) parts.push(h('p', { class: 'error', role: 'alert', id: 'card-error', text: state.cardError }));
 
@@ -537,72 +580,62 @@ function viewCard() {
       h(
         'div',
         { class: `saved${a.action === 'dont_know' ? ' unsure' : ''}`, role: 'status' },
-        h('span', {}, h('strong', {}, a.action === 'dont_know' ? 'Marked as: don’t know' : ['Answer: ', typedText(describeAnswer(c, a))]), ' · saved by ', typedText(a.by), `, ${day(a.at)}`),
-        h('button', { class: 'linklike', type: 'button', id: 'clear', disabled: busy, onclick: () => save(c, { action: 'clear' }, { advance: false }), text: 'Clear this answer' }),
+        h('strong', {}, a.action === 'dont_know' ? 'Saved as: don’t know' : ['Saved: ', typedText(describeAnswer(c, a))]),
+        h('span', { class: 'who-when' }, 'by ', typedText(a.by), `, ${day(a.at)} · `, h('button', { class: 'linklike', type: 'button', id: 'clear', disabled: busy, onclick: () => save(c, { action: 'clear' }, { advance: false }), text: 'Clear' })),
         a.note ? h('span', { class: 'saved-note' }, 'Note: ', typedText(a.note)) : null,
       ),
     );
   } else if (stale) {
-    parts.push(
-      h('div', { class: 'saved unsure', role: 'status' }, h('span', {}, h('strong', { text: 'The suggested answer has changed.' }), ' ', typedText(saved.by), ` accepted an earlier suggestion (“${String(saved.value)}”) on ${day(saved.at)}. Please look at the new one.`)),
-    );
+    parts.push(h('div', { class: 'saved unsure', role: 'status' }, h('span', {}, h('strong', { text: 'The suggested answer has changed. ' }), typedText(saved.by), ` accepted “${String(saved.value)}” on ${day(saved.at)}. Please look again.`)));
   }
 
   if (suggestion) {
     const accepted = a && a.action === 'accept';
+    const groups = groupedQuotes(suggestion.evidence).slice(0, 1);
+    const why = reasonText(suggestion);
     parts.push(
       h(
-        'div',
-        { class: 'suggest' },
-        h('p', { class: 'eyebrow', text: 'Suggested answer' }),
+        'section',
+        { class: 'suggest', 'aria-label': 'Suggested answer' },
+        h('p', { class: 'label' }, 'Suggested answer', CONFIDENCE[suggestion.confidence] ? h('span', { class: 'confidence', text: ` · ${CONFIDENCE[suggestion.confidence]}` }) : null),
         h('p', { class: 'suggest-value', text: suggestion.label ?? String(suggestion.value) }),
-        suggestion.reason ? h('p', { class: 'suggest-why', text: suggestion.reason }) : null,
-        h('p', { class: 'suggest-basis', text: [CONFIDENCE[suggestion.confidence], BASIS[suggestion.basis]].filter(Boolean).join(' · ') }),
-        ...(suggestion.evidence || []).slice(0, 3).map(quoteBlock),
+        why ? h('p', { class: 'why', text: why }) : null,
+        ...groups.map((g) => quoteBlock(g.item, g.more)),
         h(
           'button',
           { class: `btn btn-primary btn-wide${accepted ? ' is-chosen' : ''}`, type: 'button', id: 'accept', disabled: busy, onclick: () => save(c, { action: 'accept', value: suggestion.value, note: noteValue() }) },
-          accepted ? 'Yes, that’s right (your current answer)' : 'Yes, that’s right',
+          accepted ? 'Yes, that’s right (your answer)' : 'Yes, that’s right',
           state.shortcuts && !a ? h('span', { class: 'kbd', 'aria-hidden': 'true', text: 'Y' }) : null,
         ),
       ),
     );
   }
 
+  const answers = [];
   if (kind === 'yes_no') {
-    parts.push(
-      h('p', { class: 'group-label', text: 'Your answer' }),
-      h('div', { class: 'options' }, optionButton({ value: true, label: 'Yes' }, 'y'), optionButton({ value: false, label: 'No' }, 'n')),
-    );
+    answers.push(h('div', { class: 'options' }, optionButton({ value: true, label: 'Yes' }, 'y'), optionButton({ value: false, label: 'No' }, 'n')));
   } else if (kind === 'choice') {
     const rest = options.filter((o) => !suggestion || JSON.stringify(o.value) !== JSON.stringify(suggestion.value));
-    const common = c.answer.common?.length ? rest.filter((o) => c.answer.common.includes(o.value)) : rest.length <= 8 ? rest : [];
+    const common = c.answer.common?.length ? rest.filter((o) => c.answer.common.includes(o.value)) : rest.length <= 6 ? rest : [];
     const others = rest.filter((o) => !common.includes(o));
     const long = rest.some((o) => String(o.label ?? o.value).length > 28);
-    if (common.length) {
-      parts.push(h('p', { class: 'group-label', text: suggestion ? 'Or pick a different answer' : 'Pick an answer' }), h('div', { class: `options${long ? ' stack' : ''}` }, common.map((o, i) => optionButton(o, `c${i}`))));
-    }
+    if (common.length) answers.push(h('div', { class: `options${long ? ' stack' : ''}` }, common.map((o, i) => optionButton(o, `c${i}`))));
     if (others.length) {
       const openNow = !common.length || others.some((o) => chosen(o.value));
-      parts.push(
-        h('details', { class: 'more', open: openNow }, h('summary', { text: common.length ? `More options (${others.length})` : suggestion ? `Pick a different answer (${others.length} options)` : `Pick an answer (${others.length} options)` }), h('div', { class: `options${long ? ' stack' : ''}` }, others.map((o, i) => optionButton(o, `o${i}`)))),
-      );
+      answers.push(h('details', { class: 'more-options', open: openNow }, h('summary', { text: common.length ? `More answers (${others.length})` : `Choose from ${others.length} answers` }), h('div', { class: `options${long ? ' stack' : ''}` }, others.map((o, i) => optionButton(o, `o${i}`)))));
     }
   }
-
   if (kind === 'text' || kind === 'number' || (kind === 'choice' && c.answer.allow_text)) {
     const isNumber = kind === 'number';
-    const input = h('input', { class: 'input', id: 'typed', type: 'text', inputmode: isNumber ? 'decimal' : null, placeholder: c.answer.placeholder || null, maxlength: 500, disabled: busy });
+    const input = h('input', { class: 'input', id: 'typed', type: 'text', inputmode: isNumber ? 'decimal' : null, placeholder: c.answer.placeholder || (kind === 'choice' ? 'Or type it in your own words' : 'Type your answer'), maxlength: 500, disabled: busy, 'aria-label': kind === 'choice' ? 'Type a different answer' : 'Your answer' });
     const prefill = a && a.typed && a.action === 'value' ? String(a.value) : '';
     input.dataset.prefill = prefill;
     input.value = draft ? draft.typed : prefill;
-    const label = kind === 'choice' ? 'None of these? Type it in your own words' : suggestion ? 'Or type a different answer' : 'Type your answer';
-    parts.push(
-      h('label', { class: 'group-label', for: 'typed', text: label }),
+    answers.push(
       h(
         'form',
         {
-          class: 'typed',
+          class: answers.length ? 'typed after-options' : 'typed',
           onsubmit: (ev) => {
             ev.preventDefault();
             if (!input.value.trim()) {
@@ -614,52 +647,48 @@ function viewCard() {
         },
         input,
         c.answer.unit ? h('span', { class: 'unit', text: c.answer.unit }) : null,
-        h('button', { class: 'btn', type: 'submit', id: 'save-typed', disabled: busy, text: 'Save answer' }),
+        h('button', { class: 'btn', type: 'submit', id: 'save-typed', disabled: busy, text: 'Save' }),
       ),
     );
   }
+  if (answers.length) parts.push(h('div', { class: 'block' }, h('p', { class: 'label', text: suggestion ? 'Or a different answer' : 'Your answer' }), answers));
 
-  const note = h('textarea', { class: 'input', id: 'note', maxlength: 2000, disabled: busy, placeholder: 'Anything we should know: who to ask, an exception, a correction…', 'aria-label': 'A note for the ISAAC team' });
+  const note = h('textarea', { class: 'input', id: 'note', maxlength: 2000, disabled: busy, placeholder: 'Anything the ISAAC team should know: an exception, a correction, who to ask', 'aria-label': 'A note for the ISAAC team' });
   note.dataset.prefill = a?.note || '';
   note.value = draft ? draft.note : a?.note || '';
   parts.push(
     h(
+      'div',
+      { class: 'quiet' },
+      h('button', { class: `linklike${a && a.action === 'dont_know' ? ' is-chosen' : ''}`, type: 'button', id: 'dont-know', disabled: busy, onclick: () => save(c, { action: 'dont_know', note: noteValue() }) }, 'I don’t know', state.shortcuts && !a ? h('span', { class: 'kbd', 'aria-hidden': 'true', text: 'D' }) : null),
+      h('button', { class: 'linklike', type: 'button', id: 'skip', disabled: busy, onclick: () => step(1) }, run.single ? 'Back to the list' : 'Skip for now', run.single || !state.shortcuts ? null : h('span', { class: 'kbd', 'aria-hidden': 'true', text: 'S' })),
+    ),
+    h(
       'details',
-      { class: 'notebox', id: 'notebox', open: Boolean(note.value) },
-      h('summary', { text: a ? 'Add or change a note (optional)' : 'Add a note (optional)' }),
+      { class: 'details notebox', id: 'notebox', open: Boolean(note.value) },
+      h('summary', { text: a ? 'Add or change a note' : 'Add a note' }),
       note,
       a
         ? h('button', { class: 'btn', type: 'button', id: 'save-note', disabled: busy, onclick: () => save(c, { action: a.action, value: a.value, typed: a.typed, note: noteValue() }, { advance: false }), text: 'Save note' })
-        : h('p', { class: 'note-small', text: 'The note is saved together with your answer, or with “I don’t know”.' }),
+        : h('p', { class: 'hint', text: 'The note is saved with your answer, or with “I don’t know”.' }),
     ),
-    h(
-      'div',
-      { class: 'secondary' },
-      h('button', { class: `btn${a && a.action === 'dont_know' ? ' is-chosen' : ''}`, type: 'button', id: 'dont-know', disabled: busy, onclick: () => save(c, { action: 'dont_know', note: noteValue() }) }, 'I don’t know', state.shortcuts && !a ? h('span', { class: 'kbd', 'aria-hidden': 'true', text: 'D' }) : null),
-      h('button', { class: 'btn btn-quiet', type: 'button', id: 'skip', disabled: busy, onclick: () => step(1) }, run.single ? 'Back to the list' : 'Skip for now', run.single || !state.shortcuts ? null : h('span', { class: 'kbd', 'aria-hidden': 'true', text: 'S' })),
-    ),
+    moreBlock(c),
   );
 
-  const runbar = h(
-    'div',
-    { class: 'runbar' },
-    h('button', { class: 'linklike', type: 'button', id: 'to-list', onclick: () => show('home'), text: '← All questions' }),
-    run.single ? null : h('span', { text: `Question ${run.index + 1} of ${run.ids.length}` }),
+  const where = run.single ? null : `Question ${run.index + 1} of ${run.ids.length}`;
+  const pager = h(
+    'nav',
+    { class: 'pager', 'aria-label': 'Questions' },
+    h('button', { class: 'btn', type: 'button', id: 'to-list', onclick: () => show('home'), text: 'All questions' }),
+    run.single
+      ? null
+      : h('span', { class: 'options' }, h('button', { class: 'btn', type: 'button', id: 'prev', disabled: run.index === 0, onclick: () => step(-1), text: 'Previous' }), h('button', { class: 'btn', type: 'button', id: 'next', onclick: () => step(1), text: run.index + 1 === run.ids.length ? 'Finish' : 'Next' })),
   );
-
-  const pager = run.single
-    ? null
-    : h(
-        'div',
-        { class: 'pager' },
-        h('button', { class: 'btn btn-quiet', type: 'button', id: 'prev', disabled: run.index === 0, onclick: () => step(-1), text: '← Previous' }),
-        h('button', { class: 'btn btn-quiet', type: 'button', id: 'next', onclick: () => step(1), text: run.index + 1 === run.ids.length ? 'Finish' : 'Next →' }),
-      );
 
   const keys = h(
     'p',
     { class: 'keys' },
-    state.shortcuts ? 'Keyboard shortcuts are on: Y for yes, D for don’t know, S to skip. ' : 'Keyboard shortcuts are off. ',
+    state.shortcuts ? 'Shortcuts: Y yes, D don’t know, S skip. ' : 'Keyboard shortcuts are off. ',
     h('button', {
       class: 'linklike',
       type: 'button',
@@ -669,11 +698,11 @@ function viewCard() {
         setPref('qs_shortcuts', state.shortcuts ? 'on' : 'off');
         render();
       },
-      text: state.shortcuts ? 'Turn them off' : 'Turn them on',
+      text: state.shortcuts ? 'Turn off' : 'Turn on',
     }),
   );
 
-  return [topbar(), runbar, h('section', { class: 'panel' }, parts), contextBlock(c), pager, keys];
+  return [topbar(where), sourceLine(), h('article', { class: 'card' }, parts), pager, keys];
 }
 
 function viewDone() {
@@ -683,16 +712,17 @@ function viewDone() {
   const left = t.neededOpen
     ? `${t.neededOpen} needed question${t.neededOpen === 1 ? '' : 's'} left.`
     : t.open
-      ? `All the needed questions are answered. ${t.open} nice-to-have question${t.open === 1 ? '' : 's'} left, only if you have time.`
+      ? `All the needed questions are answered. ${t.open} optional question${t.open === 1 ? '' : 's'} left, only if you have time.`
       : 'Everything is answered.';
   return [
     topbar(),
+    sourceLine(),
     h(
       'section',
-      { class: 'panel' },
-      h('h1', { class: 'title', text: run.answered ? `Thank you. ${run.answered} answer${run.answered === 1 ? '' : 's'} saved.` : 'Nothing new saved this time.' }),
-      h('p', { class: 'subtitle', text: `${left} You can stop here and come back any time.` }),
-      t.needed ? progressBlock('needed questions done', t.neededDone, t.needed, t.neededUnsure) : null,
+      { class: 'card' },
+      h('h1', { class: 'q', text: run.answered ? `Thank you. ${run.answered} answer${run.answered === 1 ? '' : 's'} saved.` : 'Nothing new saved this time.' }),
+      h('p', { class: 'lead', text: `${left} You can stop here and come back any time.` }),
+      t.needed ? progressBlock('needed questions answered', t.neededDone, t.needed, t.neededUnsure) : null,
       h(
         'div',
         { class: 'start' },
