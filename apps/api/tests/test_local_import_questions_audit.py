@@ -78,8 +78,10 @@ def test_question_ids_of_the_grouped_corpus_are_pinned(grouped):
     p = Q.consolidate(M.load(grouped))
     # the condition labels (labels.py) are NEW questions beside these; every id here is unchanged
     # ...and so is the beamtime-wide potential-scale question (audit of 18 Nov 2026, finding 1): its own new id
+    # ...and so is the counter question (C6, 22 Nov 2026): unit 04's filter is now the one its scan exports recorded
+    # (bl15.resolution.recorded_filter_motor.v1), so units 04 and 05 read alike and the grouping asks it, under its own id
     ids = sorted(q["question_id"] for q in p["questions"]
-                 if q["kind"] != L.KIND and q["question_id"] != Q.potential_scale_question_id())
+                 if q["kind"] != L.KIND and q["question_id"] not in (Q.potential_scale_question_id(), Q.COUNTER_QUESTION_ID))
     # r8: the follows question is asked whenever a chain was held (informational here: it says why)
     assert sorted(q["label"] for q in p["questions"] if q["kind"] == L.KIND) == ["filter", "follows", "history",
                                                                                 "history", "sample_id", "tag"]

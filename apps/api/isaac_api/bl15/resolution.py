@@ -69,6 +69,7 @@ __all__ = [
     "RECOMMENDATION_SUGGESTED",
     "ROLE_MEANINGS",
     "STANDING_RESOLUTIONS",
+    "STANDING_RULE_RECORDED_FILTER",
     "STANDING_RULE_RECORDED_POSITION",
     "StandingResolution",
     "Recommendation",
@@ -87,6 +88,10 @@ LAYER_SOURCE_FACT = "source_fact"
 LAYER_NORMALIZED_READING = "normalized_reading"
 LAYER_SUGGESTED_RESOLUTION = "suggested_resolution"
 LAYER_CONFIRMED_RESOLUTION = "scientist_confirmed_resolution"
+#: A standing rule ISAAC ships that the domain owner has NOT confirmed (C6, 2026-11-22). It is applied like a standing
+#: rule (every reading kept, the one used named), but it is ISAAC's, not a scientist's, and says so on the wire. Not a
+#: member of :data:`LAYERS`: that served list is the four-layer model, unchanged.
+LAYER_ISAAC_RULE = "isaac_standing_rule_pending_domain_owner"
 
 #: In order, with the one sentence that says what each is and whether it is authoritative.
 LAYERS: tuple[tuple[str, str], ...] = (
@@ -194,7 +199,7 @@ def role_of_evidence(item: ev.SourceEvidence) -> str:
     return ROLE_OTHER
 
 
-# --- STANDING RULES: resolutions the DOMAIN OWNER confirmed, applied by the build ------
+# --- STANDING RULES: resolutions the DOMAIN OWNER confirmed (or, marked as such, ISAAC proposes), applied by the build --
 #
 # A scientist-confirmed resolution (`isaac_api.convention_rules`) is recorded in a session
 # or on an experiment by an act in this application. A STANDING rule is the same layer —
@@ -210,6 +215,12 @@ def role_of_evidence(item: ev.SourceEvidence) -> str:
 #: mistakes in updating the position with a move command e.g., "mv Sx 13.0" but the real
 #: motor position will be recorded no matter what on the original raw SPEC file."*
 STANDING_RULE_RECORDED_POSITION = "bl15.resolution.recorded_motor_position.v1"
+#: ISAAC'S rule, NOT the domain owner's (plan item C6, 22 Nov 2026; pending his confirmation, so it carries
+#: :data:`LAYER_ISAAC_RULE` and authority ``isaac_rule_pending_domain_owner``): the 2026-10-12 answer above, extended
+#: to the FILTER motor. The filter is a motor of the same ``#O``/``#P`` header, so the position the raw file recorded is what was in the beam, and a file name that states
+#: another filter is a label, not a recording. Found on a real beamtime: four files named ``filter35`` whose every
+#: recording (the SPEC file and every scan export) reads the filter motor at 20, which their I0 counts confirm.
+STANDING_RULE_RECORDED_FILTER = "bl15.resolution.recorded_filter_motor.v1"
 
 #: Who confirmed the standing rules, and how that reached the repository. The same
 #: evidentiary class as `bl15.mapping.ANGEL_2026_10_12` (asserted equal by test).
@@ -240,13 +251,16 @@ class StandingResolution:
     over_meaning: str = ""
     attribution: str = STANDING_RULE_ATTRIBUTION
     confirmed: str = "2026-10-12"
+    #: who stands behind the rule: the domain owner (confirmed), or ISAAC pending his confirmation (C6)
+    authority: str = "domain_owner_rule"
+    layer: str = LAYER_CONFIRMED_RESOLUTION
 
     def to_state(self, *, reading_used: Sequence[Mapping]) -> dict:
         return {
             "rule_id": self.rule_id,
             "rule_version": self.version,
-            "authority": "domain_owner_rule",
-            "layer": LAYER_CONFIRMED_RESOLUTION,
+            "authority": self.authority,
+            "layer": self.layer,
             "chosen_source_role": self.chosen_source_role,
             "chosen_source_role_meaning": self.chosen_meaning
             or ROLE_MEANINGS[self.chosen_source_role],
@@ -282,6 +296,30 @@ STANDING_RESOLUTIONS: tuple[StandingResolution, ...] = (
         over_meaning=(
             "A run file: the move command a person wrote before the measurement."
         ),
+    ),
+    StandingResolution(
+        rule_id=STANDING_RULE_RECORDED_FILTER,
+        version=1,
+        concepts=frozenset({ev.CONCEPT_FILTER}),
+        chosen_source_role=ROLE_INSTRUMENT_HEADER,
+        over_source_role=ROLE_HUMAN_LABEL,
+        statement=(
+            "The filter the acquisition files recorded is the one used. The filter is a motor, and the raw file "
+            "records where it actually was; a file name is a label a person typed and can be out of date. Both "
+            "readings are kept."
+        ),
+        chosen_meaning=(
+            "The raw acquisition files: the filter motor position the instrument recorded, scan by scan."
+        ),
+        over_meaning="A file name: the filter a person wrote into the name.",
+        attribution=(
+            "ISAAC's rule (the project owner's plan of 2026-11-22, item C6), NOT confirmed by the domain owner: it "
+            "extends his 2026-10-12 answer about recorded motor positions to the filter motor, and is asked of him. "
+            "Until he confirms it, it is ISAAC's reading of the files, not his."
+        ),
+        confirmed="not confirmed by the domain owner (proposed 2026-11-22)",
+        authority="isaac_rule_pending_domain_owner",
+        layer=LAYER_ISAAC_RULE,
     ),
 )
 

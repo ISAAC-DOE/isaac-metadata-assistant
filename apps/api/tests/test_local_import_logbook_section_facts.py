@@ -260,6 +260,10 @@ def test_the_recorded_filter_motor_outranks_the_file_names_filter():
     assert c.standing_resolution["chosen_source_role"] == res.ROLE_INSTRUMENT_HEADER
     assert c.standing_resolution["over_source_role"] == res.ROLE_HUMAN_LABEL
     assert {row["value"] for row in c.standing_resolution["reading_used"]} == {"20"}
+    # ISAAC'S RULE, NOT THE DOMAIN OWNER'S: it says so, and never claims his confirmation
+    assert c.standing_resolution["authority"] == "isaac_rule_pending_domain_owner"
+    assert c.standing_resolution["layer"] == res.LAYER_ISAAC_RULE != res.LAYER_CONFIRMED_RESOLUTION
+    assert "NOT confirmed by the domain owner" in c.standing_resolution["attribution"]
 
 
 def test_MUTATION_recordings_that_disagree_among_themselves_stay_a_question():
@@ -271,19 +275,21 @@ def test_MUTATION_recordings_that_disagree_among_themselves_stay_a_question():
     assert c.resolved_by_rule is None and c.standing_resolution is None
 
 
-def test_through_the_import_the_filter_is_the_recorded_one_and_asks_no_disagreement(imported):
+def test_through_the_import_the_filter_is_the_recorded_one_and_blocks_nothing(imported):
     _, b = imported
     c = _candidate(b, "04_02", key="filter")
     assert (c["standing_resolution"] or {}).get("rule_id") == res.STANDING_RULE_RECORDED_FILTER
     assert c["state_basis"]["resolved_by_rule"] == res.STANDING_RULE_RECORDED_FILTER
     gid = _group_of(b, "04_02")
     group = next(g for g in b["record_groups"] if g["group_id"] == gid)
-    assert group["basis"]["conditions"]["filter"] == {"kind": "value", "value": "20"}
-    asked = [q for q in Q.consolidate(b)["questions"]
-             if q["kind"] == "resolve_conflict" and any(t["id"] in {cf["conflict_id"] for cf in b["conflicts"]
-                                                                   if cf.get("candidate_id") == c["candidate_id"]}
-                                                        for t in q["targets"])]
-    assert asked == []
+    basis = group["basis"]["conditions"]["filter"]
+    assert (basis["kind"], basis["value"]) == ("value", "20")
+    # the disagreement stays on record (both readings kept) and, exactly as for a recorded motor position the standing
+    # rule settles, is listed only as an optional disagreement: it blocks nothing and holds no group apart
+    mine = {cf["conflict_id"] for cf in b["conflicts"] if cf.get("candidate_id") == c["candidate_id"]}
+    asked = [q for q in Q.consolidate(b)["questions"] if any(t["id"] in mine for t in q["targets"])]
+    assert all(q["tier"] == Q.TIER_OPTIONAL and not q["blocking"] for q in asked)
+    assert not any(r.get("code") == "conflicting_condition" for r in group.get("split_reasons") or ())
     # the label proposed for the group is the recorded filter
     label = next(p for p in L.proposals(b) if p["label"] == "filter")
     assert next(i["value"] for i in label["items"] if i["group_id"] == gid) == "filter20"

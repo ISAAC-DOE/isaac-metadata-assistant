@@ -215,7 +215,11 @@ class _Index:
         """``(open conflict ids, declined)`` of the disagreement on ``condition``'s reading for ``group`` (its basis
         candidates' conflicts): ``declined`` when the scientist's latest word on one is ``reject`` (neither reading:
         leave it out on purpose); open ones have no answer yet (or a ``defer``)."""
-        ids = [c for i in self.entry(group, condition).get("candidate_ids") or () for c in self.conflicts_of.get(i, ())]
+        # C6: a disagreement a standing rule settled (the filter the acquisition files recorded over a file name's) asks
+        # nothing first: the group's condition is the reading the rule used, and its label question asks the rest
+        ids = [c for i in self.entry(group, condition).get("candidate_ids") or ()
+               if not ((self.cand.get(i) or {}).get("state_basis") or {}).get("resolved_by_rule")
+               for c in self.conflicts_of.get(i, ())]
         said = {c: (self.decisions.get(("conflict", c)) or {}).get("decision") for c in ids}
         return [c for c, d in said.items() if d in (None, "defer")], any(d == "reject" for d in said.values())
 

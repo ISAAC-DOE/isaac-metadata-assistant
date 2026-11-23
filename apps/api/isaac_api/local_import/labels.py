@@ -832,6 +832,8 @@ def _filter(ctx: _Ctx, f: _Facts, g: Mapping, own: Mapping, written) -> None:
     for rid in f.runs:
         for c in own.get(rid, {}).get("filter", ()):
             for e in c.get("evidence") or ():
+                if filter_number(e.get("literal_value")) != f.filter:
+                    continue  # C6: a file name the recorded filter outranks is not where this number was read
                 loc = str(e.get("locator") or "")
                 f.filter_from.add("file name" if loc.startswith("filename") else
                                   "scan header" if "header" in loc else "other")

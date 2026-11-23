@@ -226,6 +226,18 @@ def _literals(candidate: Mapping) -> list[str]:
     return sorted({x for x in (_norm_literal(v) for v in candidate.get("observed_literals") or ()) if x})
 
 
+def standing_reading(candidate: Mapping) -> str | None:
+    """The ONE value a standing rule (``bl15.resolution.STANDING_RESOLUTIONS``) used for ``candidate``, or ``None``:
+    no rule applied, or the readings it used state more than one value (a per-scan quantity, such as positions)."""
+    sr = candidate.get("standing_resolution")
+    if not isinstance(sr, Mapping) or not sr.get("applied") or (candidate.get("state_basis") or {}).get(
+            "resolved_by_rule") != sr.get("rule_id"):
+        return None
+    used = {str(row.get("value")) for row in sr.get("reading_used") or () if isinstance(row, Mapping)
+            and row.get("value") is not None}
+    return next(iter(used)) if len(used) == 1 else None
+
+
 def _reading(candidate: Mapping, run: Mapping) -> dict | None:
     state = candidate.get("value_state") or candidate.get("extracted_state")
     if state == "rejected":
@@ -248,6 +260,10 @@ def _reading(candidate: Mapping, run: Mapping) -> dict | None:
         return {"kind": "literal", "value": toks} if toks else None
     if candidate.get("value") is not None:
         return {"kind": "value", "value": candidate["value"]}
+    if (used := standing_reading(candidate)) is not None:
+        # C6: a standing rule chose the reading (the filter the acquisition files recorded over the one a file name
+        # states): the runs are compared on the reading it used; both readings stay on the candidate and its conflict
+        return {"kind": "value", "value": used}
     from .bundle import passing_reading_value
 
     if (passing := passing_reading_value(candidate)) is not None:

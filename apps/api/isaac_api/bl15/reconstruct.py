@@ -699,7 +699,7 @@ def _standing_resolution(
     not reach. See :data:`bl15.resolution.STANDING_RESOLUTIONS`.
 
     IT REACHES ONLY A DISAGREEMENT BETWEEN EXACTLY ITS TWO ROLES — a plan and a
-    recording — and only when the RECORDINGS AGREE AMONG THEMSELVES at the concept's own
+    recording, or (the filter, C6) a file name and a recording — and only when the RECORDINGS AGREE AMONG THEMSELVES at the concept's own
     cardinality. Two acquisition files recording different positions for the same motor
     of the same scan is not a plan-versus-recording question, so the rule says nothing
     and the conflict stays open. Every reading stays a source fact; the readings the
