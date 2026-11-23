@@ -189,10 +189,10 @@ If processing is not installed, say what that costs (no curves, records stay inc
 
 ## Step 7 · Questions: three messages
 
-Read `reference/questions-and-decisions.md`. Use `<isaac> bundle questions <bundle> --blocking-only --limit 10 --plain`, never the raw list.
-`--plain` gives each question as one sentence with its options and suggestion; its `question_id` goes in the decide command.
-The JSON page (no `--plain`) has the same in `ask`, `answer`, `suggested`, and the full `text`, `hints`, a `context`
-(the lines, values and plots to show with it; never the answer) and an `answer_command` template. Use the ask as it is.
+Read `reference/questions-and-decisions.md`. Use `<isaac> bundle questions <bundle> --blocking-only --limit 10`, never the raw list.
+Read the JSON page: each question has `ask`, `answer` (its options) and `suggested` (in plain words, to say to the scientist
+as they are), the full `text`, `hints`, a `context` (the lines, values and plots to show with it; never the answer) and an
+`answer_command` template; the page has `minimum_for_one_group` and the counts. `--plain` prints the asks for a person; it leaves those out.
 
 1. **What the records cannot go out without.** The blocking questions, numbered, one line each, as a yes/no or a pick.
    - Start from `minimum_for_one_group`: its `questions`, then its `unasked_required`, then its `plus_decisions`.

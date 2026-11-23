@@ -229,7 +229,7 @@ def test_an_athena_project_is_listed_as_read_by_processing(tmp_path, capsys):
     code, page, _ = _run(capsys, "bundle", "list", str(out), "unread", "--limit", "200")
     rows = [r for r in json.loads(page)["items"] if r["relative_path"].endswith(".prj")]
     assert code == 0 and rows
-    assert all("isaac process" in r["read_by"] for r in rows)
+    assert all(r["athena_project"] is True and "read_by" not in r for r in rows)
 
 
 def test_process_says_in_one_line_why_no_athena_group_matched():
