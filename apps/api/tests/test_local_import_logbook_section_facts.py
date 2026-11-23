@@ -87,7 +87,8 @@ UNITS = {
 
 
 def _notes(*, heading_3: str = "Sample 3 ZZ3 in base (bad)", heading_4: str = "Sample 4",
-           remark_3: str = "did not work!", extra: tuple[str, ...] = ()) -> list[str]:
+           remark_3: str = "did not work!", extra: tuple[str, ...] = (),
+           lines_4: tuple[str, ...] = ("Cell: H-cell",)) -> list[str]:
     return [
         "SYNTHETIC notes -- invented, no real beamtime, no real person.", "", "Beam January 1-2, 2099", "",
         # a beamtime-wide line before any section that names a cell only in passing
@@ -103,7 +104,7 @@ def _notes(*, heading_3: str = "Sample 3 ZZ3 in base (bad)", heading_4: str = "S
         # FACT 1: a sample the logbook calls bad; its section lists no file numbers
         heading_3, remark_3, "",
         # FACT 3: a section with an empty File Number column that states the cell
-        heading_4, "Cell: H-cell", *_table([(1, "", "Sets the working potential to 0.1 V", "")]), "",
+        heading_4, *lines_4, *_table([(1, "", "Sets the working potential to 0.1 V", "")]), "",
         "Sample 5 ZZ5 in base",
         *_table([(1, "10", "Sets the working potential to 0.1 V", "measured after 500 cycles")]), "",
         *extra,
@@ -216,6 +217,18 @@ def test_confirming_keeps_the_records_and_answers_the_question(tmp_path):
     assert _qc_questions(after) == []
 
 
+def test_a_later_plain_confirm_does_not_undo_a_keep(tmp_path):
+    """Re-review of #352, B: "keep" then a bulk confirm of the grouping leaves the remark answered."""
+    bdir, b = _import(tmp_path)
+    qid = _qc_questions(b)[0]["question_id"]
+    M.decide_question(bdir, question_id=qid, decision="confirm", value=None, **BY)
+    M.decide(bdir, target_ids=[g["group_id"] for g in M.load(bdir)["record_groups"]], decision="confirm", value=None, **BY)
+    after = M.load(bdir)
+    assert _qc_questions(after) == []
+    assert "this also confirms the grouping of those runs" in next(
+        q for q in Q.consolidate(after, include_answered=True)["questions"] if q["question_id"] == qid)["text"]
+
+
 def test_a_group_confirmed_for_another_reason_has_not_answered_the_remark(tmp_path):
     """Review of #352, finding 5: a bulk confirm of the grouping is not "keep them despite the remark"."""
     bdir, b = _import(tmp_path)
@@ -237,6 +250,16 @@ def test_a_remark_about_something_else_is_not_about_the_sample(line):
 
     assert not N.is_failure_remark(line)
     assert N.is_failure_remark("did not work!") and N.is_failure_remark("Sample failed") and N.is_failure_remark("bad")
+
+
+@pytest.mark.parametrize("line", ["did not work, scans noisy", "Sample did not work, no signal on detector",
+                                  "Bad sample, all spots damaged", "Electrode failed, reference broken", "Nothing works",
+                                  "bad ring of catalyst", "ZZ9 failed, beam fine"])
+def test_a_remark_that_names_the_sample_or_nothing_else_is_about_the_sample(line):
+    """Re-review of #352, A: the exclusions never drop a line that names the sample, and are narrowed to the beam."""
+    from isaac_api.bl15 import notes as N
+
+    assert N.is_failure_remark(line, "ZZ9")
 
 
 def _read_notes(lines: list[str]):
@@ -393,9 +416,13 @@ def test_a_number_that_heads_two_sections_binds_nothing_and_listed_runs_are_neve
         assert c["value"] is None
 
 
-def test_the_rule_says_the_number_is_the_only_link_for_an_unnamed_heading(imported):
-    _, b = imported
+def test_the_rule_says_the_number_is_the_only_link_for_an_unnamed_heading(tmp_path):
+    _, b = _import(tmp_path, group=False, lines_4=("Cell: H-cell", "Water oxidation until 2 V"))
     assert "the heading names no sample, so the number is the only link" in _candidate(b, "09_04", path=CELL)["rule"]
+    # re-review of #352, C: also on the path where the statement gives no value ("water oxidation" is no schema option)
+    rx = _candidate(b, "09_04", path="context.electrochemistry.reaction")
+    assert rx["value"] is None and [e["literal_value"] for e in rx["evidence"]] == ["Water oxidation until 2 V"]
+    assert "the heading names no sample, so the number is the only link" in rx["rule"]
 
 
 def test_a_dry_measurement_gets_the_sections_cell_only_as_a_suggestion(imported):

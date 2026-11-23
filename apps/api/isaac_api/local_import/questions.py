@@ -3718,14 +3718,19 @@ _QUALITY_REMARK_WHY = ("The logbook has a remark under this sample's heading tha
 
 
 def quality_remark_answered(bundle: Mapping, qid: str) -> set[str]:
-    """The group ids whose latest decision keeps them in answer to question ``qid`` (a confirm carrying its id)."""
-    latest: dict[str, Mapping] = {}
+    """The group ids kept in answer to question ``qid``: a confirm carrying its id, not undone since by a reject, split,
+    merge or defer of the group. A later plain confirm (of the grouping) does not undo it (re-review of #352, B)."""
+    kept: set[str] = set()
     for d in bundle.get("scientist_decisions") or ():
         t = d.get("target") or {}
-        if t.get("kind") == "record_group" and d.get("decision") in ("confirm", "reject", "defer", "split", "merge"):
-            latest[t.get("id")] = d
-    return {gid for gid, d in latest.items() if d.get("decision") == "confirm" and isinstance(d.get("value"), Mapping)
-            and d["value"].get(QUALITY_REMARK_ANSWER_KEY) == qid}
+        if t.get("kind") != "record_group":
+            continue
+        if (d.get("decision") == "confirm" and isinstance(d.get("value"), Mapping)
+                and d["value"].get(QUALITY_REMARK_ANSWER_KEY) == qid):
+            kept.add(t.get("id"))
+        elif d.get("decision") in ("reject", "split", "merge", "defer"):
+            kept.discard(t.get("id"))
+    return kept
 
 
 def quality_remark_question_id(source: str, locator: str) -> str:
@@ -3752,8 +3757,8 @@ def sample_failure_notes(bundle: Mapping) -> list[Mapping]:
             continue
         if loc.endswith("sample heading qualifier") and text.strip().casefold() in N.FAILURE_MARKERS:
             out.append(n)
-        elif loc.endswith(") quality remark") and N.is_failure_remark(text):
-            out.append(n)
+        elif loc.endswith(") quality remark") and text.strip():
+            out.append(n)  # the notes reader kept it only because it is such a remark (bl15.notes.section_quality_remark.v1)
     return out
 
 
@@ -3787,7 +3792,8 @@ def _quality_remark_questions(bundle: Mapping, groups: Sequence[Mapping], *, inc
         shown = ", ".join(files[:4]) + (f" and {len(files) - 4} more" if len(files) > 4 else "")
         text = (f"The logbook ({source}) has this remark under the sample's heading: {quotes}. It may say the sample "
                 f"failed or was bad. It reaches {len(run_ids)} measurement(s) ({shown}) in {len(targets)} record "
-                "group(s). Nothing has been dropped. Keep them as records despite the remark (confirm), or leave them out "
+                "group(s). Nothing has been dropped. Keep them as records despite the remark (confirm: this also confirms the "
+                "grouping of those runs), or leave them out "
                 "(reject: no record is built from them, and the runs and their files stay in the bundle). Answer once, "
                 "or per group. A group confirmed for any other reason has not answered this. To keep a group with a QC "
                 "status, approve its processing result with --qc-status and a --qc-note in the scientist's words.")

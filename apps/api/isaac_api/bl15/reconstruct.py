@@ -1752,6 +1752,9 @@ def logbook_candidates(
                 f"The logbook says “{term}”, which is not one of the {name} options the "
                 "official schema offers, so nothing is filled in."
             )
+        if by_number is not None:
+            # re-review of #352, C: say how a section with no file-number rows reached this measurement
+            why += f" It is stated in {scope}."
         out.append(
             SemanticCandidate(
                 **common,
