@@ -582,9 +582,17 @@ def test_med1_an_answer_that_would_replace_a_later_decision_is_refused_and_named
 
 
 def test_med2_ok_on_a_confirm_proposal_only_confirms_the_value_the_files_give_now(bdir, tmp_path, capsys):
-    pot = [q for q in _qs(bdir) if q["kind"] == "confirm_value"
-           and q.get("target_field_path") == "context.electrochemistry.potential_setpoint_V"]
     path = "context.electrochemistry.potential_setpoint_V"
+    # picked by the run each question is about, not by list position: the groups' order moved in C6 (the
+    # recorded-filter rule settled units 05-08's filter), and no id did
+    b = M.load(bdir)
+    stem_of = {c["candidate_id"]: next(r["stem"] for r in b["runs"] if r["run_id"] == c["run_id"]) for c in b["candidates"]
+               if c.get("target_field_path") == path}
+    by_stem = {stem_of[q["targets"][0]["id"]]: q for q in _qs(bdir)
+               if q["kind"] == "confirm_value" and q.get("target_field_path") == path}
+    pot = {2: by_stem["03_01_ZZ1_acid_after500Cycling_filter10_400mV"],
+           3: by_stem["04_02_ZZ2_base_after500Cycling_filter20_800mV"],
+           4: by_stem["05_02_ZZ2_base_after400Cycling_filter20_800mV"]}
     xlsx = tmp_path / "SYN_confirm.xlsx"
     _workbook(bdir, xlsx, extra=[
         ("SYN proposals 2", PHEAD, [
