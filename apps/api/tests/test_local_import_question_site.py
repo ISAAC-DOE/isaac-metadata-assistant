@@ -1325,7 +1325,7 @@ def test_the_commands_run_end_to_end(base, tmp_path, capsys):
     assert cli.main(["bundle", "site", "export", str(bdir), "--out", str(out), "--site-template", str(tmp_path / "none")]) == 0
     printed = capsys.readouterr()
     assert "Question site export: SYN_BL00_2100-01_Synthetic" in printed.out and "Cards by section:" in printed.out
-    assert "13 card(s), 13 blocking; they cover 17 of 129 open question(s) (17 of 17 blocking)." in printed.out
+    assert "13 card(s), 13 blocking; they cover 17 of 130 open question(s) (17 of 17 blocking)." in printed.out
     assert "checking card 1 of 13" in printed.err
     assert cli.main(["bundle", "site", "export", str(bdir), "--out", str(out), "--include", "optional", "--json",
                      "--site-template", str(tmp_path / "none")]) == 0
