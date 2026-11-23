@@ -15,6 +15,7 @@ export default handler('GET', async (req, res) => {
       generated_at: raw.generated_at || null,
       totals: raw.totals || null,
       sections: raw.sections || [],
+      beamtime: raw.beamtime || null,
     },
     cards: raw.cards.map(publicCard),
     answers,
