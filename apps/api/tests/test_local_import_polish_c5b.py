@@ -5,7 +5,7 @@
   skipped scans get a sentence in ``qc.statements``, said AFTER the run id (``qc.json`` is hashed into it), so
   no result id moves. ``list processing-results`` rows and ``show processing-result`` carry a ``scans`` line.
 * ``crosscheck-plan`` gives ``high_value_total`` (and names the categories) for "N of M high-value items".
-* ``list unread`` says what ``read_by`` means once per page, with a short marker on the row.
+* ``list unread`` says once per page that an Athena project is never read, with a short marker on the row.
 * summary.md collapses a folder's identical unread lines and does not say "no value is confirmed" once a
   scientist has decided values.
 """
@@ -158,20 +158,20 @@ def _unread(source_id: str, rel: str) -> dict:
 # --- 3. list unread says read_by once -----------------------------------------------------------------
 
 
-def test_list_unread_says_what_read_by_means_once(bdir, capsys):
+def test_list_unread_says_once_that_an_athena_project_is_never_read(bdir, capsys):
     b = M.load(bdir)
     b["unread_files"] += [_unread(f"src-9{n:03d}", f"Norm/prj_{n}.prj") for n in range(30)]
     M.save_bundle(bdir, b)
     code, out, _ = _run(capsys, "bundle", "list", str(bdir), "unread", "--limit", "50")
     payload = json.loads(out)
-    prj = [i for i in payload["items"] if i.get("read_by")]
-    assert len(prj) == 30 and {i["read_by"] for i in prj} == {"isaac process"}
-    assert payload["read_by_note"].count("Athena project") == 1 and "isaac process" in payload["read_by_note"]
-    assert out.count("matched by name to record groups") == 1  # the long sentence is on the page, not on 30 rows
+    prj = [i for i in payload["items"] if i.get("athena_project")]
+    assert len(prj) == 30 and not any("read_by" in i for i in payload["items"]) and "read_by_note" not in payload
+    assert payload["athena_note"].count("Athena project") == 1 and "never read" in payload["athena_note"]
+    assert out.count("never read") == 1  # the sentence is on the page, not on 30 rows
     code, out, _ = _run(capsys, "bundle", "list", str(bdir), "unread", "--limit", "5", "--offset", "0")
     first = json.loads(out)
-    if not any(i.get("read_by") for i in first["items"]):
-        assert "read_by_note" not in first
+    if not any(i.get("athena_project") for i in first["items"]):
+        assert "athena_note" not in first
 
 
 # --- 4. summary.md --------------------------------------------------------------------------------------

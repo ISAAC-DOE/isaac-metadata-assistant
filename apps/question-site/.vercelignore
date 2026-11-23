@@ -4,3 +4,6 @@ dev-server.js
 .env.local
 .dev-store.json
 README.md
+.impeccable/
+PRODUCT.md
+DESIGN.md

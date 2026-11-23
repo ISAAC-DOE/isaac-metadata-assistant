@@ -1569,9 +1569,13 @@ def consolidate(bundle: Mapping, *, compositions_out: dict | None = None, includ
 #: such result. Before this it was only found by having a bulk approval refused. ONE experiment-scope question, its
 #: id from its kind and rule only (DEC-91); answered with ``set_dose_reading`` on the experiment.
 DOSE_QUESTION_KIND = "dose_reading"
-DOSE_RULE_ID = "isaac.xas.dose_damage.v2"
+#: The rule that asks it now (processing.engine_xas.DOSE_RULE_ID; processing is optional, so it is restated here).
+DOSE_RULE_ID = "isaac.xas.dose_damage.v3"
 DOSE_QUESTION_FLAG = "dose_reading_question"  # processing.engine_xas.DOSE_QUESTION_FLAG (processing is optional)
-DOSE_QUESTION_ID = _qid("experiment", DOSE_QUESTION_KIND, DOSE_RULE_ID)
+#: Question ids stay stable: the id is the one first minted, under v2, and does not move when the rule's version does
+#: (the answer is a ``set_dose_reading`` decision on the experiment, which no rule version changes).
+_DOSE_ID_RULE = "isaac.xas.dose_damage.v2"
+DOSE_QUESTION_ID = _qid("experiment", DOSE_QUESTION_KIND, _DOSE_ID_RULE)
 _DOSE_EXAMPLES = 3
 DOSE_READING_WORDS = {
     "beam_damage": "the beam changes the sample at a spot: keep the first scan at each spot",

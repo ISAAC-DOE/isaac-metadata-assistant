@@ -4,7 +4,7 @@ Read this at Step 4. Step 6 (processing) does not start until this step is done.
 
 `<isaac> bundle list <bundle> unread --limit 50 --offset 0` — each entry has `relative_path`, `source_id`,
 `source_type` and `reason_code`. An Athena project is listed as a file and nothing reads it: processing never uses
-Athena, whatever its `read_by` marker says. The page's `not_listed.companion_not_opened` counts the files a run reader
+Athena (its row has `athena_project: true`). The page's `not_listed.companion_not_opened` counts the files a run reader
 kept beside a run without opening them (`.rgn/.det/.exp`, `profile.txt`, `binary/` originals): not unread,
 and not read; `unread --all` lists them with `run_id` and `role`, and `bundle show <bundle> source <id>`
 says the same (`read_as.opened: false`). Read them only if the scientist asks. Work through the unread
