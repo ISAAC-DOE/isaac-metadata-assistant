@@ -45,7 +45,7 @@ from typing import Any, Mapping, Sequence
 
 from .. import bundle as B
 from . import core as C
-from .channels import MODE_FLUORESCENCE
+from .channels import MODE_FLUORESCENCE, MODE_TRANSMISSION
 
 PROTOCOL_ID = "isaac.xas.v1"
 PROTOCOL_VERSION = "1.0.0"
@@ -88,6 +88,13 @@ MAX_SHIFT_EV = {"glitch_I0": 1.0, "ref_foil": 2.0, "foil_timeline": 2.0, "none":
 #: normalisation window variants for the uncertainty note (normalization.md: "window choice: A spread 9-15 %")
 WINDOW_VARIANTS = {"pre_hi": (-10.0, 0.0), "post_lo": (0.0, 15.0, 25.0), "post_hi": (-50.0, 0.0)}
 WINDOW_SPREAD_WARN = 0.20
+#: THE WHITE-LINE SPREAD OVER WINDOW CHOICES (processing-science audit of 18 Nov 2026, findings 4 and 8): the 12
+#: variants above (the edge step's spread, which the QC warning reads, unchanged) understate how much the window
+#: choice moves the white line, the quantity people reuse. The white-line height (the normalised maximum within
+#: ``WL_RANGE_EV`` of the tabulated edge) is reported over a wider set: the pre-edge end -10..0 eV, the post-edge
+#: start 0..+50 eV and its end -100..0 eV from the window used (36 fits, the 12 above among them).
+WL_VARIANTS = {"pre_hi": (-10.0, -5.0, 0.0), "post_lo": (0.0, 15.0, 25.0, 50.0), "post_hi": (-100.0, -50.0, 0.0)}
+WL_RANGE_EV = (-5.0, 20.0)
 #: TENDER FLUORESCENCE (the engine's normalization.md, "Tender fluorescence (S K, BL4-3): background options"): below
 #: about 3-4 keV a gas I0 counts ~ E^-3, so IF/I0 rises as (E/E_edge)^p over the WHOLE signal, the pre-edge carries a
 #: falling scatter tail and a resonant-Raman foot about 25 eV before the edge. The documented options are used, with
@@ -143,8 +150,9 @@ DECISION_RULE = {
         "6 robust sigmas and 1.5 times the median, and more than twice its own counting noise), a ratio-shape or "
         "post-edge-drift flag whose NORMALISED shape is distorted (after a free scale and offset it still departs 5 % "
         "of the edge step; a within-scan step collapse is shape, a uniformly weaker scan is not), or a dead channel "
-        "that shows no edge at all; or (d) a within-spot change at two or more spots (isaac.xas.dose_damage.v2): beam "
-        "damage when it GROWS with dose (scan 3 further from scan 1 than scan 2), the way the edge expects (the white "
+        "that shows no edge at all; or (d) a within-spot change at two or more spots (isaac.xas.dose_damage.v3; "
+        "each scan normalised on its own, never fitted onto another; under 150 post-edge counts per point at most "
+        "spots the rule says it cannot judge and decides nothing): beam damage when it GROWS with dose (scan 3 further from scan 1 than scan 2), the way the edge expects (the white "
         "line falls at Ir and Pt L3) and a fresh spot recovers: the later scans are dropped, the first kept; a first "
         "scan still settling when the later scans agree with each other: the first is dropped; otherwise (two scans per "
         "spot, mixed patterns, a logbook note on CV or equilibration) a question to the scientist, nothing decided "
@@ -160,7 +168,7 @@ DECISION_RULE = {
                 "screening": "xas-analysis screen_report (report-only) + this rule's intensity guard",
                 "input": "the scan could not be read or formed (its skip reason)",
                 "params_file": "the params file's exclude_scans",
-                "dose": "isaac.xas.dose_damage.v2 (beam damage, or a first scan still settling, at each spot)",
+                "dose": "isaac.xas.dose_damage.v3 (beam damage, or a first scan still settling, at each spot)",
                 "merge": "a point excluded from the scan's contribution (an I0 dropout), said, never a drop",
                 "scientist": "a set_scan_decision decision"},
 }
@@ -338,18 +346,27 @@ def read_group(g: Mapping, ctx) -> dict:
         choice = fallback
         attempts = R._bl15_2_missing(R._scan_attempts(tables, choice, np), ctx, params)
     out["choice"] = choice
+    standard_in_transmission = False
     if choice.mode != MODE_FLUORESCENCE:
         out["scope"] = (f"measured in {choice.mode} (mu = {choice.signal_name}): the engine reduces fluorescence / "
                         "HERFD (IF/I0) only; transmission-mode samples are NOT SUPPORTED in its scope")
-        # a foil (or any transmission group) is never a v1 record, but the survey sees its scans: the foil timeline
+        # a transmission group is never part of the beamtime survey as a sample, but the survey sees its scans (the
+        # foil timeline); a STANDARD in transmission is still reduced on v1 (TRANSMISSION_STANDARD), its own recs apart
         out["recs"] = _survey_recs(tables, role, sel, ctx, num_of, stem_of, choice=choice)
-        return out
+        if role != "reference" or choice.mode != MODE_TRANSMISSION:
+            return out
+        if R._reference_channel_fallback(attempts, choice, tables, role, stems, ctx) is not None:
+            return out                     # a foil on I2 read on v0's reference channel: stays on v0, said there
+        standard_in_transmission = True
+        out["scope"] = (f"a standard measured in transmission (mu = {choice.signal_name}): not part of the beamtime "
+                        f"reference survey as a sample (reduced on v1 by {TRANSMISSION_RULE_ID} when its scans read)")
+    v1_recs: list[dict] = []
     for k, (entry, table, sa, code) in enumerate(attempts):
         code = code or C.unusable_reason(sa)
         if code:
             entry["skip_reason"] = code
             continue
-        rec = _arrays(table, choice, np)
+        rec = _arrays(table, choice, np, transmission=standard_in_transmission)
         if rec is None:
             entry["skip_reason"] = "too_few_points"
             continue
@@ -360,10 +377,18 @@ def read_group(g: Mapping, ctx) -> dict:
                    run_key=entry.get("run_key"), header=table.header_lines, time=_scan_time(table.header_lines),
                    motor_lines=tuple(getattr(table, "motor_lines", ()) or ()),
                    template=R._scan_template(table.header_lines))
-        if not R._is_energy_scan(rec["template"], choice.energy):
-            entry["skip_reason"] = "not_an_energy_scan"
+        axis = R.energy_axis_problem(rec["E"], params)
+        if not R._is_energy_scan(rec["template"], choice.energy) or axis:
+            entry["skip_reason"] = axis[0] if axis else "not_an_energy_scan"
             continue
-        out["recs"].append(rec)
+        v1_recs.append(rec)
+    if standard_in_transmission:
+        if v1_recs:
+            out["transmission_v1"] = True
+            out["v1_recs"] = v1_recs
+            out["transmission_offset"] = _transmission_offset(v1_recs, np)
+        return out
+    out["recs"] = v1_recs
     if not out["recs"]:
         out["scope"] = "no usable energy scan (v0 says why)"
         return out
@@ -408,12 +433,18 @@ def _survey_recs(tables, role: str, sel, ctx, num_of: Mapping, stem_of: Mapping,
     return out
 
 
-def _arrays(table, choice, np, *, signal: bool = True) -> dict | None:
+def _arrays(table, choice, np, *, signal: bool = True, transmission: bool = False) -> dict | None:
     """Sorted, duplicate-averaged E, IF, I0, I1, I2, sec of one scan (finite E, I0 > 0, finite IF). ``signal=False``
-    (a foil or alignment scan the survey reads): no fluorescence signal, ``IF`` is None."""
+    (a foil or alignment scan the survey reads): no fluorescence signal, ``IF`` is None. ``transmission``: ``IF`` is
+    ln(I0/I1) x I0, so IF/I0 is the transmission mu (:data:`TRANSMISSION_RULE_ID`; the group's constant offset is
+    added by :func:`_transmission_offset`)."""
     cols = table.columns
     E = np.asarray(cols[choice.energy], float)
-    if signal:
+    if transmission:
+        with np.errstate(all="ignore"):
+            I0_, I1_ = np.asarray(cols[choice.i0], float), np.asarray(cols[choice.transmission_after], float)
+            IF = np.where((I0_ > 0) & (I1_ > 0), np.log(I0_ / I1_), np.nan) * I0_
+    elif signal:
         IF = np.sum([np.asarray(cols[c], float) for c in choice.signal_columns], axis=0)
     else:
         IF = np.zeros(E.size)
@@ -456,6 +487,43 @@ def _arrays(table, choice, np, *, signal: bool = True) -> dict | None:
     if not signal:
         arr["IF"] = None
     return {"E": E, **arr, "i0_dropouts": dropouts}
+
+
+#: A STANDARD MEASURED IN TRANSMISSION ON v1 (processing-science audit of 18 Nov 2026, finding 7; the scientists' rule:
+#: every scan of all samples is aligned on its in-scan reference). v0 reduced transmission standards without per-scan
+#: alignment and with another normalisation (larch pre_edge, flattened) than the samples'. On v1 a standard (role
+#: reference) whose channel choice is transmission is read as mu = ln(I0/I1), aligned per scan to the SAME beamtime
+#: reference as the samples (the foil on I1/I2, else the I0 glitch), merged and normalised exactly as they are
+#: (Victoreen + McMaster). It is never part of the beamtime survey as a sample (the reference group stays a sample's).
+#: ln(I0/I1) carries the ion chambers' gain ratio as a constant and may be negative; one constant per group
+#: (``offset``: the curve's robust span minus its robust minimum, 1st and 99th percentiles, so it starts at its own
+#: span above zero) is added while it is
+#: processed, because the Victoreen background is non-negative, and subtracted again in merged.csv and the
+#: background column; the normalised curve does not depend on a constant. The dose rule is not applied (IF is not a
+#: count). No thickness, pinhole or harmonic correction. Transmission SAMPLES stay on v0 (not in the engine's scope), and
+#: so does a foil on I2 that v0 reads on its reference channel (run._reference_channel_fallback).
+TRANSMISSION_RULE_ID = "isaac.xas.transmission_standard_on_v1.v1"
+TRANSMISSION_SAID = ("Measured in transmission: mu = ln(I0/I1), aligned per scan to the beamtime reference and "
+                     "normalised as the samples are ({rule}); a constant {offset:.4g} is added while it is "
+                     "normalised (the Victoreen background is non-negative) and subtracted in merged.csv; no "
+                     "thickness, pinhole or harmonic correction; the beam-damage rule is not applied (the signal is "
+                     "not a count).")
+
+
+def _transmission_offset(recs: Sequence[dict], np) -> float:
+    """Add the group's one constant to every transmission rec's IF/I0 (:data:`TRANSMISSION_RULE_ID`); returns it."""
+    with np.errstate(all="ignore"):
+        mus = np.concatenate([r["IF"] / r["I0"] for r in recs])
+    mus = mus[np.isfinite(mus)]
+    if not mus.size:
+        return 0.0
+    # robust (review of PR 345, M3): the 1st and 99th percentiles of the points kept (I0 dropouts are already out), so
+    # one stray point (an I0 of a few counts that is not a dropout) cannot make the constant large
+    lo, hi = (float(v) for v in np.percentile(mus, [1.0, 99.0]))
+    offset = (hi - lo) - lo
+    for r in recs:
+        r["IF"] = r["IF"] + offset * r["I0"]
+    return offset
 
 
 #: I0 DROPOUTS AND BEAM LOSSES: a point, or a contiguous run of points, whose I0 falls under ``frac`` of the scan's own
@@ -1161,9 +1229,8 @@ def _anchor_all(bt: dict, reads: Mapping, ctx) -> None:
         bt["_fits"] = {}
     fits = bt.get("_fits") or {}
     for gr in reads.values():
-        if gr.get("scope") is not None:
-            continue
-        for r in gr["recs"]:
+        recs = gr.get("v1_recs") if gr.get("transmission_v1") else (gr["recs"] if gr.get("scope") is None else ())
+        for r in recs or ():
             r["alignment"] = _align_rec(r, routes, fns, fits, ctx.np)
 
 
@@ -1255,7 +1322,9 @@ def beamtime_payload(bt: Mapping) -> dict:
     out["protocol_id"], out["engine_version"] = PROTOCOL_ID, engine_version()
     out["in_scope_groups"] = sorted(k for k, v in (bt.get("reads") or {}).items() if v.get("scope") is None)
     out["out_of_scope_groups"] = {k: v.get("scope") for k, v in sorted((bt.get("reads") or {}).items())
-                                  if v.get("scope") is not None}
+                                  if v.get("scope") is not None and not v.get("transmission_v1")}
+    # review of PR 345, M8: a standard in transmission is reduced on v1, so it is not listed as out of scope
+    out["transmission_standards_on_v1"] = sorted(k for k, v in (bt.get("reads") or {}).items() if v.get("transmission_v1"))
     return json.loads(json.dumps(out, default=str))
 
 
@@ -1271,11 +1340,17 @@ def covers(group: Mapping, ctx) -> tuple[bool, str | None]:
     gr = (bt.get("reads") or {}).get(group["group_id"])
     if gr is None:
         return False, "the group was not read by the engine"
-    if gr.get("scope") is not None:
+    transmission = bool(gr.get("transmission_v1") and gr.get("v1_recs"))
+    if gr.get("scope") is not None and not transmission:
         return False, gr["scope"]
     if not bt.get("calibration"):
         return False, bt.get("statement") or "no beamtime calibration"
     absorber = absorber_of(group, ctx, bt)
+    if transmission:
+        gr["recs"] = gr["v1_recs"]          # its own v1 recs (the survey's recs carry no signal)
+        gr["mode_check"] = {"mode": "transmission", "basis": "the channel choice: a standard in transmission",
+                            "offset": gr.get("transmission_offset")}
+        return True, None
     tr = _transmission_check(gr, absorber.get("E_edge_eV"))
     gr["mode_check"] = tr
     if tr and tr.get("mode") == "transmission":
@@ -1332,7 +1407,7 @@ def process_group_v1(group: Mapping, ctx) -> list[dict]:
         (max(float(r["E"][-1]) for r in gr["recs"]), float(E_edge0), absorber, len(gr["recs"])) if below else None))
     if res["measurement_mode"]["mode"] == BELOW_EDGE:
         res["review_flags"].append(BELOW_EDGE_FLAG)
-    elif res["measurement_mode"]["mode"] != "fluorescence":
+    elif res["measurement_mode"]["mode"] not in ("fluorescence", "transmission"):
         res["review_flags"].append("measurement_mode_unknown")
     if R.FALLBACK_FLAG in (gr["choice"].flags or ()):
         res["review_flags"].append(R.FALLBACK_FLAG)        # v0's own fallback, never silent
@@ -1398,8 +1473,10 @@ def process_group_v1(group: Mapping, ctx) -> list[dict]:
     table = decide_scans(recs, by_scan, stability, notes, scientist_scan_decisions(ctx.bundle, group["group_id"]),
                          inputs, target, win, np, complete_eV=complete, E_edge=E_edge,
                          ratio_win=rs.get("window_eV"), ratio_exclude=rs.get("exclude_eV") or ())
-    dose = apply_dose_damage(table, recs, stability, np, E_edge, absorber=absorber, notes_said=notes_said,
-                             reading=dose_reading_of(ctx.bundle, group["group_id"]))
+    transmission = res["measurement_mode"]["mode"] == "transmission"
+    dose = None if transmission else apply_dose_damage(table, recs, stability, np, E_edge, absorber=absorber,
+                                                       notes_said=notes_said,
+                                                       reading=dose_reading_of(ctx.bundle, group["group_id"]))
     if dose:
         res["dose_damage"] = dose
         if dose.get("outcome") == "question":
@@ -1455,13 +1532,17 @@ def process_group_v1(group: Mapping, ctx) -> list[dict]:
     with warnings.catch_warnings(), np.errstate(all="ignore"):
         warnings.simplefilter("ignore")
         avg, ainfo = average_scans([r["aligned"] for r in kept], "uniform", 1, True, True)
+        matched = coverage_matched_mean([r["aligned"] for r in kept], avg, np,
+                                        transmission=gr.get("transmission_v1", False))
     ok = np.isfinite(avg["IF_over_I0"]) & (avg["n_kept"] > 0)
     E, y, err, n = target[ok], avg["IF_over_I0"][ok], avg["err"][ok], avg["n_kept"][ok]
     res["steps"].append({"step": "merge", "params": {"statistic": "uniform mean of raw IF/I0 over the kept scans "
                                                                   "(xas_analysis.average.average_scans; err = its standard "
-                                                                  "error)",
+                                                                  "error)" + (", scale-matched where coverage differs "
+                                                                              f"({COVERAGE_RULE_ID})" if matched else ""),
                                                      "grid": grid_said or "the group's modal scan grid (a kept scan's), shifted"},
-                         "outcome": {"n_scans": len(kept), "points": int(E.size), "grid_from_scan": grid_rec["scan_id"]},
+                         "outcome": {"n_scans": len(kept), "points": int(E.size), "grid_from_scan": grid_rec["scan_id"],
+                                     **({"coverage_matched": matched} if matched else {})},
                          "flags": [] if len(kept) > 1 else ["single_scan_no_merge"]})
     short = _incomplete(E, complete, E_edge, absorber, len(kept))
     if short is not None:
@@ -1478,7 +1559,8 @@ def process_group_v1(group: Mapping, ctx) -> list[dict]:
                                    + (f"; and {len(excluded_points) - 20} more" if len(excluded_points) > 20 else "")
                                    + ". Each such point is left out of its scan's contribution to the average (the "
                                      "other scans cover that energy); it is never interpolated, and the scan is kept."}
-    nm = normalize_once(E, y, n, absorber, bt, np)
+    res["acquisition"] = acquisition_block(kept, E_edge, transmission, np)
+    nm = normalize_once(E, y, n, absorber, bt, np, transmission=transmission)
     res[NORMALIZATION_KEY] = {k: v for k, v in nm.items() if k not in ("norm", "mu", "bg")}
     if nm.get("error"):
         res["steps"].append({"step": "normalize", "params": nm.get("params") or {}, "outcome": {"error": nm["error"]},
@@ -1491,6 +1573,9 @@ def process_group_v1(group: Mapping, ctx) -> list[dict]:
         e0 = _f(ctx.xafs.find_e0(E, y))
     except Exception:  # noqa: BLE001
         e0 = None
+    if e0 is not None:
+        res["e0"] = e0_block(E, e0, absorber, np, transmission=transmission)
+        e0 = res["e0"]["e0_eV"]
     res["steps"].append({"step": "normalize", "params": nm["params"],
                          "outcome": {"e0_eV": e0, "edge_step": nm["A_edge"], "model": nm["model"],
                                      "convention": nm["convention"]}, "flags": []})
@@ -1502,8 +1587,10 @@ def process_group_v1(group: Mapping, ctx) -> list[dict]:
     group_dir = ctx.out_dir / group["group_id"]
     group_dir.mkdir(parents=True, exist_ok=True)
     gdir = Path(tempfile.mkdtemp(prefix=".staging-", dir=group_dir))
-    _csv(gdir / "merged.csv", ["energy_eV", "mu_mean", "mu_stderr", "n_scans"], [E, y, err, n.astype(float)], np)
-    _csv(gdir / "normalized.csv", ["energy_eV", "norm", "mcmaster_mu", "background"], [E, nm["norm"], nm["mu"], nm["bg"]], np)
+    off = float(res["measurement_mode"].get("offset") or 0.0) if transmission else 0.0   # TRANSMISSION_RULE_ID
+    _csv(gdir / "merged.csv", ["energy_eV", "mu_mean", "mu_stderr", "n_scans"], [E, y - off, err, n.astype(float)], np)
+    _csv(gdir / "normalized.csv", ["energy_eV", "norm", "mcmaster_mu", "background"],
+         [E, nm["norm"], nm["mu"], nm["bg"] - off], np)
     R._write(gdir / "scan_decisions.json", R._json_bytes({"group_id": group["group_id"], "rule": DECISION_RULE,
                                                           "scan_decisions": res[DECISIONS_KEY]["rows"],
                                                           "scan_shifts": res[SHIFTS_KEY]}))
@@ -1516,7 +1603,8 @@ def process_group_v1(group: Mapping, ctx) -> list[dict]:
         "energy_reference": res[REFERENCE_KEY]}))
     plotted = False
     try:
-        plotted = plot(gdir / "plot.png", group, recs, table, E, y, nm, e0, absorber, np)
+        plotted = plot(gdir / "plot.png", group, recs, table, E, y, nm, e0, absorber, np, offset=off,
+                       signal="ln(I0/I1)" if transmission else "IF/I0")
     except Exception:  # noqa: BLE001 - a plot failure is a flag, never a processing failure
         plotted = False
     if not plotted:
@@ -1551,7 +1639,7 @@ def process_group_v1(group: Mapping, ctx) -> list[dict]:
                       "e0_eV": e0, "edge_step": nm["A_edge"], "points": int(E.size)}
     # the scientists' quick beamtime merges: a rough reference, as on v0 (outside every hashed file)
     try:
-        quick = _quick_merges(group, ctx, recs, kept, E, y, nm, e0, absorber, np)
+        quick = _quick_merges(group, ctx, recs, kept, E, y, nm, e0, absorber, np, offset=off)
         if quick:
             from . import quick_merge as QM
 
@@ -1648,6 +1736,9 @@ def measurement_mode_block(mc: Mapping | None, below_edge: tuple | None = None) 
                                   "name_says_transmission", "scans", "thresholds")}
     if mc.get("mode") == "fluorescence":
         out["statement"] = f"Measured in fluorescence / HERFD: {mc.get('basis')}."
+    elif mc.get("mode") == "transmission" and mc.get("offset") is not None:
+        out.update(rule_id=TRANSMISSION_RULE_ID, offset=mc["offset"])
+        out["statement"] = TRANSMISSION_SAID.format(rule=TRANSMISSION_RULE_ID, offset=float(mc["offset"]))
     else:
         out["statement"] = (f"The measurement mode is UNKNOWN ({mc.get('basis')}; fluorescence contrast "
                             f"{mc.get('fluorescence_contrast')}, ln(I0/I1) step {mc.get('transmission_step')}): v1 "
@@ -2182,12 +2273,26 @@ def apply_spots(table: dict, recs: Sequence[Mapping], stability: Mapping, np) ->
     return block
 
 
-#: WITHIN-SPOT CHANGE: BEAM DAMAGE, OR A FIRST SCAN STILL SETTLING (isaac.xas.dose_damage.v2; review of 271efe4a).
-#: The measure: one scan at a spot against another there, in NORMALISED shape: put on the other's scale by a free scale
-#: and offset fitted over the pre-edge and the post-edge (an intensity change or a background is never shape), the
-#: mean difference over the white-line window (the group's white-line energy +- ``wl_half_eV``) in edge-step units,
-#: with its noise (the point-to-point scatter of the difference over the window, / sqrt(n)); "beyond the noise" is
-#: max(``floor``, ``noise_mult`` x that noise). Per spot with three or more scans (in time):
+#: WITHIN-SPOT CHANGE: BEAM DAMAGE, OR A FIRST SCAN STILL SETTLING (isaac.xas.dose_damage.v3; v2 reviewed 271efe4a;
+#: v3 after the processing-science audit of 18 Nov 2026, finding 1).
+#: The measure: EACH scan is normalised ON ITS OWN with the same fixed windows (its mean IF/I0 below E_edge +
+#: ``pre_eV`` set to 0, its mean above E_edge + ``post_eV`` set to 1: an intensity change or a constant background is
+#: never shape), and the later scan minus the earlier one is averaged over the white-line window (the group's
+#: white-line energy +- ``wl_half_eV``), in edge-step units. v2 instead fitted one scan onto the other by least squares
+#: (yf ~ c*ys + k): the regressor is itself a noisy scan, so c is attenuated (regression dilution) and the later scan's
+#: white line reads LOWER from counting noise alone, the more so the fewer the counts (on the real 2025 data, two
+#: simulated scans of one unchanged curve gave almost the same "damage" as measured). Normalising each scan alone has
+#: no regressor: noise enters only through the two window means, the same way for both scans, so pure noise gives no
+#: trend (a residual bias is second order in the window means' relative error, about 1e-4 of the step for a 1 % error,
+#: and cancels between scans of equal counts). Fitting both scans onto the group's merge was the other option; it
+#: still regresses on a noisy curve (the merge contains the two scans) and its bias depends on how many scans merge. The noise of the difference: the point-to-point scatter of the difference over the window, / sqrt(n),
+#: combined with each scan's edge-step error (its window means' scatter / sqrt(n), times the window's mean level), times
+#: ``resample_factor`` for the correlation the one interpolation onto the grid adds;
+#: "beyond the noise" is max(``floor``, ``noise_mult`` x that noise). COUNTS FLOOR: a spot whose scans have under
+#: ``min_counts`` counts per point in the post-edge (the median IF above E_edge + ``post_eV``, the lower of the scans
+#: compared, IF read as the counts the beamline wrote) is NOT JUDGED; when at least half of the spots measured more
+#: than once are under it, the rule says it cannot judge dose at this count level and decides nothing (no drop, no
+#: question). Per spot with three or more scans (in time):
 #:   GROWS (beam damage): scan 3 differs from scan 1 more than scan 2 does, the same way, and scan 3 differs from
 #:     scan 2 beyond the noise: the change grows with dose;
 #:   PLATEAU (a first scan still settling): scans 2 and 3 both differ from scan 1 the same way and agree with each
@@ -2204,8 +2309,11 @@ def apply_spots(table: dict, recs: Sequence[Mapping], stability: Mapping, np) ->
 #: of CV, equilibration or discarding the first scans. A logbook exclude / start_from / keep_only note on the group
 #: always wins (this rule then decides nothing); an existing shape-screen drop is never cleared; a scientist's
 #: set_dose_reading (the group's, else the beamtime's) decides the reading; set_scan_decision still wins per scan.
-DOSE = {"wl_half_eV": 4.0, "floor": 0.01, "noise_mult": 3.0, "pre_eV": -10.0, "post_eV": 30.0, "recovery_frac": 0.5}
-DOSE_RULE_ID = "isaac.xas.dose_damage.v2"
+DOSE = {"wl_half_eV": 4.0, "floor": 0.01, "noise_mult": 3.0, "pre_eV": -10.0, "post_eV": 30.0, "recovery_frac": 0.5,
+        "min_counts": 150.0, "resample_factor": 1.2}
+DOSE_RULE_ID = "isaac.xas.dose_damage.v3"
+DOSE_LOW_COUNTS = "cannot_judge_low_counts"
+DOSE_NO_CHANGE = "no_change_at_judged_spots"
 DOSE_CODE = "beam_damage_at_spot"
 SETTLING_CODE = "first_scan_settling"
 DOSE_SAID = "beam damage at each spot: later scans at the same spot change shape"
@@ -2235,7 +2343,9 @@ def dose_reading_of(bundle: Mapping, group_id: str) -> dict | None:
 
 
 def _norm_difference(f: Mapping, s: Mapping, E_edge: float, win: Sequence[float], np) -> tuple[float, float] | None:
-    """``(mean difference, its noise)`` of scan ``s`` against scan ``f`` in normalised shape over ``win`` (:data:`DOSE`)."""
+    """``(mean difference, its noise)`` of scan ``s`` minus scan ``f``, each normalised ON ITS OWN with the same fixed
+    pre- and post-edge windows, over ``win`` in edge-step units (:data:`DOSE`; no regression of one noisy scan on the
+    other, which biases the later scan's white line low)."""
     a, b = f.get("aligned"), s.get("aligned")
     if a is None or b is None:
         return None
@@ -2247,19 +2357,61 @@ def _norm_difference(f: Mapping, s: Mapping, E_edge: float, win: Sequence[float]
         w = ok & (E >= win[0]) & (E <= win[1])
         if pre.sum() < 2 or post.sum() < 3 or w.sum() < 5:
             return None
-        fit = pre | post
-        (c, k), *_ = np.linalg.lstsq(np.c_[ys[fit], np.ones(fit.sum())], yf[fit], rcond=None)
-        step = float(np.median(yf[post]) - np.median(yf[pre]))
-        if not step > 0:
-            return None
-        d = (c * ys[w] + k - yf[w]) / step
-        return float(np.mean(d)), float(np.std(np.diff(d)) / np.sqrt(2.0) / np.sqrt(w.sum()))
+        normed, step_var = [], 0.0
+        for y in (yf, ys):
+            lo, hi = float(np.mean(y[pre])), float(np.mean(y[post]))
+            step = hi - lo
+            if not step > 0:
+                return None
+            nrm = (y - lo) / step
+            normed.append(nrm)
+            # the edge-step error: each window mean's point-to-point scatter / sqrt(n), carried to the window's level
+            e_lo, e_hi = (float(np.std(np.diff(y[m])) / np.sqrt(2.0) / np.sqrt(m.sum())) for m in (pre, post))
+            step_var += (float(np.mean(nrm[w])) * np.hypot(e_lo, e_hi) / step) ** 2
+        d = normed[1][w] - normed[0][w]
+        # x resample_factor (review of PR 345, M4): the one linear interpolation onto the group's grid correlates
+        # neighbouring points, which a point-to-point scatter does not see (the spread seen over the noise said was
+        # 1.16-1.18 on resampled synthetic scans); the noise is inflated, not re-estimated before resampling
+        noise = DOSE["resample_factor"] * np.hypot(float(np.std(np.diff(d)) / np.sqrt(2.0) / np.sqrt(w.sum())),
+                                                   np.sqrt(step_var))
+        return float(np.mean(d)), float(noise)
+
+
+def _post_counts(r: Mapping, E_edge: float, np) -> float | None:
+    """The scan's counts per point in the post-edge (median IF above E_edge + ``post_eV``, as written), or None."""
+    a = r.get("aligned")
+    if a is None:
+        return None
+    with np.errstate(all="ignore"):
+        m = np.isfinite(a.IF) & (a.E > E_edge + DOSE["post_eV"])
+        return float(np.median(a.IF[m])) if m.sum() >= 3 else None
 
 
 def apply_dose_damage(table: dict, recs: Sequence[Mapping], stability: Mapping, np, E_edge: float | None = None, *,
                       absorber: Mapping | None = None, notes_said: Mapping | None = None,
                       reading: Mapping | None = None) -> dict | None:
-    """:data:`DOSE_RULE_ID` on the decision table (changed in place); the block said on the result, or None."""
+    """:data:`DOSE_RULE_ID` on the decision table (changed in place); the block said on the result, or None. Spots
+    under the counts floor are left out and said (review of PR 345, I1)."""
+    info: dict = {}
+    block = _dose_core(table, recs, stability, np, E_edge, absorber=absorber, notes_said=notes_said, reading=reading,
+                       info=info)
+    low = info.get("left_out") or ()
+    if not low:
+        return block
+    said = (f"{len(low)} of {info['repeat']} spots measured more than once were left out of this judgement (under "
+            f"{DOSE['min_counts']:.0f} post-edge counts per point: {', '.join(sorted(low))}); {info['judged']} were "
+            "judged.")
+    if block is None:
+        return {"rule_id": DOSE_RULE_ID, "rule": DOSE, "outcome": DOSE_NO_CHANGE, "spots_under_floor_not_judged":
+                sorted(low), "post_edge_counts_per_point": info.get("counts"),
+                "statement": f"No consistent within-spot change at the {info['judged']} spots judged. {said}"}
+    block["statement"] = block["statement"].rstrip() + " " + said
+    return block
+
+
+def _dose_core(table: dict, recs: Sequence[Mapping], stability: Mapping, np, E_edge: float | None = None, *,
+               absorber: Mapping | None = None, notes_said: Mapping | None = None, reading: Mapping | None = None,
+               info: dict) -> dict | None:
     if E_edge is None:
         return None
     spot = _spots_of(recs)
@@ -2274,6 +2426,49 @@ def apply_dose_damage(table: dict, recs: Sequence[Mapping], stability: Mapping, 
     repeat = {lab: rs for lab, rs in by_spot.items() if len(rs) >= 2}
     if len(repeat) < 2:
         return None
+    # the COUNTS FLOOR (v3): a spot under min_counts post-edge counts per point is not judged
+    counts = {}
+    for lab, rs in repeat.items():
+        c = [v for r in rs if (v := _post_counts(r, float(E_edge), np)) is not None]
+        counts[lab] = min(c) if c else None
+    low = {lab for lab, c in counts.items() if c is not None and c < DOSE["min_counts"]}
+    reading_of = (reading or {}).get("reading")
+    forced = False
+    if len(repeat) - len(low) < 2:
+        known = [c for c in counts.values() if c is not None]
+        block = {"rule_id": DOSE_RULE_ID, "rule": DOSE, "outcome": DOSE_LOW_COUNTS, "spots_measured_more_than_once":
+                 len(repeat), "spots_under_floor": len(low), "post_edge_counts_per_point": counts,
+                 "statement": (f"Beam damage is not judged at this count level: {len(low)} of {len(repeat)} spots "
+                               f"measured more than once have under {DOSE['min_counts']:.0f} counts per point in the "
+                               f"post-edge (median {statistics.median(known):.0f}), so fewer than two can be judged. "
+                               "At these counts a within-spot change of a few % of the white line cannot be told "
+                               "from counting noise, and its absence cannot be confirmed either; only a much larger "
+                               "change would stand out. Nothing is decided by this rule; every scan is judged by the "
+                               "other rules.")}
+        # a scientist's set_dose_reading is checked BEFORE the floor (review of PR 345, I2): applied, or said as not
+        # applied (override_not_applied), never ignored
+        if reading_of == "not_beam_damage":
+            block.update(outcome="not_beam_damage", reading=reading, statement=(
+                f"The scientist's reading ({reading.get('decided_by')}, {reading.get('scope')}): not beam damage. "
+                + block["statement"]))
+            return block
+        if reading_of in ("beam_damage", "first_scan_settling") and reading.get("scope") == "group":
+            forced = True                  # the scientist's reading for THIS group decides it at every repeated spot
+        else:
+            if reading_of:
+                table.setdefault("overrides_not_applied", []).append({
+                    "scan": None, "decision": f"{DOSE_READING} {reading_of}", "decision_id": reading.get("decision_id"),
+                    "decided_by": reading.get("decided_by"),
+                    "said": (f"override not applied: the scientist's beamtime-wide {DOSE_READING} {reading_of} "
+                             f"({reading.get('decision_id')}) has nothing to act on in this group, because no spot's "
+                             "change can be measured at this count level; it stays in the bundle (a "
+                             f"{DOSE_READING} on this group, or set_scan_decision, decides it here)")})
+                _recount(table)
+                block.update(reading=reading, reading_applied=False)
+            return block
+    elif low:
+        info.update(left_out=sorted(low), repeat=len(repeat), judged=len(repeat) - len(low), counts=counts)
+        repeat = {lab: rs for lab, rs in repeat.items() if lab not in low}
     wle = [((stab.get(r["scan_id"]) or {}).get("metrics") or {}).get("wl_e_eV") for r in judged]
     wle = [float(v) for v in wle if isinstance(v, (int, float)) and v == v]
     centre = float(np.median(wle)) if wle else float(E_edge) + 3.0
@@ -2325,9 +2520,10 @@ def apply_dose_damage(table: dict, recs: Sequence[Mapping], stability: Mapping, 
             else:
                 x.update(kind="mixed", direction=s13 or s12)
         per[lab] = x
-    changed = {lab: x for lab, x in per.items() if x["kind"] != "none"}
+    changed = dict(per) if forced else {lab: x for lab, x in per.items() if x["kind"] != "none"}
     block: dict = {"rule_id": DOSE_RULE_ID, "rule": DOSE, "window_eV": win, "per_spot": per,
-                   "spots_measured_more_than_once": len(repeat)}
+                   "spots_measured_more_than_once": len(repeat), "post_edge_counts_per_point": counts,
+                   **({"spots_under_floor_not_judged": sorted(low)} if low else {})}
     # a logbook exclude / start_from / keep_only note on the group ALWAYS wins
     applied = [n for n in (notes_said or {}).get("notes") or () if n.get("applied") and n.get("drops")]
     if applied:
@@ -2338,7 +2534,7 @@ def apply_dose_damage(table: dict, recs: Sequence[Mapping], stability: Mapping, 
                 + "); the beam-damage rule decides nothing here."))
             return block
         return None
-    if len(changed) < 2 or 2 * len(changed) <= len(repeat):
+    if not forced and (len(changed) < 2 or 2 * len(changed) <= len(repeat)):
         return None
     three = {lab: x for lab, x in changed.items() if len(x["scans"]) >= 3}
     directions = {x["direction"] for x in changed.values() if x["direction"]}
@@ -2366,7 +2562,6 @@ def apply_dose_damage(table: dict, recs: Sequence[Mapping], stability: Mapping, 
                                      and abs(x[0]) >= DOSE["recovery_frac"] * abs(dmg[0]))})
         return out
 
-    reading_of = (reading or {}).get("reading")
     outcome, why = None, None
     if reading_of == "not_beam_damage":
         block.update(outcome="not_beam_damage", reading=reading, statement=(
@@ -2428,6 +2623,10 @@ def apply_dose_damage(table: dict, recs: Sequence[Mapping], stability: Mapping, 
                 + ("" if expected is not None or reading_of else f"; at {el} {ed} the direction the spots share, "
                                                                    f"the white line {word}, is taken as the damage")
                 + f"; decided by {by}); the first scan per spot is kept")
+        if forced:
+            what = (f"{DOSE_SAID}: decided by {by} for this group, at every one of the {len(repeat)} spots measured "
+                    "more than once; no change could be measured at this count level (" + spots_said
+                    + "); the first scan per spot is kept")
         for lab in changed:
             for r in repeat[lab][1:]:
                 x = rows[r["scan_id"]]
@@ -2440,6 +2639,10 @@ def apply_dose_damage(table: dict, recs: Sequence[Mapping], stability: Mapping, 
     else:
         what = (f"{SETTLING_SAID} ({spots_said}; normalised shape, edge-step units, window {win[0]:.1f}-{win[1]:.1f} "
                 f"eV; decided by {by}); the first scan per spot is dropped")
+        if forced:
+            what = (f"{SETTLING_SAID}: decided by {by} for this group, at every one of the {len(repeat)} spots "
+                    "measured more than once; no change could be measured at this count level (" + spots_said
+                    + "); the first scan per spot is dropped")
         for lab in changed:
             r = repeat[lab][0]
             x = rows[r["scan_id"]]
@@ -2457,6 +2660,62 @@ def apply_dose_damage(table: dict, recs: Sequence[Mapping], stability: Mapping, 
     block.update(outcome=outcome, dropped=dropped, spots=sorted(changed, key=lambda v: int(v.split()[-1])),
                  statement=what[:1].upper() + what[1:] + ".", **({"reading": reading} if reading_of else {}))
     return block
+
+
+#: WHERE COVERAGE DIFFERS, A SCALE-MATCHED MEAN (processing-science audit of 18 Nov 2026, finding 6). The kept scans'
+#: raw IF/I0 differ in level (spot, loading, filter); where only some of them contribute (an I0-dropout point left
+#: out, a scan that ends early) the plain mean steps by the missing scans' level. Each scan's level relative to the
+#: merge, r_j = sum(y_j m) / sum(m^2) over the points ALL kept scans cover (m: the plain mean there; the r_j average
+#: exactly 1), then at every point the mean is sum(y_j) / sum(r_j) over the scans that contribute there: the plain mean
+#: where all contribute (uniform weights, unchanged), free of the step where some do not. Nothing is interpolated.
+COVERAGE_RULE_ID = "isaac.xas.coverage_matched_mean.v1"
+COVERAGE_MIN_COMMON = 20
+
+
+def coverage_matched_mean(aligned: Sequence, avg: dict, np, *, transmission: bool = False) -> dict | None:
+    """Rewrite ``avg["IF_over_I0"]`` in place at the points where only some kept scans contribute
+    (:data:`COVERAGE_RULE_ID`); the disclosure block, or None when every point has every scan (or too few in common)."""
+    if len(aligned) < 2:
+        return None
+    Y = np.array([np.ravel(a.IF) / np.ravel(a.I0) for a in aligned]).T
+    fin = np.isfinite(Y)
+    nfin = fin.sum(axis=1)
+    partial = (nfin > 0) & (nfin < len(aligned))
+    if not partial.any():
+        return None
+    full = nfin == len(aligned)
+    if transmission:
+        # review of PR 345, M7: a scale model is the wrong model for ln(I0/I1) plus a constant (a thickness scales mu,
+        # a chamber gain adds to it): the plain mean is kept and said
+        return {"rule_id": COVERAGE_RULE_ID, "applied": False, "partial_points": int(partial.sum()),
+                "statement": (f"At {int(partial.sum())} points only some of the kept scans contribute; in "
+                              "transmission a level scale is not the right model for ln(I0/I1), so the plain mean "
+                              "is kept there and may step where coverage changes.")}
+    if full.sum() < COVERAGE_MIN_COMMON:
+        return {"rule_id": COVERAGE_RULE_ID, "applied": False, "partial_points": int(partial.sum()),
+                "statement": (f"At {int(partial.sum())} points only some of the kept scans contribute, and the scans "
+                              f"share under {COVERAGE_MIN_COMMON} points to match their levels on: the plain mean is "
+                              "kept there and may step where coverage changes.")}
+    m = Y[full].mean(axis=1)
+    r = (Y[full] * m[:, None]).sum(axis=0) / float((m * m).sum())
+    if not np.all(np.isfinite(r) & (r > 0)):
+        return None
+    num = np.where(fin, Y, 0.0).sum(axis=1)
+    den = np.where(fin, r[None, :], 0.0).sum(axis=1)
+    avg["IF_over_I0"] = np.where(partial, num / np.where(den > 0, den, np.nan), avg["IF_over_I0"])
+    keys = [getattr(a, "ident", getattr(a, "num", None)) for a in aligned]
+    return {"rule_id": COVERAGE_RULE_ID, "applied": True, "partial_points": int(partial.sum()),
+            "common_points": int(full.sum()), "scan_levels": {str(k): round(float(v), 4) for k, v in zip(keys, r)},
+            "statement": (f"Scale-matched where coverage differs: at {int(partial.sum())} points only some of the "
+                          f"{len(aligned)} kept scans contribute (a point left out, a scan that ends early); there "
+                          "the mean is the sum of the contributing scans over the sum of their levels relative to the "
+                          f"merge (levels {min(r):.3f}-{max(r):.3f}, fitted over the {int(full.sum())} points all "
+                          "scans cover), so a missing scan's level leaves no step. Where all scans contribute it is "
+                          "the plain mean. Nothing is interpolated. The levels are a pure scale fitted mostly on the "
+                          "white line, so a scan with its own background or white line is matched only "
+                          "approximately."),
+            "stderr_statement": ("Where coverage differs the standard error is still the spread of the contributing "
+                                 "scans around their plain mean, not around the value reported.")}
 
 
 def _earliest(flagged: Sequence[str], recs: Sequence[Mapping], rows: Mapping) -> bool:
@@ -2731,7 +2990,8 @@ def tender_window(rng: Sequence[float], E_edge: float) -> list[float]:
     return [rng[0], round(min(float(rng[1]), E_edge - TENDER["pre_hi_below_edge_eV"]), 1), rng[2], rng[3]]
 
 
-def normalize_once(E, y, n, absorber: Mapping, bt: Mapping, np, *, exclude_extra: Sequence = ()) -> dict:
+def normalize_once(E, y, n, absorber: Mapping, bt: Mapping, np, *, exclude_extra: Sequence = (),
+                   transmission: bool = False) -> dict:
     """The kept scans' raw average, normalised ONCE: Victoreen + McMaster (``mback_xrs``, bg_decreasing default),
     with the tender-fluorescence options when :func:`tender_choice` says so, and the glitch windows kept out of the
     fit windows (:func:`glitch_exclusions`)."""
@@ -2761,6 +3021,8 @@ def normalize_once(E, y, n, absorber: Mapping, bt: Mapping, np, *, exclude_extra
         if lo <= fixed[1] - 10 and hi >= fixed[2] + 50:
             rng, basis = [lo, fixed[1], fixed[2], hi], ("beamtime" if [lo, hi] == [fixed[0], fixed[3]] else "beamtime_clipped")
     tender = tender_choice(E, y, float(E_edge), rng, np)
+    if transmission:                       # the tender options model a fluorescence detector's response, not ln(I0/I1)
+        tender = {**tender, "tender": False, "why": "transmission: the tender-fluorescence options do not apply"}
     opts: dict = {}
     if tender["tender"]:
         opts = dict(TENDER["options"])
@@ -2806,19 +3068,28 @@ def normalize_once(E, y, n, absorber: Mapping, bt: Mapping, np, *, exclude_extra
                    bg=np.asarray(r.info["bg"], float), background=r.info.get("bg_params"),
                    pre_rms=_f(r.info.get("pre_rms")), post_rms=_f(r.info.get("post_rms")),
                    post_level=_post_level(r, np))
-        spread = []
-        for dp in WINDOW_VARIANTS["pre_hi"]:
-            for dl in WINDOW_VARIANTS["post_lo"]:
-                for dh in WINDOW_VARIANTS["post_hi"]:
+        spread, wl = [], []
+        Ev = np.asarray(E, float)
+        in_wl = (Ev >= float(E_edge) + WL_RANGE_EV[0]) & (Ev <= float(E_edge) + WL_RANGE_EV[1])
+        for dp in WL_VARIANTS["pre_hi"]:
+            for dl in WL_VARIANTS["post_lo"]:
+                for dh in WL_VARIANTS["post_hi"]:
                     w = [rng[0], rng[1] + dp, rng[2] + dl, rng[3] + dh]
                     if w[1] <= w[0] + 5 or w[3] <= w[2] + 30:
                         continue
                     try:
-                        a = _f(mback_xrs(el, E, y, w, ed, **opts).info["A_edge"])
+                        rv = mback_xrs(el, E, y, w, ed, **opts)
+                        a = _f(rv.info["A_edge"])
                     except Exception:  # noqa: BLE001
-                        a = None
-                    if a:
+                        a = rv = None
+                    if not a:
+                        continue
+                    if dp in WINDOW_VARIANTS["pre_hi"] and dl in WINDOW_VARIANTS["post_lo"] and dh in WINDOW_VARIANTS["post_hi"]:
                         spread.append((w, a))
+                    if in_wl.any():
+                        h = _f(np.nanmax(np.asarray(rv.norm_xas, float)[in_wl]))
+                        if h is not None:
+                            wl.append(h)
     if spread and A:
         vals = [a for _, a in spread]
         med = statistics.median(vals)
@@ -2829,6 +3100,72 @@ def normalize_once(E, y, n, absorber: Mapping, bt: Mapping, np, *, exclude_extra
                                             "(max - min over the median). The engine's own measurement (normalization.md): "
                                             "noise 1.7 % on A, window choice 9-15 % at normal loading and 16-20 % at about "
                                             "1 % Ir loading, the dominant systematic at low loading.")}
+        h0 = _f(np.nanmax(out["norm"][in_wl])) if in_wl.any() else None
+        if h0 is not None and len(wl) >= 3:
+            out["uncertainty"].update(
+                white_line_height=round(h0, 4), white_line_min=round(min(wl), 4), white_line_max=round(max(wl), 4),
+                white_line_windows_tried=len(wl), white_line_spread=round((max(wl) - min(wl)) / h0, 4),
+                white_line_statement=(
+                    f"The white-line height (the normalised maximum {WL_RANGE_EV[0]:+g} to {WL_RANGE_EV[1]:+g} eV from "
+                    f"the tabulated edge) is {h0:.3f}; over {len(wl)} window choices (pre-edge end -10..0 eV, post-edge "
+                    f"start 0..+50 eV, post-edge end -100..0 eV from the window used) it ranges {min(wl):.3f}-"
+                    f"{max(wl):.3f} ({100 * (max(wl) - min(wl)) / h0:.1f} % of it). That is the normalisation-window "
+                    "uncertainty only; another convention (a flattened post-edge, area normalisation) moves it more, "
+                    "and no self-absorption correction is applied."))
+    return out
+
+
+#: WHAT THE FILES STATE ABOUT THE COUNTS (processing-science audit of 18 Nov 2026, finding 8): the attenuator setting
+#: (the ``filter`` a SPEC #P line states as key=value) of each kept scan, and the counts per point in the post-edge
+#: (the median IF above E_edge + DOSE["post_eV"], as written), with what is NOT corrected.
+NOT_CORRECTED_SAID = ("No dead-time correction beyond the detector column as the beamline wrote it, and no self-"
+                      "absorption (over-absorption) correction is applied.")
+
+
+def acquisition_block(kept: Sequence[Mapping], E_edge: float | None, transmission: bool, np) -> dict:
+    from . import run as R
+
+    filt = [R._header_setup(r.get("header")).get("filter") for r in kept]
+    stated = sorted({v for v in filt if v is not None})
+    counts = [] if transmission or E_edge is None else [
+        float(np.median(r["IF"][m])) for r in kept if (m := np.isfinite(r["IF"]) & (r["E"] > E_edge + DOSE["post_eV"])).sum() >= 3]
+    out: dict = {"attenuator_filter": stated or None,
+                 "attenuator_stated_in": f"{sum(v is not None for v in filt)} of {len(kept)} kept scans",
+                 "post_edge_counts_per_point": ({"median": round(float(np.median(counts)), 1),
+                                                 "min": round(min(counts), 1), "max": round(max(counts), 1),
+                                                 "scans": len(counts)} if counts else None)}
+    parts = [("Attenuator (filter, as the #P line states it): " + ", ".join(f"{v:g}" for v in stated)
+              + f" ({out['attenuator_stated_in']})") if stated else "No attenuator (filter) setting was read from the files' #P key=value lines"]
+    if counts:
+        parts.append(f"counts per point in the post-edge (median IF above E_edge + {DOSE['post_eV']:g} eV, as written): "
+                     f"median {np.median(counts):.0f}, {min(counts):.0f}-{max(counts):.0f} over {len(counts)} kept scans")
+    elif transmission:
+        parts.append("counts per point are not given for transmission (ln(I0/I1) is not a count)")
+    out["statement"] = "; ".join(parts) + ". " + NOT_CORRECTED_SAID
+    return out
+
+
+#: E0 AS REPORTED (processing-science audit of 18 Nov 2026, finding 5): larch find_e0 returns a GRID POINT (the
+#: maximum of the first derivative, no sub-grid interpolation), so it is reported to 0.01 eV with the grid step there
+#: as its resolution, and said apart from the tabulated edge the normalisation locks its step to.
+E0_DEFINITION = ("larch find_e0 on the merged raw {signal}: the grid point of the maximum first derivative (no sub-grid "
+                 "interpolation; on a rising white line competing maxima can move it by about a grid step or more)")
+
+
+def e0_block(E, e0: float, absorber: Mapping, np, *, transmission: bool = False) -> dict:
+    E = np.asarray(E, float)
+    k = int(np.argmin(np.abs(E - e0)))
+    steps = np.diff(E[max(0, k - 2):k + 3])
+    step = float(np.median(steps)) if steps.size else None
+    tab = absorber.get("E_edge_eV")
+    definition = E0_DEFINITION.format(signal="ln(I0/I1)" if transmission else "IF/I0")
+    out = {"e0_eV": round(float(e0), 2), "definition": definition, "grid_step_eV": round(step, 3) if step else None,
+           "tabulated_edge_eV": tab}
+    out["statement"] = (f"E0 {out['e0_eV']:.2f} eV: {definition}; the grid step there is "
+                        + (f"{step:.2f} eV, its resolution" if step else "unknown")
+                        + (f". The normalisation locks its step at the tabulated {absorber.get('element')} "
+                           f"{absorber.get('edge')} edge, {tab:g} eV, a different definition"
+                           if isinstance(tab, (int, float)) else "") + ".")
     return out
 
 
@@ -2999,8 +3336,11 @@ def _reference_view(bt, recs) -> dict:
             + (f" ({first.get('method')} fit, window {first.get('window_eV')})" if first.get("window_eV") else "")
             + (f", anchored on the earliest group {first.get('reference_name')} (median of {first.get('reference_scans')} "
                f"scans with a good anchor, {first.get('reference_anchor_eV'):.4f} eV)" if first.get("reference_anchor_eV") else "")
-            + ". The mono was foil-calibrated by the beamline staff at the start of the beamtime; every scan of every "
-              "sample is aligned to this one reference, never to its own sample's edge.")
+            + ". " + ({0: "The files hold no mono reset line (no calibration record). ",
+                      1: "The mono was foil-calibrated by the beamline staff at the start of the beamtime (one mono "
+                         "reset line). "}.get(len(sv.get("calibration_log") or ()),
+                                             f"The files state {len(sv.get('calibration_log') or ())} mono resets. "))
+            + "Every scan of every sample is aligned to this one reference, never to its own sample's edge.")
     if len(routes) > 1:
         stmt += " A scan whose foil edge is not usable is aligned on the I0 glitch instead."
     if mode == "none":
@@ -3017,10 +3357,45 @@ def _reference_view(bt, recs) -> dict:
             "beamtime_fingerprint": bt.get("fingerprint")}
 
 
-#: what ``applied_shift_eV`` 0.0 on a v1 result means: no ABSOLUTE calibration, because none is needed
-ABSOLUTE_CALIBRATION_SAID = ("No absolute energy calibration was applied (shift 0 eV), and none is needed: the "
-                             "monochromator was foil-calibrated by the beamline staff at the start of the beamtime. "
-                             "Energies are the beamline's calibrated energies.")
+#: what ``applied_shift_eV`` 0.0 on a v1 result means: no ABSOLUTE calibration was applied. The absolute scale is the
+#: staff's foil calibration of the mono, not traced to a tabulated energy nor across beamtimes (processing-science
+#: audit of 18 Nov 2026, finding 2: v1 said none "is needed", which overclaims).
+ABSOLUTE_CALIBRATION_SAID = ("No absolute energy calibration was applied (shift 0 eV).{alignment}{scale} It is not "
+                             "traced to a tabulated energy, and not across beamtimes: energies from two beamtimes may "
+                             "differ by a constant offset.")
+SET_POINT_NONE = ("The files hold no calibration record (no mono reset line): the absolute scale is the monochromator's "
+                  "as the beamline set it, undocumented here.")
+
+
+def calibration_set_points(ref: Mapping) -> list[dict]:
+    """The ``mono reset from A to B`` lines of the beamtime's files (energy_reference.mono_reset_lines), as read."""
+    return [x for x in (ref or {}).get("mono_reset_lines") or ()
+            if isinstance(x, Mapping) and isinstance(x.get("to"), (int, float))]
+
+
+def _set_points_said(pts: Sequence[Mapping]) -> str:
+    said = "; ".join(f"`{x.get('axis') or 'mono'} reset from {x['from']:g} to {x['to']:g}`"
+                     + (f" at {x['time']}" if x.get("time") else "") for x in pts[:3])
+    return said + (f"; and {len(pts) - 3} more" if len(pts) > 3 else "")
+
+
+def absolute_calibration_said(ref: Mapping, mode: str | None = None) -> str:
+    """Review of PR 345, I3: the alignment clause follows the route; no reset line is no calibration record; "at the
+    start of the beamtime" only when the files state one reset."""
+    pts = calibration_set_points(ref)
+    alignment = (" No scan is aligned: the beamtime has no energy reference." if mode in ("none", None) else
+                 " The scans are aligned to one beamtime reference (the alignment says how many).")
+    if not pts:
+        scale = " " + SET_POINT_NONE
+    elif len(pts) == 1:
+        scale = (" The absolute scale rests on the beamline staff's foil calibration of the monochromator at the start "
+                 f"of the beamtime, as the files state it: {_set_points_said(pts)}.")
+    else:
+        scale = (" The absolute scale rests on the beamline staff's foil calibration of the monochromator; the files "
+                 f"state {len(pts)} mono resets: {_set_points_said(pts)}.")
+    return ABSOLUTE_CALIBRATION_SAID.format(alignment=alignment, scale=scale)
+
+
 _ROUTE_SAID = {"ref_foil": "an in-scan reference foil in transmission", "glitch_I0": "the I0 glitch",
                "foil_timeline": "separate foil scans over time", "none": "no energy reference"}
 
@@ -3031,7 +3406,8 @@ def energy_story(res: Mapping) -> dict:
 
     The two words mean two things (end-to-end test on real data, 17 Nov 2026: the calibration block said "no energy
     reference" while the energy reference showed an I0-glitch alignment of +67 to +72 meV). CALIBRATION is absolute
-    (onto tabulated energies): none, since the mono is staff-calibrated. ALIGNMENT is per scan: every scan shifted onto
+    (onto tabulated energies): none applied; the scale is the staff's foil calibration of the mono (its set-point said
+    when the files state it), not traced across beamtimes. ALIGNMENT is per scan: every scan shifted onto
     the ONE beamtime reference."""
     ref = res.get(REFERENCE_KEY) or {}
     route = (ref.get("routes") or [{}])[0] or {}
@@ -3063,13 +3439,18 @@ def energy_story(res: Mapping) -> dict:
             + f": {len(aligned)} of {len(rows)} scans aligned"
             + (f", shifts {shown(min(in_merge))} to {shown(max(in_merge))} ({alignment['shift_range_of']})"
                if in_merge else "") + ".")
-    return {"absolute_calibration": {"applied": False, "applied_shift_eV": 0.0, "needed": False,
-                                     "basis": "staff_foil_calibrated_mono", "statement": ABSOLUTE_CALIBRATION_SAID},
+    return {"absolute_calibration": {"applied": False, "applied_shift_eV": 0.0, "traced_across_beamtimes": False,
+                                     "basis": "staff_foil_calibrated_mono",
+                                     "set_points": [{k: x.get(k) for k in ("time", "axis", "from", "to")}
+                                                    for x in calibration_set_points(ref)],
+                                     "statement": absolute_calibration_said(ref, mode if route else None)},
             "alignment": alignment}
 
 
-def _quick_merges(group, ctx, recs, kept, E, y, nm, e0, absorber, np) -> list[dict]:
-    """The MERGE quick-merge comparison (quick_merge.py), with the quick merge normalised the way this result is."""
+def _quick_merges(group, ctx, recs, kept, E, y, nm, e0, absorber, np, *, offset: float = 0.0) -> list[dict]:
+    """The MERGE quick-merge comparison (quick_merge.py), with the quick merge normalised the way this result is.
+    ``offset``: a transmission standard's constant (TRANSMISSION_RULE_ID), taken out of the curves compared (review of
+    PR 345, M2); the quick merge's own ln(I0/I1) gets it back only while it is normalised."""
     from xas_analysis.model.mback_xrs import mback_xrs
 
     from . import quick_merge as QM
@@ -3079,11 +3460,12 @@ def _quick_merges(group, ctx, recs, kept, E, y, nm, e0, absorber, np) -> list[di
     rp = {"pre1": rng[0] - e0v, "pre2": rng[1] - e0v, "norm1": rng[2] - e0v, "norm2": rng[3] - e0v, "nnorm": None}
     nmv = {"resolved_params": rp, "e0_eV": e0v, "edge_step": nm["A_edge"], "norm": nm["norm"]}
     M = np.array([np.interp(E, r["aligned"].E, r["aligned"].IF / r["aligned"].I0, left=np.nan, right=np.nan) for r in kept])
+    M, y = M - offset, y - offset
 
     opts = nm.get("options") or {}
 
     def normalizer(e, yy):
-        r = mback_xrs(absorber["element"], e, yy, rng, absorber["edge"], **opts)
+        r = mback_xrs(absorber["element"], e, np.asarray(yy, float) + offset, rng, absorber["edge"], **opts)
         return np.asarray(r.norm_xas, float), float(r.info["A_edge"])
 
     return QM.compare_group(group, ctx, grid_ok=E, mean=y, nm=nmv, M=M, grid=E, used_entries=[r["entry"] for r in kept],
@@ -3093,7 +3475,9 @@ def _quick_merges(group, ctx, recs, kept, E, y, nm, e0, absorber, np) -> list[di
 # --- the plot ----------------------------------------------------------------------------------------------------
 
 
-def plot(path: Path, group, recs, table, E, y, nm, e0, absorber, np) -> bool:
+def plot(path: Path, group, recs, table, E, y, nm, e0, absorber, np, *, offset: float = 0.0, signal: str = "IF/I0"
+         ) -> bool:
+    """``offset``: a transmission standard's constant, taken out of the raw panel (review of PR 345, M1)."""
     from ._deps import require
 
     mpl = require().get("matplotlib")
@@ -3113,7 +3497,7 @@ def plot(path: Path, group, recs, table, E, y, nm, e0, absorber, np) -> bool:
         if a is None:
             continue
         with np.errstate(all="ignore"):
-            yy = a.IF / a.I0
+            yy = a.IF / a.I0 - offset
         # scans coloured by spot (the spot named in the legend) when the group has several
         sp = row.get("spot")
         color = spot_colors.get(sp) if sp else None
@@ -3127,13 +3511,13 @@ def plot(path: Path, group, recs, table, E, y, nm, e0, absorber, np) -> bool:
             ax1.plot(a.E, yy, lw=0.9, ls="--", alpha=0.8, color=color,
                      label=f"{r['stem'][:18]} #{r['num']}{tag} DROPPED: {why}"[:80] if shown < 14 else None)
         shown += 1
-    ax1.plot(E, y, color="k", lw=1.8, label=f"average of {table['counts']['kept']} kept (raw IF/I0)")
+    ax1.plot(E, y - offset, color="k", lw=1.8, label=f"average of {table['counts']['kept']} kept (raw {signal})")
     unaligned = [f"#{r['num']}" for r in recs if r.get("aligned") is None]
     if unaligned:
         # a scan with no energy anchor cannot be drawn on the aligned axis: named, never hidden
         ax1.plot([], [], ls="--", color="0.5", label=f"not drawn (no energy anchor, dropped): {', '.join(unaligned)}"[:70])
     ax1.set_xlim(lo, hi)
-    ax1.set_ylabel("raw IF/I0 (aligned)")
+    ax1.set_ylabel(f"raw {signal} (aligned)")
     ax1.legend(fontsize=6, loc="upper right", ncol=1)
     ax1.set_title(f"{group['group_id']} - aligned scans (kept solid, dropped dashed)", fontsize=9)
     ax2.plot(E, nm["norm"], color="k", lw=1.4, label="normalised average (Victoreen + McMaster)")

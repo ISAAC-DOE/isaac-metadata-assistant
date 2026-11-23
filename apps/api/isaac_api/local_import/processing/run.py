@@ -2075,6 +2075,52 @@ def _scan_template(header_lines: Sequence[str] | None) -> tuple[str, str] | None
 ENERGY_SCAN_MOTORS = ("energy", "mono", "absev")
 
 
+#: NOT AN ENERGY AXIS (processing-science audit of 18 Nov 2026, finding 7): a scan with no ``#S`` line (an XDAC
+#: alignment file) is taken as an energy scan by :func:`_is_energy_scan`; its energy column must also READ as one: a
+#: median inside ``channels.energy_value_range_eV`` and a span of at least :data:`ENERGY_AXIS_MIN_SPAN_EV` (the span
+#: only for a scan of at least ``merge.min_points`` points: a shorter one is a stopped fragment, its own rule). A motor or
+#: alignment scan whose "Achieved Energy" holds motor positions (tens of units) never comes out as a spectrum.
+ENERGY_AXIS_MIN_SPAN_EV = 25.0
+NOT_ENERGY_SCAN = "not_an_energy_scan"
+
+
+SHORT_SCAN = "energy_range_too_short"
+#: under this span (eV) the energy column holds one value: a scan of another motor at a fixed energy
+FIXED_ENERGY_SPAN_EV = 1.0
+
+
+def energy_axis_problem(E, params: Mapping) -> tuple[str, str] | None:
+    """``(code, why)`` when this energy column is not a spectrum's axis (:data:`ENERGY_AXIS_MIN_SPAN_EV`), else None:
+    :data:`NOT_ENERGY_SCAN` for motor positions or one fixed energy, :data:`SHORT_SCAN` for a real energy scan too
+    short to process as a spectrum (a glitch check, a foil check; review of PR 345, M6)."""
+    import numpy as np
+
+    E = np.asarray(E, float)
+    E = E[np.isfinite(E)]
+    if not E.size:
+        return NOT_ENERGY_SCAN, "the energy column has no finite value"
+    lo, hi = (params.get("channels") or {}).get("energy_value_range_eV") or (1000.0, 100000.0)
+    med, span = float(np.median(E)), float(np.ptp(E))
+    if not lo <= med <= hi:
+        return NOT_ENERGY_SCAN, (f"the energy column reads {float(E.min()):.4g} to {float(E.max()):.4g} (median "
+                                 f"{med:.4g}), outside {lo:g}-{hi:g} eV: a motor or alignment scan, not an energy scan")
+    if E.size < int((params.get("merge") or {}).get("min_points") or 20):
+        return None                        # a stopped fragment: the aborted-fragment rule's
+    if span < FIXED_ENERGY_SPAN_EV:
+        return NOT_ENERGY_SCAN, (f"the energy column stays at {med:.6g} eV (span {span:.3g} eV): a scan of another "
+                                 "motor at a fixed energy, not an energy scan")
+    if span < ENERGY_AXIS_MIN_SPAN_EV:
+        return SHORT_SCAN, (f"the scan spans only {span:.3g} eV ({float(E.min()):.6g}-{float(E.max()):.6g} eV, under "
+                            f"{ENERGY_AXIS_MIN_SPAN_EV:g} eV): too short to process as a spectrum")
+    return None
+
+
+def not_an_energy_axis(E, params: Mapping) -> str | None:
+    """Why this energy column cannot be processed as a spectrum's axis, or None (:func:`energy_axis_problem`)."""
+    p = energy_axis_problem(E, params)
+    return p[1] if p else None
+
+
 def _is_energy_scan(template: tuple[str, str] | None, energy_column: str | None = None) -> bool:
     """A scan whose ``#S`` line scans ``energy`` (``gscan energy``, ``ascan energy``), a ``gscan`` of an energy motor
     (:data:`ENERGY_SCAN_MOTORS`: ``gscan mono`` on BL6-2c 2018 and BL15-2 2019), or scans the motor that IS the chosen
@@ -2605,6 +2651,10 @@ def process_group(group: Mapping, ctx: _Ctx, athena_entry: Mapping | None = None
     motors_of: dict[int, Sequence[str]] = {id(entry): getattr(table, "motor_lines", ()) for entry, table, _, _ in attempts}
     for entry, table, sa, code in attempts:
         code = code or C.unusable_reason(sa)
+        axis = energy_axis_problem(sa["energy"], params) if not code and sa is not None else None
+        if axis:
+            code = axis[0]
+            entry[NOT_ENERGY_SCAN] = axis[1]
         if code:
             entry["skip_reason"] = code
             if code == "too_few_points" and sa is not None:
@@ -2627,6 +2677,15 @@ def process_group(group: Mapping, ctx: _Ctx, athena_entry: Mapping | None = None
         scans_data.append(sa)
         used_entries.append(entry)
         headers.extend(table.header_lines)
+    skipped = [e for e in res["inputs"] if e.get("skip_reason")]
+    if not scans_data and skipped and all(e.get("skip_reason") in (NOT_ENERGY_SCAN, SHORT_SCAN) for e in skipped):
+        said = next(e[NOT_ENERGY_SCAN] for e in res["inputs"] if e.get(NOT_ENERGY_SCAN))
+        code = skipped[0]["skip_reason"] if len({e["skip_reason"] for e in skipped}) == 1 else NOT_ENERGY_SCAN
+        out = _fail(res, code, said)
+        out["qc"]["statements"] = {code: (f"No spectrum is made: {said}"
+                                                     + (f" ({len(skipped)} scans)" if len(skipped) > 1 else "")
+                                                     + ".")}
+        return [out]
     if not scans_data:
         causes = sorted({e.get("skip_reason") or "?" for e in res["inputs"]})
         nonfinite = [e["diagnostics"] for e in res["inputs"] if e.get("skip_reason") == C.SIGNAL_NOT_FINITE]

@@ -196,7 +196,7 @@ ALIGNMENT_STEP_TOKEN = "energy_alignment"
 
 
 def _compose_merged_series(draft: dict, used: dict, files: Sequence[Mapping], bundle_dir: Path, group_id: str,
-                           conf: Mapping) -> str | None:
+                           conf: Mapping, result: Mapping | None = None) -> str | None:
     """isaac.xas.v1: the merged RAW average (``merged.csv``) as the record's second series, beside the normalised one,
     when its file is in the bundle with the sha256 the result recorded. Returns its series id, or ``None`` (and
     ``used["merged_series"]`` says why)."""
@@ -208,7 +208,7 @@ def _compose_merged_series(draft: dict, used: dict, files: Sequence[Mapping], bu
     if fpath is None or hashlib.sha256(fpath.read_bytes()).hexdigest() != merged.get("sha256"):
         used["merged_series"] = "not used: the merged file is missing or its sha256 differs"
         return None
-    series, said, stderr = PV.merged_series(group_id, fpath)
+    series, said, stderr = PV.merged_series(group_id, fpath, result=result)
     if series is None:
         used["merged_series"] = said
         return None
@@ -1010,7 +1010,8 @@ def compose_group(bundle: Mapping, group: Mapping, bundle_dir: Path, index: dict
                     ]
                     used["series"] = spectrum["relative_path"]
                     if PV.is_v1(r):
-                        merged_sid = _compose_merged_series(draft, used, files, Path(bundle_dir), group["group_id"], conf)
+                        merged_sid = _compose_merged_series(draft, used, files, Path(bundle_dir), group["group_id"], conf,
+                                                            result=r)
                         draft["series"][0]["notes"] = PV.normalized_series_note(r, merged_sid)
                 elif "series" not in used:
                     used["series"] = "not used: no data"

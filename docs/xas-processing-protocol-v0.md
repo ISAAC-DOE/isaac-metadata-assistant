@@ -81,7 +81,14 @@ the adapter `apps/api/isaac_api/local_import/processing/engine_xas.py` (protocol
 the engine's own scope (`src/xas_analysis/skill/scope.md`) covers: SSRL hard-XAS fluorescence / HERFD read from SPEC
 or SSRL EXAFS Data Collector files. Everything else stays on v0 (this document) and its result says why
 (`engine.reason`): transmission samples (the channel choice is ln(I0/I1), or the engine's `measurement_mode` reads the
-data as transmission), alignment groups, other formats. `ISAAC_PROCESSING_ENGINE=v0` keeps every group on v0.
+data as transmission), alignment groups, other formats. A STANDARD (role reference) whose channel choice is transmission
+is on v1 (`isaac.xas.transmission_standard_on_v1.v1`, audit of 18 Nov 2026): mu = ln(I0/I1), aligned per scan to the
+samples' beamtime reference, merged and normalised as the samples are (Victoreen + McMaster); one constant per group is
+added while it is normalised (the Victoreen background is non-negative; ln(I0/I1) carries the chambers' gain ratio) and
+taken out of merged.csv; no thickness, pinhole or harmonic correction; no dose rule (the signal is not a count). A scan
+whose energy column does not read as an energy axis (median outside `channels.energy_value_range_eV`, or a span under
+25 eV: a motor or alignment scan, e.g. an XDAC `align_data` file) is `not_an_energy_scan`; a group of only such scans
+fails with that reason, on v0 as on v1, and never comes out as a spectrum. `ISAAC_PROCESSING_ENGINE=v0` keeps every group on v0.
 
 **Once per beamtime** (`engine_beamtime` in `processing_results.json`): every group is read with v0's own reader,
 channel choice and BL15-2 absev rule (hash-checked); the engine's survey (`survey_files`, one entry per record group,
@@ -98,11 +105,18 @@ model fit; else the foil timeline; else none, said loudly), each anchor validate
 shift = reference anchor - scan anchor (a shift beyond 1 eV for a glitch, 2 eV for a foil, is a failed anchor), ONE
 interpolation onto the group's modal grid; screen
 (`screen_report`, report-only); decide (below); average the kept scans' raw IF/I0 (`average_scans`, points no kept
-scan covers dropped); normalise the average ONCE (`mback_xrs`, Victoreen + McMaster, constrained background, the step
+scan covers dropped; where only some kept scans contribute, a dropout point or a scan ending early, the mean is the
+contributing scans' sum over the sum of their levels relative to the merge, fitted over the points all scans cover,
+`isaac.xas.coverage_matched_mean.v1`: the plain mean where all contribute, no step where coverage changes; the stderr
+is the raw scans' spread, edge-step differences included); normalise the average ONCE (`mback_xrs`, Victoreen + McMaster, constrained background, the step
 locked at the tabulated edge; element and edge from the scientist's `set_absorber`, else the files' agreeing absorber
 evidence, else the edge the survey identified from the scan range, said as unconfirmed); E0 = larch `find_e0` on the
-average. Uncertainty note: the edge step over 12 windows around the one used (max - min over the median; warn above
-20 %). QC: `no_edge`, `edge_step_implausible`, `post_edge_not_at_1` fail (never offered for approval, as v0); warns
+average (a grid point of the maximum first derivative: reported to 0.01 eV with the grid step there as its resolution,
+said apart from the tabulated edge the step is locked to). Uncertainty note: the edge step over 12 windows around the
+one used (max - min over the median; warn above 20 %), and the white-line height (normalised maximum -5..+20 eV from
+the tabulated edge) over 36 windows (pre-edge end -10..0, post-edge start 0..+50, post-edge end -100..0 eV). The result's
+`acquisition` block states the attenuator (`filter` on the #P line) and the post-edge counts per point, and that no
+dead-time beyond the beamline's column and no self-absorption correction is applied. QC: `no_edge`, `edge_step_implausible`, `post_edge_not_at_1` fail (never offered for approval, as v0); warns
 `normalization_window_sensitive`, `most_scans_dropped`, `logbook_inferred_note_applied`, `anchor_fallback_route_used`,
 `normalization_window_group_own`, `single_scan`, `no_energy_reference` (also a review flag: a bulk approval refuses
 it), `kept_scan_not_merged`, `override_not_applied`, `measurement_mode_unknown` (the engine's `measurement_mode` read
@@ -163,8 +177,12 @@ scientist still approves each curve before it goes into a record.
   screens run, glitch windows excluded; a flag drops only when, after a free scale and offset fitted over the pre-edge
   and post-edge, the smoothed residual still departs 5 % of the edge step and 5 x its noise (a within-scan step collapse
   is shape; a uniformly weaker scan, or one on a background, is not: `intensity_not_shape`). A WITHIN-SPOT
-  CHANGE (`isaac.xas.dose_damage.v2`; scans compared in normalised shape over the white-line window, after a free scale
-  and offset): BEAM DAMAGE only when, at most spots measured three or more times (at least two), the change GROWS with
+  CHANGE (`isaac.xas.dose_damage.v3`; each scan normalised on its own with the same fixed windows, mean below E_edge - 10
+  eV to 0 and mean above E_edge + 30 eV to 1, then compared over the white-line window; v2 fitted one noisy scan onto
+  the other, which made the later white line read low from counting noise alone; spots under 150 post-edge counts per
+  point are left out and said, and when fewer than two repeated spots are at or above it the rule says it cannot judge,
+  `cannot_judge_low_counts`, and decides nothing, unless a scientist's set_dose_reading on the group decides it; a
+  beamtime-wide reading it cannot place is `override_not_applied`): BEAM DAMAGE only when, at most spots measured three or more times (at least two), the change GROWS with
   dose (scan 3 differs from scan 1 more than scan 2 does), goes the way the edge expects (the white line falls at Ir and
   Pt L3; elsewhere the one direction every spot shares, said) and a fresh spot recovers: the later scans are dropped,
   "beam damage at each spot: later scans at the same spot change shape". A FIRST SCAN STILL SETTLING when the later

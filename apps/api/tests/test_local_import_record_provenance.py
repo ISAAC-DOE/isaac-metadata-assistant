@@ -121,7 +121,10 @@ def test_the_v1_record_validates_and_carries_its_processing_story(bdir, tmp_path
     assert gb["version"] == (f"protocol {res['protocol_version']}; adapter isaac.xas.engine_adapter.v1; xas-analysis "
                              f"{res['engine']['engine_version']} (vendored, see src/xas_analysis/PROVENANCE.md)")
     notes = gb["notes"]
-    for said in ("Energy: no absolute energy calibration was applied", "none is needed",
+    assert "none is needed" not in notes
+    for said in ("Energy: no absolute energy calibration was applied", "not across beamtimes",
+                 "not traced to a tabulated energy", "scan-to-scan spread of the raw IF/I0",
+                 "grid point of the maximum first derivative", "no self-absorption (over-absorption) correction",
                  "aligned to one beamtime energy reference, the I0 glitch", "anchored on the earliest group", "shifts ",
                  " meV", "Scans: 4 of 6 kept (4 merged), 2 dropped (the scientist's decision: ",
                  "Normalisation: Victoreen background + McMaster step", "pre-edge ",
@@ -204,7 +207,9 @@ def test_calibration_and_alignment_are_said_apart_and_agree(engine_run, capsys):
     assert "no energy reference" not in said.lower()
     assert view["calibration"]["alignment"]["statement"].startswith("Each scan was aligned to one beamtime energy "
                                                                     "reference, the I0 glitch")
-    assert "none is needed" in view["calibration"]["absolute_calibration"]["statement"]
+    cal = view["calibration"]["absolute_calibration"]
+    assert "none is needed" not in cal["statement"] and cal["traced_across_beamtimes"] is False
+    assert "not traced to a tabulated energy" in cal["statement"]
 
 
 def test_a_remark_never_contradicts_its_decision(engine_run):
