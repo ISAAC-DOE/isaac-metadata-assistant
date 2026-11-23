@@ -544,7 +544,8 @@ class _Facts:
     __slots__ = ("gid", "runs", "keys", "electrode", "position", "sample", "names", "names_said", "filter", "filter_said",
                  "filter_from", "history", "history_canon", "why_not", "readings", "decided", "run_interval",
                  "time_interval", "loose_key", "full_key", "stems", "sid", "ident", "stage", "stage_from",
-                 "position_unsettled", "set_aside_at", "role", "time_why", "time_questions", "time_answers")
+                 "position_unsettled", "set_aside_at", "role", "time_why", "time_questions", "time_answers",
+                 "filter_overruled")
 
     def __init__(self, gid: str):
         self.gid = gid
@@ -561,6 +562,8 @@ class _Facts:
         self.run_interval = self.time_interval = self.loose_key = self.full_key = None
         self.sid = self.ident = self.stage = self.stage_from = None
         self.filter_from: set[str] = set()
+        #: review of #352, finding 4: the file-name filter(s) a standing rule outranked for this group, and the rule
+        self.filter_overruled: dict | None = None
         self.position_unsettled = False
         self.set_aside_at: tuple[int, str] | None = None  # the position and token the grouping set aside
         self.role: str | None = None
@@ -926,6 +929,14 @@ def _filter(ctx: _Ctx, f: _Facts, g: Mapping, own: Mapping, written) -> None:
     f.filter_said = sorted({x for x in written("filter")})
     for rid in f.runs:
         for c in own.get(rid, {}).get("filter", ()):
+            rule = (c.get("state_basis") or {}).get("resolved_by_rule")
+            if rule:
+                overruled = sorted({f"filter{filter_number(e.get('literal_value'))}" for e in c.get("evidence") or ()
+                                    if filter_number(e.get("literal_value")) not in (None, f.filter)
+                                    and str(e.get("locator") or "").startswith("filename")})
+                if overruled:
+                    f.filter_overruled = {"rule": rule, "file_name": sorted({*(f.filter_overruled or {}).get("file_name", ()),
+                                                                             *overruled})}
             for e in c.get("evidence") or ():
                 if filter_number(e.get("literal_value")) != f.filter:
                     continue  # C6: a file name the recorded filter outranks is not where this number was read
@@ -1285,6 +1296,8 @@ def proposals(bundle: Mapping, groups: Sequence[Mapping] | None = None) -> list[
         said = {"literals": f.filter_said, "from": sorted(f.filter_from)}
         if f.decided.get("filter"):
             said["from_decisions"] = list(f.decided["filter"])
+        if f.filter_overruled:
+            said["overruled"] = dict(f.filter_overruled)
         items.append({"group_id": f.gid, "run_ids": list(f.runs), "value": f"filter{f.filter}", "fill": {"filter": f.filter},
                       "said": said, "first_file": f.stems[0]})
     if items or held:
@@ -1488,12 +1501,20 @@ def _text(p: Mapping, n_groups: int, n_runs: int) -> str:
                     "file name" if "file name" in got else
                     f"the scan header's filter motor reads {i['fill']['filter']}" if "scan header" in got else "files")
         zero = sum(1 for i in items if i["fill"].get("filter") == 0)
+        settled = [i for i in items if (i.get("said") or {}).get("overruled")]
         text = (f"The filter for {n_groups} group(s) ({n_runs} run(s)), into system.configuration.beam_attenuator (the "
                 "portal vocabulary's key for it): the filter count a file name (rule bl15.filenames.filter_count.v1) "
                 f"or the scan headers' filter motor states, written filter<n> ({n_val} value(s)). "
                 + "; ".join(f"{i['first_file']} -> {i['value']!r} ({source(i)})" for i in ex)
                 + (f"; and {len(items) - len(ex)} more groups." if len(items) > len(ex) else ".") + more
                 + (f" filter0 ({zero} group(s)) is a count of 0: no filter in the beam." if zero else "")
+                + (f" {len(settled)} group(s) take the filter their acquisition files recorded over the one their file "
+                   "name states, by ISAAC's rule (" + settled[0]["said"]["overruled"]["rule"] + "), not yet confirmed "
+                   "by the scientist: " + "; ".join(
+                       f"{i['first_file']} -> {i['value']!r} (the file name says "
+                       + " or ".join(repr(v) for v in i["said"]["overruled"]["file_name"]) + ")" for i in settled)
+                   + ". Check these before confirming all; answer them on their own with --only group:<id>."
+                   if settled else "")
                 + " Confirm to record these, or give the scientist's own wording with --decision correct --value, using "
                 "{filter} for the number (e.g. \"{filter} filters\"); for the groups with no filter, their own words "
                 "with --only group:<id> (several --only in one call) --decision correct --value \"<words>\".")

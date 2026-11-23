@@ -81,11 +81,13 @@ UNITS = {
     "08_03_ZZ3_base_beforeCycling_filter10_400mV": [10, 10],
     "09_04_YY1_film_filter10_100mV": [10, 10],
     "10_05_ZZ5_base_after500Cycling_filter10_100mV": [10, 10],
+    # review of #352, finding 6: a dry measurement of sample 4 (its own name says so)
+    "11_04_YY1_dry_filter10": [10, 10],
 }
 
 
 def _notes(*, heading_3: str = "Sample 3 ZZ3 in base (bad)", heading_4: str = "Sample 4",
-           remark_3: str = "did not work!") -> list[str]:
+           remark_3: str = "did not work!", extra: tuple[str, ...] = ()) -> list[str]:
     return [
         "SYNTHETIC notes -- invented, no real beamtime, no real person.", "", "Beam January 1-2, 2099", "",
         # a beamtime-wide line before any section that names a cell only in passing
@@ -104,6 +106,7 @@ def _notes(*, heading_3: str = "Sample 3 ZZ3 in base (bad)", heading_4: str = "S
         heading_4, "Cell: H-cell", *_table([(1, "", "Sets the working potential to 0.1 V", "")]), "",
         "Sample 5 ZZ5 in base",
         *_table([(1, "10", "Sets the working potential to 0.1 V", "measured after 500 cycles")]), "",
+        *extra,
     ]
 
 
@@ -175,7 +178,9 @@ def test_the_remark_becomes_one_qc_question_on_that_samples_groups(imported):
     assert all(t["kind"] == "record_group" for t in q["targets"])
     # the scientist's words are quoted, where they were written, and nothing is decided for them
     assert "'bad'" in q["text"] and "'did not work!'" in q["text"] and NOTES in q["text"]
-    assert set(q["allowed_decisions"]) == {"confirm", "reject", "defer"}
+    # worded as what it is, a remark under the heading, never as ISAAC's verdict (review of #352, finding 2)
+    assert "has this remark under the sample's heading" in q["text"] and "says this sample failed" not in q["text"]
+    assert set(q["allowed_decisions"]) == {"confirm", "reject"}
     assert q["blocking"] is False
     # NOTHING IS DROPPED: the groups are still live proposals, every run is still in the bundle
     live = {g["group_id"]: g["status"] for g in Q.live_groups(b)}
@@ -209,6 +214,48 @@ def test_confirming_keeps_the_records_and_answers_the_question(tmp_path):
     status = {g["group_id"]: g["status"] for g in after["record_groups"]}
     assert status[_group_of(after, "07_03")] == "scientist_confirmed"
     assert _qc_questions(after) == []
+
+
+def test_a_group_confirmed_for_another_reason_has_not_answered_the_remark(tmp_path):
+    """Review of #352, finding 5: a bulk confirm of the grouping is not "keep them despite the remark"."""
+    bdir, b = _import(tmp_path)
+    qid = _qc_questions(b)[0]["question_id"]
+    M.decide(bdir, target_ids=[g["group_id"] for g in b["record_groups"]], decision="confirm", value=None, **BY)
+    after = M.load(bdir)
+    assert [q["question_id"] for q in _qc_questions(after)] == [qid]
+    M.decide_question(bdir, question_id=qid, decision="confirm", value=None, **BY)
+    assert _qc_questions(M.load(bdir)) == []
+    with pytest.raises(M.MutationRefused, match="takes no --value"):
+        M.decide_question(bdir, question_id=qid, decision="reject", value="SYN", **BY)
+
+
+@pytest.mark.parametrize("line", ["Beam failed at 2am, refilled", "Bad weather, beam dump", "No signal on reference foil",
+                                  "discard first scan", "works but bad contact", "Beam dump, discard first scan",
+                                  "not bad at all"])
+def test_a_remark_about_something_else_is_not_about_the_sample(line):
+    from isaac_api.bl15 import notes as N
+
+    assert not N.is_failure_remark(line)
+    assert N.is_failure_remark("did not work!") and N.is_failure_remark("Sample failed") and N.is_failure_remark("bad")
+
+
+def _read_notes(lines: list[str]):
+    from isaac_api.bl15 import notes as N
+
+    text = "\r\n".join(lines)
+    rec = N.SourceRecord(archive_path=NOTES, basename=NOTES, extension=".txt", size_bytes=len(text),
+                         content_sha256="x", parent_dir="", depth=0)
+    return N.read_beamtime_notes(rec, text).evidence
+
+
+def test_a_remark_line_is_still_read_for_everything_else_on_it():
+    """Review of #352, finding 1: the remark is recorded, and the line goes on to the other readers."""
+    found = _read_notes(["Sample 3 ZZ3 in base", "Flow cell leaked, failed", "Operator: SYN Person, did not work", "",
+                         *_table([(1, "07", "Sets the working potential to 0.1 V", "")])])
+    concepts = {(e.concept, e.raw_literal) for e in found}
+    assert (ev.CONCEPT_QUALITY_NOTE, "Flow cell leaked, failed") in concepts
+    assert any(c == "cell_type_statement" and lit == "Flow cell leaked, failed" for c, lit in concepts)
+    assert any(c == ev.CONCEPT_CONTRIBUTOR_STATEMENT for c, _ in concepts)
 
 
 def test_a_good_heading_asks_nothing(tmp_path):
@@ -293,6 +340,20 @@ def test_through_the_import_the_filter_is_the_recorded_one_and_blocks_nothing(im
     # the label proposed for the group is the recorded filter
     label = next(p for p in L.proposals(b) if p["label"] == "filter")
     assert next(i["value"] for i in label["items"] if i["group_id"] == gid) == "filter20"
+    # review of #352, finding 4: the bulk question names the group the rule settled, the file name it overruled, and
+    # that the rule is ISAAC's, not yet the scientist's
+    text = next(q for q in L.label_questions(b) if q.get("label") == "filter")["text"]
+    assert "04_02_ZZ2_base_after1200Cycling_filter35_900mV -> 'filter20' (the file name says 'filter35')" in text
+    assert "by ISAAC's rule (bl15.resolution.recorded_filter_motor.v1), not yet confirmed by the scientist" in text
+    # review of #352, finding 7: a scientist's reject on the settled disagreement still declines the condition
+    from isaac_api.local_import import completeness as CP
+
+    index = CP._Index(b)
+    assert index.conflicts(group, "filter") == ([], False)
+    cid = next(iter(mine))
+    b2 = __import__("copy").deepcopy(b)
+    M.record_decision(b2, target_ids=[cid], decision="reject", value=None, **BY)
+    assert CP._Index(b2).conflicts(group, "filter") == ([], True)
     # the run whose recordings disagree among themselves is still a disagreement
     assert _candidate(b, "06_02", key="filter")["extracted_state"] == "conflicting"
 
@@ -319,6 +380,31 @@ def test_runs_whose_section_says_nothing_keep_only_the_beamtime_line(imported):
         c = _candidate(b, prefix, path=CELL)
         assert [e["literal_value"] for e in c["evidence"]] == ["The spare parts are on the bench with the flow cell."]
         assert c["value"] is None   # named only in passing (r5 B1): unchanged
+
+
+def test_a_number_that_heads_two_sections_binds_nothing_and_listed_runs_are_never_reached(tmp_path):
+    """Review of #352, finding 3: a second, unnamed "Sample 2" section (no rows) states a cell. Which of the two
+    sections the files numbered 02 belong to is not something the number decides, and files 03-06 are listed in the
+    named section's rows anyway: none of them takes the cell."""
+    _, b = _import(tmp_path, group=False, extra=("Sample 2", "Cell: H-cell", ""))
+    for prefix in ("03_02", "04_02", "05_02", "06_02"):
+        c = _candidate(b, prefix, path=CELL)
+        assert all(e["literal_value"] != "Cell: H-cell" or "line 5" in e["locator"] for e in c["evidence"]), prefix
+        assert c["value"] is None
+
+
+def test_the_rule_says_the_number_is_the_only_link_for_an_unnamed_heading(imported):
+    _, b = imported
+    assert "the heading names no sample, so the number is the only link" in _candidate(b, "09_04", path=CELL)["rule"]
+
+
+def test_a_dry_measurement_gets_the_sections_cell_only_as_a_suggestion(imported):
+    """Review of #352, finding 6: a run whose own name says it was dry may not have been in the cell."""
+    _, b = imported
+    c = _candidate(b, "11_04", path=CELL)
+    assert c["value"] is None and [e["literal_value"] for e in c["evidence"]] == ["Cell: H-cell"]
+    assert "dry or had no electrolyte" in c["state_basis"]["not_proposable_summary"] + c["state_basis"]["not_proposable_reason"]
+    assert _candidate(b, "09_04", path=CELL)["value"] == "h_cell"
 
 
 def test_a_heading_name_the_numbered_files_do_not_carry_binds_nothing(tmp_path):

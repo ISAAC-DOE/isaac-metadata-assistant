@@ -215,13 +215,16 @@ class _Index:
         """``(open conflict ids, declined)`` of the disagreement on ``condition``'s reading for ``group`` (its basis
         candidates' conflicts): ``declined`` when the scientist's latest word on one is ``reject`` (neither reading:
         leave it out on purpose); open ones have no answer yet (or a ``defer``)."""
-        # C6: a disagreement a standing rule settled (the filter the acquisition files recorded over a file name's) asks
-        # nothing first: the group's condition is the reading the rule used, and its label question asks the rest
-        ids = [c for i in self.entry(group, condition).get("candidate_ids") or ()
-               if not ((self.cand.get(i) or {}).get("state_basis") or {}).get("resolved_by_rule")
-               for c in self.conflicts_of.get(i, ())]
+        cands = list(self.entry(group, condition).get("candidate_ids") or ())
+        ids = [c for i in cands for c in self.conflicts_of.get(i, ())]
         said = {c: (self.decisions.get(("conflict", c)) or {}).get("decision") for c in ids}
-        return [c for c, d in said.items() if d in (None, "defer")], any(d == "reject" for d in said.values())
+        # C6: a disagreement a standing rule settled (the filter the acquisition files recorded over a file name's) asks
+        # nothing first: the group's condition is the reading the rule used, and its label question asks the rest. A
+        # scientist's `reject` on it still declines the condition (review of #352, finding 7): only the OPEN list skips it
+        settled = {c for i in cands if ((self.cand.get(i) or {}).get("state_basis") or {}).get("resolved_by_rule")
+                   for c in self.conflicts_of.get(i, ())}
+        return ([c for c, d in said.items() if d in (None, "defer") and c not in settled],
+                any(d == "reject" for d in said.values()))
 
     def paths(self, group: Mapping, condition: str) -> list[str]:
         """The record field(s) that carry ``condition`` for ``group``: what its basis candidates target, else the

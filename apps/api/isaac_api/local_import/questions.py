@@ -108,8 +108,9 @@ ALLOWED_DECISIONS: Mapping[str, tuple[str, ...]] = {
     "stated_utc_start_times": ("confirm",),
     # finding 4 (audit of 18 Nov 2026): the beamtime-wide dose reading (isaac.xas.dose_damage.v2)
     "dose_reading": (B.DOSE_READING_DECISION,),
-    # C6: keep the records of a sample the logbook says failed (confirm the groups), leave them out (reject), or defer
-    "logbook_quality_remark": ("confirm", "reject", "defer"),
+    # C6: keep the records despite the logbook's remark (confirm the groups, recorded WITH this question's id), or leave
+    # them out (reject). No `defer`: a group's defer makes it a proposal again, which is a grouping act, not this answer
+    "logbook_quality_remark": ("confirm", "reject"),
 }
 #: A ``confirm_value`` question whose targets carry NO value (the files hold text, no value this
 #: build derives from it): there is nothing to confirm, so ``confirm`` is not offered. The kind —
@@ -3709,8 +3710,22 @@ def _absorber_questions(bundle: Mapping, groups: Sequence[Mapping], *, include_a
 
 #: The kind of the question (a new kind, with its own ids; no other question changes).
 QUALITY_REMARK_KIND = "logbook_quality_remark"
-_QUALITY_REMARK_WHY = ("The logbook says this sample failed or was bad. Whether its records are kept is the scientist's "
-                       "decision: nothing is dropped until they say so.")
+#: The key a "keep them" answer's value carries: the question it answers (review of #352, finding 5). A group confirmed
+#: for any other reason (a bulk confirm of the grouping) has not answered the remark, so the question stays open.
+QUALITY_REMARK_ANSWER_KEY = "answers_logbook_remark"
+_QUALITY_REMARK_WHY = ("The logbook has a remark under this sample's heading that may say it failed or was bad. Whether "
+                       "its records are kept is the scientist's decision: nothing is dropped until they say so.")
+
+
+def quality_remark_answered(bundle: Mapping, qid: str) -> set[str]:
+    """The group ids whose latest decision keeps them in answer to question ``qid`` (a confirm carrying its id)."""
+    latest: dict[str, Mapping] = {}
+    for d in bundle.get("scientist_decisions") or ():
+        t = d.get("target") or {}
+        if t.get("kind") == "record_group" and d.get("decision") in ("confirm", "reject", "defer", "split", "merge"):
+            latest[t.get("id")] = d
+    return {gid for gid, d in latest.items() if d.get("decision") == "confirm" and isinstance(d.get("value"), Mapping)
+            and d["value"].get(QUALITY_REMARK_ANSWER_KEY) == qid}
 
 
 def quality_remark_question_id(source: str, locator: str) -> str:
@@ -3760,21 +3775,22 @@ def _quality_remark_questions(bundle: Mapping, groups: Sequence[Mapping], *, inc
     for (source_id, run_ids), its in by_sample.items():
         its = sorted(its, key=lambda n: _line_of(n.get("locator")))
         keys = {key_of[r] for r in run_ids if r in key_of}
-        targets = [g for g in groups if keys & set(g.get("member_run_keys") or ())
-                   and (include_answered or g.get("status") != B.STATE_SCIENTIST_CONFIRMED)]
-        if not targets:
-            continue
         source = str(path_of.get(source_id) or source_id or "the logbook")
         qid = quality_remark_question_id(source, str(its[0].get("locator")))
+        answered = quality_remark_answered(bundle, qid)
+        targets = [g for g in groups if keys & set(g.get("member_run_keys") or ())
+                   and (include_answered or g["group_id"] not in answered)]
+        if not targets:
+            continue
         quotes = "; ".join(f"{_quoted(str(n.get('text') or ''))} ({n.get('locator')})" for n in its)
         files = [stem_of[r] for r in run_ids if stem_of.get(r)]
         shown = ", ".join(files[:4]) + (f" and {len(files) - 4} more" if len(files) > 4 else "")
-        text = (f"The logbook ({source}) says this sample failed: {quotes}. It reaches {len(run_ids)} measurement(s) "
-                f"({shown}) in {len(targets)} record group(s). Nothing has been dropped. Keep them as records "
-                "(confirm the groups), or leave them out (reject the groups: no record is built from them, and the runs "
-                "and their files stay in the bundle). Answer once, or per group. To keep a group with a QC status, "
-                "approve its processing result with --qc-status and a --qc-note in the scientist's words. "
-                "Not known: defer.")
+        text = (f"The logbook ({source}) has this remark under the sample's heading: {quotes}. It may say the sample "
+                f"failed or was bad. It reaches {len(run_ids)} measurement(s) ({shown}) in {len(targets)} record "
+                "group(s). Nothing has been dropped. Keep them as records despite the remark (confirm), or leave them out "
+                "(reject: no record is built from them, and the runs and their files stay in the bundle). Answer once, "
+                "or per group. A group confirmed for any other reason has not answered this. To keep a group with a QC "
+                "status, approve its processing result with --qc-status and a --qc-note in the scientist's words.")
         out.append({
             "question_id": qid,
             "partition": None,
@@ -3793,7 +3809,7 @@ def _quality_remark_questions(bundle: Mapping, groups: Sequence[Mapping], *, inc
                        "source": source, "note_id": n.get("note_id")} for n in its],
             "allowed_values": None,
             "answer_command": (f'isaac bundle decide <bundle_dir> --question {qid} --decision <confirm|reject> '
-                               '--by "<your name>"   # per group: add --only group:<group_id>   # not known: --decision defer'),
+                               '--by "<your name>"   # per group: add --only group:<group_id>'),
         })
     return out
 
