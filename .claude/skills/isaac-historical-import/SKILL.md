@@ -189,9 +189,10 @@ If processing is not installed, say what that costs (no curves, records stay inc
 
 ## Step 7 · Questions: three messages
 
-Read `reference/questions-and-decisions.md`. Use `<isaac> bundle questions <bundle> --blocking-only --limit 10`, never the raw list.
-Each question has its text, why it blocks export, hints, a `context` (the lines, values and plots to show with it;
-never the answer) and an `answer_command` template.
+Read `reference/questions-and-decisions.md`. Use `<isaac> bundle questions <bundle> --blocking-only --limit 10 --plain`, never the raw list.
+`--plain` gives each question as one sentence with its options and suggestion; its `question_id` goes in the decide command.
+The JSON page (no `--plain`) has the same in `ask`, `answer`, `suggested`, and the full `text`, `hints`, a `context`
+(the lines, values and plots to show with it; never the answer) and an `answer_command` template. Use the ask as it is.
 
 1. **What the records cannot go out without.** The blocking questions, numbered, one line each, as a yes/no or a pick.
    - Start from `minimum_for_one_group`: its `questions`, then its `unasked_required`, then its `plus_decisions`.
@@ -211,8 +212,10 @@ never the answer) and an `answer_command` template.
 - **A word that is not on the list**, and they keep it: `reference/vocabulary-requests.md`.
 - **An earlier beamtime's answer** shown on a question: `reference/earlier-answers.md`.
 - **A filled sheet or workbook:** `reference/template-and-own-sheet.md`, `reference/workbook-answers.md`.
-- **They would rather click through a few at a time, on a phone:** `reference/question-site.md` (`bundle site export`, later `bundle site import`).
+- **They would rather click through a few at a time, on a phone:** `reference/question-site.md`. `isaac bundle site export` makes the cards; `isaac bundle site import` reads their answers back (preview first).
 - Not asked: `informational` and `covered_by` questions, and conflicts with `affects_record: false`. Give their count once.
+- Two more kinds are in the same list: the record-completeness tier (after the blocking ones; `--distinguishing-only`
+  shows only it) and the beam-damage question (`dose_reading`, once for the beamtime; Step 6 says how to record it).
 - They may also answer on the local *Local Imports* page. Run `bundle questions` again after.
 
 ## Step 8 · Build and validate

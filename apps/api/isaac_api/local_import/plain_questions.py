@@ -314,3 +314,41 @@ def not_plain(text: Any) -> str | None:
         if m:
             return f"{what} ({m.group(0)!r})"
     return None
+
+
+# --- the asks of the kinds the question site does not put on a card (read by ``bundle questions``) ------------------
+# COPY ONLY, like everything above: each is built from the question's own structured fields.
+
+def ordinal(n: int) -> str:
+    """1 -> "1st", 4 -> "4th", 11 -> "11th", 21 -> "21st"."""
+    suffix = "th" if n % 100 in (11, 12, 13) else {1: "st", 2: "nd", 3: "rd"}.get(n % 10, "th")
+    return f"{n}{suffix}"
+
+
+def counter_ask(positions: Sequence[Any]) -> str:
+    """The file-name counter question, from the positions it names (a number, or ``last``)."""
+    named = [("last part" if str(p).casefold() == "last" else f"{ordinal(int(p))} part") for p in positions]
+    if len(named) == 1:
+        return (f"Is the {named[0]} of the file names a run counter, a number that only tells repeats of one "
+                "measurement apart?")
+    return (f"Are the {or_list(named)} of the file names run counters, numbers that only tell repeats of one "
+            "measurement apart?")
+
+
+def absorber_ask(element: str, edge: str) -> str:
+    return f"Is the absorbing element and edge {element} {edge}?"
+
+
+#: The beamtime-wide start-time question: the files give the moment each file was created; a scientist chooses.
+START_TIME_ASK = "Should each measurement's start time be the moment its file was created?"
+
+#: The beamtime-wide dose question (the processing card's own sentence is longer: it counts spots).
+DOSE_ASK = "Is the change in the white line after the first scan at a spot beam damage?"
+
+
+def optional_ask(paths: Sequence[str]) -> str:
+    """The optional-fields question: the fields it lists, in nouns."""
+    nouns = [noun(p) for p in paths]
+    shown = or_list(nouns[:6])
+    more = len(nouns) - 6
+    return f"Do you know any of these: {shown}{f' (and {more} more)' if more > 0 else ''}?"

@@ -304,7 +304,7 @@ def render_summary(bundle: Mapping) -> str:
         + (f" (walk stopped: {root['truncated_reason']})" if root.get("truncated_reason") else "")
     )
     if athena:
-        add(f"  - {_athena_read_by_process(len(athena))} (the import has no reader for them, so they stay in the unread count)")
+        add(f"  - {_athena_listed_only(len(athena))} (the import has no reader for them, so they stay in the unread count)")
     if n_kept := len(B.files_not_opened(bundle)):
         add(f"  - {_not_opened_text(n_kept)}, not counted as unread: `isaac bundle list <dir> unread --all` lists them")
     add(
@@ -435,8 +435,8 @@ def render_summary(bundle: Mapping) -> str:
         add(f"- Not counted here: {_not_opened_text(n_kept)}; a run reader claimed them, so they are not unread "
             "(`isaac bundle list <dir> unread --all` lists them).")
     if athena:
-        # an Athena project is not unread: `isaac process` reads it (the import has no reader for it)
-        add(f"- {_athena_read_by_process(len(athena))} (`isaac bundle list <dir> unread` shows each with its `read_by`).")
+        # an Athena project is listed, never read: said once here
+        add(f"- {_athena_listed_only(len(athena))} (`isaac bundle list <dir> unread` lists each).")
     others = [u for u in unread if not _is_athena_project(u)]
     # one line per FOLDER and reason, with the number of files: ten files of one folder that no reader reads
     # are one finding, not ten identical lines
@@ -679,7 +679,7 @@ def cmd_import(args) -> int:
 
         print(f"  It replaces the bundle that was in {out}: {REIMPORT_CAVEAT}.")
     if n_athena := sum(1 for u in bundle["unread_files"] if _is_athena_project(u)):
-        print(f"  {_athena_read_by_process(n_athena)}")
+        print(f"  {_athena_listed_only(n_athena)}")
     if n_kept := len(B.files_not_opened(bundle)):
         print(f"  {_not_opened_text(n_kept)}, not counted as unread: `isaac bundle list {out} unread --all` lists them")
     n_quick = sum(len(p["files"]) for p in bundle.get("processed_outputs") or [] if B.is_engine_classified(p))
@@ -967,9 +967,10 @@ def _merge_folder_text(folder) -> str:
             "runs; no question is asked about them.")
 
 
-def _athena_read_by_process(n: int) -> str:
-    """What the summary and the import output say about Athena projects (the stored unread_files keep them)."""
-    return f"{n} Athena project{'s are' if n != 1 else ' is'} read by `isaac process`, not at import"
+def _athena_listed_only(n: int) -> str:
+    """What the summary and the import output say about Athena projects (the stored unread_files keep them): they are
+    listed, and never read, by the import or by any later command (ISAAC never uses Athena)."""
+    return f"{n} Athena project{'s are' if n != 1 else ' is'} listed as files and never read (ISAAC does not use Athena)"
 
 
 def _mc_reason_code(obj: Mapping) -> str | None:
@@ -1994,6 +1995,9 @@ def cmd_bundle_check(args) -> int:
 
 
 def _print(obj: Any) -> None:
+    if isinstance(obj, str):  # a page already written as text (`bundle questions --plain`)
+        print(obj, end="")
+        return
     print(json.dumps(obj, indent=1, ensure_ascii=False))
 
 
@@ -2113,11 +2117,15 @@ def _targets_from(args) -> list[str]:
 def cmd_bundle_questions(args) -> int:
     from . import answer_memory as AM
     from . import mutations as M
+    from . import plain_asks as PA
     from . import question_context as QC
     from . import questions as Q
 
     if args.limit < 1 or args.limit > MAX_LIMIT or args.offset < 0:
         _err(f"--limit must be 1..{MAX_LIMIT} and --offset must be >= 0.")
+        return EXIT_USAGE
+    if getattr(args, "detail", False) and not getattr(args, "plain", False):
+        _err("--detail goes with --plain (the JSON page always carries each question's full text).")
         return EXIT_USAGE
 
     def run():
@@ -2141,6 +2149,8 @@ def cmd_bundle_questions(args) -> int:
         page = AM.annotate(page, bundle)
         earlier = AM.exposures(page)
         minimum = AM.annotate_minimum(minimum, payload, bundle, exposed=earlier)
+        # PLAIN ASKS (plain_asks): each question's one-sentence ask, options and suggestion, ADDED beside its text
+        page = PA.annotate(page, bundle, Path(args.bundle_dir), payload)
         # QUESTION CONTEXT (question_context): the evidence beside each question (quotes, values, plots, images, file
         # names), compact; additive, after the counts and the paging. --no-context leaves it out
         context_shown: list = []
@@ -2159,7 +2169,7 @@ def cmd_bundle_questions(args) -> int:
         _expose_each(Path(args.bundle_dir), [(shown, "bundle questions"),
                                              (list(dict.fromkeys(earlier)), AM.EXPOSURE_COMMAND),
                                              (list(dict.fromkeys(context_shown)), QC.EXPOSURE_COMMAND)])
-        return {
+        report = {
             "format": payload["format"], "format_version": payload["format_version"],
             "blocking_basis": payload["blocking_basis"],
             # THE SCOPE'S counts (every question --scope selects, before --blocking-only / --skip-deferred), and the
@@ -2180,7 +2190,12 @@ def cmd_bundle_questions(args) -> int:
             **({} if getattr(args, "no_context", False) else {"context_note": QC.NOTE + " `bundle show <dir> question <id>` shows the "
                                                            "full context; --no-context leaves it out."}),
             **({"questions": page} if args.with_targets else _compact_page(page)),
+            "plain_asks": {"note": "each question's `ask`, `answer` (its options) and `suggested` are its plain form; `text` "
+                                   "is the full wording for the tool (`--plain` prints the plain form; `--plain --detail` "
+                                   "adds the full text)",
+                           "without_ask": PA.missing(page)},
         }
+        return PA.render(report, detail=args.detail) if getattr(args, "plain", False) else report
 
     return _mutation(run)
 
@@ -3060,7 +3075,9 @@ def build_parser(prog: str = "isaac") -> argparse.ArgumentParser:
     q.add_argument("--decision", required=True,
                    help="candidate / missing value / conflict: confirm correct reject defer; record group: confirm split merge "
                         "reject defer approve_calibration set_absorber set_scan_decision (with --value keep|drop and "
-                        "--scans: the scientist's keep / drop of those scans, isaac.xas.v1) set_role (with --value "
+                        "--scans: the scientist's keep / drop of those scans, isaac.xas.v1) set_dose_reading (with --value "
+                        "beam_damage|first_scan_settling|not_beam_damage: what the white-line change after the first scan "
+                        "at a spot is; also --target experiment, or --question on the dose question) set_role (with --value "
                         "sample|reference|alignment: what the group is, over the role grouping proposed); processing result: approve "
                         "reject needs_changes defer, "
                         "or select_athena_version --value <one of its athena_versions[].version_id> (the result of record, "
@@ -3142,6 +3159,11 @@ def build_parser(prog: str = "isaac") -> argparse.ArgumentParser:
     q.add_argument("--no-context", action="store_true",
                    help="leave out each question's context (the quotes, values, plots and images beside it; "
                         "`bundle show <dir> question <id>` prints it in full)")
+    q.add_argument("--plain", action="store_true",
+                   help="print each question as plain text: its one-sentence ask, who it is about, its options, its "
+                        "suggestion and its id (the JSON page has the same in `ask`, `answer`, `suggested`)")
+    q.add_argument("--detail", action="store_true",
+                   help="with --plain: also each question's full text (what the JSON page's `text` says)")
     q.add_argument("--limit", type=int, default=DEFAULT_LIMIT)
     q.add_argument("--offset", type=int, default=0)
     q.set_defaults(func=cmd_bundle_questions)
