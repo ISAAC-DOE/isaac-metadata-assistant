@@ -220,3 +220,166 @@ def test_the_local_questions_screen_counts_them_the_same_way(pristine, tmp_path,
     assert page["not_listed"] == len(hidden) and "include_unreachable=true" in page["not_listed_statement"]
     every = client.get("/api/local-bundles/alpha/questions", params={"include_unreachable": "true"}).json()
     assert "not_listed" not in every and every["total"] == page["total"] + len(hidden)
+
+
+# --- review of #350 ------------------------------------------------------------------------------------------------
+
+
+def _latest_value(bdir, target_id):
+    got = [d for d in M.load(bdir).get("scientist_decisions") or () if (d.get("target") or {}).get("id") == target_id]
+    return got[-1].get("value") if got else None
+
+
+def _zz1(bdir):
+    fam = next(f for f in _families(Q.consolidate(M.load(bdir))) if f["sample_family"]["sample"] == "ZZ1")
+    members = {q["question_id"]: q for q in Q.consolidate(M.load(bdir))["questions"]
+               if q["question_id"] in fam["sample_family"]["member_questions"]}
+    return fam, [members[m] for m in fam["sample_family"]["member_questions"]]
+
+
+def test_finding_1_a_question_that_holds_a_record_or_feeds_a_label_is_always_listed(grouped, capsys):
+    # never hidden, whatever else holds for it
+    for flag in ("completeness", "label_question"):
+        assert Q.not_listed_reason({"kind": "resolve_conflict", "no_record_field": True, flag: {"x": 1}}) is None
+        assert Q.not_listed_reason({"informational": True, flag: "Q-x"}) is None
+    payload = Q.consolidate(M.load(grouped))
+    rows = Q.filter_questions(payload, scope=None, blocking_only=False)
+    kept = [q for q in rows if q.get("completeness") or q.get("label_question")]
+    assert any(q.get("label_question") for q in kept), "the synthetic corpus has a disagreement a label is read from"
+    code, out, err = _run(capsys, "bundle", "questions", grouped, "--limit", "200", "--each-group")
+    assert code == 0, err
+    listed = {q["question_id"] for q in json.loads(out)["questions"]}
+    assert {q["question_id"] for q in kept} <= listed
+    # --distinguishing-only lists every question of the completeness tier, none counted away
+    code, out, _ = _run(capsys, "bundle", "questions", grouped, "--limit", "200", "--distinguishing-only")
+    page = json.loads(out)
+    assert "not_listed" not in page
+    assert page["total"] == len([q for q in rows if q.get("completeness") and not q.get("outside_live_groups")])
+
+
+def test_finding_2_an_electrode_answered_on_its_own_keeps_its_answer_from_the_cli(grouped, capsys):
+    fam, members = _zz1(grouped)
+    own = [t["id"] for t in members[0]["targets"]]
+    assert _run(capsys, "bundle", "decide", grouped, "--question", members[0]["question_id"], "--decision", "correct",
+                "--value", "SYN own oxide", "--by", WHO)[0] == 0
+    # the sample question, still open for the other two, records on theirs only
+    code, _out, err = _run(capsys, "bundle", "decide", grouped, "--question", fam["question_id"], "--decision",
+                           "correct", "--value", "SYN shared oxide", "--by", WHO)
+    assert code == 0, err
+    assert all(_latest_value(grouped, t) == "SYN own oxide" for t in own)
+    assert all(_latest_value(grouped, t["id"]) == "SYN shared oxide" for m in members[1:] for t in m["targets"])
+    # answered again once every target is answered: refused, nothing changes
+    code, _out, err = _run(capsys, "bundle", "decide", grouped, "--question", fam["question_id"], "--decision",
+                           "correct", "--value", "SYN third oxide", "--by", WHO)
+    assert code != 0 and "never changes an answer" in err
+    assert all(_latest_value(grouped, t) == "SYN own oxide" for t in own)
+
+
+def test_finding_2_once_one_member_is_left_the_sample_question_records_on_it_alone(grouped, capsys):
+    fam, members = _zz1(grouped)
+    for m, value in zip(members[:2], ("SYN first", "SYN second")):
+        assert _run(capsys, "bundle", "decide", grouped, "--question", m["question_id"], "--decision", "correct",
+                    "--value", value, "--by", WHO)[0] == 0
+    assert fam["question_id"] not in {q["question_id"] for q in Q.consolidate(M.load(grouped))["questions"]}
+    code, _out, err = _run(capsys, "bundle", "decide", grouped, "--question", fam["question_id"], "--decision",
+                           "correct", "--value", "SYN last", "--by", WHO)
+    assert code == 0, err
+    assert [_latest_value(grouped, m["targets"][0]["id"]) for m in members] == ["SYN first", "SYN second", "SYN last"]
+
+
+def _screen(pristine, tmp_path, monkeypatch):
+    root = tmp_path / "bundles"
+    root.mkdir()
+    shutil.copytree(pristine, root / "alpha")
+    monkeypatch.setenv(LB.LOCAL_BUNDLES_ENV, str(root))
+    monkeypatch.setenv("ISAAC_UI_WORKSPACE", str(tmp_path / "ws"))
+    monkeypatch.delenv("ISAAC_BASE_PATH", raising=False)
+    LB._check_memo.clear()
+    return root / "alpha", TestClient(create_app(), **LOCAL)
+
+
+def _version(client):
+    return next(b for b in client.get("/api/local-bundles").json()["bundles"] if b["name"] == "alpha")["bundle_version"]
+
+
+def test_finding_2_an_electrode_answered_on_its_own_keeps_its_answer_from_the_screen(pristine, tmp_path, monkeypatch):
+    bdir, client = _screen(pristine, tmp_path, monkeypatch)
+    fam, members = _zz1(bdir)
+    for qid, value in ((members[0]["question_id"], "SYN own oxide"), (fam["question_id"], "SYN shared oxide")):
+        r = client.post(f"/api/local-bundles/alpha/questions/{qid}/answer",
+                        json={"decision": "correct", "value": value, "by": WHO, "expected_version": _version(client)})
+        assert r.status_code == 200, r.text
+    assert all(_latest_value(bdir, t["id"]) == "SYN own oxide" for t in members[0]["targets"])
+    assert all(_latest_value(bdir, t["id"]) == "SYN shared oxide" for m in members[1:] for t in m["targets"])
+
+
+def test_finding_3_the_screen_folds_the_members_as_the_cli_does(pristine, tmp_path, monkeypatch, capsys):
+    bdir, client = _screen(pristine, tmp_path, monkeypatch)
+    page = client.get("/api/local-bundles/alpha/questions").json()
+    fams = _families(Q.consolidate(M.load(bdir)))
+    members = {m for f in fams for m in f["sample_family"]["member_questions"]}
+    ids = {q["question_id"] for q in page["questions"]}
+    assert {f["question_id"] for f in fams} <= ids and not members & ids
+    assert page["asked_once_per_sample"] == len(members) and "each_group=true" in page["asked_once_per_sample_statement"]
+    every = client.get("/api/local-bundles/alpha/questions", params={"each_group": True}).json()
+    assert members <= {q["question_id"] for q in every["questions"]}
+    # the same count as the command line (which also folds the per-group start-time questions this screen nests)
+    code, out, err = _run(capsys, "bundle", "questions", bdir, "--limit", "200", "--no-context")
+    assert code == 0, err
+    cli_page = json.loads(out)
+    assert page["total"] == cli_page["total"] + cli_page.get("answered_at_once", 0)
+    assert page["not_listed"] == cli_page["not_listed"]
+
+
+def _hand_family(path, numbers, *, settled=True):
+    """Three groups of ONE sample (JK2), told apart only by their number: a question each."""
+    from isaac_api.local_import.grouping import SAMPLE_NUMBER_KEY
+
+    groups, questions, written = [], [], {}
+    for i, n in enumerate(numbers):
+        gid = f"rg-{i}"
+        groups.append({"group_id": gid, "status": "proposed",
+                       "basis": {"sample": {"sample_name": {"value": "jk2"}, SAMPLE_NUMBER_KEY: {"value": n}}}})
+        written[gid] = [("sample_name", "JK2"), (SAMPLE_NUMBER_KEY, n) if settled else ("file-name number", n, "x"),
+                        ("sample_name_stem", f"jk2_{n}_stem")]
+        questions.append({"question_id": f"Q-{i}", "kind": "missing_value", "scope": f"group:{gid}", "tier": 1,
+                          "blocking": True, "target_field_path": path, "targets": [{"kind": "missing_value", "id": f"m{i}"}],
+                          "per_scope_targets": {f"group:{gid}": [f"m{i}"]}, "applies_to": {"runs": 1},
+                          "allowed_decisions": ["correct", "defer"], "text": "Q.", "hints": []})
+    return questions, {"record_groups": groups}, written
+
+
+def test_finding_4_the_question_names_the_electrodes_and_only_the_material_and_form_are_grouped():
+    from isaac_api.local_import import plain_questions as P
+
+    qs, bundle, written = _hand_family("sample.sample_form", ["02", "03", "04"])
+    (fam,) = Q._sample_family_questions(qs, bundle, written)
+    assert fam["text"].startswith("What is the sample form (sample.sample_form) of the JK2 electrodes (no. 02, 03, 04)? ")
+    assert "One answer applies to each of them" in fam["text"] and "this question never changes it" in fam["text"]
+    assert fam["sample_family"]["objects"] == "the JK2 electrodes (no. 02, 03, 04)"
+    assert P.ask_for("sample.sample_form", subject=fam["sample_family"]["objects"], plural=True, names_sample=True) == (
+        "What form were the JK2 electrodes (no. 02, 03, 04) in?")
+    # numbers nobody said are electrodes are not called electrodes
+    qs, bundle, written = _hand_family("sample.sample_form", ["02", "03"], settled=False)
+    (fam,) = Q._sample_family_questions(qs, bundle, written)
+    assert "electrodes (no." not in fam["text"] and "whether they name electrodes is not yet said" in fam["text"]
+    assert fam["sample_family"]["objects"] is None
+    # a field that can differ from one object to the next is never asked once
+    for path in ("sample.geometry.geometric_area_cm2", "sample.electrode_type", "sample.composition",
+                 "sample.library.plate_id", "sample.sample_id", "sample.material.notes"):
+        qs, bundle, written = _hand_family(path, ["02", "03", "04"])
+        assert Q._sample_family_questions(qs, bundle, written) == [], path
+    assert {p for p in Q.SAMPLE_FAMILY_FIELDS} == {"sample.sample_form", "sample.material.name",
+                                                   "sample.material.formula", "sample.material.provenance"}
+
+
+def test_finding_5_only_the_number_is_quoted_as_a_number():
+    qs, bundle, written = _hand_family("sample.material.name", ["02", "03"])
+    (fam,) = Q._sample_family_questions(qs, bundle, written)
+    assert fam["sample_family"]["numbers"] == ["02", "03"] and "stem" not in fam["text"]
+
+
+def test_finding_6_the_not_listed_line_says_what_holds_for_each_reason():
+    said = Q.not_listed([{"all_groups_cannot_export": True}, {"informational": True}], "--x")["not_listed_statement"]
+    assert "some can after processing again" in said and "As the bundle stands" in said
+    assert "No answer to them reaches a record" not in said

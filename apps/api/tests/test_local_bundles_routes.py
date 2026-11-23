@@ -237,9 +237,9 @@ def test_reading_the_questions_records_at_least_the_cli_exposures(client, root, 
 def test_every_suggestion_is_marked_not_confirmed_and_hints_cannot_be_accepted(client):
     body = client.get("/api/local-bundles/alpha/questions").json()
     # C3: the questions no answer takes to a record are counted in one line, not listed
-    # C1: and each question a sample question asks once is counted as that one (listed here, beside it)
-    assert (body["counts"]["total"] + body["counts"].get("asked_once_per_sample", 0)
-            == body["total"] + body.get("not_listed", 0))
+    # C1: and each question a sample question asks once is counted as that one (each_group=true lists it)
+    assert body["counts"]["total"] == body["total"] + body.get("not_listed", 0)
+    assert body.get("asked_once_per_sample", 0) == body["counts"].get("asked_once_per_sample", 0)
     assert body["identity"] == "local_unverified"
     for q in body["questions"]:
         d = q["display"]

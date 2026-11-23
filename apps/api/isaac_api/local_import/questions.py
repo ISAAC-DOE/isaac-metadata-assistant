@@ -2103,17 +2103,19 @@ def without_answered_at_once(q: Mapping) -> Mapping:
             "text": str(q.get("text") or "").replace(answered_at_once_sentence(by), "")}
 
 
-def fold_answered_at_once(questions: Sequence[Mapping], *, scope: str | None, include: bool) -> tuple[list, list]:
+def fold_answered_at_once(questions: Sequence[Mapping], *, scope: str | None, include: bool,
+                          starts: bool = True) -> tuple[list, list]:
     """r6 I1: ``(listed, folded)``: with no ``--scope``, a per-group question that a listed beamtime-wide question
     answers at once (``answered_at_once_by``) is counted, not listed — unless ``include`` asks for each one. It keeps
     its id and stays answerable (``decide --question``, ``bundle show question``, ``--scope group:<id>``).
 
     C1: so is a per-electrode or per-group sample question that a listed sample question asks once
-    (``asked_for_sample_by``), with no ``--scope`` or with ``--scope experiment``."""
+    (``asked_for_sample_by``), with no ``--scope`` or with ``--scope experiment``. ``starts=False`` folds only those
+    (the local questions screen lists each per-group start-time question under its beamtime question itself)."""
     if include or (scope and scope != "experiment"):
         return list(questions), []
     listed_ids = {q["question_id"] for q in questions
-                  if (q.get("kind") == STATED_UTC_START_KIND and not scope) or q.get("sample_family")}
+                  if (starts and q.get("kind") == STATED_UTC_START_KIND and not scope) or q.get("sample_family")}
     folded = [q for q in questions
               if q.get("answered_at_once_by") in listed_ids or q.get("asked_for_sample_by") in listed_ids]
     gone = {q["question_id"] for q in folded}
@@ -2712,8 +2714,16 @@ def _say_the_one_group(questions: list[dict]) -> None:
 #: C1 (audit of 18 Nov 2026, finding 5; other beamtimes, rule 1): the kind tag a sample question's id is hashed with,
 #: so it can never be the id of a question built per sample reading or per group
 SAMPLE_FAMILY_TAG = "sample_family"
-#: the sample fields that name the specimen, not the material: never asked once for several electrodes or runs
-SAMPLE_FAMILY_EXCLUDED = frozenset({"sample.sample_id"})
+#: the ONLY sample fields asked once for several electrodes or runs of one sample: what the material is, and the form
+#: it was in (review of #350, finding 4). A field that can differ from one object to the next (its geometry, the
+#: electrode type, an ID, a library entry, a composition, a free-text note) is never grouped
+SAMPLE_FAMILY_FIELDS = frozenset({"sample.sample_form", "sample.material.name", "sample.material.formula",
+                                  "sample.material.provenance"})
+
+
+def sample_family_field(path: str) -> bool:
+    """Whether a sample question may ask ``path`` once for several electrodes or runs (:data:`SAMPLE_FAMILY_FIELDS`)."""
+    return path in SAMPLE_FAMILY_FIELDS
 
 
 def asked_for_sample_sentence(qid: str) -> str:
@@ -2750,9 +2760,9 @@ def _asks_for_a_value(q: Mapping) -> bool:
     """A value question about one sample field that takes ONE answer for all its targets (a missing value, or a
     confirm question none of whose targets carries a value), with nothing that keeps it apart."""
     path, kind = q.get("target_field_path"), q.get("kind")
-    if kind not in ("missing_value", "confirm_value") or not isinstance(path, str) or not path.startswith("sample."):
+    if kind not in ("missing_value", "confirm_value") or not isinstance(path, str) or not sample_family_field(path):
         return False
-    if path in SAMPLE_FAMILY_EXCLUDED or "[]" in path or not q.get("targets"):
+    if "[]" in path or not q.get("targets"):
         return False
     # (``answers_differ`` is not a reason: it says answers to OTHER samples differ, which a sample question expects)
     if any(q.get(flag) for flag in ("informational", "outside_live_groups", "all_groups_cannot_export",
@@ -2786,6 +2796,8 @@ def _sample_family_questions(questions: list[dict], bundle: Mapping,
     loadings or two fields; a question that names a group whose sample is not stated is never a member. Answers
     already given to ANOTHER sample (``answers_differ``) keep no question out: one answer per sample is what this
     asks."""
+    from .grouping import SAMPLE_NUMBER_KEY
+
     groups = {g["group_id"]: g for g in live_groups(bundle)}
     identity = {gid: _group_sample_identity(g) for gid, g in groups.items()}
     families: dict[tuple[str, str, str], list[dict]] = {}
@@ -2819,16 +2831,21 @@ def _sample_family_questions(questions: list[dict], bundle: Mapping,
                 per_scope.setdefault(sc, []).extend(i for i in ids if i not in per_scope.get(sc, ()))
         gids = [sc[len("group:"):] for sc in per_scope if sc.startswith("group:")]
         runs = sum(int((m.get("applies_to") or {}).get("runs") or 0) for m in members)
-        # the sample as the FILES write it (the key above is lowercased); the number, when the files state one
+        # the sample as the FILES write it (the key above is lowercased); the electrode or specimen number, when the
+        # files state one: a settled number (``SAMPLE_NUMBER_KEY``) or a file-name number nobody said is one yet
+        # (``sample_number_words``: a third item). No other part of the reading is a number (finding 5)
         spelled: dict[str, list[str]] = {"sample_name": [], "loading_or_thickness": []}
         numbers: list[str] = []
+        settled = True
         for g in gids:
             for entry in sample_written_of_group.get(g) or ():
                 if len(entry) == 2 and entry[0] in spelled:
                     if entry[1] not in spelled[entry[0]]:
                         spelled[entry[0]].append(entry[1])
-                elif entry[1] not in numbers:
-                    numbers.append(entry[1])
+                elif (len(entry) == 2 and entry[0] == SAMPLE_NUMBER_KEY) or len(entry) == 3:
+                    settled = settled and len(entry) == 2
+                    if entry[1] not in numbers:
+                        numbers.append(entry[1])
         names = spelled["sample_name"] + spelled["loading_or_thickness"]  # the name first ("IrTiO2, 2nm")
         numbers.sort()
         if key.startswith("tokens="):
@@ -2845,16 +2862,24 @@ def _sample_family_questions(questions: list[dict], bundle: Mapping,
                     seen.add(hkey)
                     hints.append(h)
         ai = list(dict.fromkeys(str(h["literal"]) for h in hints if h.get("kind") == "ai_suggestion"))
-        numbered = (f" (the files number them {', '.join(_quoted(n) for n in numbers[:8])}"
-                    + ("…" if len(numbers) > 8 else "") + ")") if len(numbers) > 1 else ""
-        text = (f"What is the {_label(path)} ({path}) of sample {said}? "
+        # WHAT one answer reaches, named (finding 4): the electrodes by their numbers ("the JK2 electrodes (no. 02, 03,
+        # 04)", several things: ``objects``), the file-name numbers nobody said are electrodes, or the sample itself
+        shown_numbers = ", ".join(numbers[:8]) + (", …" if len(numbers) > 8 else "")
+        objects = f"the {said} electrodes (no. {shown_numbers})" if len(numbers) > 1 and settled else None
+        if objects:
+            subject = objects
+        elif len(numbers) > 1:
+            subject = f"sample {said} (file-name numbers {shown_numbers}; whether they name electrodes is not yet said)"
+        else:
+            subject = f"sample {said}"
+        own = ", ".join(m["question_id"] for m in members[:5]) + (", …" if len(members) > 5 else "")
+        text = (f"What is the {_label(path)} ({path}) of {subject}? "
                 + ("No source in this import states it. " if kind == "missing_value" else
                    "The files hold text for it (see the hints) but no value this build can carry. ")
-                + f"Asked ONCE for the sample: {len(gids)} group(s), {runs} run(s), of sample {said}{numbered}. "
-                "One answer is recorded for every run of the sample, each run keeping it as its own value. If one of "
-                "them differs, answer it on its own: add --only group:<group_id>, or answer its own question ("
-                + ", ".join(m["question_id"] for m in members[:5]) + (", …" if len(members) > 5 else "")
-                + "; `bundle questions --each-group` lists them).")
+                + f"One answer applies to each of {'them' if len(numbers) > 1 else 'its measurements'} ({len(gids)} "
+                f"group(s), {runs} run(s)), each run keeping it as its own value. If one of them differs, answer that one on its own question (" + own + "; `bundle "
+                "questions --each-group` lists them) or add --only group:<group_id>: an answer given that way is kept, "
+                "and this question never changes it.")
         if kind == "missing_value" and members[0].get("allowed_values"):
             text += (" If none of the allowed values fits, never pick the nearest one: if the scientist keeps "
                      "their own word, keep it as a vocabulary request (--value \"<their exact word>\" --as-said; "
@@ -2882,6 +2907,7 @@ def _sample_family_questions(questions: list[dict], bundle: Mapping,
             "answer_command": (f'isaac bundle decide <bundle_dir> --question {qid} --decision correct --value <value> '
                                '--by "<your name>"   # one group differs: add --only group:<group_id>'),
             "sample_family": {"sample": said, "basis": key.split("=", 1)[0], "numbers": numbers,
+                              "numbers_name_electrodes": bool(numbers) and settled, "objects": objects,
                               "member_questions": [m["question_id"] for m in members]},
             "answers_at_once": len(members),
         }
@@ -3095,18 +3121,21 @@ def hidden_outside_live_groups(hidden: Sequence[Mapping], flag: str) -> dict:
 #: C3 (audit of 18 Nov 2026, finding 8): why a question that no answer takes to a record is counted, not listed, in
 #: the order a question is judged (the first that holds is its reason)
 NOT_LISTED_REASONS: tuple[tuple[str, str], ...] = (
-    ("informational", "no answer here can reach the record"),
-    ("no_record_field", "about a value no record field holds"),
+    ("informational", "for information only (no record field takes an answer to it)"),
+    ("no_record_field", "a disagreement about a value no record field holds"),
     ("covered_by_decisions", "settled already by decisions given for its runs"),
     ("asked_by_question", "answered through another question"),
-    ("all_groups_cannot_export", "only about groups that cannot become a record as they stand"),
+    ("all_groups_cannot_export", "only about groups that cannot become a record as they stand (`bundle list "
+                                 "<bundle_dir> groups` says why; some can after processing again)"),
 )
 
 
 def not_listed_reason(q: Mapping) -> str | None:
     """C3: why ``q`` is counted rather than listed (:data:`NOT_LISTED_REASONS`), or ``None`` when an answer to it
-    can reach a record. A question that blocks a record is always listed."""
-    if q.get("blocking"):
+    can reach a record. A question that blocks a record is always listed, and so is one that holds a record back
+    from export in the local completeness tier (``completeness``) or that a condition-label question is proposed
+    from (``label_question``): answering either changes what a record says (review of #350, finding 1)."""
+    if q.get("blocking") or q.get("completeness") or q.get("label_question"):
         return None
     for flag, reason in NOT_LISTED_REASONS:
         if flag == "no_record_field" and q.get("kind") != "resolve_conflict":
@@ -3136,7 +3165,8 @@ def not_listed(hidden: Sequence[Mapping], flag: str) -> dict:
     order = [reason for _, reason in NOT_LISTED_REASONS if by.get(reason)]
     return {"not_listed": len(hidden), "not_listed_by_reason": {r: by[r] for r in order},
             "not_listed_statement": (f"{len(hidden)} not listed: " + "; ".join(f"{by[r]} {r}" for r in order)
-                                     + f". No answer to them reaches a record; {flag} lists them.")}
+                                     + f". As the bundle stands, an answer to them changes no record; {flag} lists "
+                                     "them.")}
 
 
 #: r3a M6: how a question that shares a reading with others is answered with them all at once (``decide

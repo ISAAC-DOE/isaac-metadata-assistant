@@ -610,9 +610,10 @@ def _subject(view: _View, unit: Mapping, groups: Sequence[str], path: str | None
     "this measurement"; ``None`` for the whole beamtime), whether that is several things, and the sample as the files
     write it ("ZZ1 (no. 01)") when the card is about one sample."""
     q = unit["named"]
-    family = (q.get("sample_family") or {}).get("sample")
-    if family and not unit["only_scopes"]:  # C1: a sample question names its sample as the files write it
-        return f"sample {family}", False, str(family)
+    family = q.get("sample_family") or {}
+    if family.get("sample") and not unit["only_scopes"]:
+        # C1: a sample question names what one answer reaches: "the JK2 electrodes (no. 02, 03, 04)" (finding 4)
+        return str(family.get("objects") or f"sample {family['sample']}"), bool(family.get("objects")), str(family["sample"])
     if unit.get("identified") and groups:  # one stated sample of a question (or reading) that spans several
         name = _identity_said(view, groups[0])
         if name:

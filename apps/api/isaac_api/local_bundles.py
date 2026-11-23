@@ -1641,6 +1641,10 @@ def get_local_bundle_questions(
                            "disagreement about a value no record field holds, one settled already, one only about "
                            "groups that cannot become a record): counted in one line, not listed, by default, as "
                            "`isaac bundle questions` does."),
+    each_group: bool = Query(
+        False, description="Also list each per-electrode or per-measurement sample question a sample question asks "
+                           "once (counted, not listed, by default, as `isaac bundle questions` does; each stays "
+                           "answerable by its id)."),
 ):
     from .local_import import answer_memory as AM
     from .local_import import mutations as M
@@ -1669,6 +1673,9 @@ def get_local_bundle_questions(
         rows, outside = Q.hide_outside_live_groups(rows, scope=scope, include=include_outside_live_groups)
         # C3: a question no answer takes to a record is counted in one line, as `isaac bundle questions` counts it
         rows, unreachable = Q.hide_not_reaching_a_record(rows, include=include_unreachable)
+        # C1: a per-electrode or per-measurement sample question a listed sample question asks once is counted, as
+        # `isaac bundle questions` counts it (the per-group start-time questions stay listed: this screen nests them)
+        rows, folded = Q.fold_answered_at_once(rows, scope=scope, include=each_group, starts=False)
         page = rows[offset: offset + limit]
         # EARLIER ANSWERS (answer_memory, opt-in): an additive hint, after the counts and the paging (nothing when off)
         page = AM.annotate(page, data)
@@ -1744,6 +1751,7 @@ def get_local_bundle_questions(
         "omitted_after": max(0, len(rows) - offset - len(page)),
         **Q.hidden_outside_live_groups(outside, "include_outside_live_groups=true"),
         **Q.not_listed(unreachable, "include_unreachable=true"),
+        **Q.folded_answered_at_once(folded, "each_group=true"),
         "minimum_for_one_group": with_page_words(minimum),
         "questions": out_questions,
         "group_names": group_names(data, [

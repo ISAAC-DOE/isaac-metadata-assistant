@@ -2575,6 +2575,18 @@ def decide_question(
                 found, slots_added, override = got
             if asked["kind"] == "confirm_absorber" and decision == "set_absorber" and only is None:
                 found, kept_overrides = _keep_absorber_overrides(bundle, found)
+            if asked.get("sample_family"):
+                # C1 (review of #350, finding 2): a sample question answered again, or once only one of its members is
+                # still open, records on the targets still OPEN, never on one answered already (an electrode answered
+                # on its own question keeps its answer); with none open there is nothing for it to record
+                still_open = {t["id"] for q in (open_payload or {}).get("questions") or () for t in q.get("targets") or ()}
+                found = [t for t in found if t in still_open]
+                if not found:
+                    own = ", ".join(asked["sample_family"].get("member_questions") or ())
+                    raise MutationRefused(
+                        f"Every target of sample question {question_id} is answered already, and it never changes an "
+                        f"answer: to change one, answer that electrode's or measurement's own question ({own}). "
+                        "Nothing was recorded.", code=6)
         if (asked_now or {}).get("kind") == Q.STATED_UTC_START_KIND:
             given = [flag for flag, v in (("--value", value), ("--field", field), ("--split-into", split_into),
                                           ("--merge-with", merge_with), ("--qc-status", qc_status), ("--element", element),
