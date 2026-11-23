@@ -21,7 +21,7 @@ COMMANDS
     A bounded page as JSON, with ``total`` and how many were omitted before and after.
     Never truncates silently. ``processing-results``: one compact row per result (id, group, verdict,
     applicability, key QC flags and metrics, a ``scans`` line saying which scans were used, plot path, Athena
-    agreement, state); ``unread`` rows carry a short ``read_by`` marker with its meaning once in ``read_by_note``,
+    agreement, state); an Athena project in ``unread`` is marked ``athena_project`` and ``athena_note`` says once that none is ever read,
     and the files a run reader kept unopened (companions) are counted in ``not_listed`` and listed with ``--all``;
     ``--state`` filters it
     by state as it filters ``candidates`` by value_state. ``groups`` and ``runs`` print one row per line: a
@@ -304,7 +304,7 @@ def render_summary(bundle: Mapping) -> str:
         + (f" (walk stopped: {root['truncated_reason']})" if root.get("truncated_reason") else "")
     )
     if athena:
-        add(f"  - {_athena_read_by_process(len(athena))} (the import has no reader for them, so they stay in the unread count)")
+        add(f"  - {_athena_listed_only(len(athena))} (the import has no reader for them, so they stay in the unread count)")
     if n_kept := len(B.files_not_opened(bundle)):
         add(f"  - {_not_opened_text(n_kept)}, not counted as unread: `isaac bundle list <dir> unread --all` lists them")
     add(
@@ -435,8 +435,8 @@ def render_summary(bundle: Mapping) -> str:
         add(f"- Not counted here: {_not_opened_text(n_kept)}; a run reader claimed them, so they are not unread "
             "(`isaac bundle list <dir> unread --all` lists them).")
     if athena:
-        # an Athena project is not unread: `isaac process` reads it (the import has no reader for it)
-        add(f"- {_athena_read_by_process(len(athena))} (`isaac bundle list <dir> unread` shows each with its `read_by`).")
+        # an Athena project is listed, never read: said once here
+        add(f"- {_athena_listed_only(len(athena))} (`isaac bundle list <dir> unread` lists each).")
     others = [u for u in unread if not _is_athena_project(u)]
     # one line per FOLDER and reason, with the number of files: ten files of one folder that no reader reads
     # are one finding, not ten identical lines
@@ -679,7 +679,7 @@ def cmd_import(args) -> int:
 
         print(f"  It replaces the bundle that was in {out}: {REIMPORT_CAVEAT}.")
     if n_athena := sum(1 for u in bundle["unread_files"] if _is_athena_project(u)):
-        print(f"  {_athena_read_by_process(n_athena)}")
+        print(f"  {_athena_listed_only(n_athena)}")
     if n_kept := len(B.files_not_opened(bundle)):
         print(f"  {_not_opened_text(n_kept)}, not counted as unread: `isaac bundle list {out} unread --all` lists them")
     n_quick = sum(len(p["files"]) for p in bundle.get("processed_outputs") or [] if B.is_engine_classified(p))
@@ -848,10 +848,8 @@ def _row(kind: str, obj: Mapping, group_status: Mapping | None = None) -> dict:
         "source_type": obj["source_type"],
         "reason_code": obj["reason_code"],
     }
-    later = next((marker for suffix, (marker, _note) in READ_LATER_BY_SUFFIX.items()
-                  if str(obj.get("relative_path") or "").lower().endswith(suffix)), None)
-    if later:
-        row["read_by"] = later  # a short marker; the sentence that explains it is said once, on the page (read_by_note)
+    if _is_athena_project(obj):
+        row["athena_project"] = True  # a short marker; what it means is said once, on the page (athena_note)
     if obj.get("kept_by"):
         # `unread --all`: a companion a run reader kept unopened (bundle.files_not_opened), with its run and role
         row.update(run_id=obj.get("run_id"), role=obj.get("role"), kept_by=obj.get("kept_by"))
@@ -928,8 +926,8 @@ def group_list_extras(bundle: Mapping) -> dict[str, dict]:
 
 
 def _is_athena_project(unread_row: Mapping) -> bool:
-    """An unread row whose file a LATER command reads (an Athena ``.prj``: see :data:`READ_LATER_BY_SUFFIX`)."""
-    return str(unread_row.get("relative_path") or "").lower().endswith(tuple(READ_LATER_BY_SUFFIX))
+    """An unread row that is an Athena project (``.prj``): listed as a file, never read by any command."""
+    return str(unread_row.get("relative_path") or "").lower().endswith(ATHENA_PROJECT_SUFFIXES)
 
 
 def _not_opened_text(n: int) -> str:
@@ -967,9 +965,10 @@ def _merge_folder_text(folder) -> str:
             "runs; no question is asked about them.")
 
 
-def _athena_read_by_process(n: int) -> str:
-    """What the summary and the import output say about Athena projects (the stored unread_files keep them)."""
-    return f"{n} Athena project{'s are' if n != 1 else ' is'} read by `isaac process`, not at import"
+def _athena_listed_only(n: int) -> str:
+    """What the summary and the import output say about Athena projects (the stored unread_files keep them): they are
+    listed, and never read, by the import or by any later command (ISAAC never uses Athena)."""
+    return f"{n} Athena project{'s are' if n != 1 else ' is'} listed as files and never read (ISAAC does not use Athena)"
 
 
 def _mc_reason_code(obj: Mapping) -> str | None:
@@ -1050,12 +1049,9 @@ _LIST_SECTION = {
     "processing-results": "processing_results",
     "scan-notes": "scan_notes",
 }
-#: ``bundle list <dir> unread``: files the IMPORT has no reader for but a later command reads (by suffix),
-#: said on the row so an Athena project is never taken for a file nobody reads.
-READ_LATER_BY_SUFFIX = {
-    ".prj": ("isaac process", "Athena project: its groups are read and matched by name to record groups, as the "
-                              "scientist's own processing to compare with; the import itself has no reader for it"),
-}
+#: ``bundle list <dir> unread``: an Athena project is listed as a file and never read (ISAAC does not use Athena).
+ATHENA_PROJECT_SUFFIXES = (".prj",)
+ATHENA_NOTE = "Athena project: listed as a file and never read, by the import or by any later command (ISAAC does not use Athena)"
 #: ``bundle list <dir> unread``: what the files counted under ``not_listed.companion_not_opened`` are (c8-b).
 NOT_OPENED_NOTE = ("files a run reader kept beside a run without any reader opening them (its companion files: "
                    ".rgn/.det/.exp, a same-named folder's files, the binary/ originals): not unread, since a reader "
@@ -1229,7 +1225,7 @@ def cmd_bundle_list(args) -> int:
            if not_listed else {}),
         **({"cannot_export": dict(sorted(cannot_export.items(), key=lambda kv: (-kv[1], kv[0]))),
             "cannot_export_note": CANNOT_EXPORT_NOTE} if cannot_export else {}),
-        **({"read_by_note": _read_by_note(items)} if args.kind == "unread" and _read_by_note(items) else {}),
+        **({"athena_note": ATHENA_NOTE} if args.kind == "unread" and any(i.get("athena_project") for i in items) else {}),
         "items": items,
     }
     # ONE LINE PER ROW for groups and runs (1.9.x polish): a 10-group page with file names, scans and reader
@@ -1262,10 +1258,10 @@ def _list_athena_merges(args) -> int:
         "kind": args.kind, "total": len(rows), "offset": args.offset, "limit": args.limit, "returned": len(page),
         "omitted_before": min(args.offset, len(rows)), "omitted_after": max(0, len(rows) - args.offset - len(page)),
         **_more(len(rows) - args.offset - len(page), args.offset + len(page)),
-        "statement": ("The scientist's Athena merges whose name matches no group, as the last `isaac process` found "
-                      "them. ISAAC used none. Near groups are hints only: ask the scientist which group each is for. "
+        "statement": ("The scientist's Athena merges whose name matches no group, as the last `isaac process` listed "
+                      "them. ISAAC used none of them. Near groups are hints only: ask the scientist which group each is for. "
                       "Tie one in a params file's athena_match; set one that is no group's aside in athena_ignore."
-                      if processed else "Not processed yet, so no Athena project was read: run `isaac process "
+                      if processed else "Not processed yet, so no Athena merge was listed: run `isaac process "
                       "<bundle_dir> --source <folder>` first."),
         **({"capped": f"{found} merges match no group; the first {len(rows)} are kept and listed"}
            if found > len(rows) else {}),
@@ -1275,13 +1271,6 @@ def _list_athena_merges(args) -> int:
     }
     print(json.dumps(payload, indent=1, ensure_ascii=False))
     return EXIT_OK
-
-
-def _read_by_note(items: Sequence[Mapping]) -> str | None:
-    """What a ``read_by`` marker on an ``unread`` row means, said ONCE for the page (not on every row)."""
-    seen = {i.get("read_by") for i in items if i.get("read_by")}
-    notes = [f"{marker}: {note}" for marker, note in READ_LATER_BY_SUFFIX.values() if marker in seen]
-    return ("`read_by` names the later command that reads this file, so it is not a file nobody reads. " + "; ".join(notes)) if notes else None
 
 
 def _athena_version_brief(v: Mapping) -> dict:
@@ -1994,6 +1983,9 @@ def cmd_bundle_check(args) -> int:
 
 
 def _print(obj: Any) -> None:
+    if isinstance(obj, str):  # a page already written as text (`bundle questions --plain`)
+        print(obj, end="")
+        return
     print(json.dumps(obj, indent=1, ensure_ascii=False))
 
 
@@ -2113,12 +2105,18 @@ def _targets_from(args) -> list[str]:
 def cmd_bundle_questions(args) -> int:
     from . import answer_memory as AM
     from . import mutations as M
+    from . import plain_asks as PA
     from . import question_context as QC
     from . import questions as Q
 
     if args.limit < 1 or args.limit > MAX_LIMIT or args.offset < 0:
         _err(f"--limit must be 1..{MAX_LIMIT} and --offset must be >= 0.")
         return EXIT_USAGE
+    if getattr(args, "detail", False) and not getattr(args, "plain", False):
+        _err("--detail goes with --plain (the JSON page always carries each question's full text).")
+        return EXIT_USAGE
+
+    no_context = getattr(args, "no_context", False) or getattr(args, "plain", False)
 
     def run():
         bundle = M.load(Path(args.bundle_dir))
@@ -2141,10 +2139,13 @@ def cmd_bundle_questions(args) -> int:
         page = AM.annotate(page, bundle)
         earlier = AM.exposures(page)
         minimum = AM.annotate_minimum(minimum, payload, bundle, exposed=earlier)
+        # PLAIN ASKS (plain_asks): each question's one-sentence ask, options and suggestion, ADDED beside its text
+        page = PA.annotate(page, bundle, Path(args.bundle_dir), payload)
         # QUESTION CONTEXT (question_context): the evidence beside each question (quotes, values, plots, images, file
         # names), compact; additive, after the counts and the paging. --no-context leaves it out
         context_shown: list = []
-        if not getattr(args, "no_context", False):
+        # --plain prints no context, so it records no exposure for any
+        if not no_context:
             page, context_shown = QC.annotate(page, bundle, Path(args.bundle_dir), full=False)
             page = [{**q, "context": QC.with_files(q["context"], Path(args.bundle_dir))} if q.get("context") else q
                     for q in page]
@@ -2159,7 +2160,7 @@ def cmd_bundle_questions(args) -> int:
         _expose_each(Path(args.bundle_dir), [(shown, "bundle questions"),
                                              (list(dict.fromkeys(earlier)), AM.EXPOSURE_COMMAND),
                                              (list(dict.fromkeys(context_shown)), QC.EXPOSURE_COMMAND)])
-        return {
+        report = {
             "format": payload["format"], "format_version": payload["format_version"],
             "blocking_basis": payload["blocking_basis"],
             # THE SCOPE'S counts (every question --scope selects, before --blocking-only / --skip-deferred), and the
@@ -2177,10 +2178,15 @@ def cmd_bundle_questions(args) -> int:
             **Q.hidden_outside_live_groups(outside, "--include-outside-live-groups"),
             **Q.folded_answered_at_once(folded, "--each-group"),
             "minimum_for_one_group": minimum,
-            **({} if getattr(args, "no_context", False) else {"context_note": QC.NOTE + " `bundle show <dir> question <id>` shows the "
+            **({} if no_context else {"context_note": QC.NOTE + " `bundle show <dir> question <id>` shows the "
                                                            "full context; --no-context leaves it out."}),
             **({"questions": page} if args.with_targets else _compact_page(page)),
+            "plain_asks": {"note": "each question's `ask`, `answer` (its options) and `suggested` are its plain form; `text` "
+                                   "is the full wording for the tool (`--plain` prints the plain form; `--plain --detail` "
+                                   "adds the full text)",
+                           "without_ask": PA.missing(page)},
         }
+        return PA.render(report, detail=args.detail) if getattr(args, "plain", False) else report
 
     return _mutation(run)
 
@@ -3060,7 +3066,9 @@ def build_parser(prog: str = "isaac") -> argparse.ArgumentParser:
     q.add_argument("--decision", required=True,
                    help="candidate / missing value / conflict: confirm correct reject defer; record group: confirm split merge "
                         "reject defer approve_calibration set_absorber set_scan_decision (with --value keep|drop and "
-                        "--scans: the scientist's keep / drop of those scans, isaac.xas.v1) set_role (with --value "
+                        "--scans: the scientist's keep / drop of those scans, isaac.xas.v1) set_dose_reading (with --value "
+                        "beam_damage|first_scan_settling|not_beam_damage: what the white-line change after the first scan "
+                        "at a spot is; also --target experiment, or --question on the dose question) set_role (with --value "
                         "sample|reference|alignment: what the group is, over the role grouping proposed); processing result: approve "
                         "reject needs_changes defer, "
                         "or select_athena_version --value <one of its athena_versions[].version_id> (the result of record, "
@@ -3142,6 +3150,12 @@ def build_parser(prog: str = "isaac") -> argparse.ArgumentParser:
     q.add_argument("--no-context", action="store_true",
                    help="leave out each question's context (the quotes, values, plots and images beside it; "
                         "`bundle show <dir> question <id>` prints it in full)")
+    q.add_argument("--plain", action="store_true",
+                   help="print each question as plain text: its one-sentence ask, who it is about, its options, its "
+                        "suggestion and its id (the JSON page has the same in `ask`, `answer`, `suggested`); it prints no "
+                        "context, so it records none as shown")
+    q.add_argument("--detail", action="store_true",
+                   help="with --plain: also each question's full text (what the JSON page's `text` says)")
     q.add_argument("--limit", type=int, default=DEFAULT_LIMIT)
     q.add_argument("--offset", type=int, default=0)
     q.set_defaults(func=cmd_bundle_questions)
