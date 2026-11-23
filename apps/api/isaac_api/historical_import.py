@@ -3425,6 +3425,12 @@ def _archive_semantics(
     # deterministic; one about an unnamed subset applies to none. Both are kept.
     logbook_named: dict[str, list] = {concept: [] for concept in cond.FIELDS}
     logbook_unscoped: list = []
+    # C6 (22 Nov 2026): a sample section whose File Number column is empty (or that has no table) still names its
+    # sample. Its statements and its remarks about the whole sample reach the measurements whose file names carry that
+    # sample's number (the convention's confirmed sample token, DEC-47) and, when the heading gives one, its name:
+    # {sample number: [(sample name or None, item)]} per field, and [(number, name, row)] for the remarks.
+    logbook_by_sample: dict[str, dict[int, list]] = {concept: {} for concept in cond.FIELDS}
+    quality_by_sample: list[tuple[int, str | None, dict]] = []
     table_row_file: dict[tuple[str, int, int], int] = {}
     procedure_rows: list[tuple[str, tuple[int, int], Any]] = []
 
@@ -3489,7 +3495,18 @@ def _archive_semantics(
                     # NEVER A VERDICT — the domain owner's answer, 2026-09-22.
                     "writes_qc_status": False,
                 }
-                if number is None:
+                section = item.normalized_value if isinstance(item.normalized_value, Mapping) else {}
+                section_numbers = [n for n in section.get("file_numbers") or () if isinstance(n, int)
+                                   and not isinstance(n, bool)]
+                sample_number = section.get("sample_number")
+                if number is None and section_numbers:
+                    # a remark about the whole sample, in a section that lists its file numbers (C6)
+                    for n in section_numbers:
+                        quality_by_number.setdefault(n, []).append(row)
+                        notes_by_number.setdefault(n, []).append(row)
+                elif number is None and isinstance(sample_number, int) and not isinstance(sample_number, bool):
+                    quality_by_sample.append((sample_number, section.get("sample_name"), row))
+                elif number is None:
                     unbound_quality.append(row)
                 else:
                     quality_by_number.setdefault(number, []).append(row)
@@ -3525,10 +3542,14 @@ def _archive_semantics(
                     logbook_named[concept].append(item)
                 elif value.get("section") is None:
                     logbook_beamtime[concept].append(item)
-                else:
+                elif value.get("file_numbers"):
                     for number in value.get("file_numbers") or []:
                         if isinstance(number, int) and not isinstance(number, bool):
                             logbook_by_number[concept].setdefault(number, []).append(item)
+                elif isinstance(value.get("sample_number"), int) and not isinstance(value.get("sample_number"), bool):
+                    # C6: a section with no file-number rows: its own sample's measurements, by number and name
+                    logbook_by_sample[concept].setdefault(value["sample_number"], []).append(
+                        (value.get("sample_name"), item))
     for path, key, item in procedure_rows:
         number = table_row_file.get((path, key[0], key[1]))
         if number is not None:
@@ -3559,6 +3580,25 @@ def _archive_semantics(
         group = _group_number(unit)
         if group is not None and unit.legacy_number is not None:
             legacy_by_group.setdefault(group, set()).add(unit.legacy_number)
+    # C6: which units a section with no file-number rows reaches: those whose sample token is the section's number,
+    # and, when the heading names the sample, only if EVERY unit with that number carries that name as a token of its
+    # file name (otherwise the document numbers its samples differently from its file names, and it reaches none)
+    stem_tokens_by_group: dict[int, list[set[str]]] = {}
+    for unit in relationships.units:
+        group = _group_number(unit)
+        if group is not None:
+            stem_tokens_by_group.setdefault(group, []).append({t.casefold() for t in str(unit.stem).split("_") if t})
+
+    def _section_reaches(unit, sample_number: int, sample_name: Any) -> bool:
+        if _group_number(unit) != sample_number:
+            return False
+        if not isinstance(sample_name, str) or not sample_name.strip():
+            return True
+        return all(sample_name.strip().casefold() in tokens for tokens in stem_tokens_by_group.get(sample_number, ()))
+
+    for sample_number, sample_name, row in quality_by_sample:
+        if not any(_section_reaches(u, sample_number, sample_name) for u in relationships.units):
+            unbound_quality.append(row)
     named_applies: dict[str, list[tuple[Any, frozenset[int]]]] = {c: [] for c in cond.FIELDS}
     for concept, items in logbook_named.items():
         for item in items:
@@ -3610,6 +3650,12 @@ def _archive_semantics(
             {**row, "legacy_number_shared": shared}
             for row in quality_by_number.get(unit.legacy_number, ())
         ] if unit.legacy_number is not None else []
+        # C6: a remark about the whole sample, from its section, reaches this measurement by its sample number
+        quality += [
+            {**row, "legacy_number_shared": shared}
+            for number, name, row in quality_by_sample
+            if _section_reaches(unit, number, name) and row not in quality
+        ]
         people = [
             {**row, "legacy_number_shared": shared}
             for row in contributors_by_number.get(unit.legacy_number, ())
@@ -3642,6 +3688,13 @@ def _archive_semantics(
                     if unit.legacy_number is not None
                     else []
                 )
+                # C6: else its own sample's section, read by sample number (a section with no file-number rows)
+                or [
+                    item
+                    for number, items in logbook_by_sample[concept].items()
+                    for name, item in items
+                    if _section_reaches(unit, number, name)
+                ]
                 or list(logbook_beamtime[concept])
                 + [
                     item
