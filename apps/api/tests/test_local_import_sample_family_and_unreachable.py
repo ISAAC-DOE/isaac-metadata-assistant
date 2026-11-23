@@ -442,3 +442,146 @@ def test_a_card_names_file_name_numbers_as_the_question_does():
     (fam,) = Q._sample_family_questions(qs, bundle, written)
     assert S._subject(None, {"named": fam, "only_scopes": None}, [], "sample.sample_form")[:2] == (
         "the JK2 electrodes (no. 02, 03)", True)
+
+
+# --- review of 08fcd124: what an answer or a processing result does to a sample question ---------------------------
+
+UNFIT = "SYN unfit oxide"
+
+
+def _unfit_from_now_on(monkeypatch):
+    """An answer an OLDER build stored that the record can no longer take (``decide`` refuses such a value now): from
+    here on, the value :data:`UNFIT` is not eligible for the official record."""
+    from isaac_api.local_import import bundle as B
+
+    real = B.eligibility_for_official_record
+
+    def eligibility(state, *, target_field_path, value, writable_paths, **kw):
+        if state == B.STATE_SCIENTIST_CONFIRMED and value == UNFIT:
+            return {"eligible": False, "reason": B.UNFIT_REASON_PREFIX + "SYNTHETIC: not an allowed value"}
+        return real(state, target_field_path=target_field_path, value=value, writable_paths=writable_paths, **kw)
+
+    monkeypatch.setattr(B, "eligibility_for_official_record", eligibility)
+    return B
+
+
+def test_an_electrode_asked_again_is_asked_once_on_its_own_and_the_sample_question_never_records_over_it(
+        grouped, tmp_path, monkeypatch):
+    fam, members = _zz1(grouped)
+    before = Q.consolidate(M.load(grouped))
+    M.decide_question(grouped, question_id=members[0]["question_id"], decision="correct", value=UNFIT, by=WHO,
+                      orcid=None)
+    B = _unfit_from_now_on(monkeypatch)
+    b = M.load(grouped)
+    B.apply_derivations(b)  # the stored answer, read by this build: no longer eligible
+    M.save_bundle(grouped, b)
+    payload = Q.consolidate(M.load(grouped))
+    again, now = Q.question(payload, members[0]["question_id"]), Q.question(payload, fam["question_id"])
+    # asked again under its own id, with why, and listed on its own: never folded into the sample question
+    assert again is not None and again["asked_again"] and not again.get("asked_for_sample_by")
+    assert Q.asked_for_sample_sentence(fam["question_id"]) not in again["text"]
+    # the sample question keeps its id; it is a member, kept apart; none of its targets is the sample question's
+    assert now is not None and now["sample_family"]["kept_apart"] == [members[0]["question_id"]]
+    assert now["sample_family"]["member_questions"] == [m["question_id"] for m in members[1:]]
+    assert now["targets"] == [t for m in members[1:] for t in m["targets"]]
+    assert now["applies_to"]["targets"] == 2 and now["answers_at_once"] == 2
+    assert not set(t["id"] for t in again["targets"]) & set(t["id"] for t in now["targets"])
+    # counted once each: ZZ1 now needs TWO answers (the sample question, for the two other electrodes, and the one
+    # asked again), so one blocking question more than before it was answered, never three or one
+    assert again["blocking"] and now["blocking"]
+    assert payload["counts"]["asked_once_per_sample"] == before["counts"]["asked_once_per_sample"] - 1
+    assert payload["counts"]["blocking"] == before["counts"]["blocking"] + 1
+    # one card per electrode on the question site: the sample question's card (the two others) and the electrode's own
+    S.export_site(grouped, tmp_path / "site", site_template=tmp_path / "no-template")
+    cards = json.loads((tmp_path / "site" / "data" / "site-data.json").read_text())["cards"]
+    for m in members:
+        assert sum(1 for c in cards if any(m["question_id"] in cv["questions"] for cv in c["covers"])) == 1
+    own = next(c for c in cards if any(m["question_id"] in cv["questions"] for cv in c["covers"] for m in members[:1]))
+    shared = next(c for c in cards if any(cv["question_id"] == fam["question_id"] for cv in c["covers"]))
+    assert own is not shared and members[0]["question_id"] not in [q for cv in shared["covers"] for q in cv["questions"]]
+    # answering the sample question records on the other electrodes only; the one asked again keeps its own answer
+    M.decide_question(grouped, question_id=fam["question_id"], decision="correct", value="SYN shared oxide", by=WHO,
+                      orcid=None)
+    assert _latest_value(grouped, members[0]["targets"][0]["id"]) == UNFIT
+    assert [_latest_value(grouped, m["targets"][0]["id"]) for m in members[1:]] == ["SYN shared oxide"] * 2
+    assert Q.question(Q.consolidate(M.load(grouped)), members[0]["question_id"]) is not None
+
+
+def _cannot_export(bdir, gids):
+    from isaac_api.local_import import bundle as B
+
+    b = M.load(bdir)
+    b["processing_results"] = [*(b.get("processing_results") or ()), *(
+        {"result_id": f"p-{g}", "group_id": g, "source": "isaac_protocol", "state": B.STATE_NEEDS_REVIEW,
+         "applicability": {"status": B.NOT_APPLICABLE, "reason_code": B.NA_NO_XAS_CHANNEL}} for g in gids)]
+    return b
+
+
+def _gids(q):
+    return [s[len("group:"):] for s in q["per_scope_targets"] if s.startswith("group:")]
+
+
+def test_a_member_whose_group_cannot_export_stays_in_the_sample_question(grouped):
+    fam, members = _zz1(grouped)
+    held = _gids(members[0])
+    now = Q.question(Q.consolidate(_cannot_export(grouped, held)), fam["question_id"])
+    assert now["sample_family"]["member_questions"] == fam["sample_family"]["member_questions"]
+    assert now["targets"] == fam["targets"] and now["per_scope_targets"] == fam["per_scope_targets"]
+    assert now["cannot_export_groups"] == held and now["applies_to"]["groups_that_can_export"] == 2
+    assert not now.get("all_groups_cannot_export") and Q.not_listed_reason(now) is None
+
+
+def test_a_sample_question_none_of_whose_groups_can_export_is_counted_not_listed(grouped):
+    fam, members = _zz1(grouped)
+    payload = Q.consolidate(_cannot_export(grouped, [g for m in members for g in _gids(m)]))
+    now = Q.question(payload, fam["question_id"])
+    assert now["targets"] == fam["targets"] and now["all_groups_cannot_export"]
+    assert Q.not_listed_reason(now) == dict(Q.NOT_LISTED_REASONS)["all_groups_cannot_export"]
+    listed, hidden = Q.hide_not_reaching_a_record(payload["questions"], include=False)
+    assert fam["question_id"] in {q["question_id"] for q in hidden} - {q["question_id"] for q in listed}
+
+
+def _open_ids(bdir):
+    return {q["question_id"]: sorted(t["id"] for t in q["targets"]) for q in Q.consolidate(M.load(bdir))["questions"]}
+
+
+def test_the_sample_question_is_the_same_whatever_order_its_members_are_answered_in(grouped, tmp_path):
+    fam, members = _zz1(grouped)
+    seen = []
+    for order in ((0, 1), (1, 0)):
+        bdir = tmp_path / f"order-{order[0]}{order[1]}"
+        shutil.copytree(grouped, bdir)
+        for i in order:
+            M.decide_question(bdir, question_id=members[i]["question_id"], decision="correct", value=f"SYN {i}",
+                              by=WHO, orcid=None)
+        seen.append(_open_ids(bdir))
+    assert seen[0] == seen[1]
+    assert seen[0][fam["question_id"]] == sorted(t["id"] for t in members[2]["targets"])
+
+
+def test_on_the_file_name_token_basis_the_first_answer_keeps_the_sample_question(tmp_path):
+    """No sample name in the grouping: the sample question is built from the shared file-name tokens of the open
+    questions; once the first member is answered the answered view is read, and the question keeps its id."""
+    from test_local_import_grouping_cli import _folder
+
+    (tmp_path / "syn").mkdir()
+    src, bdir = _folder(tmp_path / "syn"), tmp_path / "syn" / "bundle"
+    assert cli.main(["import", str(src), "--out", str(bdir)]) == 0
+    M.group(bdir)
+    b = M.load(bdir)
+    group_of = {r["run_id"]: g["group_id"] for g in Q.live_groups(b) for r in b["runs"]
+                if r["run_key"] in g["member_run_keys"]}
+    assert not Q._sample_family_field_answered(b, group_of)
+    fam = next(f for f in _families(Q.consolidate(b)) if f["sample_family"]["basis"] == "tokens"
+               and len(f["sample_family"]["member_questions"]) == 2)
+    first, second = fam["sample_family"]["member_questions"]
+    before = _open_ids(bdir)
+    M.decide_question(bdir, question_id=first, decision="correct", value="SYN token oxide", by=WHO, orcid=None)
+    assert Q._sample_family_field_answered(M.load(bdir), group_of)
+    after = Q.consolidate(M.load(bdir))
+    now = Q.question(after, fam["question_id"])
+    assert now is not None and now["sample_family"]["member_questions"] == [second]
+    assert now["sample_family"]["sample"] == fam["sample_family"]["sample"]
+    assert Q.question(after, second)["asked_for_sample_by"] == fam["question_id"]
+    # every id still open was open before, under the same id
+    assert set(_open_ids(bdir)) <= set(before)

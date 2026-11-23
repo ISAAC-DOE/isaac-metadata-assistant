@@ -99,6 +99,9 @@ def test_every_question_id_of_the_synthetic_grouped_bundle_is_unchanged(grouped)
     # each sample question asks only questions above, every one of which keeps its id (ZZ1, ZZ2, ZZ3: three each)
     families = [q for q in questions if q.get("sample_family")]
     assert sorted(f["sample_family"]["sample"] for f in families) == ["ZZ1", "ZZ2", "ZZ3"]
+    # ...under ids pinned here too, so a change to how a sample question's id is derived is caught
+    assert {f["sample_family"]["sample"]: f["question_id"] for f in families} == {
+        "ZZ1": "Q-e14aacf5ce", "ZZ2": "Q-194ae171d9", "ZZ3": "Q-5d70725e6f"}
     assert all(len(f["sample_family"]["member_questions"]) == 3 and set(f["sample_family"]["member_questions"]) <= set(ids)
                for f in families)
 

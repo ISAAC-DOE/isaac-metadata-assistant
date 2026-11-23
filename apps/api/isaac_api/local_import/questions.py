@@ -1523,7 +1523,7 @@ def consolidate(bundle: Mapping, *, compositions_out: dict | None = None, includ
         # read from the bundle WITH its answered targets back in (DEC-91): a sample question answered for some of its
         # members keeps its id, and an answer never makes a new one appear
         universe = None
-        if not include_answered and _sample_family_field_answered(bundle):
+        if not include_answered and _sample_family_field_answered(bundle, group_of):
             universe = {q["question_id"]: q for q in consolidate(bundle, include_answered=True,
                                                                  explain_counter=False)["questions"]
                         if q.get("sample_family")}
@@ -2790,12 +2790,20 @@ def _asks_for_a_value(q: Mapping) -> bool:
     return True
 
 
-def _sample_family_field_answered(bundle: Mapping) -> bool:
-    """Whether a scientist answered any value of a :data:`SAMPLE_FAMILY_FIELDS` field (so the open questions alone
-    no longer show every member a sample question was built from)."""
-    return any(o.get("target_field_path") in SAMPLE_FAMILY_FIELDS
-               and o.get("value_state") in (B.STATE_SCIENTIST_CONFIRMED, B.STATE_REJECTED)
-               for o in (*(bundle.get("candidates") or ()), *(bundle.get("missing_values") or ())))
+def _sample_family_field_answered(bundle: Mapping, group_of: Mapping[str, str]) -> bool:
+    """Whether a scientist answered a value that a member of a sample question could have asked (so the open
+    questions alone no longer show every member a sample question was built from): a :data:`SAMPLE_FAMILY_FIELDS`
+    value of a run in a live group whose sample another live group shares, or whose sample the grouping does not
+    state (the file-name token basis). A beamtime-wide value (no run), or one of a sample measured in ONE group,
+    is never a member's, so it needs no second look."""
+    answered = [o for o in (*(bundle.get("candidates") or ()), *(bundle.get("missing_values") or ()))
+                if o.get("target_field_path") in SAMPLE_FAMILY_FIELDS and o.get("run_id") in group_of
+                and o.get("value_state") in (B.STATE_SCIENTIST_CONFIRMED, B.STATE_REJECTED)]
+    if not answered:
+        return False
+    identity = {g["group_id"]: _group_sample_identity(g) for g in live_groups(bundle)}
+    shared = Counter(identity.values())
+    return any((key := identity.get(group_of[o["run_id"]])) is None or shared[key] > 1 for o in answered)
 
 
 def _sample_family_questions(questions: list[dict], bundle: Mapping,
@@ -2837,7 +2845,7 @@ def _sample_family_questions(questions: list[dict], bundle: Mapping,
         family_of: dict[str, tuple[str, str, str]] = {}
         for fq in universe.values():
             fkey = (fq["target_field_path"], fq["kind"], str(fq["partition"])[len(SAMPLE_FAMILY_TAG) + 1:])
-            for mid in fq["sample_family"]["member_questions"]:
+            for mid in (*fq["sample_family"]["member_questions"], *fq["sample_family"].get("kept_apart", ())):
                 family_of[mid] = fkey
         for q in questions:
             if q["question_id"] in family_of and not q.get("sample_family"):
@@ -2860,6 +2868,14 @@ def _sample_family_questions(questions: list[dict], bundle: Mapping,
     for (path, kind, key), members in families.items():
         qid = _qid("experiment", SAMPLE_FAMILY_TAG, kind, path, key)
         if universe is None and len(members) < 2:
+            continue
+        # a member whose earlier answer the record can no longer take (``asked_again``) stays a member (the sample
+        # question's id and existence need it: DEC-91) but is KEPT APART: listed on its own with why, and none of its
+        # targets is the sample question's, so answering the sample question never records over that electrode's
+        # own question (review of 08fcd124, finding 1)
+        apart = sorted((m for m in members if m.get("asked_again")), key=lambda m: m["question_id"])
+        members = [m for m in members if not m.get("asked_again")]
+        if not members:
             continue
         members.sort(key=lambda m: m["question_id"])
         targets: list[dict] = []
@@ -2953,7 +2969,8 @@ def _sample_family_questions(questions: list[dict], bundle: Mapping,
             "sample_family": {"sample": said, "basis": key.split("=", 1)[0], "numbers": numbers,
                               "numbers_name_electrodes": bool(numbers) and settled, "objects": objects,
                               "named": named,
-                              "member_questions": [m["question_id"] for m in members]},
+                              "member_questions": [m["question_id"] for m in members],
+                              **({"kept_apart": [m["question_id"] for m in apart]} if apart else {})},
             "answers_at_once": len(members),
         }
         for k in ("deprecated_values", "lands_in_record"):
@@ -2976,9 +2993,7 @@ def _sample_family_questions(questions: list[dict], bundle: Mapping,
         if all(m.get("deferred") for m in members):
             fam["deferred"] = {**members[0]["deferred"], "targets": len(targets)}
         for m in members:
-            # a member whose answer the record could not take stays listed on its own, with why (its id unchanged)
-            if not m.get("asked_again"):
-                m["asked_for_sample_by"] = qid
+            m["asked_for_sample_by"] = qid
             m["text"] += asked_for_sample_sentence(qid)
         out.append(fam)
     return out
