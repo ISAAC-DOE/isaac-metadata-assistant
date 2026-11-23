@@ -207,7 +207,7 @@ def test_confirming_keeps_the_records_and_answers_the_question(tmp_path):
     M.decide_question(bdir, question_id=qid, decision="confirm", value=None, **BY)
     after = M.load(bdir)
     status = {g["group_id"]: g["status"] for g in after["record_groups"]}
-    assert status[_group_of(after, "07_03")] == "confirmed"
+    assert status[_group_of(after, "07_03")] == "scientist_confirmed"
     assert _qc_questions(after) == []
 
 

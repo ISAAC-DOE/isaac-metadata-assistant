@@ -108,6 +108,8 @@ ALLOWED_DECISIONS: Mapping[str, tuple[str, ...]] = {
     "stated_utc_start_times": ("confirm",),
     # finding 4 (audit of 18 Nov 2026): the beamtime-wide dose reading (isaac.xas.dose_damage.v2)
     "dose_reading": (B.DOSE_READING_DECISION,),
+    # C6: keep the records of a sample the logbook says failed (confirm the groups), leave them out (reject), or defer
+    "logbook_quality_remark": ("confirm", "reject", "defer"),
 }
 #: A ``confirm_value`` question whose targets carry NO value (the files hold text, no value this
 #: build derives from it): there is nothing to confirm, so ``confirm`` is not offered. The kind —
@@ -125,7 +127,7 @@ VALUE_KINDS = ("missing_value", "optional_values", "confirm_value", "resolve_con
 #: The kinds an ANSWERED question of is still found under its id (``consolidate(include_answered=True)``):
 #: ``decide --question`` re-answers it and ``bundle show question`` shows it with ``status`` and its answers.
 RESOLVABLE_WHEN_ANSWERED = VALUE_KINDS + ("confirm_absorber", "naming_counter_positions", "clock_time_zone",
-                                          "stated_utc_start_times", "dose_reading")
+                                          "stated_utc_start_times", "dose_reading", "logbook_quality_remark")
 #: r6 I1: the beamtime-wide start-time question (:func:`_stated_utc_start_question`): one answer for every group whose
 #: start-time disagreement the files settle with an instant they state in UTC. Its targets are conflicts.
 STATED_UTC_START_KIND = "stated_utc_start_times"
@@ -1468,6 +1470,8 @@ def consolidate(bundle: Mapping, *, compositions_out: dict | None = None, includ
         )
 
     questions += _absorber_questions(bundle, groups, include_answered=include_answered)
+    if has_groups:
+        questions += _quality_remark_questions(bundle, groups, include_answered=include_answered)
 
     def order(q):
         scope = q["scope"]
@@ -3697,6 +3701,99 @@ def _absorber_questions(bundle: Mapping, groups: Sequence[Mapping], *, include_a
             "hints": _absorber_hints([(g, sug)]) + before,
             "allowed_values": None,
             "answer_command": f'isaac bundle decide <bundle_dir> --question {qid} --decision set_absorber --element <El> --edge <K|L1-L3|M1-M5> --by "<your name>"',
+        })
+    return out
+
+
+# --- C6: a logbook remark that a SAMPLE failed is a QC question on that sample's record groups --------------------
+
+#: The kind of the question (a new kind, with its own ids; no other question changes).
+QUALITY_REMARK_KIND = "logbook_quality_remark"
+_QUALITY_REMARK_WHY = ("The logbook says this sample failed or was bad. Whether its records are kept is the scientist's "
+                       "decision: nothing is dropped until they say so.")
+
+
+def quality_remark_question_id(source: str, locator: str) -> str:
+    """The id of the QC question about the sample a logbook remark is about: from the kind and the remark's own source
+    and locator (the first of its section), as the import recorded them (DEC-91), never from an answer."""
+    return _qid("experiment", QUALITY_REMARK_KIND, f"{source}|{locator}")
+
+
+def _line_of(locator: Any) -> int:
+    m = re.match(r"lines? (\d+)", str(locator or ""))
+    return int(m.group(1)) if m else 10 ** 9
+
+
+def sample_failure_notes(bundle: Mapping) -> list[Mapping]:
+    """The data-quality notes that say a whole SAMPLE failed and reach runs: a sample heading's qualifier that is a
+    failure marker (``(bad)``), and a short line right under the heading that says the sample failed ("did not
+    work!", ``bl15.notes.section_quality_remark.v1``). A row's Notes cell is about one file, and is not one of them."""
+    from ..bl15 import notes as N
+
+    out = []
+    for n in bundle.get("data_quality_notes") or ():
+        loc, text = str(n.get("locator") or ""), str(n.get("text") or "")
+        if not n.get("run_ids"):
+            continue
+        if loc.endswith("sample heading qualifier") and text.strip().casefold() in N.FAILURE_MARKERS:
+            out.append(n)
+        elif loc.endswith(") quality remark") and N.is_failure_remark(text):
+            out.append(n)
+    return out
+
+
+def _quality_remark_questions(bundle: Mapping, groups: Sequence[Mapping], *, include_answered: bool = False) -> list[dict]:
+    """One question per sample the logbook says failed: its remarks quoted, where they are, and the live record groups
+    holding its runs as targets. ``confirm`` keeps them as records, ``reject`` leaves them out (no record is built; the
+    runs and their files stay in the bundle), ``defer`` says "I don't know". A group a scientist already confirmed is
+    answered (``include_answered`` keeps it, under the same id); a rejected one is no longer live."""
+    notes = sample_failure_notes(bundle)
+    if not notes:
+        return []
+    path_of = {src.get("source_id"): src.get("relative_path") for src in bundle.get("sources") or ()}
+    key_of = {r["run_id"]: r["run_key"] for r in bundle.get("runs") or ()}
+    stem_of = {r["run_id"]: r.get("stem") for r in bundle.get("runs") or ()}
+    by_sample: dict[tuple, list[Mapping]] = {}
+    for n in notes:
+        by_sample.setdefault((n.get("source_id"), tuple(sorted(n["run_ids"]))), []).append(n)
+    out = []
+    for (source_id, run_ids), its in by_sample.items():
+        its = sorted(its, key=lambda n: _line_of(n.get("locator")))
+        keys = {key_of[r] for r in run_ids if r in key_of}
+        targets = [g for g in groups if keys & set(g.get("member_run_keys") or ())
+                   and (include_answered or g.get("status") != B.STATE_SCIENTIST_CONFIRMED)]
+        if not targets:
+            continue
+        source = str(path_of.get(source_id) or source_id or "the logbook")
+        qid = quality_remark_question_id(source, str(its[0].get("locator")))
+        quotes = "; ".join(f"{_quoted(str(n.get('text') or ''))} ({n.get('locator')})" for n in its)
+        files = [stem_of[r] for r in run_ids if stem_of.get(r)]
+        shown = ", ".join(files[:4]) + (f" and {len(files) - 4} more" if len(files) > 4 else "")
+        text = (f"The logbook ({source}) says this sample failed: {quotes}. It reaches {len(run_ids)} measurement(s) "
+                f"({shown}) in {len(targets)} record group(s). Nothing has been dropped. Keep them as records "
+                "(confirm the groups), or leave them out (reject the groups: no record is built from them, and the runs "
+                "and their files stay in the bundle). Answer once, or per group. To keep a group with a QC status, "
+                "approve its processing result with --qc-status and a --qc-note in the scientist's words. "
+                "Not known: defer.")
+        out.append({
+            "question_id": qid,
+            "partition": None,
+            "tier": TIER_CONFLICT,
+            "blocking": False,
+            "why": _QUALITY_REMARK_WHY,
+            "kind": QUALITY_REMARK_KIND,
+            "scope": "experiment",
+            "target_field_path": None,
+            "text": text,
+            "applies_to": {"groups": len(targets), "runs": sum(_measured_runs(g) for g in targets),
+                           "targets": len(targets)},
+            "targets": [{"kind": "record_group", "id": g["group_id"]} for g in targets],
+            "per_scope_targets": {f"group:{g['group_id']}": [g["group_id"]] for g in targets},
+            "hints": [{"kind": "logbook_remark", "literal": n.get("text"), "locator": n.get("locator"),
+                       "source": source, "note_id": n.get("note_id")} for n in its],
+            "allowed_values": None,
+            "answer_command": (f'isaac bundle decide <bundle_dir> --question {qid} --decision <confirm|reject> '
+                               '--by "<your name>"   # per group: add --only group:<group_id>   # not known: --decision defer'),
         })
     return out
 
