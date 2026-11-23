@@ -102,6 +102,8 @@ CONDITION_KEYS: Mapping[str, str] = {
     "scan_header_ph": "condition: pH changes the state",
     "scan_header_potential": "condition: the applied potential sets the electrochemical state",
     "scan_header_potential_scale": "condition: a potential means nothing without its reference scale",
+    # a run name's OCV / OCP token (suggestions.OPEN_CIRCUIT_RULE_ID): a value that needs review
+    "control_mode_statement": "condition: open circuit and a held potential are different electrochemical states",
     # pq-003 (beamline scientist answers relayed by Krish, 17 Nov 2026; STEP_RULE_ID)
     "step_number": ("condition: stepNN is the order of potential steps in one sequence; different steps are NEVER "
                     "merged, even at the same potential (step05 and step08 at 850 mV: after the 1st and the 2nd cycling)"),
@@ -1092,6 +1094,59 @@ def xdc_name_role(stem: str) -> tuple[str, str] | None:
     return None
 
 
+#: 1.16.0 (audit of 18 Nov 2026, rule 13): an XDC run whose NAME says it is a reference STANDARD proposes the role
+#: ``reference`` (a proposal, said as judged from the name, as :data:`XDC_NAME_ROLE_RULE_ID`): a mineral name
+#: (``ANATASE``, ``rutile``), ``elemental`` before an element symbol (``elemental_S``), a weight-percent dilution
+#: (``0p8wtpc``, ``5wt``) or a dilution matrix (``sucrose``, ``sugar``, ``BN``, ``cellulose``) ONLY where every other
+#: word is a stoichiometric formula (review of PR 346, I5) - and never beside a condition (a potential, a pH, an
+#: electrolyte), a support, form or history word (``film``, ``postXAS``), or a temperature. A formula token alone
+#: (``TiO2``) is not enough: ``IrTiO2`` is a sample.
+XDC_STANDARD_NAME_RULE_ID = "isaac.grouping.xdc_standard_name.v1"
+_STANDARD_MINERALS = frozenset({"anatase", "rutile", "brookite"})
+_STANDARD_MATRICES = frozenset({"sucrose", "sugar", "bn", "cellulose"})
+_STANDARD_DILUTION = re.compile(r"^\d+(?:[p.]\d+)?wt(?:pc|pct|%)?$")
+#: review of PR 346, I5: a form, support or history word makes a name a sample's (``RuO2_rutile_film``,
+#: ``TiO2_brookite_postXAS``)
+_STANDARD_NOT = re.compile(r"^(?:films?|layers?|coat\w*|deposit\w*|thin|post\w*|pre\w*|electrode\w*|cell)$")
+#: tokens that name no material (a counter, a size, a spot, a counting note)
+_STANDARD_NEUTRAL = re.compile(r"^(?:\d+|\d+(?:p\d+)?x\d+(?:p\d+)?(?:mm|um)?|spot\w*|k\d+|i\d+|opt|lowcounts|std)$")
+#: a stoichiometric formula as written (``Ti2O3``, ``CoSO4``, ``Na2S2O3``): element symbols with at least one count
+_FORMULA = re.compile(r"^(?:[A-Z][a-z]?\d*)+$")
+
+
+def xdc_standard_role(stem: str) -> tuple[str, str] | None:
+    """:data:`XDC_STANDARD_NAME_RULE_ID`: ``(reference, token)`` when an XDC run's name says it is a reference
+    standard, or ``None``."""
+    from .template import ELEMENT_SYMBOLS
+
+    tokens = _name_tokens(stem)
+    if not tokens or any(_condition_shaped(t) for t in _stem_tokens(stem)) or any(
+            _SAMPLE_BESIDE.match(t) or _TEMPERATURE_TOKEN.match(t) for t in tokens):
+        return None
+    if any(_STANDARD_NOT.match(t) for t in tokens):
+        return None
+    symbols = {e.casefold() for e in ELEMENT_SYMBOLS}
+    for i, tok in enumerate(tokens):
+        if tok in _STANDARD_MINERALS or (tok == "elemental" and i + 1 < len(tokens) and tokens[i + 1] in symbols):
+            return ROLE_REFERENCE, tok
+    # a dilution or a matrix is how ANY transmission pellet is made: it names a standard only when every other word of
+    # the name is a stoichiometric formula (``0p7wtpc_Ti2O3``), never beside a sample's own name (``CoMOF_10wt_BN``)
+    cue = next((t for t in tokens if t in _STANDARD_MATRICES or _STANDARD_DILUTION.match(t)), None)
+    if cue is None:
+        return None
+    rest = [t for t in _stem_tokens(stem) if t.casefold() not in _STANDARD_MATRICES
+            and not _STANDARD_DILUTION.match(t.casefold()) and not _STANDARD_NEUTRAL.match(t.casefold())]
+    formulas = [t for t in rest if _is_formula(t, ELEMENT_SYMBOLS)]
+    return (ROLE_REFERENCE, cue) if rest and len(formulas) == len(rest) else None
+
+
+def _is_formula(token: str, elements: Container[str]) -> bool:
+    """``Ti2O3`` / ``CoSO4``: element symbols, each with an optional count, at least one count written."""
+    if not _FORMULA.fullmatch(token) or not re.search(r"\d", token):
+        return False
+    return all(sym in elements for sym in re.findall(r"[A-Z][a-z]?", token))
+
+
 def _header_not_measurement(statement: Mapping) -> str | None:
     """The role ONE header statement of an XDC scan states (:data:`XDC_NOT_MEASUREMENT_RULE_ID`), or ``None``."""
     key, lit = statement.get("key"), str(statement.get("literal") or "").strip()
@@ -1175,6 +1230,10 @@ def run_role(run: Mapping, sources_by_id: Mapping[str, Mapping] | None = None) -
                 return named[0], {**shared[1], "name": run.get("stem"), "source_id": run.get("acquisition_source_id")}
             return named[0], {"rule_id": XDC_NAME_ROLE_RULE_ID, "basis": "name_token", "token": named[1],
                               "name": run.get("stem"), "source_id": run.get("acquisition_source_id")}
+        standard = xdc_standard_role(name)
+        if standard:
+            return standard[0], {"rule_id": XDC_STANDARD_NAME_RULE_ID, "basis": "name_token", "token": standard[1],
+                                 "name": run.get("stem"), "source_id": run.get("acquisition_source_id")}
         return ROLE_SAMPLE, {"rule_id": ROLE_RULE_ID, "basis": "default_sample", "source_type": stype}
     named = name_role(str(run.get("stem") or run.get("label") or ""))
     if named:

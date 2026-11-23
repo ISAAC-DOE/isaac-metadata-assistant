@@ -47,6 +47,35 @@ def _element(literal: Any) -> str | None:
     return text if _ELEMENT.fullmatch(text) else None
 
 
+#: 1.16.0 (audit of 18 Nov 2026, rule 14): an SSRL XDC scan whose "Requested Energy" grid has a finest-step window
+#: strictly inside its range (a pre-edge region before it and a post-edge region after it: the XANES region) names the
+#: absorption edge that window brackets (``readers.xray_tables``, edges of 1 keV and up); where it brackets several, a
+#: K or L3 edge (the edges one scans) is taken when exactly one is; otherwise nothing. A run's scans that name
+#: different edges name none. A witness for the absorber SUGGESTION only (confirm_absorber), never a value.
+SCANNED_EDGE_RULE_ID = "isaac.suggest.absorber_from_scanned_range.v1"
+SCANNED_EDGE_MIN_EV = 1000.0
+#: ``experiment.element_evidence[].role`` of a witness this rule gives (one per run, with its ``run_key``)
+SCANNED_EDGE_ROLE = "scanned_range"
+
+
+def scanned_edge(check: Mapping | None) -> dict | None:
+    """``{element, edge, energy_eV, window_eV, range_eV, step_eV}`` the reader's energy check of ONE scan names
+    (:data:`SCANNED_EDGE_RULE_ID`), or ``None``."""
+    from .readers import xray_tables as X
+
+    if not isinstance(check, Mapping) or not check.get("finest_window_eV") or not check.get("range_eV"):
+        return None
+    (lo, hi), (start, stop) = check["finest_window_eV"], check["range_eV"]
+    if not (start < lo and hi < stop):
+        return None  # a scan sampled uniformly (an alignment, a check): no XANES region, no edge named
+    edges = [e for e in X.edges_between(lo, hi) if e["energy_eV"] >= SCANNED_EDGE_MIN_EV]
+    if len(edges) > 1:
+        edges = [e for e in edges if e["edge"] in ("K", "L3")]
+    if len(edges) != 1:
+        return None
+    return {**edges[0], "window_eV": [lo, hi], "range_eV": [start, stop], "step_eV": check.get("finest_step_eV")}
+
+
 def absorber_for_group(bundle: Mapping, group: Mapping) -> dict:
     """``{element, edge, status, readings, witnesses, rule_id}`` for ONE record group.
 
@@ -64,7 +93,7 @@ def absorber_for_group(bundle: Mapping, group: Mapping) -> dict:
 
     def note(kind: str, element: str | None, edge: str | None, source_id, locator, extra: dict, literal: str | None = None):
         if element or edge:
-            (group_specific if kind == "processed_output_header" else beamtime_wide)[0] += 1
+            (group_specific if kind in ("processed_output_header", "scanned_range") else beamtime_wide)[0] += 1
         if element:
             elements[element] += 1
         if edge:
@@ -91,6 +120,13 @@ def absorber_for_group(bundle: Mapping, group: Mapping) -> dict:
         for st in states.get("element_edge") or ():
             note("processed_output_header", None, _edge(st.get("literal")), st.get("source_id"), st.get("locator"), extra, st.get("literal"))
     for ev in (bundle.get("experiment") or {}).get("element_evidence") or ():
+        if ev.get("role") == SCANNED_EDGE_ROLE:
+            # 1.16.0: the edge a run's OWN scans bracket, a witness for that run's group only
+            if ev.get("run_key") in keys:
+                note("scanned_range", _element(ev.get("element")), _edge(ev.get("edge")), ev.get("source_id"),
+                     ev.get("locator"), {"role": ev.get("role"), "rule_id": SCANNED_EDGE_RULE_ID},
+                     ev.get("literal"))
+            continue
         note("beamtime_element_evidence", _element(ev.get("element")), _edge(ev.get("edge")),
              ev.get("source_id"), ev.get("locator"), {"role": ev.get("role")})
 
@@ -1027,6 +1063,34 @@ POTENTIAL_SCALE_PATH = "context.electrochemistry.potential_scale"
 STALE_FIELDS = frozenset({SETPOINT_PATH, POTENTIAL_SCALE_PATH})
 
 
+# --- the potential a run's NAME states (rule 10) ----------------------------------------------------------------------
+
+NAME_POTENTIAL_RULE_ID = "isaac.suggest.name_potential.v1"
+NAME_POTENTIAL_RULE = (
+    f"{NAME_POTENTIAL_RULE_ID}: the potential a run's own name writes is read by the file-name token rules "
+    "(bl15.filenames: a leading m or - is a minus sign; millivolts as digits/1000) for a run the token reader does "
+    "not read (an SSRL XDC scan set). When a name has several potential tokens the last is the condition. A name "
+    "that marks two levels Pos / Neg writes a pulsed step: no set-point is read from it. Where a comment line of "
+    "the same run writes the potential too, the two are compared: the same value confirms the reading, a different "
+    "one is shown beside it and neither is offered. The value needs review: a name states a number, never the scale."
+)
+#: the engine's statement key for a potential read from a name: a grouping CONDITION key (``grouping.CONDITION_KEYS``)
+NAME_POTENTIAL_KEY = "potential_magnitude"
+OPEN_CIRCUIT_RULE_ID = "isaac.suggest.name_open_circuit.v1"
+OPEN_CIRCUIT_RULE = (
+    f"{OPEN_CIRCUIT_RULE_ID}: a run whose name carries an OCV or OCP token and no potential token after it was "
+    "measured at open circuit: the control mode open_circuit is suggested and no set-point applies. A name is not "
+    "the potentiostat's log, so the value needs review."
+)
+OPEN_CIRCUIT_KEY = "control_mode_statement"
+CONTROL_MODE_VALUE = "open_circuit"
+#: the largest size (volts) a name token with no scale is offered as a set-point at (``questions.HEADER_POTENTIAL_MAX_V``)
+NAME_POTENTIAL_MAX_V = 3.0
+#: the runs whose names are read here: an SSRL XDC scan set (no token reader reads its name) and a SPEC acquisition
+#: (the engine's token reader gives its set-point; open circuit and a pulsed step are said here)
+_NAMED_RUN_TYPES = frozenset({B.XDC_RUN_SOURCE_TYPE, B.SPEC_ACQUISITION_SOURCE_TYPE})
+
+
 def xdc_comment_lines(g: Any, run_scans: Sequence[Mapping]) -> list[tuple]:
     """``(scan_index, relative_path, locator, literal)`` for every comment line (``bundle.XDC_COMMENT_LINES``) of ONE
     ``ssrl_xdc_v1`` run's scans: the lines rule ``bundle.XDC_COMMENT_RULE_ID`` reads."""
@@ -1111,4 +1175,208 @@ def stale_comment_index(bundle: Mapping) -> dict[tuple[str, int], str]:
             for sc in run.get("scans") or ():
                 if number and sc.get("relative_path"):
                     out[(sc["relative_path"], int(number.group(0)))] = str(a.get("detail") or "")
+    return out
+
+
+def _token_spans(stem: str) -> list[tuple[int, int]]:
+    spans, at = [], 0
+    for token in stem.split("_"):
+        spans.append((at, at + len(token)))
+        at += len(token) + 1
+    return spans
+
+
+def _token_locator(stem: str, index: int) -> str:
+    start, end = _token_spans(stem)[index]
+    return f"filename token {index} [chars {start}..{end}]"
+
+
+def _volts(value: Any) -> float:
+    return float(value) + 0.0
+
+
+def _same_volts(a: float, b: float) -> bool:
+    return abs(a - b) < 1e-9
+
+
+def comment_potential_mentions(lines: Sequence[tuple]) -> list[dict]:
+    """Every potential the comment lines of ONE run mention (``questions.header_potential_mentions``), one item per
+    distinct (line text, mention), each with its first place. ``lines``: ``(scan_index, relative_path, locator,
+    literal)``. Only to COMPARE with the name: never a value."""
+    from .questions import header_potential_mentions
+
+    out: dict[tuple[str, str], dict] = {}
+    for _index, rel, locator, literal in sorted(lines, key=lambda l: (l[0] is None, l[0] or 0, str(l[2]))):
+        for m in header_potential_mentions(literal):
+            out.setdefault((literal, m["literal"]), {"line": literal, "relative_path": rel, "locator": locator,
+                                                     "literal": m["literal"], "volts": m["volts"], "scale": m["scale"]})
+    return list(out.values())
+
+
+def name_potential_review(runs: Sequence[Mapping], comment_lines: Mapping[str, Sequence[tuple]]) -> dict[str, dict]:
+    """``{run_id: review}`` for every measurement run whose name states a potential, open circuit or a pulsed step
+    (``bl15.filenames.name_potential``). ``review``: ``reading`` (the name's), ``mentions`` (what the run's comment
+    lines mention), ``relation`` (``agrees`` / ``differs`` / ``no_comment``; a set-point only), and ``sign_pairs``
+    (shared by every review): the runs of this import whose name writes a minus as ``m`` or ``-`` and whose comment
+    line writes the same negative potential, which is what confirms the convention here."""
+    from ..bl15 import filenames as fn
+
+    reviews: dict[str, dict] = {}
+    pairs: list[dict] = []
+    for run in runs:
+        if not run.get("run_candidate") or run.get("source_type") not in _NAMED_RUN_TYPES:
+            continue
+        stem = str(run.get("stem") or "")
+        reading = fn.name_potential(stem.split("_"))
+        if reading.kind is None:
+            continue
+        mentions = comment_potential_mentions(comment_lines.get(run["run_id"]) or ())
+        relation = None
+        if reading.kind == fn.NAME_SETPOINT:
+            volts = _volts(reading.volts)
+            if not mentions:
+                relation = "no_comment"
+            elif all(_same_volts(m["volts"], volts) for m in mentions):
+                relation = "agrees"
+                if volts < 0 and reading.rule == fn.RULE_SIGNED_POTENTIAL:
+                    pairs.append({"run_id": run["run_id"], "name": stem, "token": reading.token,
+                                  "literal": mentions[0]["literal"], "relative_path": mentions[0]["relative_path"],
+                                  "locator": mentions[0]["locator"]})
+            else:
+                relation = "differs"
+        reviews[run["run_id"]] = {"reading": reading, "stem": stem, "mentions": mentions, "relation": relation,
+                                  "sign_pairs": pairs, "source_type": run.get("source_type")}
+    return reviews
+
+
+def _where(m: Mapping) -> str:
+    place = str(m.get("locator") or "").replace("line:", "line ")
+    return f"{place} of {m['relative_path']}" if place and m.get("relative_path") else str(m.get("relative_path") or "")
+
+
+def comment_differs_reason(review: Mapping) -> str | None:
+    """Why NO potential is offered for a run whose name and comment line write different potentials (``None`` when
+    they do not differ). The same sentence on the name's candidate and on the comment line's."""
+    if review.get("relation") != "differs":
+        return None
+    reading = review["reading"]
+    said = "; ".join(f"{m['literal']!r} ({_where(m)})" for m in review["mentions"][:3])
+    return (f"The file name writes {reading.token} ({_volts(reading.volts):g} V) and a comment line of the same run "
+            f"writes {said}. The two differ, and nothing in the files says which is right or that both are on one "
+            "scale, so neither is offered: tell me the potential held during this scan.")
+
+
+def name_setpoint_value(review: Mapping | None) -> float | None:
+    """The set-point a run's NAME will be offered as (:func:`name_potential_candidates`), or ``None``: no review, not
+    a set-point, a run the engine's token reader reads, a number too large, or a comment line that writes another."""
+    from ..bl15 import filenames as fn
+
+    if not review or review["reading"].kind != fn.NAME_SETPOINT or review.get("source_type") != B.XDC_RUN_SOURCE_TYPE:
+        return None
+    volts = _volts(review["reading"].volts)
+    if abs(volts) > NAME_POTENTIAL_MAX_V or review.get("relation") == "differs":
+        return None
+    return volts
+
+
+def name_potential_candidates(runs: Sequence[Mapping], candidates: Sequence[Mapping], reviews: Mapping[str, Mapping],
+                              sources: Mapping[str, str], first_n: int, writable, *, room: int) -> list[dict]:
+    """The candidates the names give (ids ``cand-<first_n>`` on, at most ``room`` of them), in run order:
+
+    * a set-point (:data:`NAME_POTENTIAL_KEY`) for a run the engine's token reader does not read, valued unless the
+      run's comment line writes another potential (:func:`comment_differs_reason`) or the number is too large to be
+      an electrode potential;
+    * a value-less set-point for a pulsed name, engine-read or not (it says the levels);
+    * the control mode ``open_circuit`` (:data:`OPEN_CIRCUIT_KEY`) for an open-circuit name.
+
+    ``sources``: ``{source_id: relative_path}``. A run that already has a candidate for the field gets none."""
+    from ..bl15 import filenames as fn
+
+    have = {(c.get("run_id"), c.get("target_field_path"), c.get("statement_key")) for c in candidates}
+    out: list[dict] = []
+    for run in runs:
+        review = reviews.get(run["run_id"])
+        if review is None or len(out) >= room:
+            continue
+        reading, stem, rid = review["reading"], review["stem"], run["run_id"]
+        sid = run.get("acquisition_source_id")
+        rel = sources.get(sid)
+        cid = f"cand-{first_n + len(out):04d}"
+
+        def token_witness(index: int, token: str, volts: Any, rule: str | None, supports: bool) -> dict:
+            return {"relative_path": rel, "source_id": sid, "locator": _token_locator(stem, index), "literal": token,
+                    "supports": supports,
+                    "normalization": ([{"step": "normalize", "rule_id": B._rule_id(rule), "from": token,
+                                        "to": None if volts is None else _volts(volts), "unit": "V"}] if rule else [])}
+
+        def line_witnesses() -> list[dict]:
+            return [{"relative_path": m["relative_path"], "source_id": next((s for s, p in sources.items() if p == m["relative_path"]), None),
+                     "locator": m["locator"], "literal": m["line"], "supports": False, "normalization": []}
+                    for m in review["mentions"]]
+
+        if reading.kind == fn.NAME_OPEN_CIRCUIT:
+            if (rid, B.CONTROL_MODE_PATH, OPEN_CIRCUIT_KEY) in have:
+                continue
+            reason = (f"Read from the file name's token {reading.token}: open circuit, so no potential was applied and "
+                      f"no set-point applies. {CONFIRM_OR_CORRECT}")
+            out.append(suggested_candidate(
+                engine_id=f"{run['run_key']}::{OPEN_CIRCUIT_RULE_ID}", bundle_cid=cid, run_id=rid, key=OPEN_CIRCUIT_KEY,
+                path=B.CONTROL_MODE_PATH, value=CONTROL_MODE_VALUE, rule_id=OPEN_CIRCUIT_RULE_ID, rule=OPEN_CIRCUIT_RULE,
+                reason=reason, writable=writable,
+                witnesses=[{**token_witness(reading.index, reading.token, None, None, True),
+                            # a DERIVED value: the token is what the file writes, the control mode what it means
+                            "normalization": [{"step": "derive", "rule_id": OPEN_CIRCUIT_RULE_ID, "from": reading.token,
+                                               "to": CONTROL_MODE_VALUE, "unit": None}]}]))
+            continue
+        if any(k[0] == rid and k[1] == SETPOINT_PATH and k[2] == NAME_POTENTIAL_KEY for k in have):
+            continue  # the engine's own reading of the name
+        if reading.kind == fn.NAME_PULSED:
+            levels = ", ".join(f"{lv.token} ({_volts(lv.volts):g} V)" for lv in reading.levels)
+            reason = (f"The file name writes {len(reading.levels)} potential levels ({levels}), marked Pos / Neg: a pulsed "
+                      "step between them, not one potential held during the scan. No set-point is offered: say the value "
+                      "the record should carry, or leave the set-point out.")
+            out.append(suggested_candidate(
+                engine_id=f"{run['run_key']}::{NAME_POTENTIAL_RULE_ID}", bundle_cid=cid, run_id=rid, key=NAME_POTENTIAL_KEY,
+                path=SETPOINT_PATH, value=None, rule_id=NAME_POTENTIAL_RULE_ID, rule=NAME_POTENTIAL_RULE, reason=reason,
+                witnesses=[token_witness(lv.index, lv.token, lv.volts, fn.RULE_PULSED_LEVELS, False) for lv in reading.levels],
+                writable=writable))
+            continue
+        if run.get("source_type") != B.XDC_RUN_SOURCE_TYPE:
+            continue  # the engine reads this run's name; it gave no set-point (a refused or unread stem): nothing is added
+        volts = _volts(reading.volts)
+        value: float | None = volts
+        signed = reading.rule == fn.RULE_SIGNED_POTENTIAL
+        read = (f"Read from the file name's token {reading.token}"
+                + (" (a leading m or - is a minus sign)" if signed else "") + f": {volts:g} V.")
+        if abs(volts) > NAME_POTENTIAL_MAX_V:
+            value = None
+            reason = (f"The file name's token {reading.token} reads as {volts:g} V, larger than an electrode potential is "
+                      "(it may be a detector or supply voltage), so it is not offered: tell me the potential held during "
+                      "this scan, or say none applies.")
+        elif review["relation"] == "differs":
+            value, reason = None, comment_differs_reason(review)
+        elif review["relation"] == "agrees":
+            m = review["mentions"][0]
+            reason = (f"{read} A comment line of the same run writes the same potential ({m['literal']!r}, {_where(m)}), "
+                      f"which confirms the reading. {CONFIRM_OR_CORRECT}")
+        else:
+            pairs = [p for p in review["sign_pairs"] if p["run_id"] != rid]
+            if signed and pairs:
+                p = pairs[0]
+                confirmed = (f" In this import {len(pairs)} run(s) write the same sign both ways (for example {p['token']} "
+                             f"in the name of {p['name']} beside {p['literal']!r} in its comment line), which confirms "
+                             "that the letter is a minus sign here.")
+            elif signed:
+                confirmed = (" No comment line in this import writes the same potential with a minus sign, so the sign "
+                             "rests on the naming convention alone: check it.")
+            else:
+                confirmed = ""
+            reason = f"{read}{confirmed} No comment line of this run states the potential. {CONFIRM_OR_CORRECT}"
+        earlier = [token_witness(e.index, e.token, e.volts, fn.RULE_LAST_POTENTIAL_TOKEN, False) for e in reading.earlier]
+        out.append(suggested_candidate(
+            engine_id=f"{run['run_key']}::{NAME_POTENTIAL_RULE_ID}", bundle_cid=cid, run_id=rid, key=NAME_POTENTIAL_KEY,
+            path=SETPOINT_PATH, value=value, rule_id=NAME_POTENTIAL_RULE_ID, rule=NAME_POTENTIAL_RULE, reason=reason,
+            witnesses=[token_witness(reading.index, reading.token, reading.volts, reading.rule, True), *earlier,
+                       *line_witnesses()],
+            writable=writable))
     return out

@@ -1392,9 +1392,16 @@ def consolidate(bundle: Mapping, *, compositions_out: dict | None = None, includ
                 "targets": [{"kind": "experiment", "id": "experiment"}],
                 "per_scope_targets": {"experiment": ["experiment"]},
                 "hints": [{"kind": "local_clock_literal", **zq["example"],
-                           "note": "The header's own words: a local clock time with no zone. A hint about WHAT is asked, never an answer."}],
+                           "note": "The header's own words: a local clock time with no zone. A hint about WHAT is asked, never an answer."}]
+                + [{"kind": "clock_offset_pair", "rule_id": B.CLOCK_OFFSET_RULE_ID, **p,
+                    "note": ("A SPEC header writes one instant as UTC (#E) and as local clock time (#D): their difference "
+                             "is the offset of the clock that wrote it."
+                             + ("" if (zq.get("suggestion") or {}).get("value") is not None else
+                                " It is the SPEC computer's clock; the clock this question asks about may differ."))}
+                   for p in ((zq.get("suggestion") or {}).get("pairs") or ())],
                 "allowed_values": None,
-                "suggested_value": None,
+                "suggested_value": (zq.get("suggestion") or {}).get("value"),
+                **({"suggestion": {k: v for k, v in zq["suggestion"].items() if k != "pairs"}} if zq.get("suggestion") else {}),
                 "answer_command": (f'isaac bundle decide <bundle_dir> --question {qid} --decision {B.CLOCK_ZONE_DECISION} '
                                    '--value <IANA time-zone name> --by "<your name>"'),
                 **({"deferred": deferred} if (deferred := _clock_zone_deferral(bundle)) else {}),
@@ -3504,6 +3511,14 @@ def _absorber_hints(items: Sequence[tuple[Mapping, dict]]) -> list[dict]:
         hints.append({"kind": "processed_output_header", "literal": f"{el or '?'} {ed or '?'}",
                       "locator": po[0].get("locator"), "relative_path": po[0].get("relative_path"), "source_id": po[0].get("source_id"),
                       "note": f"from {n} linked processed output(s) (e.g. this one; an output can be linked to runs of several groups); links are proposed by name, not confirmed"})
+    scanned = [w for _, s in items for w in s["witnesses"] if w["kind"] == "scanned_range"]
+    if scanned:
+        w = scanned[0]
+        hints.append({"kind": "scanned_range", "literal": f"{w.get('element') or '?'} {w.get('edge') or '?'}",
+                      "locator": w.get("locator"), "relative_path": w.get("relative_path"), "source_id": w.get("source_id"),
+                      "rule_id": w.get("rule_id"),
+                      "note": (f"from the energy grid of {len(scanned)} run(s)' own scans (e.g. this one: "
+                               f"{w.get('literal')}): the finest steps bracket this edge")})
     seen = set()
     for _, s in items:
         for w in s["witnesses"]:
@@ -3625,11 +3640,19 @@ def _absorber_questions(bundle: Mapping, groups: Sequence[Mapping], *, include_a
             own = sum(1 for _, s in items if s['group_specific_statements'])
             statements = items[0][1]['beamtime_wide_statements']
             # r4-b L3: the rest counted in groups, the statements apart ("the rest (2, …)" read as two groups of eight)
-            text = (f"The files state element {element}, edge {edge} for {len(items)} group(s), and no file disagrees: "
-                    f"{own} of them from processed outputs linked to their runs, "
-                    f"the rest only from beamtime-wide statements: {len(items) - own} group(s), from {statements} "
-                    "statement(s) (e.g. an acquisition macro's name). "
-                    "Is that the absorber? Answer once, or per group (a reference foil or blank cell may differ).")
+            only_grid = all(w["kind"] == "scanned_range" for _, s in items for w in s["witnesses"])
+            text = (f"Element {element}, edge {edge} is suggested from the scans' energy grid for {len(items)} group(s) "
+                    "(the finest energy steps of each group's own scans bracket that edge; no file states the absorber), "
+                    "and no scan disagrees. "
+                    "Is that the absorber? Answer once, or per group (a reference foil or blank cell may differ)."
+                    if only_grid else
+                    f"The files state element {element}, edge {edge} for {len(items)} group(s), and no file disagrees: "
+                    f"{own} of them from processed outputs linked to their runs"
+                    + (" or from their own scans' energy grid" if any(w["kind"] == "scanned_range" for _, s in items for w in s["witnesses"]) else "")
+                    + (", "
+                       f"the rest only from beamtime-wide statements: {len(items) - own} group(s), from {statements} "
+                       "statement(s) (e.g. an acquisition macro's name). " if own < len(items) else ". ")
+                    + "Is that the absorber? Answer once, or per group (a reference foil or blank cell may differ).")
         else:
             partial = sum(1 for _, s in items for r in s["ai_readings"] if r.get("read_for"))
             text = (f"Element {element}, edge {edge} is suggested for {len(items)} group(s): "
@@ -4825,10 +4848,14 @@ def stated_potentials_beyond_candidates(bundle: Mapping, member_ids: set) -> lis
         if (e.get("run_id") in run_ids and B.is_xdc_comment_line(e.get("concept"), e.get("locator"))
                 and isinstance(e.get("raw_literal"), str) and (e["run_id"], e.get("relative_path"), e.get("locator")) not in held):
             headers.setdefault(e["run_id"], []).append(e)
+    # a name token a candidate holds (``suggestions.NAME_POTENTIAL_RULE_ID``) is stated by that candidate
+    named = {(c.get("run_id"), e.get("literal_value")) for c in bundle.get("candidates") or ()
+             if c.get("run_id") in run_ids and c.get("target_field_path") == "context.electrochemistry.potential_setpoint_V"
+             for e in c.get("evidence") or () if str(e.get("locator") or "").startswith("filename token")}
     for r in runs:
         first = next((sc.get("relative_path") for sc in r.get("scans") or () if sc.get("relative_path")), None)
         found = [("file name", tok, first, "file name", None, _token_volts(tok))
-                 for tok in _name_tokens(r) if _POTENTIAL_TOKEN.match(tok)]
+                 for tok in _name_tokens(r) if _POTENTIAL_TOKEN.match(tok) and (r["run_id"], tok) not in named]
         for e in headers.get(r["run_id"], ()):
             for got in header_potentials_in_line(e["raw_literal"]):  # `-0.3 V vs RHE` as well as `0.5Vrhe`
                 found.append(("scan header", got["literal"], e.get("relative_path"), e.get("locator"), got["scale"], got["volts"]))
@@ -4862,11 +4889,14 @@ def stated_potential_notes(w: Mapping) -> str:
     lits = list(dict.fromkeys(stated_literal(s) for s in header))
     held = all(s.get("candidate_id") for s in header)  # c16b: the comment rule's candidates hold the lines
     read = held and any(s.get("read_as_V") is not None for s in header)  # r1d: a value, read from a plain form
+    withheld = held and not read and any(s.get("withheld") for s in header)  # 1.16.0: plain, but not offered
     text = (f" {', '.join(lits[:3])}{', …' if len(lits) > 3 else ''} {'is' if len(lits) == 1 else 'are'} written in the "
             "scan header (a comment line), not the file name"
             + ((f", with the scale ({', '.join(scales)})" if scales else "")
                + "; read from that free-text line, the set-point" + (" and the scale" if scales else "")
                + " need your review (confirm or correct)" if read else
+               "; its value is not offered (the file name writes another number, or the line is possibly an earlier "
+               "run's), so the set-point is asked: the value held during the scan" if withheld else
                "; no value is read from that free-text line (not written in a plain form), so the set-point is asked: "
                "the value held during the scan" if held else
                f", with the scale ({', '.join(scales)}); no reader reads the set-point or the scale from it, so both "

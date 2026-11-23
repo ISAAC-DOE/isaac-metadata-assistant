@@ -20,15 +20,17 @@ from tests_support_records import BY, pristine_bundle  # noqa: F401
 
 
 def test_the_version_follows_1_14_0_by_the_existing_mechanism():
-    assert B.FORMAT_VERSION == "1.15.0" == B._VERSION_ORDER[-1] and B._VERSION_ORDER[-2] == "1.14.0"
+    # 1.16.0 follows it (test_local_import_format_1_16.py)
+    assert B._VERSION_ORDER.index("1.15.0") == B._VERSION_ORDER.index("1.14.0") + 1
     schema = B.bundle_schema()
-    assert schema["properties"]["format_version"]["enum"][-2:] == ["1.14.0", "1.15.0"]
+    enum = schema["properties"]["format_version"]["enum"]
+    assert enum.index("1.15.0") == enum.index("1.14.0") + 1
     assert "1.15.0" in schema["properties"]["format_version"]["description"]
     blocks = [b for b in schema.get("allOf") or ()
               if (b.get("if") or {}).get("properties", {}).get("format_version", {}).get("const") == "1.15.0"]
     assert blocks and blocks[0]["then"]["required"] == ["processed_outputs"]
     assert B.EXPORT_ANYWAY_DECISION in schema["$defs"]["scientist_decision"]["properties"]["decision"]["enum"]
-    assert B.changes_since("1.14.0") == [B.CHANGES_ADDED_IN["1.15.0"]]
+    assert B.changes_since("1.14.0")[0] == B.CHANGES_ADDED_IN["1.15.0"]  # and each later version's, after it
 
 
 @pytest.fixture()

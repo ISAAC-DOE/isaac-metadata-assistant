@@ -92,7 +92,9 @@ def test_the_same_reading_reply_names_each_members_file(shared):
     q = next(q for q in _setpoint_questions(M.load(shared)) if q.get("same_reading_group"))
     got = M.decide_question(shared, question_id=q["question_id"], same_reading=True, decision="correct", value=-0.6,
                             by=WHO, orcid=None)
-    assert len(got["recorded"]) == 2
+    # each run's question holds its comment line's candidate and (1.16.0, suggestions.NAME_POTENTIAL_RULE_ID) its
+    # name's: one answer records both, for each of the two runs
+    assert len(got["recorded"]) == 4
     assert [m["file_name"] for m in got["same_reading_members"]] == [f"{SIX}_A.001", f"{SIX2}_A.001"]
     assert f"--same-reading answered 2 question(s), for: {SIX}_A.001, {SIX2}_A.001." in got["statement"]
 
@@ -299,14 +301,16 @@ def test_a_cell_adopted_before_mentions_were_compared_is_recorded_with_the_menti
 def test_one_exp_shared_by_a_folders_runs_is_said_to_be_a_template(tmp_path):
     src = tmp_path / "SYN_bt43"
     d = src / "mixed"
-    for stem in ("SYNti_m600mV_096", "SYNti_m600mV_097", "SYNfoo_dry_001"):
+    # names with no potential: since 1.16.0 a name's potential is a classified condition (suggestions.
+    # NAME_POTENTIAL_RULE_ID), and this caution is about groups whose files classify nothing
+    for stem in ("SYNti_dry_096", "SYNti_dry_097", "SYNfoo_wet_001"):
         make_scan(d / f"{stem}_A.001", free_text=("SYN gain 1e8", "SYN comment"))
-    (d / "template.exp").write_text("DATA_FILE SYNti_m600mV\n")
+    (d / "template.exp").write_text("DATA_FILE SYNti_dry\n")
     b = M.load(_import(src, tmp_path / "bundle"))
     [mc] = b["merge_candidates"]
     [caution] = [c for c in mc["caution"] if c["code"] == G.CAUTION_NOTHING_CLASSIFIED]
     assert caution["data_file_shared"] == ["mixed/template.exp"]
-    assert ("one .exp in their folder (mixed/template.exp) names SYNti_m600mV (DATA_FILE); that is a template, not "
+    assert ("one .exp in their folder (mixed/template.exp) names SYNti_dry (DATA_FILE); that is a template, not "
             "evidence they are one measurement") in caution["statement"]
     assert "merging them could make one wrong record" in caution["statement"]
     assert "each run's own .exp" not in caution["statement"]

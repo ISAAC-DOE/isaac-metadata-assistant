@@ -166,7 +166,7 @@ def test_the_validator_refuses_an_average_run_and_a_forged_average_output(b):
 
 
 def test_a_1_12_0_bundle_holding_average_runs_validates_and_its_first_save_says_reimport(tmp_path, capsys, monkeypatch):
-    monkeypatch.setattr(B, "is_average_title", lambda literal: False)  # what a 1.12.0 build made: the averages as runs
+    monkeypatch.setattr(B, "is_average_title", lambda literal, **_: False)  # what a 1.12.0 build made: the averages as runs
     out = tmp_path / "old"
     old = _import(_beamtime(tmp_path / "src"), out, capsys)
     monkeypatch.undo()

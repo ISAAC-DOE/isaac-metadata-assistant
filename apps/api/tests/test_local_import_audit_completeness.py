@@ -134,7 +134,9 @@ def pristine(tmp_path_factory):
         tmp = tmp_path_factory.mktemp("completeness")
         runs = [("01_SYN_ZZ1_base_060mV", 9, [T.scan_cols(10 + k) for k in range(4)]),
                 ("02_SYN_ZZ1_base_120mV", 10, [T.scan_cols(40 + k) for k in range(4)]),
-                ("03_SYN_ZZ1_base_OCV", 11, [T.scan_cols(60 + k) for k in range(4)])]
+                # no OCV token: since 1.16.0 an OCV name suggests the control mode open_circuit, a condition that
+                # keeps this group apart of its own (isaac.suggest.name_open_circuit.v1); this group states none
+                ("03_SYN_ZZ1_base", 11, [T.scan_cols(60 + k) for k in range(4)])]
         root = tmp / "SYN_beamtime"
         T.write_beamtime(root, runs)
         out = tmp / "out"
@@ -198,7 +200,7 @@ def test_one_beamtime_question_asks_the_potential_scale_of_the_groups_that_state
     q = Q.question(payload, Q.potential_scale_question_id())
     g060, g120, gocv = (_group_of(bdir, p) for p in ("01_", "02_", "03_"))
     assert q["scope"] == "experiment" and q["kind"] == "missing_value" and q["target_field_path"] == SCALE
-    assert set(q["per_scope_targets"]) == {f"group:{g060}", f"group:{g120}"}       # never the open-circuit group
+    assert set(q["per_scope_targets"]) == {f"group:{g060}", f"group:{g120}"}       # never the group whose name states none
     assert q["applies_to"]["groups"] == 2 and q["applies_to"]["groups_not_reached"] == 1
     assert "confirm" not in q["allowed_decisions"] and q["hints"] == []            # nothing is suggested: no file states it
     assert "RHE" in q["allowed_values"] and "01_SYN_ZZ1_base_060mV" in q["text"]

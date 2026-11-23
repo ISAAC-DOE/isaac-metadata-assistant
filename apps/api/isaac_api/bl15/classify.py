@@ -129,6 +129,58 @@ _STANDARD_STEM = re.compile(
 )
 _NOTES_STEM = re.compile(r"(?:herfd|notes|beam\s*\d|bl\s*15)", re.IGNORECASE)
 
+# A SCAN TITLE THAT IS NOT A SCAN (audit of 18 Nov 2026, rule 5). A SPEC acquisition's `#S` line names the command it
+# ran (`#S 1 gscan mono ...`). The scientists' PyMca exports write the same SPEC header, `#F` included, but their
+# `#S` names the scans they were computed from: an average (`#S 1 Average of 8 from A 1.1 vortDT to A 8.1 vortDT`),
+# an arithmetic expression (`#S 1 (A 3.1 DTC_FF1 + A 1.1 DTC_FF1)/2`) or a normalised copy (`#S 1 Norm. (A 1.1 FF1
+# + ...)`, `#S 1 Norm. A 3.1 Y`). Measured on three real beamtimes: 76 such files, each made a run (with questions)
+# of its own. A term is `<scan file name> <scan>.<column> <counter>`; nothing else in the title is interpreted.
+PROCESSED_TITLE_RULE_ID = "bl15.classify.processed_scan_title.v1"
+_SCAN_TERM = r"\S+\s+\d+\.\d+\s+\S+"
+_PROCESSED_TITLE = re.compile(
+    r"^(?:S\s+)?\d+\s+(?:"
+    r"Average of \d+ from\s+\S"                                   # PyMca's average of N spectra
+    r"|(?:Norm\.\s*)?\(\s*(?:Norm\.\s+)?" + _SCAN_TERM + r"\s*(?:[-+*/]|\))"  # an expression over named scans
+    r"|Norm\.\s+" + _SCAN_TERM +                                   # a normalised copy of one named scan
+    r")",
+    re.IGNORECASE,
+)
+#: a term: a WHOLE whitespace-delimited name (an opening parenthesis aside), then `<scan>.<column> <counter>`. Never
+#: a name cut at a `+`, `(` or `/` inside it (review of PR 346, I1: `SYN+C_01` is not `C_01`)
+_TITLE_TERM = re.compile(r"(?<!\S)\(*([^\s(][^\s]*?)\s+(\d+)\.\d+\s+[^\s()+*/]+")
+_AVERAGE_RANGE = re.compile(
+    r"Average of \d+ from\s+(?:Norm\.\s+)?(\S+)\s+(\d+)\.\d+\s+\S+\s+to\s+(?:Norm\.\s+)?(\S+)\s+(\d+)\.\d+\s+\S+",
+    re.IGNORECASE)
+
+
+_GLUED_OPERATOR = re.compile(r"[^\s()][+*/][^\s()\d]")
+
+
+def is_processed_scan_title(title: object) -> bool:
+    """True for a ``#S`` title (the text after ``#S``: ``1 (A 3.1 X + A 1.1 X)/2``) that names other scans instead of
+    a command: an average, an arithmetic expression or a normalised copy (:data:`PROCESSED_TITLE_RULE_ID`)."""
+    return isinstance(title, str) and bool(_PROCESSED_TITLE.match(title.strip()))
+
+
+def processed_title_scans(title: object) -> list[tuple[str, int]]:
+    """``[(scan file name, scan number)]`` a processed title names, in order, each once (``[]`` for another title).
+    ``Average of N from A 1.1 X to A 8.1 X`` names scans 1..8 of A. Only to LINK an output to its run."""
+    if not is_processed_scan_title(title):
+        return []
+    text = str(title).strip()
+    span = _AVERAGE_RANGE.search(text)
+    if span and span.group(1) == span.group(3) and int(span.group(2)) <= int(span.group(4)) <= int(span.group(2)) + 10_000:
+        return [(span.group(1), n) for n in range(int(span.group(2)), int(span.group(4)) + 1)]
+    body = re.sub(r"^(?:S\s+)?\d+\s+(?:Average of \d+ from\s+)?", "", text, flags=re.IGNORECASE)
+    if _GLUED_OPERATOR.search(body):
+        return []  # `A+B 1.1 X`: a name holding an operator, or an operator with no space: never cut, never linked
+    return list(dict.fromkeys((m.group(1), int(m.group(2))) for m in _TITLE_TERM.finditer(body)))
+
+
+def _first_scan_title(lines: list[str]) -> str | None:
+    line = next((x for x in lines if x.startswith("#S ") or x.startswith("#S\t")), None)
+    return line[2:].strip() if line is not None else None
+
 
 def _significant_lines(head_text: str, limit: int = 400) -> list[str]:
     """Non-blank lines of the head, in order, bounded."""
@@ -215,6 +267,19 @@ def classify(
     #    single most reliable marker in this corpus and the one that rescues
     #    `alignment`.
     if has_F:
+        title = _first_scan_title(lines)
+        if is_processed_scan_title(title):
+            # CONTENT BEFORE THE NAME: the file says it was computed from other scans, whatever it is called
+            shown = title if len(title) <= 160 else title[:157] + "..."
+            return Classification(
+                source_type=SOURCE_TYPE_PROCESSED_SPECTRUM,
+                reason=(
+                    "a processed spectrum in SPEC format: it declares a file name with `#F`, but its first scan "
+                    f"title names the scans it was computed from instead of a command (`#S {shown}`), so it is "
+                    f"the scientists' average or normalised copy, never an acquisition ({PROCESSED_TITLE_RULE_ID})"
+                ),
+                confidence=CONFIDENCE_CONTENT,
+            )
         if _ALIGNMENT_STEM.search(stem):
             return Classification(
                 source_type=SOURCE_TYPE_ALIGNMENT,

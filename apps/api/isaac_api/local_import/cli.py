@@ -341,6 +341,8 @@ def render_summary(bundle: Mapping) -> str:
     )
     if counts.get(B.HEADER_COMMENT_RUNS_NOT_READ):
         add(f"  - {B.header_comment_runs_not_read_text(counts[B.HEADER_COMMENT_RUNS_NOT_READ])}")
+    if counts.get(B.NOT_A_CONFLICT_COUNT):
+        add(f"  - {B.not_a_conflict_text(counts[B.NOT_A_CONFLICT_COUNT])}")
     add(f"- People named in the sources: {counts['contributors']} (evidence, not the naming profile)")
     groups = bundle.get("record_groups") or []
     if groups or bundle.get("processing_results"):
@@ -1940,7 +1942,7 @@ def cmd_bundle_check(args) -> int:
         print("  Remedy: any change re-derives it under this build and logs each value in `eligibility_rederived`; "
               "`isaac bundle build-records` does that under the bundle lock before composing.")
         if B.needs_format_upgrade(bundle):
-            print(f"  On that write: {B.upgrade_statement(bundle.get('format_version'), B._added_since(bundle.get('format_version')), B.import_rules_missing(bundle), B.quick_merge_runs(bundle), B.average_title_runs(bundle))}.")
+            print(f"  On that write: {B.upgrade_statement(bundle.get('format_version'), B._added_since(bundle.get('format_version')), B.import_rules_missing(bundle), B.quick_merge_runs(bundle), B.average_title_runs(bundle), B.processed_title_runs(bundle))}.")
         else:  # the same format: only the export target's allowed values re-derive them (bundle.allowed_list_rederivations)
             print("  On that write: the format stays the same; only these values' eligibility is re-derived and logged.")
         _print_non_finite(bundle)

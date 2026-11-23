@@ -133,7 +133,9 @@ def test_the_warning_names_each_sources_scale_never_the_same_scale(imported):
     # c16-r M3: a scale missing on one side is never "different potentials"
     assert f"({rid}: file name m150mV, scan header '-300mV vs RHE' (file name: no scale; scan header: RHE))" in text
     assert "different potentials" not in text
-    assert "read from that free-text line, the set-point and the scale need your review" in text
+    # 1.16.0: the name writes another number (suggestions.NAME_POTENTIAL_RULE_ID), so the line's value is withheld
+    # and the warning says why, never that the line was not written in a plain form
+    assert "its value is not offered (the file name writes another number" in text and "plain form" not in text
 
 
 def test_neither_scale_stated_is_said_so():
