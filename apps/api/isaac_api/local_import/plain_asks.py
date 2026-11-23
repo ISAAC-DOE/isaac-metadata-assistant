@@ -31,6 +31,8 @@ KEYS = ("ask", "answer", "suggested", "about", "plain_detail")
 #: ``answer.options_total`` (the field's whole list is in ``allowed_values_by_field``).
 _SHOW_OPTIONS = P.COMMON_FROM
 _ABOUT_ITEMS = 2
+#: What the opt-in answer memory adds to a question (answer_memory.annotate): never read for a plain field.
+_MEMORY_KEYS = ("earlier_answers", "earlier_answers_statement")
 
 
 def _unit(q: Mapping) -> dict:
@@ -191,8 +193,12 @@ def plain_fields(view: S._View, q: Mapping) -> dict:
 
 def annotate(page: Sequence[Mapping], bundle: Mapping, bundle_dir: Path, payload: Mapping) -> list[dict]:
     """``page`` with each question's plain keys added (a question with no plain wording is returned as it was)."""
-    view = S._View(bundle, Path(bundle_dir), {**payload, "questions": list(page)})
-    return [{**q, **plain_fields(view, q)} for q in page]
+    # THE EARLIER-ANSWER MEMORY (answer_memory, opt-in) NEVER CHANGES A PLAIN FIELD: its hint stays in `earlier_answers`,
+    # labelled as an earlier answer, and is not a suggestion from the files. The fields are built from the question as
+    # it is without the memory, so ask / answer / suggested are the same whether the memory is on or off.
+    bare = [{k: v for k, v in q.items() if k not in _MEMORY_KEYS} for q in page]
+    view = S._View(bundle, Path(bundle_dir), {**payload, "questions": bare})
+    return [{**q, **plain_fields(view, b)} for q, b in zip(page, bare)]
 
 
 def missing(page: Sequence[Mapping]) -> int:
@@ -251,6 +257,9 @@ def render(report: Mapping, *, detail: bool = False) -> str:
                 more = int(s.get("evidence_more") or 0)
                 lines.append(f"   Quoted: '{quote.get('quote')}'" + (f" ({where})" if where else "")
                              + (f", and {more} more quote{'s' if more != 1 else ''}" if more else ""))
+        for e in q.get("earlier_answers") or ():  # the opt-in memory, shown as what it is: an earlier answer
+            lines.append(f"   Earlier answer: {e.get('value')}"
+                         + (f" ({e.get('by') or 'a scientist'}, {e['date']})" if e.get("date") else ""))
         if q.get("plain_detail"):
             lines.append(f"   {q['plain_detail']}")
         if detail or "ask" not in q:

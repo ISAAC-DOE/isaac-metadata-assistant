@@ -302,3 +302,19 @@ def test_the_counter_ask_says_how_to_name_one_part(grouped):
 def test_unread_athena_rows_and_the_import_agree_that_nothing_reads_them():
     """Finding 9: no marker says a later command reads an Athena project."""
     assert "never read" in cli.ATHENA_NOTE and not hasattr(cli, "READ_LATER_BY_SUFFIX")
+
+
+def test_the_answer_memory_never_changes_a_plain_field(grouped):
+    """An earlier answer stays in `earlier_answers`; it is never `suggested`, and no plain field differs with it present."""
+    b = M.load(grouped)
+    payload = Q.consolidate(b)
+    page = [q for q in payload["questions"] if q.get("target_field_path") == "sample.sample_form"][:1]
+    hinted = [{**q, "earlier_answers": [{"field": "sample.sample_form", "value": "pellet", "by": "A", "date": "2026-01-01",
+                                        "matched_on": "x", "entry_id": "e1"}]} for q in page]
+    plain = PA.annotate(page, b, grouped, payload)
+    with_memory = PA.annotate(hinted, b, grouped, payload)
+    for key in PA.KEYS:
+        assert plain[0].get(key) == with_memory[0].get(key)
+    assert (with_memory[0].get("suggested") or {}).get("basis") != "earlier_answer"
+    text = PA.render({"questions": with_memory, "total": 1, "counts": {}})
+    assert "Earlier answer: pellet (A, 2026-01-01)" in text
