@@ -585,3 +585,34 @@ def test_on_the_file_name_token_basis_the_first_answer_keeps_the_sample_question
     assert Q.question(after, second)["asked_for_sample_by"] == fam["question_id"]
     # every id still open was open before, under the same id
     assert set(_open_ids(bdir)) <= set(before)
+
+
+def test_once_only_an_electrode_asked_again_is_open_the_sample_question_points_at_it(grouped, monkeypatch):
+    """ZZ1: electrodes 02 and 03 answered with values the record takes, then 01's earlier answer can no longer go into
+    the record. The sample question has nothing left to record on; deciding it names the one question still open."""
+    fam, members = _zz1(grouped)
+    assert [m["question_id"] for m in members] == ["Q-06a397dcc5", "Q-18c613534f", "Q-ff5ccd4538"]
+    assert Q.consolidate(M.load(grouped))["counts"]["blocking"] == 11
+    for m, value in ((members[1], "SYN second oxide"), (members[2], "SYN third oxide"), (members[0], UNFIT)):
+        M.decide_question(grouped, question_id=m["question_id"], decision="correct", value=value, by=WHO, orcid=None)
+    B = _unfit_from_now_on(monkeypatch)
+    b = M.load(grouped)
+    B.apply_derivations(b)
+    M.save_bundle(grouped, b)
+    payload = Q.consolidate(M.load(grouped))
+    assert Q.question(payload, fam["question_id"]) is None and Q.question(payload, "Q-06a397dcc5")["asked_again"]
+    assert payload["counts"]["blocking"] == 11
+    with pytest.raises(M.MutationRefused) as refused:
+        M.decide_question(grouped, question_id=fam["question_id"], decision="correct", value="SYN shared oxide",
+                          by=WHO, orcid=None)
+    said = str(refused.value)
+    assert "Still open: question Q-06a397dcc5 (asked again" in said and "--question Q-06a397dcc5" in said
+    assert "Q-18c613534f" not in said and "Q-ff5ccd4538" not in said and "Nothing was recorded." in said
+    assert _latest_value(grouped, members[0]["targets"][0]["id"]) == UNFIT
+    # answered again with a value the record takes: the sample question, answered, has all three members again
+    M.decide_question(grouped, question_id="Q-06a397dcc5", decision="correct", value="SYN first oxide", by=WHO,
+                      orcid=None)
+    answered = Q.question(Q.consolidate(M.load(grouped), include_answered=True), fam["question_id"])
+    assert answered["sample_family"]["member_questions"] == [m["question_id"] for m in members]
+    assert "kept_apart" not in answered["sample_family"]
+    assert Q.consolidate(M.load(grouped))["counts"]["blocking"] == 10

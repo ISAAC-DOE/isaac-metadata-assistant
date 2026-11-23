@@ -2582,6 +2582,16 @@ def decide_question(
                 still_open = {t["id"] for q in (open_payload or {}).get("questions") or () for t in q.get("targets") or ()}
                 found = [t for t in found if t in still_open]
                 if not found:
+                    # review of 162bd039: an electrode asked again (its earlier answer the record cannot take) is kept
+                    # apart from the sample question; when it is what is still open, name it, and only it
+                    open_ids = {q["question_id"] for q in (open_payload or {}).get("questions") or ()}
+                    again = [q for q in asked["sample_family"].get("kept_apart") or () if q in open_ids]
+                    if again:
+                        raise MutationRefused(
+                            f"Every target sample question {question_id} records on is answered already, and it never "
+                            f"changes an answer. Still open: question {', '.join(again)} (asked again: its earlier "
+                            "answer cannot go into the record); answer it on its own question (`isaac bundle decide "
+                            f"<bundle_dir> --question {again[0]} ...`). Nothing was recorded.", code=6)
                     own = ", ".join(asked["sample_family"].get("member_questions") or ())
                     raise MutationRefused(
                         f"Every target of sample question {question_id} is answered already, and it never changes an "
