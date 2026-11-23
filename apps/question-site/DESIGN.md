@@ -233,6 +233,10 @@ Quietly solid, sized for a laptop trackpad.
 - **Disabled:** 55% opacity.
 - **Transitions:** background and border, 120ms ease-out.
 
+### Answer choices (the flashcard flow)
+
+The page opens straight on the first open question and moves through them like flashcards. Every answer is a full-width choice button (56px tall, 12px radius, 18px label) with a numbered key chip; the keys 1–9 pick the matching choice. The suggested answer comes first with a 2px Form Blue border and a "Suggested" pill. One click saves the answer, the choice turns Saved Green with a drawn check, and the next card slides in (220ms, from 10px right; none under reduced motion). Short answer lists (up to three beyond the common ones) are shown whole; longer ones sit behind "More answers (N)". A thin blue bar above the card shows how far through the questions the person is.
+
 ### Links and disclosures
 - **Quiet links:** blue 550 text, no underline at rest, underline on hover (offset 3px). "I don't know" and "Skip for now" share a row under a hairline; chosen "I don't know" turns ok green.
 - **Disclosures:** blue summary with the drawn chevron (160ms rotate), no native marker. Used for "More answers (N)", "Add a note" and "Show the evidence and context".

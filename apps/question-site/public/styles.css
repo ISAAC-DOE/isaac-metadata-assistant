@@ -922,3 +922,160 @@ th.num {
 .options.stack .btn {
   white-space: normal;
 }
+
+/* ---- flashcard flow ----------------------------------------------------------------------------------------- */
+
+.flow {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  margin: 0 4px 14px;
+}
+.flow-count {
+  font-size: 15px;
+  font-weight: 600;
+  color: var(--ink-2);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+.flow .bar {
+  flex: 1;
+  margin-top: 0;
+  height: 6px;
+}
+.flow .bar i {
+  background: var(--action);
+}
+
+.context {
+  margin-top: 16px;
+}
+.context .why {
+  color: var(--ink-2);
+  max-width: 64ch;
+}
+.context .confidence {
+  color: var(--ink);
+  font-weight: 600;
+}
+
+.choices {
+  margin-top: 24px;
+  display: grid;
+  gap: 10px;
+}
+.more-options .choices {
+  margin-top: 0;
+}
+.choice {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  width: 100%;
+  min-height: 56px;
+  padding: 12px 18px;
+  border: 1px solid var(--control-line);
+  border-radius: 12px;
+  background: var(--card);
+  color: var(--ink);
+  font-size: 18px;
+  font-weight: 550;
+  line-height: 1.35;
+  text-align: left;
+  cursor: pointer;
+  transition: background-color 120ms ease-out, border-color 120ms ease-out, transform 120ms ease-out;
+}
+.choice:hover {
+  background: var(--sunk);
+  border-color: var(--ink-3);
+}
+.choice:active {
+  transform: scale(0.995);
+}
+.choice:disabled {
+  cursor: default;
+}
+.choice .key {
+  flex: none;
+  display: inline-grid;
+  place-items: center;
+  width: 28px;
+  height: 28px;
+  border: 1px solid var(--line-strong);
+  border-radius: 7px;
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--ink-2);
+  font-variant-numeric: tabular-nums;
+}
+.choice .choice-label {
+  flex: 1;
+  overflow-wrap: anywhere;
+}
+.choice .tag {
+  flex: none;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--action);
+  background: var(--action-tint);
+  border-radius: 999px;
+  padding: 3px 10px;
+}
+.choice.is-suggested {
+  border-color: var(--action);
+  border-width: 2px;
+  padding: 11px 17px;
+}
+.choice.is-chosen {
+  background: var(--ok-bg);
+  border-color: var(--ok);
+  color: var(--ok);
+}
+.choice.is-chosen .key {
+  border-color: var(--ok);
+  color: var(--ok);
+}
+.choice.is-chosen .tag {
+  display: none;
+}
+.choice.is-chosen::after {
+  content: '';
+  flex: none;
+  width: 14px;
+  height: 8px;
+  border-left: 2px solid currentColor;
+  border-bottom: 2px solid currentColor;
+  transform: translateY(-2px) rotate(-45deg);
+  margin-right: 4px;
+}
+
+.card .typed {
+  margin-top: 12px;
+}
+
+.answered-by {
+  margin-top: 16px;
+  font-size: 15px;
+  color: var(--ink-3);
+}
+
+.pager .linklike {
+  font-size: 16px;
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  .card.enter {
+    animation: card-in 220ms cubic-bezier(0.16, 1, 0.3, 1);
+  }
+  @keyframes card-in {
+    from {
+      opacity: 0.4;
+      transform: translateX(10px);
+    }
+  }
+}
+
+/* the heading takes focus when a card arrives (for screen readers); it is not a control, so no ring */
+h1[tabindex='-1']:focus {
+  outline: none;
+}

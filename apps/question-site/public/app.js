@@ -25,6 +25,7 @@ const state = {
 
 let advanceTimer = null;
 let lastRenderAt = 0;
+let lastCardShown = null;
 
 function pref(key, fallback) {
   try {
@@ -180,7 +181,13 @@ async function load() {
       state.view = 'card';
       render({ keepFocus: false });
     } else {
-      state.view = 'home';
+      const open = pickRun(state.cards, state.answers, state.cards.length);
+      if (open.length && !standing(card(open[0]), state.answers)) {
+        state.run = { ids: open, index: 0, answered: 0, single: false };
+        state.view = 'card';
+      } else {
+        state.view = 'home';
+      }
       render({ keepFocus: false });
     }
   } catch (err) {
@@ -309,22 +316,9 @@ function progressBlock(label, done, total, unsure = 0) {
 
 function viewHome() {
   const t = tally(state.cards, state.answers);
-  const next = pickRun(state.cards, state.answers, state.runSize);
+  const next = pickRun(state.cards, state.answers, state.cards.length);
   const allDone = t.open === 0;
   const first = state.name.split(' ')[0];
-
-  const size = h(
-    'select',
-    {
-      id: 'run-size',
-      onchange: (ev) => {
-        state.runSize = Number(ev.target.value);
-        setPref('qs_run_size', String(state.runSize));
-        render();
-      },
-    },
-    [5, 10, 15, 25].map((n) => h('option', { value: n, selected: n === state.runSize, text: String(n) })),
-  );
 
   const headline = allDone
     ? 'Everything is answered. Thank you.'
@@ -336,7 +330,7 @@ function viewHome() {
     'section',
     { class: 'card' },
     h('h1', { class: 'hello' }, allDone ? null : ['Hi ', typedText(first), '. '], headline),
-    h('p', { class: 'lead', text: 'Most answers are one click. You can stop any time and change an answer later.' }),
+    h('p', { class: 'lead', text: 'One question at a time. Pick an answer and the next one appears. Every answer saves at once, so you can stop whenever you like.' }),
     t.needed ? progressBlock('needed questions answered', t.neededDone, t.needed, t.neededUnsure) : null,
     t.optional ? progressBlock('optional questions answered', t.optionalDone, t.optional) : null,
     allDone
@@ -344,8 +338,7 @@ function viewHome() {
       : h(
           'div',
           { class: 'start' },
-          h('button', { class: 'btn btn-primary', type: 'button', id: 'start', onclick: () => startRun(next), text: next.length === 1 ? 'Answer the next question' : `Answer the next ${next.length}` }),
-          h('label', { for: 'run-size' }, 'Questions per sitting ', size),
+          h('button', { class: 'btn btn-primary', type: 'button', id: 'start', onclick: () => startRun(next), text: t.neededDone + t.optionalDone ? 'Continue answering' : 'Start answering' }),
         ),
   );
 
@@ -596,77 +589,87 @@ function viewCard() {
   const kind = c.answer?.kind || 'text';
   const options = c.answer?.options || [];
   const suggestion = c.suggestion || null;
-  const chosen = (value) => a && a.action !== 'dont_know' && JSON.stringify(a.value) === JSON.stringify(value);
+  const same = (x, y) => JSON.stringify(x) === JSON.stringify(y);
+  const chosenValue = (value) => a && a.action !== 'dont_know' && same(a.value, value);
   const pick = (value, typed = false) => save(c, { action: 'value', value, typed, note: noteValue() });
-  const optionButton = (o, i) =>
-    h('button', { class: `btn${chosen(o.value) ? ' is-chosen' : ''}`, type: 'button', id: `opt-${i}-${String(o.value).slice(0, 40)}`, disabled: busy, 'aria-pressed': chosen(o.value) ? 'true' : 'false', onclick: () => pick(o.value), text: o.label ?? String(o.value) });
+  const accept = () => save(c, { action: 'accept', value: suggestion.value, note: noteValue() });
+  const allowText = kind === 'text' || kind === 'number' || (kind === 'choice' && c.answer.allow_text);
+
+  // ---- the choices, like a quiz: the suggestion first, then the common answers, each one click
+  const visible = [];
+  const hidden = [];
+  if (kind === 'yes_no') {
+    for (const v of [true, false]) {
+      const isSuggested = suggestion && same(suggestion.value, v);
+      visible.push({ value: v, label: v ? 'Yes' : 'No', suggested: isSuggested });
+    }
+  } else {
+    if (suggestion) visible.push({ value: suggestion.value, label: suggestion.label ?? String(suggestion.value), suggested: true });
+    if (kind === 'choice') {
+      const rest = options.filter((o) => !suggestion || !same(o.value, suggestion.value));
+      const common = c.answer.common?.length ? rest.filter((o) => c.answer.common.includes(o.value)) : rest.length <= 5 ? rest : [];
+      for (const o of common.slice(0, 5)) visible.push({ value: o.value, label: o.label ?? String(o.value) });
+      for (const o of rest) if (!visible.some((x) => same(x.value, o.value))) hidden.push({ value: o.value, label: o.label ?? String(o.value) });
+      if (hidden.length && hidden.length <= 3) visible.push(...hidden.splice(0)); // a short list is shown whole
+    }
+  }
+  let n = 0;
+  const choiceButton = (item, numbered) => {
+    const isChosen = Boolean(chosenValue(item.value));
+    const key = numbered && n < 9 ? String(++n) : null;
+    return h(
+      'button',
+      {
+        class: `choice${item.suggested ? ' is-suggested' : ''}${isChosen ? ' is-chosen' : ''}`,
+        type: 'button',
+        id: key ? `choice-${key}` : null,
+        disabled: busy,
+        'aria-pressed': isChosen ? 'true' : 'false',
+        onclick: () => (item.suggested ? accept() : pick(item.value)),
+      },
+      key && state.shortcuts ? h('span', { class: 'key', 'aria-hidden': 'true', text: key }) : null,
+      h('span', { class: 'choice-label' }, item.label),
+      item.suggested ? h('span', { class: 'tag', text: 'Suggested' }) : null,
+    );
+  };
 
   const parts = [h('h1', { class: 'q', text: c.title })];
   if (c.applies_to?.summary) parts.push(h('p', { class: 'scope', text: `Applies to ${lowerFirst(c.applies_to.summary)}${c.blocking ? '' : ' · optional'}` }));
-  if (!suggestion && c.detail) parts.push(h('p', { class: 'lead', text: c.detail }));
+
+  // the relevant stuff: why the suggestion, and the one line from the files behind it
+  if (suggestion) {
+    const why = reasonText(suggestion);
+    const first = groupedQuotes(suggestion.evidence)[0];
+    parts.push(
+      h('div', { class: 'context' },
+        h('p', { class: 'why' }, CONFIDENCE[suggestion.confidence] ? h('strong', { class: 'confidence', text: `${CONFIDENCE[suggestion.confidence]}. ` }) : null, why || null),
+        first ? quoteBlock(first.item, first.more) : null),
+    );
+  } else if (c.detail) {
+    parts.push(h('div', { class: 'context' }, h('p', { class: 'why', text: c.detail })));
+  }
 
   if (state.cardError) parts.push(h('p', { class: 'error', role: 'alert', id: 'card-error', text: state.cardError }));
+  if (stale) parts.push(h('p', { class: 'saved unsure', role: 'status' }, h('span', {}, h('strong', { text: 'The suggested answer has changed. ' }), typedText(saved.by), ` accepted “${String(saved.value)}” on ${day(saved.at)}. Please look again.`)));
 
-  if (a) {
-    parts.push(
-      h(
-        'div',
-        { class: `saved${a.action === 'dont_know' ? ' unsure' : ''}`, role: 'status' },
-        h('strong', {}, a.action === 'dont_know' ? 'Saved as: don’t know' : ['Saved: ', typedText(describeAnswer(c, a))]),
-        h('span', { class: 'who-when' }, 'by ', typedText(a.by), `, ${day(a.at)} · `, h('button', { class: 'linklike', type: 'button', id: 'clear', disabled: busy, onclick: () => save(c, { action: 'clear' }, { advance: false }), text: 'Clear' })),
-        a.note ? h('span', { class: 'saved-note' }, 'Note: ', typedText(a.note)) : null,
-      ),
-    );
-  } else if (stale) {
-    parts.push(h('div', { class: 'saved unsure', role: 'status' }, h('span', {}, h('strong', { text: 'The suggested answer has changed. ' }), typedText(saved.by), ` accepted “${String(saved.value)}” on ${day(saved.at)}. Please look again.`)));
+  const choices = h('div', { class: 'choices', role: 'group', 'aria-label': 'Answers' }, visible.map((item) => choiceButton(item, true)));
+  parts.push(choices);
+  if (hidden.length) {
+    const openNow = !visible.length || hidden.some((o) => chosenValue(o.value));
+    parts.push(h('details', { class: 'more-options', open: openNow }, h('summary', { text: visible.length ? `More answers (${hidden.length})` : `Choose from ${hidden.length} answers` }), h('div', { class: 'choices' }, hidden.map((item) => choiceButton(item, false)))));
   }
 
-  if (suggestion) {
-    const accepted = a && a.action === 'accept';
-    const groups = groupedQuotes(suggestion.evidence).slice(0, 1);
-    const why = reasonText(suggestion);
-    parts.push(
-      h(
-        'section',
-        { class: 'suggest', 'aria-label': 'Suggested answer' },
-        h('p', { class: 'suggest-value' }, h('span', { class: 'suggest-prefix', text: 'Suggested: ' }), suggestion.label ?? String(suggestion.value)),
-        h('p', { class: 'why' }, CONFIDENCE[suggestion.confidence] ? h('strong', { class: 'confidence', text: `${CONFIDENCE[suggestion.confidence]}. ` }) : null, why || null),
-        ...groups.map((g) => quoteBlock(g.item, g.more)),
-        h(
-          'button',
-          { class: `btn btn-primary btn-wide${accepted ? ' is-chosen' : ''}`, type: 'button', id: 'accept', disabled: busy, onclick: () => save(c, { action: 'accept', value: suggestion.value, note: noteValue() }) },
-          accepted ? 'Yes, that’s right (your answer)' : 'Yes, that’s right',
-          state.shortcuts && !a ? h('span', { class: 'kbd', 'aria-hidden': 'true', text: 'Y' }) : null,
-        ),
-      ),
-    );
-  }
-
-  const answers = [];
-  if (kind === 'yes_no') {
-    answers.push(h('div', { class: 'options' }, optionButton({ value: true, label: 'Yes' }, 'y'), optionButton({ value: false, label: 'No' }, 'n')));
-  } else if (kind === 'choice') {
-    const rest = options.filter((o) => !suggestion || JSON.stringify(o.value) !== JSON.stringify(suggestion.value));
-    const common = c.answer.common?.length ? rest.filter((o) => c.answer.common.includes(o.value)) : rest.length <= 6 ? rest : [];
-    const others = rest.filter((o) => !common.includes(o));
-    const long = rest.some((o) => String(o.label ?? o.value).length > 28);
-    if (common.length) answers.push(h('div', { class: `options${long ? ' stack' : ''}` }, common.map((o, i) => optionButton(o, `c${i}`))));
-    if (others.length) {
-      const openNow = !common.length || others.some((o) => chosen(o.value));
-      answers.push(h('details', { class: 'more-options', open: openNow }, h('summary', { text: common.length ? `More answers (${others.length})` : `Choose from ${others.length} answers` }), h('div', { class: `options${long ? ' stack' : ''}` }, others.map((o, i) => optionButton(o, `o${i}`)))));
-    }
-  }
-  if (kind === 'text' || kind === 'number' || (kind === 'choice' && c.answer.allow_text)) {
+  if (allowText) {
     const isNumber = kind === 'number';
-    const input = h('input', { class: 'input', id: 'typed', type: 'text', inputmode: isNumber ? 'decimal' : null, placeholder: c.answer.placeholder || (kind === 'choice' ? 'Or type it in your own words' : 'Type your answer'), maxlength: 500, disabled: busy, 'aria-label': kind === 'choice' ? 'Type a different answer' : 'Your answer' });
     const prefill = a && a.typed && a.action === 'value' ? String(a.value) : '';
+    const input = h('input', { class: 'input', id: 'typed', type: 'text', inputmode: isNumber ? 'decimal' : null, placeholder: c.answer.placeholder || (visible.length ? 'Something else? Type it here' : 'Type your answer'), maxlength: 500, disabled: busy, 'aria-label': visible.length ? 'Something else' : 'Your answer' });
     input.dataset.prefill = prefill;
     input.value = draft ? draft.typed : prefill;
-    answers.push(
+    parts.push(
       h(
         'form',
         {
-          class: answers.length ? 'typed after-options' : 'typed',
+          class: 'typed',
           onsubmit: (ev) => {
             ev.preventDefault();
             if (!input.value.trim()) {
@@ -678,11 +681,10 @@ function viewCard() {
         },
         input,
         c.answer.unit ? h('span', { class: 'unit', text: c.answer.unit }) : null,
-        h('button', { class: 'btn', type: 'submit', id: 'save-typed', disabled: busy, text: 'Save' }),
+        h('button', { class: visible.length ? 'btn' : 'btn btn-primary', type: 'submit', id: 'save-typed', disabled: busy, text: 'Save' }),
       ),
     );
   }
-  if (answers.length) parts.push(h('div', { class: 'block' }, h('p', { class: 'label', text: suggestion ? 'Or a different answer' : 'Your answer' }), answers));
 
   const note = h('textarea', { class: 'input', id: 'note', maxlength: 2000, disabled: busy, placeholder: 'Anything the ISAAC team should know: an exception, a correction, who to ask', 'aria-label': 'A note for the ISAAC team' });
   note.dataset.prefill = a?.note || '';
@@ -691,8 +693,9 @@ function viewCard() {
     h(
       'div',
       { class: 'quiet' },
-      h('button', { class: `linklike${a && a.action === 'dont_know' ? ' is-chosen' : ''}`, type: 'button', id: 'dont-know', disabled: busy, onclick: () => save(c, { action: 'dont_know', note: noteValue() }) }, 'I don’t know', state.shortcuts && !a ? h('span', { class: 'kbd', 'aria-hidden': 'true', text: 'D' }) : null),
-      h('button', { class: 'linklike', type: 'button', id: 'skip', disabled: busy, onclick: () => step(1) }, run.single ? 'Back to the list' : 'Skip for now', run.single || !state.shortcuts ? null : h('span', { class: 'kbd', 'aria-hidden': 'true', text: 'S' })),
+      h('button', { class: `linklike${a && a.action === 'dont_know' ? ' is-chosen' : ''}`, type: 'button', id: 'dont-know', disabled: busy, onclick: () => save(c, { action: 'dont_know', note: noteValue() }) }, 'I don’t know', state.shortcuts ? h('span', { class: 'kbd', 'aria-hidden': 'true', text: 'D' }) : null),
+      h('button', { class: 'linklike', type: 'button', id: 'skip', disabled: busy, onclick: () => step(1) }, run.single ? 'Back to the list' : 'Skip', run.single || !state.shortcuts ? null : h('span', { class: 'kbd', 'aria-hidden': 'true', text: 'S' })),
+      a ? h('button', { class: 'linklike', type: 'button', id: 'clear', disabled: busy, onclick: () => save(c, { action: 'clear' }, { advance: false }), text: 'Clear my answer' }) : null,
     ),
     h(
       'details',
@@ -701,45 +704,39 @@ function viewCard() {
       note,
       a
         ? h('button', { class: 'btn', type: 'button', id: 'save-note', disabled: busy, onclick: () => save(c, { action: a.action, value: a.value, typed: a.typed, note: noteValue() }, { advance: false }), text: 'Save note' })
-        : h('p', { class: 'hint', text: 'The note is saved with your answer, or with “I don’t know”.' }),
+        : h('p', { class: 'hint', text: 'Type the note first; it is saved with the answer you pick.' }),
     ),
     moreBlock(c),
   );
+  if (a) parts.push(h('p', { class: 'answered-by' }, a.action === 'dont_know' ? 'Saved as “don’t know”' : ['Saved: ', typedText(describeAnswer(c, a))], ' · by ', typedText(a.by), `, ${day(a.at)}`, a.note ? [' · note: ', typedText(a.note)] : null));
 
-  const where = run.single ? null : `Question ${run.index + 1} of ${run.ids.length}`;
-  const pager = h(
+  const entering = lastCardShown !== c.card_id; // the slide-in plays when a new card arrives, not on every redraw
+  lastCardShown = c.card_id;
+  const done = run.single ? null : run.index;
+  const pct = run.single ? 0 : Math.round((done / run.ids.length) * 100);
+  const fill = h('i');
+  fill.style.width = `${pct}%`;
+  const head = run.single
+    ? null
+    : h('div', { class: 'flow' }, h('span', { class: 'flow-count', text: `${run.index + 1} of ${run.ids.length}` }), h('div', { class: 'bar', role: 'progressbar', 'aria-valuemin': 0, 'aria-valuemax': run.ids.length, 'aria-valuenow': run.index, 'aria-label': 'Questions done in this sitting' }, fill));
+
+  const foot = h(
     'nav',
     { class: 'pager', 'aria-label': 'Questions' },
-    h('button', { class: 'btn', type: 'button', id: 'to-list', onclick: () => show('home'), text: 'All questions' }),
-    run.single
-      ? null
-      : h('span', { class: 'options' }, h('button', { class: 'btn', type: 'button', id: 'prev', disabled: run.index === 0, onclick: () => step(-1), text: 'Previous' }), h('button', { class: 'btn', type: 'button', id: 'next', onclick: () => step(1), text: run.index + 1 === run.ids.length ? 'Finish' : 'Next' })),
+    h('button', { class: 'linklike', type: 'button', id: 'to-list', onclick: () => show('home'), text: 'All questions' }),
+    run.single || run.index === 0 ? null : h('button', { class: 'linklike', type: 'button', id: 'prev', onclick: () => step(-1), text: 'Previous question' }),
   );
+  const keys = state.shortcuts
+    ? h('p', { class: 'keys' }, `Keys: ${n ? `1–${n} to answer, ` : ''}D don’t know, S skip. `, h('button', { class: 'linklike', type: 'button', id: 'toggle-keys', onclick: () => { state.shortcuts = false; setPref('qs_shortcuts', 'off'); render(); }, text: 'Turn off' }))
+    : h('p', { class: 'keys' }, 'Keyboard shortcuts are off. ', h('button', { class: 'linklike', type: 'button', id: 'toggle-keys', onclick: () => { state.shortcuts = true; setPref('qs_shortcuts', 'on'); render(); }, text: 'Turn on' }));
 
-  const keys = h(
-    'p',
-    { class: 'keys' },
-    state.shortcuts ? 'Shortcuts: Y yes, D don’t know, S skip. ' : 'Keyboard shortcuts are off. ',
-    h('button', {
-      class: 'linklike',
-      type: 'button',
-      id: 'toggle-keys',
-      onclick: () => {
-        state.shortcuts = !state.shortcuts;
-        setPref('qs_shortcuts', state.shortcuts ? 'on' : 'off');
-        render();
-      },
-      text: state.shortcuts ? 'Turn off' : 'Turn on',
-    }),
-  );
-
-  return [topbar(where), sourceLine(), h('article', { class: 'card' }, parts), pager, keys];
+  return [topbar(), sourceLine(), head, h('article', { class: entering ? 'card enter' : 'card' }, parts), foot, keys];
 }
 
 function viewDone() {
   const run = state.run || { answered: 0 };
   const t = tally(state.cards, state.answers);
-  const next = pickRun(state.cards, state.answers, state.runSize);
+  const next = pickRun(state.cards, state.answers, state.cards.length);
   const left = t.neededOpen
     ? `${t.neededOpen} needed question${t.neededOpen === 1 ? '' : 's'} left.`
     : t.open
@@ -805,11 +802,11 @@ document.addEventListener('keydown', (ev) => {
   const tag = (ev.target.tagName || '').toLowerCase();
   if (tag === 'input' || tag === 'textarea' || tag === 'select') return;
   const key = ev.key.toLowerCase();
-  const id = { y: 'accept', d: 'dont-know', s: 'skip' }[key];
+  const id = /^[1-9]$/.test(key) ? `choice-${key}` : { d: 'dont-know', s: 'skip' }[key];
   if (!id) return;
   const c = card(currentCardId());
   const allowed = shortcutAllowed({
-    key,
+    key: /^[1-9]$/.test(key) ? 'y' : key, // a number picks an answer: guarded like the old Y key
     enabled: state.shortcuts,
     busy: state.busy,
     msSinceRender: Date.now() - lastRenderAt,
