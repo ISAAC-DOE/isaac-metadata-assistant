@@ -25,6 +25,7 @@ local user typed — and is never used to decide anything.
 
 from __future__ import annotations
 
+import contextlib
 import copy
 import errno
 import fcntl
@@ -232,7 +233,10 @@ def pending_exposures(bundle_dir: Path) -> list[dict]:
         raw = handle.read()
     kinds = set(B.bundle_schema()["$defs"]["target"]["properties"]["kind"]["enum"])  # what an exposure may name
     out = []
-    for n, line in enumerate(raw.decode("utf-8", errors="replace").splitlines(), start=1):
+    lines = raw.split(b"\n")
+    lines.pop()  # what follows the last newline: empty, or a line whose write never finished (never reported, never printed)
+    for n, chunk in enumerate(lines, start=1):
+        line = chunk.decode("utf-8", errors="replace")
         if not line.strip():
             continue
         try:
@@ -285,21 +289,42 @@ def _target_ids(bundle: Mapping) -> dict[str, set]:
 def append_pending_exposures(bundle_dir: Path, bundle: Mapping, entries: Sequence[Mapping]) -> None:
     """Append ``entries`` (exposures of ``bundle``, as :func:`record_exposure` made them) to
     :data:`PENDING_EXPOSURES_FILE`, in one write, flushed to disk. The caller holds :func:`locked`. ``bundle.json`` is
-    not touched. A file that cannot be written is refused (the caller then prints nothing)."""
+    not touched. Refused (the caller then prints nothing) when the file cannot be written, or when the exposures would
+    pass the bundle's bound on ``exposures[]`` (the next write could never fold them in).
+
+    A TORN WRITE NEVER LOCKS THE BUNDLE (review of this change, I1): a write that fails part-way (a full disk) is cut
+    back to where it began before the refusal, and a tail a crash left without its newline is cut off before the next
+    append (and never read: :func:`pending_exposures`). Its writer never reported success, so nothing was printed."""
     if not entries:
         return
+    bound = B.bundle_schema()["properties"]["exposures"]["maxItems"]
+    if len(bundle.get("exposures") or ()) > bound:
+        raise _pending_refusal(f"would take the exposure log past its bound of {bound} entries")
+    # ensure_ascii: a raw U+2028 / U+0085 in an id can never split a line
     data = "".join(json.dumps({"bundle_id": bundle.get("bundle_id"), "target": dict(e["target"]), "command": e["command"],
-                               "at_utc": e["at_utc"]}, ensure_ascii=False) + "\n" for e in entries).encode("utf-8")
-    flags = os.O_WRONLY | os.O_APPEND | os.O_CREAT | getattr(os, "O_NOFOLLOW", 0) | getattr(os, "O_CLOEXEC", 0)
+                               "at_utc": e["at_utc"]}, ensure_ascii=True) + "\n" for e in entries).encode("ascii")
+    flags = os.O_RDWR | os.O_APPEND | os.O_CREAT | getattr(os, "O_NOFOLLOW", 0) | getattr(os, "O_CLOEXEC", 0)
     try:
         fd = os.open(Path(bundle_dir) / PENDING_EXPOSURES_FILE, flags, 0o600)
     except OSError as exc:
         raise _pending_refusal("cannot be written (" + errno.errorcode.get(exc.errno or 0, type(exc).__name__) + ")") from None
     try:
-        view = memoryview(data)
-        while view:
-            view = view[os.write(fd, view):]
-        os.fsync(fd)
+        start = os.fstat(fd).st_size
+        if start:
+            tail = os.pread(fd, min(start, 1 << 16), start - min(start, 1 << 16))
+            if not tail.endswith(b"\n"):  # a torn line a crash left: cut back to the last whole line
+                cut = tail.rfind(b"\n")
+                start = (start - len(tail) + cut + 1) if cut >= 0 else (0 if start <= len(tail) else start)
+                os.ftruncate(fd, start)
+        try:
+            view = memoryview(data)
+            while view:
+                view = view[os.write(fd, view):]
+            os.fsync(fd)
+        except OSError as exc:
+            with contextlib.suppress(OSError):
+                os.ftruncate(fd, start)
+            raise _pending_refusal("cannot be written (" + errno.errorcode.get(exc.errno or 0, type(exc).__name__) + ")") from None
     finally:
         os.close(fd)
 
@@ -603,6 +628,8 @@ def record_consent(bundle_dir: Path, *, by: str | None, withdraw: bool = False, 
     if decider is None:
         raise MutationRefused("Record consent under the scientist's name: --by \"<their name>\". Nothing was recorded.",
                               code=2)
+    if len(decider["name"]) > 300 or (note and len(str(note)) > 2000):
+        raise MutationRefused("The name may be up to 300 characters and --note up to 2000. Nothing was recorded.", code=2)
     answer = "withdrawn" if withdraw else "given"
     with locked(Path(bundle_dir)):
         bundle = load(bundle_dir)
@@ -614,7 +641,7 @@ def record_consent(bundle_dir: Path, *, by: str | None, withdraw: bool = False, 
         entries = bundle.setdefault("consents", [])
         entry = {"consent_id": f"consent-{len(entries) + 1:04d}", "answer": answer, "scope": B.CONSENT_SCOPE,
                  "agreement": B.CONSENT_AGREEMENT, "given_by": decider,
-                 "folder": str((bundle.get("source_root") or {}).get("label") or Path(bundle_dir).name),
+                 "folder": str((bundle.get("source_root") or {}).get("label") or Path(bundle_dir).name)[:500],
                  "recorded_utc": now_utc(), "command": command, **({"note": str(note)} if note else {})}
         entries.append(entry)
         save_bundle(bundle_dir, bundle)

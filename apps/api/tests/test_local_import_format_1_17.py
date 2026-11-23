@@ -128,6 +128,8 @@ def test_consent_needs_a_name(bdir, capsys):
     version = M.bundle_version(bdir)
     code, _, err = _run(capsys, "bundle", "consent", str(bdir), "--by", "   ")
     assert code != 0 and "name" in err and M.bundle_version(bdir) == version
+    code, _, err = _run(capsys, "bundle", "consent", str(bdir), "--by", "SYN", "--note", "x" * 2001)
+    assert code != 0 and "2000" in err and M.bundle_version(bdir) == version
 
 
 def test_the_validator_refuses_a_consent_without_a_name_or_with_another_answer(bdir):

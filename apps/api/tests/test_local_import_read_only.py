@@ -157,6 +157,32 @@ def test_a_pending_exposure_of_a_target_no_longer_held_is_not_folded_in_and_writ
     assert not (bdir / M.PENDING_EXPOSURES_FILE).exists()
 
 
+def test_a_torn_last_line_never_locks_the_bundle_and_a_failed_append_is_cut_back(bdir, capsys, monkeypatch):
+    # a crash mid-append left a line without its newline: it was never reported, so nothing was printed for it
+    cand = M.load(bdir)["candidates"][0]["candidate_id"]
+    (bdir / M.PENDING_EXPOSURES_FILE).write_bytes(b'{"bundle_id": "x", "target": {"kind": "cand')
+    assert M.load(bdir)  # readable
+    assert cli.main(["bundle", "reveal", str(bdir), cand]) == 0  # the next append cuts the torn tail first
+    capsys.readouterr()
+    assert [e["command"] for e in M.exposures_for(M.load(bdir), "candidate", cand)] == ["bundle reveal"]
+    # a write that fails part-way (a full disk) is cut back and refused, so nothing is printed
+    other = M.load(bdir)["candidates"][1]["candidate_id"]
+    good = (bdir / M.PENDING_EXPOSURES_FILE).read_bytes()
+    real_write = M.os.write
+
+    def half_then_full(fd, data):
+        if bytes(data).startswith(b'{"bundle_id"') and fd != 1 and fd != 2:
+            real_write(fd, bytes(data)[:10])
+            raise OSError(28, "No space left on device")
+        return real_write(fd, data)
+
+    monkeypatch.setattr(M.os, "write", half_then_full)
+    assert cli.main(["bundle", "reveal", str(bdir), other]) != 0
+    monkeypatch.undo()
+    assert other not in capsys.readouterr().out
+    assert (bdir / M.PENDING_EXPOSURES_FILE).read_bytes() == good
+
+
 def test_an_unreadable_pending_exposure_line_is_refused_not_skipped(bdir):
     bid = M.load(bdir)["bundle_id"]
     good = {"bundle_id": bid, "target": {"kind": "candidate", "id": "c-1"}, "command": "bundle reveal",
