@@ -473,13 +473,21 @@ function breakable(text) {
 
 const NUMBER_CELL = /^[-+−]?\d[\d.,]*(\s?[a-zA-Zµ°%/]{0,4})?$/;
 
-function cell(value) {
-  const text = value === null || value === undefined ? '' : String(value);
-  return h('td', { class: NUMBER_CELL.test(text.trim()) ? 'num' : null }, breakable(text));
+function cellText(value) {
+  return value === null || value === undefined ? '' : String(value);
 }
 
+/** A column is numeric when every filled cell in it is a number: its header and cells align right. */
 function valuesTable(label, columns, rows) {
-  return h('div', { class: 'tablewrap', tabindex: 0, role: 'region', 'aria-label': label }, h('table', {}, h('thead', {}, h('tr', {}, (columns || []).map((col) => h('th', { scope: 'col', text: col })))), h('tbody', {}, rows.map((row) => h('tr', {}, row.map(cell))))));
+  const width = Math.max((columns || []).length, ...rows.map((r) => r.length));
+  const numeric = Array.from({ length: width }, (_, i) => {
+    const filled = rows.map((r) => cellText(r[i]).trim()).filter(Boolean);
+    return filled.length > 0 && filled.every((t) => NUMBER_CELL.test(t));
+  });
+  return [
+    h('div', { class: 'tablewrap', tabindex: 0, role: 'region', 'aria-label': label }, h('table', {}, h('thead', {}, h('tr', {}, (columns || []).map((col, i) => h('th', { scope: 'col', class: numeric[i] ? 'num' : null, text: col })))), h('tbody', {}, rows.map((row) => h('tr', {}, row.map((v, i) => h('td', { class: numeric[i] ? 'num' : null }, numeric[i] ? cellText(v) : breakable(cellText(v))))))))),
+    width > 3 ? h('p', { class: 'scroll-hint', text: 'Swipe the table sideways to see every column.' }) : null,
+  ];
 }
 
 /** Where a quote is, in plain words: "line 36", "lines 9–12", "the file name". The full locator stays in a tooltip. */
@@ -538,7 +546,7 @@ function moreBlock(c) {
   if (breakdown.length > 1) {
     out.push(
       h('h3', { text: `What one answer covers (${c.applies_to.count})` }),
-      valuesTable('What one answer covers', ['Sample', 'Measurements', 'For example'], breakdown.map((b) => [b.label, b.count, b.example || ''])),
+      ...valuesTable('What one answer covers', ['Sample', 'Measurements', 'For example'], breakdown.map((b) => [b.label, b.count, b.example || ''])),
     );
   } else if ((c.applies_to?.items || []).length) {
     const items = c.applies_to.items.slice(0, 10);
@@ -558,7 +566,7 @@ function moreBlock(c) {
       if (breakdown.length > 1 && /one answer covers/i.test(item.label || '')) continue; // shown above
       out.push(
         heading(item.label || 'Values'),
-        valuesTable(item.label || 'Values', item.columns, item.rows),
+        ...valuesTable(item.label || 'Values', item.columns, item.rows),
         item.more ? h('p', { text: `and ${item.more} more` }) : null,
       );
     } else if (item.kind === 'image' && item.image) {

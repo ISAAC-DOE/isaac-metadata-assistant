@@ -582,7 +582,7 @@ td {
   padding: 8px 12px;
   border-bottom: 1px solid var(--line);
   vertical-align: top;
-  overflow-wrap: anywhere;
+  overflow-wrap: normal;
 }
 th {
   font-weight: 600;
@@ -592,9 +592,13 @@ th {
 tr:last-child td {
   border-bottom: 0;
 }
-td.num {
+td.num,
+th.num {
   text-align: right;
   white-space: nowrap;
+}
+.scroll-hint {
+  display: none;
 }
 .tablewrap {
   scrollbar-width: thin;
@@ -867,6 +871,12 @@ td.num {
 @media (max-width: 640px) {
   body {
     font-size: 17px;
+  }
+  .details .scroll-hint {
+    display: block;
+    margin-top: 6px;
+    font-size: 14px;
+    color: var(--ink-3);
   }
   .pager {
     flex-direction: column-reverse;
