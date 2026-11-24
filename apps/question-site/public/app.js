@@ -1,7 +1,7 @@
 // The question site's page. No framework and no build step: a few views drawn with DOM calls.
 // Every piece of text from the server is set with textContent, never as HTML.
 
-import { describeAnswer, pickRun, tally, standing, isStale, shortcutAllowed, CONFIDENCE, BASIS } from './logic.js';
+import { describeAnswer, pickRun, tally, standing, isStale, shortcutAllowed, byOther, keptKey, carryNote, CONFIDENCE, BASIS } from './logic.js';
 
 const root = document.getElementById('main');
 const toastEl = document.getElementById('toast');
@@ -41,6 +41,23 @@ function setPref(key, value) {
   } catch {
     /* fine */
   }
+}
+
+// someone else's answers this browser looked at and kept, so they are not offered again (a newer answer is)
+function keptSet() {
+  try {
+    return new Set(JSON.parse(pref('qs_kept', '[]')));
+  } catch {
+    return new Set();
+  }
+}
+function keep(answer) {
+  const kept = keptSet();
+  kept.add(keptKey(answer));
+  setPref('qs_kept', JSON.stringify([...kept].slice(-500)));
+}
+function nextRun() {
+  return pickRun(state.cards, state.answers, state.cards.length, state.name, keptSet());
 }
 {
   const saved = Number(pref('qs_run_size', '10'));
@@ -181,7 +198,7 @@ async function load() {
       state.view = 'card';
       render({ keepFocus: false });
     } else {
-      const open = pickRun(state.cards, state.answers, state.cards.length);
+      const open = nextRun();
       if (open.length && !standing(card(open[0]), state.answers)) {
         state.run = { ids: open, index: 0, answered: 0, single: false };
         state.view = 'card';
@@ -316,7 +333,7 @@ function progressBlock(label, done, total, unsure = 0) {
 
 function viewHome() {
   const t = tally(state.cards, state.answers);
-  const next = pickRun(state.cards, state.answers, state.cards.length);
+  const next = nextRun();
   const allDone = t.open === 0;
   const first = state.name.split(' ')[0];
 
@@ -333,12 +350,12 @@ function viewHome() {
     h('p', { class: 'lead', text: 'One question at a time. Pick an answer and the next one appears. Every answer saves at once, so you can stop whenever you like.' }),
     t.needed ? progressBlock('needed questions answered', t.neededDone, t.needed, t.neededUnsure) : null,
     t.optional ? progressBlock('optional questions answered', t.optionalDone, t.optional) : null,
-    allDone
+    allDone && !next.length
       ? null
       : h(
           'div',
           { class: 'start' },
-          h('button', { class: 'btn btn-primary', type: 'button', id: 'start', onclick: () => startRun(next), text: t.neededDone + t.optionalDone ? 'Continue answering' : 'Start answering' }),
+          h('button', { class: 'btn btn-primary', type: 'button', id: 'start', onclick: () => startRun(next), text: allDone ? `Look over ${next.length === 1 ? 'one answer' : `${next.length} answers`} from someone else` : t.neededDone + t.optionalDone ? 'Continue answering' : 'Start answering' }),
         ),
   );
 
@@ -396,7 +413,8 @@ async function save(c, body, { advance = true } = {}) {
   for (const el of controls) el.disabled = true;
   const before = state.answers[c.card_id] || null;
   try {
-    const out = await api('/api/answer', { card_id: c.card_id, seen_at: before ? before.at : null, ...body });
+    const sent = body.action === 'clear' || isStale(c, before) ? body : { ...body, note: carryNote(body.note, before, state.name) };
+    const out = await api('/api/answer', { card_id: c.card_id, seen_at: before ? before.at : null, ...sent });
     if (out.answer) state.answers[c.card_id] = out.answer;
     else delete state.answers[c.card_id];
     delete state.drafts[c.card_id];
@@ -406,7 +424,7 @@ async function save(c, body, { advance = true } = {}) {
       return render({ focusId: focusBefore });
     }
     const run = state.run;
-    if (run && !before) run.answered += 1;
+    if (run && (!before || byOther(before, state.name))) run.answered += 1;
     toast('Saved');
     if (!advance || !run) {
       state.busy = false;
@@ -584,6 +602,8 @@ function viewCard() {
   const saved = state.answers[c.card_id] || null;
   const stale = isStale(c, saved);
   const a = stale ? null : saved;
+  // someone else's answer: the person can keep it, pick another answer, or add a note to it
+  const theirs = byOther(a, state.name) ? String(a.by).trim().split(/\s+/)[0] : null;
   const busy = state.busy;
   const draft = state.drafts[c.card_id] || null;
   const kind = c.answer?.kind || 'text';
@@ -687,28 +707,30 @@ function viewCard() {
   }
 
   const note = h('textarea', { class: 'input', id: 'note', maxlength: 2000, disabled: busy, placeholder: 'Anything the ISAAC team should know: an exception, a correction, who to ask', 'aria-label': 'A note for the ISAAC team' });
-  note.dataset.prefill = a?.note || '';
-  note.value = draft ? draft.note : a?.note || '';
+  // someone else's note is shown with their answer and kept when it is replaced, never put in this person's box
+  const ownNote = theirs ? '' : a?.note || '';
+  note.dataset.prefill = ownNote;
+  note.value = draft ? draft.note : ownNote;
   parts.push(
     h(
       'div',
       { class: 'quiet' },
       h('button', { class: `linklike${a && a.action === 'dont_know' ? ' is-chosen' : ''}`, type: 'button', id: 'dont-know', disabled: busy, onclick: () => save(c, { action: 'dont_know', note: noteValue() }) }, 'I don’t know', state.shortcuts ? h('span', { class: 'kbd', 'aria-hidden': 'true', text: 'D' }) : null),
-      h('button', { class: 'linklike', type: 'button', id: 'skip', disabled: busy, onclick: () => step(1) }, run.single ? 'Back to the list' : 'Skip', run.single || !state.shortcuts ? null : h('span', { class: 'kbd', 'aria-hidden': 'true', text: 'S' })),
-      a ? h('button', { class: 'linklike', type: 'button', id: 'clear', disabled: busy, onclick: () => save(c, { action: 'clear' }, { advance: false }), text: 'Clear my answer' }) : null,
+      h('button', { class: 'linklike', type: 'button', id: 'skip', disabled: busy, onclick: () => { if (theirs) keep(a); step(1); } }, run.single ? 'Back to the list' : theirs ? `Keep ${theirs}’s answer` : 'Skip', run.single || !state.shortcuts ? null : h('span', { class: 'kbd', 'aria-hidden': 'true', text: 'S' })),
+      a ? h('button', { class: 'linklike', type: 'button', id: 'clear', disabled: busy, onclick: () => save(c, { action: 'clear' }, { advance: false }), text: theirs ? 'Clear this answer' : 'Clear my answer' }) : null,
     ),
     h(
       'details',
       { class: 'details notebox', id: 'notebox', open: Boolean(note.value) },
-      h('summary', { text: a ? 'Add or change a note' : 'Add a note' }),
+      h('summary', { text: a && !theirs ? 'Add or change a note' : 'Add a note' }),
       note,
       a
-        ? h('button', { class: 'btn', type: 'button', id: 'save-note', disabled: busy, onclick: () => save(c, { action: a.action, value: a.value, typed: a.typed, note: noteValue() }, { advance: false }), text: 'Save note' })
+        ? h('button', { class: 'btn', type: 'button', id: 'save-note', disabled: busy, onclick: () => save(c, { action: a.action, value: a.value, typed: a.typed, note: noteValue() }, { advance: false }), text: theirs ? `Save note with ${theirs}’s answer` : 'Save note' })
         : h('p', { class: 'hint', text: 'Type the note first; it is saved with the answer you pick.' }),
     ),
     moreBlock(c),
   );
-  if (a) parts.push(h('p', { class: 'answered-by' }, a.action === 'dont_know' ? 'Saved as “don’t know”' : ['Saved: ', typedText(describeAnswer(c, a))], ' · by ', typedText(a.by), `, ${day(a.at)}`, a.note ? [' · note: ', typedText(a.note)] : null));
+  if (a) parts.push(h('p', { class: 'answered-by' }, a.action === 'dont_know' ? 'Saved as “don’t know”' : ['Saved: ', typedText(describeAnswer(c, a))], ' · by ', typedText(a.by), `, ${day(a.at)}`, a.note ? [' · note: ', typedText(a.note)] : null, theirs ? '. You can keep it, pick a different answer, or add a note.' : null));
 
   const entering = lastCardShown !== c.card_id; // the slide-in plays when a new card arrives, not on every redraw
   lastCardShown = c.card_id;
@@ -736,7 +758,7 @@ function viewCard() {
 function viewDone() {
   const run = state.run || { answered: 0 };
   const t = tally(state.cards, state.answers);
-  const next = pickRun(state.cards, state.answers, state.cards.length);
+  const next = nextRun();
   const left = t.neededOpen
     ? `${t.neededOpen} needed question${t.neededOpen === 1 ? '' : 's'} left.`
     : t.open

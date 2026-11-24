@@ -68,15 +68,44 @@ export function tally(cards, answers) {
   };
 }
 
+/** Whether a saved answer was given by someone other than `me` (names compared without case or extra spaces). */
+export function byOther(answer, me) {
+  const norm = (s) => String(s || '').trim().replace(/\s+/g, ' ').toLowerCase();
+  return Boolean(answer && me && norm(answer.by) !== norm(me));
+}
+
+/**
+ * The note to save when a person replaces someone else's answer: their own note, with the earlier person's note kept
+ * after it under that person's name, so the replaced note is neither lost nor put in the new person's words.
+ */
+export function carryNote(mine, before, me) {
+  const own = String(mine || '').trim();
+  const earlier = before && byOther(before, me) ? String(before.note || '').trim() : '';
+  if (!earlier || own.includes(earlier)) return own;
+  const kept = `Earlier note from ${String(before.by).trim()}: ${earlier}`;
+  return (own ? `${own}\n\n${kept}` : kept).slice(0, 2000);
+}
+
+/** The key that remembers "I looked at this answer of someone else's and kept it": a new answer asks again. */
+export function keptKey(answer) {
+  return answer ? `${answer.card_id}@${answer.at}` : '';
+}
+
 /**
  * The next cards to answer: the open ones in the site's own order (needed first, widest reach first). A card marked
  * "don't know" is not offered again: a person who said they do not know should not be asked in a loop.
+ * With `me` given, the cards someone else answered come after the open ones, so the person can keep that answer,
+ * change it or add a note; `kept` holds the ones they already looked at and kept.
  */
-export function pickRun(cards, answers, size) {
+export function pickRun(cards, answers, size, me = null, kept = new Set()) {
   const open = cards.filter((c) => !standing(c, answers));
   const needed = open.filter((c) => c.blocking);
   const rest = open.filter((c) => !c.blocking);
-  return [...needed, ...rest].slice(0, Math.max(1, size)).map((c) => c.card_id);
+  const others = cards.filter((c) => {
+    const a = standing(c, answers);
+    return byOther(a, me) && !kept.has(keptKey(a));
+  });
+  return [...needed, ...rest, ...others].slice(0, Math.max(1, size)).map((c) => c.card_id);
 }
 
 /**
