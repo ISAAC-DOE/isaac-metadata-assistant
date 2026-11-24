@@ -223,7 +223,8 @@ def test_reading_the_questions_records_at_least_the_cli_exposures(client, root, 
     r = client.get("/api/local-bundles/alpha/questions")
     assert r.status_code == 200
     body = r.json()
-    assert body["exposures_recorded"] > 0 and body["bundle"]["bundle_version"] != before
+    # 1.17.0 (C7): recorded beside bundle.json, never in it, so the read moves no version (it used to pin `!= before`)
+    assert body["exposures_recorded"] > 0 and body["bundle"]["bundle_version"] == before == M.bundle_version(root / "alpha")
     route_x = {(e["target"]["kind"], e["target"]["id"]) for e in M.load(root / "alpha")["exposures"]}
     cli_x = {(e["target"]["kind"], e["target"]["id"]) for e in M.load(cli_copy)["exposures"]}
     assert cli_x <= route_x

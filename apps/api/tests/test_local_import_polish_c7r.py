@@ -294,7 +294,7 @@ def test_a_value_the_nearest_records_warnings_state_is_an_exposure_on_the_progre
     stated = minimum["values_shown_from"]
     assert stated and any("read as 0.1 V" in w for w in minimum["warnings"])
     assert set(stated) <= _exposed(plain, "bundle progress") and body["progress"]["exposures_recorded"] == len(stated)
-    assert body["bundle"]["bundle_version"] == M.bundle_version(plain)  # the version after the exposures
+    assert body["bundle"]["bundle_version"] == M.bundle_version(plain)  # 1.17.0: the exposures move no version
     again = client.get(f"/api/local-bundles/{plain.name}/progress").json()
     assert again["progress"]["exposures_recorded"] == 0
     # the questions page shows the same minimum: the same values are its exposures too

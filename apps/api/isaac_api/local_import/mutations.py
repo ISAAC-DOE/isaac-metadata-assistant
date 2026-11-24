@@ -13,6 +13,11 @@ otherwise the interpretation is stored with ``blind: false`` and the reason. The
 cannot see a person or an agent reading ``bundle.json`` or ``reading.full.json``
 directly — a blind claim is only as good as that discipline, and the contract says so.
 
+A READ WRITES NOTHING TO ``bundle.json`` (1.17.0). The exposures a command that only looks records go to
+:data:`PENDING_EXPOSURES_FILE` beside it (:func:`record_exposures`); every :func:`load` reads them back, and the next
+:func:`save_bundle` folds them into ``exposures[]`` and removes the file. So a look never moves the bundle's version
+(:func:`bundle_version`), and an older bundle is upgraded by the next write, never by a look.
+
 IDENTITY. ``decided_by.identity`` is always ``local_unverified``: this build
 authenticates nobody. An ORCID iD is stored as ``orcid_claimed`` — a credit value the
 local user typed — and is never used to decide anything.
@@ -20,6 +25,7 @@ local user typed — and is never used to decide anything.
 
 from __future__ import annotations
 
+import contextlib
 import copy
 import errno
 import fcntl
@@ -187,7 +193,160 @@ def load(bundle_dir: Path) -> dict:
     # an older build's bundle holds a beamtime-wide notes statement as a run's extracted value: held for
     # review here, in memory, so every question and template reads it as the import now gives it (c6-a)
     B.hold_beamtime_wide_statements(bundle)
+    merge_pending_exposures(bundle, Path(bundle_dir))  # 1.17.0: what a read recorded beside bundle.json
     return bundle
+
+
+# --- exposures a READ records, beside bundle.json (1.17.0) --------------------------------------------------------
+
+#: Beside ``bundle.json``: one JSON object per line, ``{"bundle_id", "target", "command", "at_utc"}``, appended under
+#: the bundle's lock by a command that only reads (:func:`record_exposures`). Read back by every :func:`load`
+#: (:func:`merge_pending_exposures`) and folded into ``exposures[]`` by the next :func:`save_bundle`, which then removes
+#: it. A line of another ``bundle_id`` (a folder re-imported since) is never folded in; an unreadable line is refused,
+#: never skipped, because a blind claim is only as good as the exposure log.
+PENDING_EXPOSURES_FILE = "exposures.pending.jsonl"
+#: The file is refused above this size (``exposures[]`` itself is bounded to 200,000 entries).
+MAX_PENDING_EXPOSURES_BYTES = 64 * 1024 * 1024
+#: ``$defs/utc`` of the bundle schema
+_UTC_RE = re.compile(r"[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}(\.[0-9]+)?Z")
+
+
+def _pending_refusal(why: str) -> MutationRefused:
+    return MutationRefused(f"{PENDING_EXPOSURES_FILE} beside bundle.json {why}; nothing was read or written. It holds "
+                           "which parser values were shown; remove it only if you accept that `annotate --blind` can no "
+                           "longer tell what was shown.", code=1)
+
+
+def pending_exposures(bundle_dir: Path) -> list[dict]:
+    """The entries of :data:`PENDING_EXPOSURES_FILE` (every ``bundle_id``), in the order they were recorded; ``[]``
+    when there is none. Opened without following a symbolic link, size-checked before reading."""
+    path = Path(bundle_dir) / PENDING_EXPOSURES_FILE
+    try:
+        fd = os.open(path, os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0) | getattr(os, "O_CLOEXEC", 0))
+    except FileNotFoundError:
+        return []
+    except OSError as exc:
+        raise _pending_refusal("cannot be opened safely" + (" (it is a symbolic link)" if exc.errno == errno.ELOOP else ""))
+    with os.fdopen(fd, "rb") as handle:
+        if os.fstat(handle.fileno()).st_size > MAX_PENDING_EXPOSURES_BYTES:
+            raise _pending_refusal(f"is over {MAX_PENDING_EXPOSURES_BYTES} bytes")
+        raw = handle.read()
+    kinds = set(B.bundle_schema()["$defs"]["target"]["properties"]["kind"]["enum"])  # what an exposure may name
+    out = []
+    lines = raw.split(b"\n")
+    lines.pop()  # what follows the last newline: empty, or a line whose write never finished (never reported, never printed)
+    for n, chunk in enumerate(lines, start=1):
+        line = chunk.decode("utf-8", errors="replace")
+        if not line.strip():
+            continue
+        try:
+            e = json.loads(line)
+        except ValueError:
+            raise _pending_refusal(f"holds an unreadable line ({n})") from None
+        target = e.get("target") if isinstance(e, dict) else None
+        # exactly what the schema takes for an exposure, so folding one in can never make the next write invalid
+        if not (isinstance(target, dict) and target.get("kind") in kinds and isinstance(target.get("id"), str)
+                and target["id"] and isinstance(e.get("command"), str)
+                and isinstance(e.get("at_utc"), str) and _UTC_RE.fullmatch(e["at_utc"])
+                and isinstance(e.get("bundle_id"), (str, type(None)))):
+            raise _pending_refusal(f"holds a line that is not an exposure ({n})")
+        out.append({"bundle_id": e.get("bundle_id"), "target": {"kind": target["kind"], "id": target["id"]},
+                    "command": e["command"], "at_utc": e["at_utc"]})
+    return out
+
+
+def merge_pending_exposures(bundle: dict, bundle_dir: Path) -> int:
+    """Fold this bundle's pending exposures into ``bundle["exposures"]`` IN MEMORY, as :func:`record_exposure` records
+    one (the first per target and command is kept, with the time it was shown); how many were added. Ids follow on,
+    in the order recorded, so every load gives them the same ids and the next write keeps them."""
+    entries = [e for e in pending_exposures(bundle_dir) if e["bundle_id"] == bundle.get("bundle_id")]
+    if not entries:
+        return 0
+    # an exposure of a target this bundle no longer holds (a build before 1.17.0 wrote in between and regrouped) shows
+    # nothing any later reading could be blind to, and the validator refuses a dangling target: never folded in
+    live = _target_ids(bundle)
+    added = 0
+    for e in entries:
+        if e["target"]["id"] in live.get(e["target"]["kind"], ()):
+            added += _append_exposure(bundle, e["target"]["kind"], e["target"]["id"], e["command"], e["at_utc"])
+    return added
+
+
+def _target_ids(bundle: Mapping) -> dict[str, set]:
+    """The ids each target kind may name in this bundle (what ``bundle.validate_bundle`` resolves a target against)."""
+    def ids(section, key):
+        return {x.get(key) for x in bundle.get(section) or () if isinstance(x, Mapping)}
+
+    return {"candidate": ids("candidates", "candidate_id"), "missing_value": ids("missing_values", "value_id"),
+            "conflict": ids("conflicts", "conflict_id"), "source": ids("sources", "source_id"), "run": ids("runs", "run_id"),
+            "record_group": ids("record_groups", "group_id") | ids("superseded_record_groups", "group_id"),
+            "processing_result": {B.processing_id(r) for r in bundle.get("processing_results") or ()},
+            "experiment": {"experiment"},
+            "merge_candidate": ids("merge_candidates", "merge_candidate_id") | ids("superseded_merge_candidates",
+                                                                                  "merge_candidate_id")}
+
+
+def append_pending_exposures(bundle_dir: Path, bundle: Mapping, entries: Sequence[Mapping]) -> None:
+    """Append ``entries`` (exposures of ``bundle``, as :func:`record_exposure` made them) to
+    :data:`PENDING_EXPOSURES_FILE`, in one write, flushed to disk. The caller holds :func:`locked`. ``bundle.json`` is
+    not touched. Refused (the caller then prints nothing) when the file cannot be written, or when the exposures would
+    pass the bundle's bound on ``exposures[]`` (the next write could never fold them in).
+
+    A TORN WRITE NEVER LOCKS THE BUNDLE (review of this change, I1): a write that fails part-way (a full disk) is cut
+    back to where it began before the refusal, and a tail a crash left without its newline is cut off before the next
+    append (and never read: :func:`pending_exposures`). Its writer never reported success, so nothing was printed."""
+    if not entries:
+        return
+    bound = B.bundle_schema()["properties"]["exposures"]["maxItems"]
+    if len(bundle.get("exposures") or ()) > bound:
+        raise _pending_refusal(f"would take the exposure log past its bound of {bound} entries")
+    # ensure_ascii: a raw U+2028 / U+0085 in an id can never split a line
+    data = "".join(json.dumps({"bundle_id": bundle.get("bundle_id"), "target": dict(e["target"]), "command": e["command"],
+                               "at_utc": e["at_utc"]}, ensure_ascii=True) + "\n" for e in entries).encode("ascii")
+    flags = os.O_RDWR | os.O_APPEND | os.O_CREAT | getattr(os, "O_NOFOLLOW", 0) | getattr(os, "O_CLOEXEC", 0)
+    try:
+        fd = os.open(Path(bundle_dir) / PENDING_EXPOSURES_FILE, flags, 0o600)
+    except OSError as exc:
+        raise _pending_refusal("cannot be written (" + errno.errorcode.get(exc.errno or 0, type(exc).__name__) + ")") from None
+    try:
+        start = os.fstat(fd).st_size
+        if start:
+            tail = os.pread(fd, min(start, 1 << 16), start - min(start, 1 << 16))
+            if not tail.endswith(b"\n"):  # a torn line a crash left: cut back to the last whole line
+                cut = tail.rfind(b"\n")
+                start = (start - len(tail) + cut + 1) if cut >= 0 else (0 if start <= len(tail) else start)
+                os.ftruncate(fd, start)
+        try:
+            view = memoryview(data)
+            while view:
+                view = view[os.write(fd, view):]
+            os.fsync(fd)
+        except OSError as exc:
+            with contextlib.suppress(OSError):
+                os.ftruncate(fd, start)
+            raise _pending_refusal("cannot be written (" + errno.errorcode.get(exc.errno or 0, type(exc).__name__) + ")") from None
+    finally:
+        os.close(fd)
+
+
+def record_exposures(bundle_dir: Path, batches: Iterable[tuple[Iterable[tuple[str, str]], str]]) -> dict:
+    """THE EXPOSURES OF A READ: each ``(targets, command)`` batch recorded as :func:`expose_and_load` always did (a
+    conflict's candidate too), in order, DURABLY, before the caller prints anything — but in
+    :data:`PENDING_EXPOSURES_FILE`, never in ``bundle.json``, so the look moves no version (1.17.0). Returns the bundle
+    as loaded, with them. Refused (nothing to print) when they cannot be written."""
+    batches = [(list(targets), command) for targets, command in batches]
+    with locked(Path(bundle_dir)):
+        bundle = load(bundle_dir)
+        before = len(bundle.setdefault("exposures", []))
+        for targets, command in batches:
+            for kind, tid in targets:
+                record_exposure(bundle, kind, tid, command)
+                if kind == "conflict":
+                    _, conflict = resolve_target(bundle, tid)
+                    if conflict.get("candidate_id"):
+                        record_exposure(bundle, "candidate", conflict["candidate_id"], command)
+        append_pending_exposures(bundle_dir, bundle, bundle["exposures"][before:])
+        return bundle
 
 
 def save_bundle(bundle_dir: Path, bundle: dict) -> None:
@@ -203,6 +362,10 @@ def save_bundle(bundle_dir: Path, bundle: dict) -> None:
     #     lock), so a change made now is not mistaken for one an older build made.
     # Every save also corrects the engine's "this build cannot write it yet" summary on paths this
     # local build writes (bundle.refresh_local_write_summaries); the engine's own text is kept.
+    # 1.17.0: what reads recorded beside bundle.json is folded in (idempotent: a bundle loaded by `load` has it),
+    # whichever loader read this bundle, and the file is removed once the write succeeds
+    merge_pending_exposures(bundle, Path(bundle_dir))
+    pending = (Path(bundle_dir) / PENDING_EXPOSURES_FILE).exists()
     stored_version = bundle.get("format_version")
     # THE STORED VERSION IS NOT RELABELLED past what it holds: only a bundle that HAS
     # processed_outputs (an import by a 1.2.0+ build) is raised to this build's version (1.4.0:
@@ -310,6 +473,11 @@ def save_bundle(bundle_dir: Path, bundle: dict) -> None:
     cli._atomic_write(bundle_dir / B.BUNDLE_FILE, encoded)
     for name, data in cli.section_payloads(bundle).items():
         cli._atomic_write(bundle_dir / name, data)
+    if pending:
+        try:
+            os.unlink(bundle_dir / PENDING_EXPOSURES_FILE)  # folded in above; a line of another bundle_id is dropped
+        except FileNotFoundError:
+            pass
     if held_now:
         print(f"isaac: {B.held_statement(len(held_now))} (an older build stored them as extracted; logged in bundle.json "
               "eligibility_rederived)", file=sys.stderr)
@@ -414,18 +582,24 @@ def _candidate_of_conflict(bundle: Mapping, conflict: Mapping) -> str | None:
 def record_exposure(bundle: dict, kind: str, target_id: str, command: str) -> None:
     """Record that ``command`` printed this target's parser value. First one per
     (target, command) is kept — the question a blind check asks is WHETHER and WHEN."""
+    _append_exposure(bundle, kind, target_id, command, now_utc())
+
+
+def _append_exposure(bundle: dict, kind: str, target_id: str, command: str, at_utc: str) -> int:
+    """:func:`record_exposure` at a given time; 1 when it was added, 0 when this target and command had one."""
     exposures = bundle.setdefault("exposures", [])
     for e in exposures:
         if e["target"] == {"kind": kind, "id": target_id} and e["command"] == command:
-            return
+            return 0
     exposures.append(
         {
             "exposure_id": f"x-{len(exposures) + 1:06d}",
             "target": {"kind": kind, "id": target_id},
             "command": command,
-            "at_utc": now_utc(),
+            "at_utc": at_utc,
         }
     )
+    return 1
 
 
 def exposures_for(bundle: Mapping, kind: str, target_id: str) -> list[dict]:
@@ -434,20 +608,48 @@ def exposures_for(bundle: Mapping, kind: str, target_id: str) -> list[dict]:
 
 def expose_and_load(bundle_dir: Path, targets: Iterable[tuple[str, str]], command: str) -> dict:
     """Record exposures FIRST (durably), then hand back the bundle for printing. If the
-    exposure cannot be written, nothing is printed — the caller gets the refusal."""
-    targets = list(targets)
+    exposure cannot be written, nothing is printed — the caller gets the refusal. 1.17.0: recorded beside
+    ``bundle.json`` (:func:`record_exposures`), which a look never writes."""
+    return record_exposures(bundle_dir, [(targets, command)])
 
-    def change(bundle):
-        for kind, tid in targets:
-            record_exposure(bundle, kind, tid, command)
-            if kind == "conflict":
-                _, conflict = resolve_target(bundle, tid)
-                cid = conflict.get("candidate_id")
-                if cid:
-                    record_exposure(bundle, "candidate", cid, command)
-        return bundle
 
-    return mutate(bundle_dir, change)
+# --- consent (1.17.0) ------------------------------------------------------------------------
+
+
+def record_consent(bundle_dir: Path, *, by: str | None, withdraw: bool = False, note: str | None = None,
+                   command: str = "bundle consent") -> dict:
+    """Record the scientist's answer to whether Claude may read this beamtime's files (``bundle.CONSENT_SCOPE``, under
+    ``bundle.CONSENT_AGREEMENT``), and the name it was given under, as one appended ``consents`` entry (C4 of the
+    22 Nov 2026 plan): a later session reads it with ``bundle status`` instead of asking again. ``withdraw`` records a
+    withdrawal, which holds from then on; the consent before it is kept. The same answer under the same name as the
+    entry that holds records nothing and writes nothing (``{"recorded": False, ...}``). The name is a claim
+    (``local_unverified``), never an identity."""
+    decider = _decider(by, None)
+    if decider is None:
+        raise MutationRefused("Record consent under the scientist's name: --by \"<their name>\". Nothing was recorded.",
+                              code=2)
+    if len(decider["name"]) > 300 or (note and len(str(note)) > 2000):
+        raise MutationRefused("The name may be up to 300 characters and --note up to 2000. Nothing was recorded.", code=2)
+    answer = "withdrawn" if withdraw else "given"
+    with locked(Path(bundle_dir)):
+        bundle = load(bundle_dir)
+        holds = B.current_consent(bundle)
+        if holds and holds.get("answer") == answer and (holds.get("given_by") or {}).get("name") == decider["name"]:
+            return {"recorded": False, "consent": holds,
+                    "statement": f"Already recorded: consent {answer} by {decider['name']} on {holds.get('recorded_utc')}. "
+                                 "Nothing new was written."}
+        entries = bundle.setdefault("consents", [])
+        entry = {"consent_id": f"consent-{len(entries) + 1:04d}", "answer": answer, "scope": B.CONSENT_SCOPE,
+                 "agreement": B.CONSENT_AGREEMENT, "given_by": decider,
+                 "folder": str((bundle.get("source_root") or {}).get("label") or Path(bundle_dir).name)[:500],
+                 "recorded_utc": now_utc(), "command": command, **({"note": str(note)} if note else {})}
+        entries.append(entry)
+        save_bundle(bundle_dir, bundle)
+    said = ("may read the files of this beamtime and the output of every command on it" if answer == "given" else
+            "may no longer read the files of this beamtime or the output of commands on it")
+    return {"recorded": True, "consent": entry,
+            "statement": f"Recorded: {decider['name']} says Claude {said} ({B.CONSENT_AGREEMENT}), for {entry['folder']}. "
+                         "`isaac bundle status` shows it in a later session."}
 
 
 # --- annotate (AI interpretation) -----------------------------------------------------------
@@ -4061,8 +4263,9 @@ def reveal(bundle_dir: Path, target_id: str) -> dict:
     with locked(Path(bundle_dir)):
         bundle = load(bundle_dir)
         kind, obj = resolve_target(bundle, target_id)
+        before = len(bundle.setdefault("exposures", []))
         record_exposure(bundle, kind, target_id, "bundle reveal")
-        save_bundle(bundle_dir, bundle)
+        append_pending_exposures(bundle_dir, bundle, bundle["exposures"][before:])  # 1.17.0: never bundle.json
     readings = [i for i in bundle.get("ai_interpretations") or () if i["target"] == {"kind": kind, "id": target_id}]
     clock = kind == "candidate" and B.is_local_clock_start(obj)
     if kind == "candidate":

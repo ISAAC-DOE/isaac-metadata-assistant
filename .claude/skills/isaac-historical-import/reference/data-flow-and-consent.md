@@ -23,23 +23,25 @@ row D is the scientist's own action on the website, outside this skill, said her
 > stay on your computer. What name should I record your answers under? One step is optional: I can
 > read a few files myself before I see what ISAAC found, as a spot check; say if you'd rather skip it.
 
-Record: "Consent given by <name> at <time> for <folder>" in your reply. Use that name as `--by` for
-every decision; do not ask it again in this conversation. Do not treat a yes about one folder as a yes about another.
+Record it in the working folder once the import exists: `<isaac> bundle consent <bundle> --by "<name>"` (a
+withdrawal: add `--withdraw`). Use that name as `--by` for every decision; do not ask it again. Do not treat a yes about
+one folder as a yes about another: the record names its folder.
 
 ## What is kept between conversations, and what is not
 
-- **The name is kept with every answer** in the working folder (each decision records who made it).
-  No command lists it yet, so in a new conversation ask it once, with the consent question.
-- **The consent is not kept anywhere.** It lives in the conversation where it was given. A new conversation asks the
-  one consent question again. Keep it to one line:
+- **The consent and the name are kept** in the working folder once recorded with `bundle consent`. In a new
+  conversation run `<isaac> bundle status <bundle>` first (it prints no file value): it says who consented and when.
+  Then greet them by that name and continue; do not ask again.
+- **Only when status says "not recorded" or WITHDRAWN**, ask the one consent line before anything else:
   "Welcome back. Am I still allowed to read this beamtime's files and outputs, and under which name do I record?"
 - Every answer, approval and export so far IS kept. Never ask those again (Step 2, "A working folder that already exists").
 
-## Looking also writes
+## Looking writes nothing to the bundle
 
-Commands that only look still write to the working folder: a newer ISAAC upgrades its format on first use, and each
-page of questions records which values were shown. So use one session at a time on a working folder. Two at once (a
-second conversation, the Local Imports page) can get "The bundle changed since it was read": run the command again.
+Commands that only look (`status`, `list`, `show`, `questions`, `check`, `site export`) never change `bundle.json`. The
+values they show are noted in `exposures.pending.jsonl` beside it, and a newer ISAAC upgrades the format only at the
+next answer. So a second conversation or the Local Imports page looking at the same folder does not get "The bundle
+changed since it was read". Two sessions both ANSWERING at once still can: run the command again.
 
 ## If the answer is "no" or "not sure"
 

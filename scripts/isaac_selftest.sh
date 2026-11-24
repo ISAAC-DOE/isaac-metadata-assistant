@@ -98,7 +98,8 @@ if [[ -n "$TARGET" ]]; then
   BL="$(json "$BUNDLE/bundle.json" "[a for a in d['ai_interpretations'] if a['target']['id']=='$TARGET'][-1]['blind']" 2>/dev/null)"
   if [[ "$BL" == "True" ]]; then report PASS "annotate --blind is blind" "no value had been shown for this target"; else report FAIL "annotate --blind is blind" "stored blind=$BL"; fi
   run "$ISAAC" bundle reveal "$BUNDLE" "$TARGET"; expect "reveal (records an exposure)" 0 ""
-  EXPO="$(json "$BUNDLE/bundle.json" "len([e for e in d['exposures'] if e['target']['id']=='$TARGET'])" 2>/dev/null)"
+  # 1.17.0: a read records its exposures in exposures.pending.jsonl beside bundle.json (folded in by the next write)
+  EXPO="$(json "$BUNDLE/bundle.json" "len([e for e in d['exposures'] if e['target']['id']=='$TARGET']) + sum(1 for l in (open('$BUNDLE/exposures.pending.jsonl').read().splitlines() if __import__('os').path.exists('$BUNDLE/exposures.pending.jsonl') else []) if json.loads(l)['target']['id']=='$TARGET')" 2>/dev/null)"
   if [[ "${EXPO:-0}" -ge 1 ]]; then report PASS "exposure recorded" "$EXPO"; else report FAIL "exposure recorded" "none"; fi
   run "$ISAAC" bundle annotate "$BUNDLE" --target "$TARGET" --value "second reading" --model "$MODEL" --blind --rationale "SYNTHETIC SELF-TEST after reveal"
   BL2="$(json "$BUNDLE/bundle.json" "[a for a in d['ai_interpretations'] if a['target']['id']=='$TARGET'][-1]['blind']" 2>/dev/null)"

@@ -24,6 +24,7 @@ import isaac_api.workspace as ws
 from isaac_api import schema_proposal_rules as R
 from isaac_api.local_import import bundle as B
 from isaac_api.local_import import cli
+from isaac_api.local_import import mutations as M
 from isaac_api.local_import import propose_terms as P
 
 SEMANTICS = ws.REPO_ROOT / "tests/fixtures/bl15/semantics/multi_operator_corpus"
@@ -225,7 +226,7 @@ def test_printing_a_parser_value_records_an_exposure_first(bundle_dir, capsys, m
     listed = {t["term"] for f in report["fields"] if f["field_path"] == field for t in f["terms"]}
     assert listed == {c["value"] for c in parsed}
     assert set(report["exposed_candidates"]) == {c["candidate_id"] for c in parsed}
-    exposures = _bundle(bundle_dir)["exposures"]
+    exposures = M.load(bundle_dir)["exposures"]  # 1.17.0: beside bundle.json until the next write folds them in
     assert {e["target"]["id"] for e in exposures if e["command"] == P.COMMAND} == set(report["exposed_candidates"])
     entry = _term(report, field, parsed[0]["value"])
     assert entry["by_origin"]["parser_reading"] == 1

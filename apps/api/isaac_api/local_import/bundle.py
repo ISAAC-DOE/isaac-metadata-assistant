@@ -125,7 +125,17 @@ FORMAT_ID = "isaac.local-import-bundle"
 #: its number unused. A file that is no longer a run takes its run's ids with it, so run, candidate and value ids after
 #: it renumber (as at 1.11.0 and 1.13.0). Nothing becomes newly writable; the upgrade is disclosed
 #: (:data:`CHANGES_ADDED_IN`).
-FORMAT_VERSION = "1.16.0"
+#: 1.17.0 (additive; C4 and C7 of the 22 Nov 2026 plan, skill audit of 18 Nov 2026, findings 10 and 15): the optional
+#: ``consents`` section — the scientist's answer to whether Claude may read this beamtime's files under the ISAAC usage
+#: agreement, and the name it was given under (``mutations.record_consent``, ``bundle consent --by``), so a second
+#: session reads it (``bundle status``) instead of asking again. Append-only; the latest entry holds. And a command that
+#: only READS never writes ``bundle.json``: the parser values it prints are recorded in
+#: ``mutations.PENDING_EXPOSURES_FILE`` beside it, read back by every load and folded into ``exposures`` by the next write
+#: (the blind protocol, contract §11, is unchanged), so two readers never trip "the bundle changed since it was read" and
+#: an older bundle is upgraded by the next write, never by a look. ``format_upgrades[].statement`` may be up to 4000
+#: characters (3000 before: the statement of a 1.7.0 bundle's upgrade, which appends every later version's note, passed
+#: it). A 1.16.0 validator refuses the new section and the longer statement, hence the version. Nothing becomes newly writable; the upgrade is disclosed (:data:`CHANGES_ADDED_IN`).
+FORMAT_VERSION = "1.17.0"
 #: The electrochemical control mode. Its allowed values are the official schema's enum (read at
 #: runtime by :func:`value_problem`); the schema's conditional rules key the set-point a record
 #: requires on it (:func:`required_record_paths`). Never defaulted, never derived.
@@ -151,7 +161,7 @@ VALUE_IDS_APPEND_FROM = "1.5.0"
 IMPORT_RULES_ADDED_IN: Mapping[str, tuple] = {
     "1.4.0": (("generic:ssrl_xdc_v1", "ssrl_xdc_scan_start_v1"),),
 }
-_VERSION_ORDER = ("1.0.0", "1.1.0", "1.2.0", "1.3.0", "1.4.0", "1.5.0", "1.6.0", "1.7.0", "1.8.0", "1.9.0", "1.10.0", "1.11.0", "1.12.0", "1.13.0", "1.14.0", "1.15.0", "1.16.0")
+_VERSION_ORDER = ("1.0.0", "1.1.0", "1.2.0", "1.3.0", "1.4.0", "1.5.0", "1.6.0", "1.7.0", "1.8.0", "1.9.0", "1.10.0", "1.11.0", "1.12.0", "1.13.0", "1.14.0", "1.15.0", "1.16.0", "1.17.0")
 #: A change a format version made that moves no eligibility and adds no import rule, but that the
 #: first save by a newer build still DISCLOSES in its ``format_upgrades`` entry (never silently).
 CHANGES_ADDED_IN: Mapping[str, str] = {
@@ -187,6 +197,9 @@ CHANGES_ADDED_IN: Mapping[str, str] = {
                "overwritten macro (isaac.import.macro_run_line.v1); suggestions only: the clock zone from #E/#D (isaac.suggest.clock_zone_from_epoch_pair.v1), a "
                "BL4-3 standard's role (isaac.grouping.xdc_standard_name.v1), the scanned edge "
                "(isaac.suggest.absorber_from_scanned_range.v1)"),
+    "1.17.0": ("1.17.0 keeps the scientist's consent to Claude reading these files, and their name (consents; `bundle "
+               "consent`, `bundle status`); a read no longer writes bundle.json: the values it prints go to "
+               "exposures.pending.jsonl, folded in by the next write"),
 }
 #: A field composed into a draft only beside another of the SAME run (interim decision for the
 #: set-point, pending domain-owner review; ``records.compose_group`` applies it). The CURRENT
@@ -1417,6 +1430,18 @@ DOSE_READINGS = ("beam_damage", "not_beam_damage", "first_scan_settling")
 ROLE_DECISION = "set_role"
 #: 1.15.0: "export it anyway" for a record the local record-completeness gate holds (``completeness.py``)
 EXPORT_ANYWAY_DECISION = "export_despite_completeness"
+#: 1.17.0 (``consents``): what a consent entry is consent TO — Claude, the model service, reading the files of the
+#: imported folder and every command output on this bundle (flow B of the skill's data-flow-and-consent.md) — and the
+#: agreement it is given under (the memory index's DEC-86). Fixed values: the schema holds them as constants.
+CONSENT_SCOPE = "claude_reads_files"
+CONSENT_AGREEMENT = "ISAAC usage agreement"
+
+
+def current_consent(bundle: Mapping) -> dict | None:
+    """The consent entry that holds now: the LATEST of ``consents`` (append-only; a withdrawal follows the consent it
+    withdraws), or ``None`` when none was recorded (1.17.0)."""
+    entries = [c for c in bundle.get("consents") or () if isinstance(c, Mapping)]
+    return dict(entries[-1]) if entries else None
 
 
 def export_anyway_problem(value: Any) -> str | None:
@@ -6781,6 +6806,7 @@ def validate_bundle(bundle: Any, *, max_errors: int = 50, encoded: bytes | None 
 
     # PROCESSED OUTPUTS (1.2.0): references, and the one invariant that matters — a file
     # that is a processed output is never also a run's scan (so never a record group's).
+    _unique(bundle.get("consents") or [], "consent_id", "consent_id")  # 1.17.0
     po_ids = _unique(bundle.get("processed_outputs") or [], "processed_output_id", "processed_output_id")
     run_scan_paths = {s.get("relative_path") for r in bundle["runs"] for s in r.get("scans") or ()}
     runs_by_id_v = {r["run_id"]: r for r in bundle["runs"]}

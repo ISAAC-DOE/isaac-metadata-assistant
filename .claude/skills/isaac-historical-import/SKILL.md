@@ -89,13 +89,13 @@ Read `reference/data-flow-and-consent.md` and ask its question. In short:
 
 **The working folder already exists.** If `<bundle>` holds an earlier import of this beamtime, do NOT import again.
 
-1. `<isaac> bundle check <bundle>`, then read `<bundle>/summary.md`. Its "Scientist decisions recorded" line counts what is decided.
-2. Look where things stand:
-   `<isaac> bundle list <bundle> scan-notes --limit 1` · `<isaac> bundle list <bundle> groups --limit 200` ·
+1. `<isaac> bundle status <bundle>` (writes nothing, prints no file value): who consented, where things stand, what next.
+2. Consent given: greet them by that name and go on; do not ask again. "not recorded" or WITHDRAWN: ask the one consent
+   line (data-flow-and-consent.md) first. Detail: `<isaac> bundle list <bundle> scan-notes --limit 1` ·
+   `<isaac> bundle list <bundle> groups --limit 200` ·
    `<isaac> bundle list <bundle> processing-results --state needs_review --limit 1` ·
    `<isaac> bundle questions <bundle> --blocking-only --limit 10 --no-context`.
-3. Tell the scientist in four lines: logbook notes loaded, groups confirmed, curves approved and still waiting, answers still missing.
-4. Continue at the first unfinished step. Never ask again what is already recorded.
+3. Say the status lines in your own words; continue at its "Next:" step. Never ask again what is already recorded.
 
 - Never suggest `--force`, or a fresh import, for a working folder that holds decisions: every answer in it would be lost.
 

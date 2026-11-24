@@ -47,7 +47,8 @@ def _client(root: Path, monkeypatch, tmp_path: Path) -> TestClient:
 
 
 def _exposed(bdir: Path, command: str) -> set[str]:
-    return {e["target"]["id"] for e in B.load_bundle(bdir).get("exposures") or ()
+    # M.load: a read's exposures are beside bundle.json until the next write folds them in (1.17.0)
+    return {e["target"]["id"] for e in M.load(bdir).get("exposures") or ()
             if e["target"]["kind"] == "candidate" and e["command"] == command}
 
 

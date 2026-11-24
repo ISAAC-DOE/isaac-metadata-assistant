@@ -30,9 +30,10 @@ A SUGGESTION IS A HINT and says where it came from: a value the files give (``ba
 from the opt-in answer memory, an AI reading with its quote, a rule's proposal, or an entry of ``--suggestions``.
 Nothing is chosen for the scientist; "accept" on the site records their decision, not the hint's.
 
-THE BUNDLE IS READ, AND ITS EXPOSURE LOG IS WRITTEN: the parser values the cards show are recorded in ``exposures``
-under :data:`EXPOSURE_COMMAND`, as ``bundle questions`` records the ones it prints. No decision, value or question
-changes. ``--out`` must be outside every git working tree and outside the bundle folder: it holds real data.
+THE BUNDLE IS READ, AND ITS EXPOSURE LOG IS WRITTEN: the parser values the cards show are recorded as exposures
+under :data:`EXPOSURE_COMMAND`, as ``bundle questions`` records the ones it prints — since 1.17.0 in
+``mutations.PENDING_EXPOSURES_FILE`` beside ``bundle.json``, never in it, so the export leaves the bundle's version as it
+read it. No decision, value or question changes. ``--out`` must be outside every git working tree and outside the bundle folder: it holds real data.
 """
 
 from __future__ import annotations
@@ -1379,12 +1380,9 @@ def export_site(bundle_dir: Path, out: Path, *, suggestions: Path | None = None,
     exposed += [x for x in shown if isinstance(x, (list, tuple)) and len(x) == 2]
     exposed = list(dict.fromkeys((str(k), str(i)) for k, i in exposed))
     if exposed:
-        def change(b):
-            for kind, tid in exposed:
-                M.record_exposure(b, kind, tid, EXPOSURE_COMMAND)
-            return b
         try:
-            M.mutate(bundle_dir, change)
+            # 1.17.0: beside bundle.json, which an export never writes, so `bundle_version` below is the one read
+            M.record_exposures(bundle_dir, [(exposed, EXPOSURE_COMMAND)])
         except M.MutationRefused as exc:
             raise SiteRefused(f"The values the cards show could not be recorded as shown ({exc}); nothing was "
                               "exported.", code=exc.code) from exc

@@ -153,12 +153,26 @@ def test_progress_lists_the_unmatched_athena_merges_read_only(client, root):
                "groups_in_project": ["rg-syn"]} for i in range(LB.ATHENA_MERGES_SHOWN + 2)]
     (proc / "processing_results.json").write_text(json.dumps({"athena": {"unmatched_merges": merges}}), encoding="utf-8")
     before = _files(root / "alpha")
-    p = client.get("/api/local-bundles/alpha/progress").json()["progress"]
+    body = client.get("/api/local-bundles/alpha/progress").json()
+    p = body["progress"]
     got = p["athena_merges"]
     assert got["total"] == LB.ATHENA_MERGES_SHOWN + 2 and len(got["items"]) == LB.ATHENA_MERGES_SHOWN
     assert got["items"][0] == M.unmatched_merge_row(merges[0])
-    assert {k: v for k, v in _files(root / "alpha").items() if k != "bundle.json"} == {
-        k: v for k, v in before.items() if k != "bundle.json"}
+    # READ-ONLY (1.17.0, C7): every bundle file, bundle.json included, is byte-identical. The one write a read may make
+    # is the exposure log beside it: only appended lines, each a well-formed exposure of THIS bundle under the route's
+    # own command, as many as the route says it recorded (the values the nearest record's warnings state)
+    after = _files(root / "alpha")
+    pending = M.PENDING_EXPOSURES_FILE
+    assert {k: v for k, v in after.items() if k != pending} == {k: v for k, v in before.items() if k != pending}
+    added = after.get(pending, b"")[len(before.get(pending, b"")):]
+    assert after.get(pending, b"").startswith(before.get(pending, b""))  # appended, never rewritten
+    lines = [json.loads(x) for x in added.decode("ascii").splitlines()]
+    assert lines and len(lines) == p["exposures_recorded"]  # this fixture's warnings state a value: the append is exercised
+    bid = M.load(root / "alpha")["bundle_id"]
+    for e in lines:
+        assert set(e) == {"bundle_id", "target", "command", "at_utc"} and e["bundle_id"] == bid
+        assert e["command"] == "bundle progress" and set(e["target"]) == {"kind", "id"} and e["target"]["id"]
+    assert body["bundle"]["bundle_version"] == M.bundle_version(root / "alpha")  # the read moved no version
     # no processing results: nothing is listed
     shutil.rmtree(proc)
     assert client.get("/api/local-bundles/alpha/progress").json()["progress"]["athena_merges"] is None

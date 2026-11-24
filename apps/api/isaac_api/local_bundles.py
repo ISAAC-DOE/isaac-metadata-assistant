@@ -455,6 +455,9 @@ def read_bundle(bundle_dir: Path) -> tuple[str, dict]:
         held = B.hold_beamtime_wide_statements(data)
     else:
         held = []
+    # 1.17.0: the exposures a read recorded beside bundle.json (`mutations.PENDING_EXPOSURES_FILE`), as `mutations.load`
+    # reads them; the version stays the stored bytes' hash, which no read moves
+    M.merge_pending_exposures(data, Path(bundle_dir))
     version = "sha256:" + hashlib.sha256(raw).hexdigest()
     # how many values THIS read held in memory, by the version read: `check_status` says so as `bundle check` does
     _held_memo[version] = len(held)
@@ -1554,9 +1557,9 @@ def list_local_bundles():
         "question counts (blocking, conflicts, optional), the fewest answers between one group and export, what "
         "still blocks export, and the verdicts the last `isaac bundle validate` wrote, each marked when it is older "
         "than the bundle. No share of missing values is given, because no command computes one.\n\n"
-        "A parser value the nearest record's warnings state is recorded as an exposure in the bundle first, as "
-        "`isaac bundle questions` does, so this read can write `bundle.json`; `exposures_recorded` says how many it "
-        "added and the header's `bundle_version` is the version after them."
+        "A parser value the nearest record's warnings state is recorded as an exposure first, as "
+        "`isaac bundle questions` does, in `exposures.pending.jsonl` beside `bundle.json` (never in it, so this read "
+        "moves no `bundle_version`); `exposures_recorded` says how many it added."
     ),
     response_description="The bundle's header and its progress.",
     responses={**_R_UNAUTHORIZED, **_R_LOCAL, **_R_NOT_FOUND, **_R_CONFLICT},
@@ -1582,11 +1585,10 @@ def get_local_bundle_progress(bundle: str = PathParam(..., max_length=255, descr
         added = _record_shown(data, Q.minimum_exposures(out.get("minimum_for_one_group")), "bundle progress")
         if added:
             try:
-                M.save_bundle(bdir, data)
+                M.append_pending_exposures(bdir, data, data["exposures"][-added:])  # 1.17.0: never bundle.json
             except M.MutationRefused as exc:
                 return _refuse(409, "exposure_not_recorded",
                                f"The exposures could not be recorded, so nothing is shown: {exc}")
-            version = M.bundle_version(bdir)
     out["exposures_recorded"] = added
     return {"bundle": bundle_header(bundle, bdir, data, version), "progress": out}
 
@@ -1617,9 +1619,9 @@ def _record_shown(data: dict, shown: Sequence[tuple[str, str]], command: str) ->
         "place in the file and the quoted text, and the rule for the value. A suggestion is never confirmed. "
         "`capture` lists the open merge and Athena-version decisions. With `scope`, `counts` are that scope's, as "
         "`isaac bundle questions --scope` gives them, and `counts_whole_bundle` the whole bundle's.\n\n"
-        "Showing a parser value is recorded as an exposure in the bundle first, as `isaac bundle questions` does, "
-        "so this read can write `bundle.json`; `exposures_recorded` says how many it added and `bundle_version` is "
-        "the version after them. Like every operation here it needs the header ISAAC's own pages send, so a page "
+        "Showing a parser value is recorded as an exposure first, as `isaac bundle questions` does, in "
+        "`exposures.pending.jsonl` beside `bundle.json` (never in it, so this read moves no `bundle_version`); "
+        "`exposures_recorded` says how many it added. Like every operation here it needs the header ISAAC's own pages send, so a page "
         "on another site cannot make it record anything."
     ),
     response_description="The questions page, its counts, the capture decisions and the bundle version.",
@@ -1729,11 +1731,11 @@ def get_local_bundle_questions(
         added += _record_shown(data, context_shown, QC.EXPOSURE_COMMAND)
         if added:
             try:
-                M.save_bundle(bdir, data)
+                M.append_pending_exposures(bdir, data, data["exposures"][-added:])  # 1.17.0: never bundle.json
             except M.MutationRefused as exc:
                 return _refuse(409, "exposure_not_recorded",
                                f"The exposures could not be recorded, so nothing is shown: {exc}")
-        version = M.bundle_version(bdir) if added else _read_version
+        version = _read_version  # a read moves no version (1.17.0)
     header = bundle_header(bundle, bdir, data, version)
     return {
         "bundle": header,
@@ -1896,8 +1898,8 @@ def answered_exposures(data: Mapping, seen: Mapping) -> list[tuple[str, str]]:
         "answer to the same id replaces these (the same checks apply); repeating one records nothing new. A question "
         "answered only as \"I don't know\" is still open and is not listed here.\n\n"
         "Showing a question records the exposures `isaac bundle show question` records for it (its hints and the "
-        "extracted values its text states) in the bundle first, so this read can write `bundle.json`; "
-        "`exposures_recorded` says how many it added and `bundle_version` is the version after them."
+        "extracted values its text states) first, in `exposures.pending.jsonl` beside `bundle.json` (never in it, so "
+        "this read moves no `bundle_version`); `exposures_recorded` says how many it added."
     ),
     response_description="The answered questions page, with each question's current answers and the bundle version.",
     responses={**_R_UNAUTHORIZED, **_R_LOCAL, **_R_NOT_FOUND, **_R_CONFLICT},
@@ -1950,11 +1952,11 @@ def get_local_bundle_answered_questions(
             out_questions.append({**seen, **({"context": context} if context else {}), "display": display})
         if added:
             try:
-                M.save_bundle(bdir, data)
+                M.append_pending_exposures(bdir, data, data["exposures"][-added:])  # 1.17.0: never bundle.json
             except M.MutationRefused as exc:
                 return _refuse(409, "exposure_not_recorded",
                                f"The exposures could not be recorded, so nothing is shown: {exc}")
-        version = M.bundle_version(bdir) if added else _read_version
+        version = _read_version  # a read moves no version (1.17.0)
     return {
         "bundle": bundle_header(bundle, bdir, data, version),
         "total": len(rows),
