@@ -326,7 +326,7 @@ RULE_SECTION_QUALITY_REMARK = (
     "line) that says the sample failed — `did not work`, `failed`, `bad`, `broken`, `discard`, `no signal`, "
     "`unusable` — is a remark about that whole sample when it names the sample (`sample`, `electrode`, `catalyst`, "
     "the heading's own name) or names nothing else it could be about (the beam or ring current, a refill, dump or "
-    "injection, the weather, a reference foil, the detector, one particular scan, a sample that `works but` ..., the sample's holder, changer, stage or mount, or one bad spot; `sample fine` alone names neither). It is reported VERBATIM as a Data Quality Note of the section, "
+    "injection, the weather, a reference foil, the detector, one particular scan, a sample that `works but` ..., the sample's holder, changer, stage, mount, plate, wheel, rod, alignment or chamber, or one bad, burnt, damaged or wrong spot; `sample fine` alone names neither). It is reported VERBATIM as a Data Quality Note of the section, "
     "like the heading's own `(bad)` qualifier, carrying the section, its sample number and name, and its file "
     "numbers, so it can reach that sample's measurements. It is never a verdict: no qc.status is derived and no "
     "measurement is dropped; the scientist is asked."

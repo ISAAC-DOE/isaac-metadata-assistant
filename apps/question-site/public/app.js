@@ -1,7 +1,7 @@
 // The question site's page. No framework and no build step: a few views drawn with DOM calls.
 // Every piece of text from the server is set with textContent, never as HTML.
 
-import { describeAnswer, pickRun, tally, standing, isStale, shortcutAllowed, byOther, keptKey, carryNote, CONFIDENCE, BASIS } from './logic.js';
+import { describeAnswer, pickRun, tally, standing, isStale, shortcutAllowed, byOther, keptKey, carryNote, noteRoom, CONFIDENCE, BASIS } from './logic.js';
 
 const root = document.getElementById('main');
 const toastEl = document.getElementById('toast');
@@ -415,6 +415,9 @@ async function save(c, body, { advance = true } = {}) {
   const before = state.answers[c.card_id] || null;
   try {
     const sameAnswer = Boolean(before) && !isStale(c, before) && body.action === before.action && JSON.stringify(body.value ?? null) === JSON.stringify(before.value ?? null);
+    if (body.action !== 'clear' && String(body.note || '').trim().length > noteRoom(before, state.name, sameAnswer)) {
+      throw Object.assign(new Error(`Please shorten your note to ${noteRoom(before, state.name, sameAnswer)} characters: ${String(before.by).trim()}’s earlier note is kept with it.`), { status: 400 });
+    }
     const sent = body.action === 'clear' ? body : { ...body, note: carryNote(body.note, before, state.name, sameAnswer) };
     const out = await api('/api/answer', { card_id: c.card_id, seen_at: before ? before.at : null, ...sent });
     if (out.answer) state.answers[c.card_id] = out.answer;

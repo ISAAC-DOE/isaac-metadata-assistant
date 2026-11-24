@@ -283,6 +283,19 @@ def test_every_label_the_site_can_ask_is_a_label_the_import_proposes():
     assert {"filter", "tag", "history", "sample_id"} <= set(S.LABEL_ASKS)
 
 
+def test_a_tag_proposed_as_a_one_item_list_is_asked_and_shown_as_the_tag(grouped):
+    """Re-review Low 1: labels.py proposes a tag as ["tag"], which the card's type check used to leave out."""
+    b, payload, view = _view_and_payload(grouped)
+    gids = [g["group_id"] for g in b["record_groups"]][:2]
+    q = {"question_id": "Q-4444444444", "kind": "condition_label", "label": "tag", "scope": "experiment",
+         "target_field_path": "tags", "allowed_decisions": ["confirm", "correct", "defer"],
+         "proposals": [{"group_id": g, "value": ["syn-tag"], "first_file": f"{n}_x.dat"} for n, g in enumerate(gids)]}
+    got = PA.plain_fields(view, q)
+    assert got["ask"] == "Should these records carry the tag 'syn-tag'?" and got["answer"]["kind"] == "yes_no"
+    q["proposals"][0]["value"] = ["a", "b"]
+    assert "ask" not in PA.plain_fields(view, q), "a list of several tags is not one yes"
+
+
 @pytest.mark.parametrize("ask, suggested, options, yes", [
     ("Is the absorbing element and edge Ir L3?", {"label": "Ir L3", "value": "Ir L3"}, [], True),
     ("Was this done operando, in situ, ex situ or in silico?", {"label": "operando", "value": "operando"},

@@ -93,10 +93,16 @@ export function carryNote(mine, before, me, sameAnswer = false) {
   if (kept.length > NOTE_MAX) kept = `${kept.slice(0, NOTE_MAX - 1)}…`;
   if (own.includes(kept)) return own.slice(0, NOTE_MAX);
   // the person's own words give way to the earlier note, never the other way round
-  const room = NOTE_MAX - kept.length - 2;
-  if (room <= 0) return kept;
-  if (own.length > room) own = `${own.slice(0, room - 1)}…`;
   return own ? `${own}\n\n${kept}` : kept;
+}
+
+/**
+ * How many characters of their own a person may write on this card, once the earlier note is kept with it
+ * (`carryNote`). The page refuses a longer note instead of cutting either one.
+ */
+export function noteRoom(before, me, sameAnswer = false) {
+  const kept = carryNote('', before, me, sameAnswer);
+  return kept ? Math.max(0, NOTE_MAX - kept.length - 2) : NOTE_MAX;
 }
 
 /** The longest note the site stores (lib/answers.js NOTE_MAX). */

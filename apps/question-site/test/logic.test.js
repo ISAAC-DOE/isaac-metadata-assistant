@@ -99,8 +99,13 @@ test('a carried note is never dropped: the new words give way, and a note inside
   const { carryNote, NOTE_MAX } = await import('../public/logic.js');
   const before = { by: 'Krish Verma', note: 'ok' };
   assert.equal(carryNote('looks ok to me', before, 'Angel'), 'looks ok to me\n\nEarlier note from Krish Verma: ok');
-  const long = carryNote('a'.repeat(2000), before, 'Angel');
-  assert.ok(long.length <= NOTE_MAX && long.endsWith('Earlier note from Krish Verma: ok'), 'theirs kept whole');
-  const huge = carryNote('mine', { by: 'K', note: 'b'.repeat(2000) }, 'Angel');
-  assert.ok(huge.length <= NOTE_MAX && huge.startsWith('Earlier note from K: b'));
+  const { noteRoom } = await import('../public/logic.js');
+  const room = noteRoom(before, 'Angel');
+  assert.equal(room, NOTE_MAX - 'Earlier note from Krish Verma: ok'.length - 2);
+  const full = carryNote('a'.repeat(room), before, 'Angel');
+  assert.ok(full.length === NOTE_MAX && full.startsWith('a'.repeat(room)) && full.endsWith('Earlier note from Krish Verma: ok'),
+    'at the limit both are kept whole (the page refuses a longer note of their own)');
+  assert.equal(noteRoom(null, 'Angel'), NOTE_MAX);
+  assert.equal(noteRoom({ by: 'Angel', note: 'x' }, 'Angel'), NOTE_MAX, 'my own note is not carried');
+  assert.equal(noteRoom({ by: 'K', note: 'b'.repeat(1999) }, 'Angel'), 0);
 });
