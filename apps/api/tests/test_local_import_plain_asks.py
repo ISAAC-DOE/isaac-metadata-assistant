@@ -254,6 +254,37 @@ def test_a_label_question_shows_its_proposals_and_how_to_say_it_is_wrong(grouped
     assert P.not_plain(S._without_quotes(detail)) is None
 
 
+def test_a_sample_id_or_filter_label_is_corrected_with_a_pattern_not_one_literal(grouped):
+    """Review of #348: a sample ID or filter correction is a pattern filled in per measurement, and the page says so."""
+    b, payload, view = _view_and_payload(grouped)
+    gids = [g["group_id"] for g in b["record_groups"]][:2]
+    q = {"question_id": "Q-2222222222", "kind": "condition_label", "label": "sample_id", "scope": "experiment",
+         "target_field_path": "sample.sample_id", "allowed_decisions": ["confirm", "correct", "defer"],
+         "proposals": [{"group_id": g, "value": f"BT:ZZ1-{n}", "first_file": f"{n}_x.dat"} for n, g in enumerate(gids)]}
+    detail = PA.plain_fields(view, q)["plain_detail"]
+    assert "{electrode}" in detail and "each electrode keeps its own ID" in detail
+    assert "give the wording you want instead, and that is what is recorded" not in detail
+    assert "{filter}" in PA._LABEL_CORRECTION["filter"]
+    assert set(PA._LABEL_CORRECTION) <= {"sample_id", "filter"}
+
+
+@pytest.mark.parametrize("ask, suggested, options, yes", [
+    ("Is the absorbing element and edge Ir L3?", {"label": "Ir L3", "value": "Ir L3"}, [], True),
+    ("Was this done operando, in situ, ex situ or in silico?", {"label": "operando", "value": "operando"},
+     [{"value": "operando", "label": "operando"}, {"value": "in situ", "label": "in situ"}], False),
+    ("Is this experimental or computational work?", {"label": "experimental", "value": "experimental"},
+     [{"value": "experimental"}, {"value": "computational"}], False),
+    ("Is this experimental or computational work?", {"label": "experimental", "value": "experimental"}, [], False),
+    ("Is the technique XAS?", {"label": "HERFD-XAS", "value": "HERFD-XAS"}, [], False),
+    ("Which technique was used?", {"label": "XAS", "value": "XAS"}, [], False),
+    ("Is the technique HERFD-XAS?", None, [], False),
+])
+def test_yes_is_offered_only_when_the_ask_names_the_suggestion_alone(ask, suggested, options, yes):
+    """Review of #348: an either/or ask names no one value to say yes to, so the page does not offer "yes"."""
+    q = {"ask": ask, "suggested": suggested, "answer": {"kind": "choice", "options": options}}
+    assert PA._confirms(q) is yes
+
+
 def test_the_absorber_ask_carries_its_basis_and_scope(grouped):
     """Finding 5: an AI-only suggestion says so, and the question says which measurements it reaches."""
     b, payload, view = _view_and_payload(grouped)
