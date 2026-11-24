@@ -88,9 +88,9 @@ OPTIONAL_KINDS = ("optional_values", "condition_label")
 LABEL_ASKS = {
     "history": ("Should the record describe the sample's history as {value}?",
                 "Is the sample history read from the file names right?"),
-    "beam_attenuator": ("Was the beam filter {value}?", "Are the beam filter settings read from the file names right?"),
+    "filter": ("Was the beam filter {value}?", "Are the beam filter settings read from the file names right?"),
     "sample_id": ("Should the sample ID be {value}?", "Are the sample IDs proposed from the file names right?"),
-    "tags": ("Should these records carry the tag {value}?", "Are the tags proposed for these records right?"),
+    "tag": ("Should these records carry the tag {value}?", "Are the tags proposed for these records right?"),
 }
 
 CONFIDENCES = H.CONFIDENCES
@@ -792,9 +792,19 @@ def _value_card(view: _View, unit: Mapping) -> dict:
 def _label_card(view: _View, unit: Mapping) -> dict:
     """A condition label ISAAC proposes from the file names, asked as one yes / no (yes records each proposal)."""
     q = unit["named"]
-    proposals = [p for p in q.get("proposals") or () if isinstance(p.get("value"), (str, int, float))]
+    def shown(value: Any) -> Any:
+        # a tag is proposed as a one-item list (labels.py); a yes still records the proposal as it is
+        return value[0] if isinstance(value, list) and len(value) == 1 and isinstance(value[0], str) else value
+
+    proposals = [{**p, "value": shown(p.get("value"))} for p in q.get("proposals") or ()
+                 if isinstance(shown(p.get("value")), (str, int, float))]
     if not proposals or len(proposals) != len(q.get("proposals") or ()):
         raise _LeftOut("a label the site cannot ask as one yes or no")
+    # a filter the acquisition files record over what the file name states is checked on its own before "confirm all"
+    # (labels.py says so in the question's text), so one yes on the site cannot answer it
+    if any((p.get("said") or {}).get("overruled") for p in proposals):
+        raise _LeftOut("a filter whose acquisition files disagree with its file name (answered in the skill, where the "
+                       "groups that disagree are checked one by one)")
     one, many = LABEL_ASKS[q["label"]]
     values = list(dict.fromkeys(str(p["value"]) for p in proposals))
     title = one.format(value=f"'{values[0]}'") if len(values) == 1 else many

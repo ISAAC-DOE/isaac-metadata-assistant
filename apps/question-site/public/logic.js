@@ -68,15 +68,66 @@ export function tally(cards, answers) {
   };
 }
 
+/** Whether a saved answer was given by someone other than `me` (names compared without case or extra spaces). */
+export function byOther(answer, me) {
+  const norm = (s) => String(s || '').trim().replace(/\s+/g, ' ').toLowerCase();
+  return Boolean(answer && me && norm(answer.by) !== norm(me));
+}
+
+/**
+ * The note to save when a person answers a card someone else answered: their own note, then what the earlier person
+ * gave, under that person's name, so it is neither lost nor put in the new person's words. When the answer itself is
+ * kept (`sameAnswer`: a note added to it), the line also says who gave the answer first.
+ */
+export function carryNote(mine, before, me, sameAnswer = false) {
+  let own = String(mine || '').trim();
+  if (!before || !byOther(before, me)) return own.slice(0, NOTE_MAX);
+  const who = String(before.by).trim();
+  const earlier = String(before.note || '').trim();
+  let kept = sameAnswer
+    ? `Answer first given by ${who}${earlier ? `, with the note: ${earlier}` : '.'}`
+    : earlier
+      ? `Earlier note from ${who}: ${earlier}`
+      : '';
+  if (!kept) return own.slice(0, NOTE_MAX);
+  if (kept.length > NOTE_MAX) kept = `${kept.slice(0, NOTE_MAX - 1)}…`;
+  if (own.includes(kept)) return own.slice(0, NOTE_MAX);
+  // the person's own words give way to the earlier note, never the other way round
+  return own ? `${own}\n\n${kept}` : kept;
+}
+
+/**
+ * How many characters of their own a person may write on this card, once the earlier note is kept with it
+ * (`carryNote`). The page refuses a longer note instead of cutting either one.
+ */
+export function noteRoom(before, me, sameAnswer = false) {
+  const kept = carryNote('', before, me, sameAnswer);
+  return kept ? Math.max(0, NOTE_MAX - kept.length - 2) : NOTE_MAX;
+}
+
+/** The longest note the site stores (lib/answers.js NOTE_MAX). */
+export const NOTE_MAX = 2000;
+
+/** The key that remembers "I looked at this answer of someone else's and kept it": a new answer asks again. */
+export function keptKey(answer) {
+  return answer ? `${answer.card_id}@${answer.at}` : '';
+}
+
 /**
  * The next cards to answer: the open ones in the site's own order (needed first, widest reach first). A card marked
  * "don't know" is not offered again: a person who said they do not know should not be asked in a loop.
+ * With `me` given, the cards someone else answered come after the open ones, so the person can keep that answer,
+ * change it or add a note; `kept` holds the ones they already looked at and kept.
  */
-export function pickRun(cards, answers, size) {
+export function pickRun(cards, answers, size, me = null, kept = new Set()) {
   const open = cards.filter((c) => !standing(c, answers));
   const needed = open.filter((c) => c.blocking);
   const rest = open.filter((c) => !c.blocking);
-  return [...needed, ...rest].slice(0, Math.max(1, size)).map((c) => c.card_id);
+  const others = cards.filter((c) => {
+    const a = standing(c, answers);
+    return byOther(a, me) && !kept.has(keptKey(a));
+  });
+  return [...needed, ...rest, ...others].slice(0, Math.max(1, size)).map((c) => c.card_id);
 }
 
 /**

@@ -56,3 +56,56 @@ test('a single key never acts on a card that is mid-typing, just redrawn, saving
   assert.equal(shortcutAllowed({ ...base, key: 'd', hasAnswer: true }), false, "nor does don't know");
   assert.equal(shortcutAllowed({ ...base, key: 's', hasAnswer: true }), true, 'skipping changes nothing, so it is allowed');
 });
+
+test('someone else’s answers come after the open cards, until they are kept', async () => {
+  const { byOther, keptKey } = await import('../public/logic.js');
+  const cards = [
+    { card_id: 'C-1', blocking: true },
+    { card_id: 'C-2', blocking: true },
+    { card_id: 'C-3', blocking: false },
+  ];
+  const theirs = { card_id: 'C-1', action: 'value', value: 'x', by: 'Krish Verma', at: '2026-11-23T10:00:00.000Z' };
+  const answers = { 'C-1': theirs };
+  assert.deepEqual(pickRun(cards, answers, 10), ['C-2', 'C-3'], 'without a name, nothing changes');
+  assert.deepEqual(pickRun(cards, answers, 10, 'Angel'), ['C-2', 'C-3', 'C-1'], 'open cards first, then theirs');
+  assert.deepEqual(pickRun(cards, answers, 10, '  krish   verma '), ['C-2', 'C-3'], 'my own answers are not offered again');
+  assert.deepEqual(pickRun(cards, answers, 10, 'Angel', new Set([keptKey(theirs)])), ['C-2', 'C-3'], 'kept');
+  const newer = { ...theirs, at: '2026-11-24T10:00:00.000Z' };
+  assert.deepEqual(pickRun(cards, { 'C-1': newer }, 10, 'Angel', new Set([keptKey(theirs)])), ['C-2', 'C-3', 'C-1'], 'a newer answer asks again');
+  const dk = { ...theirs, action: 'dont_know', value: null };
+  assert.deepEqual(pickRun(cards, { 'C-1': dk }, 10, 'Angel'), ['C-2', 'C-3', 'C-1'], 'their “don’t know” may be something I know');
+  assert.equal(byOther(null, 'Angel'), false);
+  assert.equal(byOther(theirs, ''), false);
+});
+
+test('replacing someone else’s answer keeps their note under their name', async () => {
+  const { carryNote } = await import('../public/logic.js');
+  const before = { by: 'Krish Verma', note: 'checked against logbook' };
+  assert.equal(carryNote('', before, 'Angel'), 'Earlier note from Krish Verma: checked against logbook');
+  assert.equal(carryNote('it was XAS', before, 'Angel'), 'it was XAS\n\nEarlier note from Krish Verma: checked against logbook');
+  assert.equal(carryNote('mine', before, 'krish verma'), 'mine', 'my own earlier note is mine to change');
+  assert.equal(carryNote('mine', { by: 'Krish', note: '' }, 'Angel'), 'mine');
+  assert.equal(carryNote(carryNote('x', before, 'Angel'), before, 'Angel'), carryNote('x', before, 'Angel'), 'not added twice');
+  assert.equal(carryNote(' x ', null, 'Angel'), 'x');
+});
+
+test('keeping someone else’s answer with a note says who gave the answer', async () => {
+  const { carryNote } = await import('../public/logic.js');
+  assert.equal(carryNote('agree', { by: 'Krish Verma', note: '' }, 'Angel', true), 'agree\n\nAnswer first given by Krish Verma.');
+  assert.equal(carryNote('', { by: 'Krish Verma', note: 'ok' }, 'Angel', true), 'Answer first given by Krish Verma, with the note: ok');
+});
+
+test('a carried note is never dropped: the new words give way, and a note inside them is not mistaken for it', async () => {
+  const { carryNote, NOTE_MAX } = await import('../public/logic.js');
+  const before = { by: 'Krish Verma', note: 'ok' };
+  assert.equal(carryNote('looks ok to me', before, 'Angel'), 'looks ok to me\n\nEarlier note from Krish Verma: ok');
+  const { noteRoom } = await import('../public/logic.js');
+  const room = noteRoom(before, 'Angel');
+  assert.equal(room, NOTE_MAX - 'Earlier note from Krish Verma: ok'.length - 2);
+  const full = carryNote('a'.repeat(room), before, 'Angel');
+  assert.ok(full.length === NOTE_MAX && full.startsWith('a'.repeat(room)) && full.endsWith('Earlier note from Krish Verma: ok'),
+    'at the limit both are kept whole (the page refuses a longer note of their own)');
+  assert.equal(noteRoom(null, 'Angel'), NOTE_MAX);
+  assert.equal(noteRoom({ by: 'Angel', note: 'x' }, 'Angel'), NOTE_MAX, 'my own note is not carried');
+  assert.equal(noteRoom({ by: 'K', note: 'b'.repeat(1999) }, 'Angel'), 0);
+});

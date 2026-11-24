@@ -91,6 +91,17 @@ _LABEL_CAUTION = {
     "sample_id": "A sample ID names one physical object and must be the same on every record of it.",
 }
 _MAX_PROPOSED = 12
+#: How a "not right" is answered. A sentence or a tag is recorded as given; a sample ID or a filter is a PATTERN filled
+#: in for each measurement (labels.SAMPLE_ID_PLACEHOLDERS / FILTER_PLACEHOLDERS), because one literal would give every
+#: electrode the same ID (refused) or every group the same filter (review of #348).
+_LABEL_CORRECTION_LITERAL = "If it is not right, give the wording you want instead, and that is what is recorded."
+_LABEL_CORRECTION = {
+    "sample_id": ("If it is not right, give the ID you want. Where there is more than one electrode, write it with "
+                  "{electrode} (and {sample} or {beamtime} if you like, for example '{sample}-e{electrode}'), so each "
+                  "electrode keeps its own ID."),
+    "filter": ("If it is not right, give the wording you want. Where the measurements had different filters, write it "
+               "with {filter} for the number (for example 'filter{filter}'), so each keeps its own."),
+}
 
 
 def _label_detail(card: Mapping, q: Mapping) -> str:
@@ -101,8 +112,8 @@ def _label_detail(card: Mapping, q: Mapping) -> str:
     proposed = ("Proposed from the file names: " + "; ".join(shown) + (f"; and {more} more" if more > 0 else "") + "."
                 if shown else "Proposed from the file names.")
     return " ".join(x for x in (proposed, _LABEL_CAUTION.get(str(q.get("label"))),
-                                "Nothing is recorded until you say yes. If it is not right, give the wording you want "
-                                "instead, and that is what is recorded.") if x)
+                                "Nothing is recorded until you say yes. "
+                                + _LABEL_CORRECTION.get(str(q.get("label")), _LABEL_CORRECTION_LITERAL)) if x)
 
 
 def _kind_card(view: S._View, q: Mapping) -> dict | None:
@@ -211,6 +222,31 @@ def missing(page: Sequence[Mapping]) -> int:
 _CONFIRMING = re.compile(r"^(?:Is|Are|Was|Were|Should|Do|Does|Did|Can)\b")
 
 
+def _confirms(q: Mapping) -> bool:
+    """Whether the ask puts the suggestion as a yes / no ("Is the absorbing element and edge Ir L3?"), so "yes" answers
+    it. An either/or ask ("Was this done operando, in situ, ex situ or in silico?") does not name one value to say yes
+    to, so "yes" means nothing there: it is offered only when the suggested value is in the ask (review of #348)."""
+    ask, s = str(q.get("ask") or ""), q.get("suggested") or {}
+    if not s or not _CONFIRMING.match(ask):
+        return False
+    def words(*xs: Any) -> set[str]:
+        return {str(x).casefold() for x in xs if x is not None and str(x).strip()}
+
+    def found(x: str, text: str) -> bool:
+        return re.search(rf"(?<![\w]){re.escape(x)}(?![\w])", text) is not None
+
+    text = ask.casefold()
+    said = words(s.get("label"), s.get("value"))
+    if not any(found(x, text) for x in said):
+        return False
+    # ...and, with the suggestion taken out (so "XAS" is not found inside "HERFD-XAS"), names no other answer and no
+    # "or": "Is this experimental or computational work?" is an either/or
+    for x in sorted(said, key=len, reverse=True):
+        text = re.sub(rf"(?<![\w]){re.escape(x)}(?![\w])", " ", text)
+    others = set().union(*(words(o.get("label"), o.get("value")) for o in (q.get("answer") or {}).get("options") or ()))
+    return not any(found(x, text) for x in others - said) and not re.search(r"\bor\b", text)
+
+
 def _options_line(answer: Mapping, confirming: bool = False) -> str:
     kind, options = answer.get("kind"), answer.get("options") or ()
     labels = [str(o.get("label") or o["value"]) for o in options]
@@ -246,7 +282,7 @@ def render(report: Mapping, *, detail: bool = False) -> str:
         if q.get("about"):
             lines.append(f"   About: {q['about']}")
         answer = q.get("answer") or {}
-        if (shape := _options_line(answer, bool(q.get("suggested")) and bool(_CONFIRMING.match(str(q.get("ask") or ""))))):
+        if (shape := _options_line(answer, _confirms(q))):
             lines.append(f"   Answer: {shape}")
         s = q.get("suggested")
         if s:
