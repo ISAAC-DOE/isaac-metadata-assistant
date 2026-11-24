@@ -326,7 +326,7 @@ RULE_SECTION_QUALITY_REMARK = (
     "line) that says the sample failed — `did not work`, `failed`, `bad`, `broken`, `discard`, `no signal`, "
     "`unusable` — is a remark about that whole sample when it names the sample (`sample`, `electrode`, `catalyst`, "
     "the heading's own name) or names nothing else it could be about (the beam or ring current, a refill, dump or "
-    "injection, the weather, a reference foil, the detector, one particular scan, a sample that `works but` ...). It is reported VERBATIM as a Data Quality Note of the section, "
+    "injection, the weather, a reference foil, the detector, one particular scan, a sample that `works but` ..., the sample's holder, changer or stage, one bad spot, or the sample said to be fine). It is reported VERBATIM as a Data Quality Note of the section, "
     "like the heading's own `(bad)` qualifier, carrying the section, its sample number and name, and its file "
     "numbers, so it can reach that sample's measurements. It is never a verdict: no qc.status is derived and no "
     "measurement is dropped; the scientist is asked."
@@ -349,6 +349,16 @@ _NOT_ABOUT_THE_SAMPLE = re.compile(
 )
 #: a line that names the sample itself is about the sample, whatever else it mentions
 _NAMES_THE_SAMPLE = re.compile(r"\b(?:samples?|electrodes?|catalysts?)\b", re.IGNORECASE)
+#: ...except where the word only names something else: the sample's holder, changer or stage, one spot on it, or the
+#: sample said to be fine (review of #352: "Sample holder broken", "bad spot on sample", "bad I0, sample fine"). These
+#: phrases are taken out before the line is checked for the sample, and count as naming something else.
+_NOT_THE_SAMPLE_ITSELF = re.compile(
+    r"\bsamples?\s+(?:holders?|changers?|stages?|mounts?|plates?|wheels?|rods?|positions?|alignment|chambers?)\b"
+    r"|\b(?:bad|burnt|burned|damaged|wrong)\s+spots?(?:\s+on\s+(?:the\s+)?(?:samples?|electrodes?|catalysts?))?\b"
+    r"|\b(?:samples?|electrodes?|catalysts?)\s+(?:is\s+|was\s+|looks?\s+|looked\s+|seems?\s+|seemed\s+)?"
+    r"(?:fine|ok|okay|good|alright|all\s+right|intact|undamaged)\b",
+    re.IGNORECASE,
+)
 #: the most words such a remark line may have (a sentence about something else is not a remark about the sample)
 SECTION_REMARK_MAX_WORDS = 8
 #: the qualifiers of a sample heading that say something is wrong with the sample (``good`` says nothing is)
@@ -362,9 +372,10 @@ def is_failure_remark(text: str, sample_name: str | None = None) -> bool:
     text = str(text or "").strip()
     if not text or len(text.split()) > SECTION_REMARK_MAX_WORDS or not _FAILURE_REMARK.search(text) or _NOT_BAD.search(text):
         return False
-    names = bool(_NAMES_THE_SAMPLE.search(text)) or (
-        bool(sample_name) and re.search(rf"(?<![\w]){re.escape(str(sample_name))}(?![\w])", text, re.IGNORECASE) is not None)
-    return names or not _NOT_ABOUT_THE_SAMPLE.search(text)
+    rest = _NOT_THE_SAMPLE_ITSELF.sub(" ", text)
+    names = bool(_NAMES_THE_SAMPLE.search(rest)) or (
+        bool(sample_name) and re.search(rf"(?<![\w]){re.escape(str(sample_name))}(?![\w])", rest, re.IGNORECASE) is not None)
+    return names or not (rest != text or _NOT_ABOUT_THE_SAMPLE.search(text))
 
 
 NORMALIZATION_RULES: frozenset[str] = frozenset(
