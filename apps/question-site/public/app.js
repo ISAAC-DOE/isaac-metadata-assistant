@@ -44,16 +44,17 @@ function setPref(key, value) {
 }
 
 // someone else's answers this browser looked at and kept, so they are not offered again (a newer answer is)
+const keptHere = new Set(); // also in memory, for a browser that cannot keep it (private mode)
 function keptSet() {
   try {
-    return new Set(JSON.parse(pref('qs_kept', '[]')));
+    return new Set([...JSON.parse(pref('qs_kept', '[]')), ...keptHere]);
   } catch {
-    return new Set();
+    return new Set(keptHere);
   }
 }
 function keep(answer) {
+  keptHere.add(keptKey(answer));
   const kept = keptSet();
-  kept.add(keptKey(answer));
   setPref('qs_kept', JSON.stringify([...kept].slice(-500)));
 }
 function nextRun() {
@@ -413,7 +414,8 @@ async function save(c, body, { advance = true } = {}) {
   for (const el of controls) el.disabled = true;
   const before = state.answers[c.card_id] || null;
   try {
-    const sent = body.action === 'clear' || isStale(c, before) ? body : { ...body, note: carryNote(body.note, before, state.name) };
+    const sameAnswer = Boolean(before) && !isStale(c, before) && body.action === before.action && JSON.stringify(body.value ?? null) === JSON.stringify(before.value ?? null);
+    const sent = body.action === 'clear' ? body : { ...body, note: carryNote(body.note, before, state.name, sameAnswer) };
     const out = await api('/api/answer', { card_id: c.card_id, seen_at: before ? before.at : null, ...sent });
     if (out.answer) state.answers[c.card_id] = out.answer;
     else delete state.answers[c.card_id];
@@ -716,7 +718,7 @@ function viewCard() {
       'div',
       { class: 'quiet' },
       h('button', { class: `linklike${a && a.action === 'dont_know' ? ' is-chosen' : ''}`, type: 'button', id: 'dont-know', disabled: busy, onclick: () => save(c, { action: 'dont_know', note: noteValue() }) }, 'I don’t know', state.shortcuts ? h('span', { class: 'kbd', 'aria-hidden': 'true', text: 'D' }) : null),
-      h('button', { class: 'linklike', type: 'button', id: 'skip', disabled: busy, onclick: () => { if (theirs) keep(a); step(1); } }, run.single ? 'Back to the list' : theirs ? `Keep ${theirs}’s answer` : 'Skip', run.single || !state.shortcuts ? null : h('span', { class: 'kbd', 'aria-hidden': 'true', text: 'S' })),
+      h('button', { class: 'linklike', type: 'button', id: 'skip', disabled: busy, onclick: () => { if (theirs && !run.single) keep(a); step(1); } }, run.single ? 'Back to the list' : theirs ? `Keep ${theirs}’s answer` : 'Skip', run.single || !state.shortcuts ? null : h('span', { class: 'kbd', 'aria-hidden': 'true', text: 'S' })),
       a ? h('button', { class: 'linklike', type: 'button', id: 'clear', disabled: busy, onclick: () => save(c, { action: 'clear' }, { advance: false }), text: theirs ? 'Clear this answer' : 'Clear my answer' }) : null,
     ),
     h(
@@ -725,7 +727,7 @@ function viewCard() {
       h('summary', { text: a && !theirs ? 'Add or change a note' : 'Add a note' }),
       note,
       a
-        ? h('button', { class: 'btn', type: 'button', id: 'save-note', disabled: busy, onclick: () => save(c, { action: a.action, value: a.value, typed: a.typed, note: noteValue() }, { advance: false }), text: theirs ? `Save note with ${theirs}’s answer` : 'Save note' })
+        ? h('button', { class: 'btn', type: 'button', id: 'save-note', disabled: busy, onclick: () => save(c, { action: a.action, value: a.value, typed: a.typed, note: noteValue() }, { advance: false }), text: theirs ? 'Save note and keep this answer' : 'Save note' })
         : h('p', { class: 'hint', text: 'Type the note first; it is saved with the answer you pick.' }),
     ),
     moreBlock(c),
@@ -749,7 +751,7 @@ function viewCard() {
     run.single || run.index === 0 ? null : h('button', { class: 'linklike', type: 'button', id: 'prev', onclick: () => step(-1), text: 'Previous question' }),
   );
   const keys = state.shortcuts
-    ? h('p', { class: 'keys' }, `Keys: ${n ? `1–${n} to answer, ` : ''}D don’t know, S skip. `, h('button', { class: 'linklike', type: 'button', id: 'toggle-keys', onclick: () => { state.shortcuts = false; setPref('qs_shortcuts', 'off'); render(); }, text: 'Turn off' }))
+    ? h('p', { class: 'keys' }, `Keys: ${n ? `1–${n} to answer, ` : ''}D don’t know, S ${theirs && !run.single ? 'keep' : 'skip'}. `, h('button', { class: 'linklike', type: 'button', id: 'toggle-keys', onclick: () => { state.shortcuts = false; setPref('qs_shortcuts', 'off'); render(); }, text: 'Turn off' }))
     : h('p', { class: 'keys' }, 'Keyboard shortcuts are off. ', h('button', { class: 'linklike', type: 'button', id: 'toggle-keys', onclick: () => { state.shortcuts = true; setPref('qs_shortcuts', 'on'); render(); }, text: 'Turn on' }));
 
   return [topbar(), sourceLine(), head, h('article', { class: entering ? 'card enter' : 'card' }, parts), foot, keys];
@@ -763,7 +765,9 @@ function viewDone() {
     ? `${t.neededOpen} needed question${t.neededOpen === 1 ? '' : 's'} left.`
     : t.open
       ? `All the needed questions are answered. ${t.open} optional question${t.open === 1 ? '' : 's'} left, only if you have time.`
-      : 'Everything is answered.';
+      : next.length
+        ? `Everything is answered. ${next.length === 1 ? 'One answer' : `${next.length} answers`} from someone else ${next.length === 1 ? 'is' : 'are'} there to look over, if you like.`
+        : 'Everything is answered.';
   return [
     topbar(),
     sourceLine(),
@@ -776,7 +780,7 @@ function viewDone() {
       h(
         'div',
         { class: 'start' },
-        next.length ? h('button', { class: 'btn btn-primary', type: 'button', id: 'start', onclick: () => startRun(next), text: next.length === 1 ? 'Answer one more' : `Keep going: the next ${next.length}` }) : null,
+        next.length ? h('button', { class: 'btn btn-primary', type: 'button', id: 'start', onclick: () => startRun(next), text: !t.open ? `Look over ${next.length === 1 ? 'one answer' : `${next.length} answers`} from someone else` : next.length === 1 ? 'Answer one more' : `Keep going: the next ${next.length}` }) : null,
         h('button', { class: 'btn', type: 'button', id: 'to-list', onclick: () => show('home'), text: 'Back to all questions' }),
       ),
     ),

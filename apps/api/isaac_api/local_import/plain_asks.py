@@ -96,10 +96,11 @@ _MAX_PROPOSED = 12
 #: electrode the same ID (refused) or every group the same filter (review of #348).
 _LABEL_CORRECTION_LITERAL = "If it is not right, give the wording you want instead, and that is what is recorded."
 _LABEL_CORRECTION = {
-    "sample_id": ("If it is not right, give the pattern you want, using {electrode}, {sample} and {beamtime} (for "
-                  "example '{sample}-e{electrode}'), so each electrode keeps its own ID."),
-    "filter": ("If it is not right, give the wording you want, using {filter} for the number (for example "
-               "'{filter} filters'), so each measurement keeps its own filter."),
+    "sample_id": ("If it is not right, give the ID you want. Where there is more than one electrode, write it with "
+                  "{electrode} (and {sample} or {beamtime} if you like, for example '{sample}-e{electrode}'), so each "
+                  "electrode keeps its own ID."),
+    "filter": ("If it is not right, give the wording you want. Where the measurements had different filters, write it "
+               "with {filter} for the number (for example 'filter{filter}'), so each keeps its own."),
 }
 
 
@@ -238,13 +239,12 @@ def _confirms(q: Mapping) -> bool:
     said = words(s.get("label"), s.get("value"))
     if not any(found(x, text) for x in said):
         return False
-    # ...and names no other answer: "Is this experimental or computational work?" names both, so it is an either/or
-    others = set().union(*(words(o.get("label"), o.get("value")) for o in (q.get("answer") or {}).get("options") or ()))
-    if any(found(x, text) for x in others - said):
-        return False
+    # ...and, with the suggestion taken out (so "XAS" is not found inside "HERFD-XAS"), names no other answer and no
+    # "or": "Is this experimental or computational work?" is an either/or
     for x in sorted(said, key=len, reverse=True):
         text = re.sub(rf"(?<![\w]){re.escape(x)}(?![\w])", " ", text)
-    return not re.search(r"\bor\b", text)
+    others = set().union(*(words(o.get("label"), o.get("value")) for o in (q.get("answer") or {}).get("options") or ()))
+    return not any(found(x, text) for x in others - said) and not re.search(r"\bor\b", text)
 
 
 def _options_line(answer: Mapping, confirming: bool = False) -> str:

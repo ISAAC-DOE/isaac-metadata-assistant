@@ -75,16 +75,32 @@ export function byOther(answer, me) {
 }
 
 /**
- * The note to save when a person replaces someone else's answer: their own note, with the earlier person's note kept
- * after it under that person's name, so the replaced note is neither lost nor put in the new person's words.
+ * The note to save when a person answers a card someone else answered: their own note, then what the earlier person
+ * gave, under that person's name, so it is neither lost nor put in the new person's words. When the answer itself is
+ * kept (`sameAnswer`: a note added to it), the line also says who gave the answer first.
  */
-export function carryNote(mine, before, me) {
-  const own = String(mine || '').trim();
-  const earlier = before && byOther(before, me) ? String(before.note || '').trim() : '';
-  if (!earlier || own.includes(earlier)) return own;
-  const kept = `Earlier note from ${String(before.by).trim()}: ${earlier}`;
-  return (own ? `${own}\n\n${kept}` : kept).slice(0, 2000);
+export function carryNote(mine, before, me, sameAnswer = false) {
+  let own = String(mine || '').trim();
+  if (!before || !byOther(before, me)) return own.slice(0, NOTE_MAX);
+  const who = String(before.by).trim();
+  const earlier = String(before.note || '').trim();
+  let kept = sameAnswer
+    ? `Answer first given by ${who}${earlier ? `, with the note: ${earlier}` : '.'}`
+    : earlier
+      ? `Earlier note from ${who}: ${earlier}`
+      : '';
+  if (!kept) return own.slice(0, NOTE_MAX);
+  if (kept.length > NOTE_MAX) kept = `${kept.slice(0, NOTE_MAX - 1)}…`;
+  if (own.includes(kept)) return own.slice(0, NOTE_MAX);
+  // the person's own words give way to the earlier note, never the other way round
+  const room = NOTE_MAX - kept.length - 2;
+  if (room <= 0) return kept;
+  if (own.length > room) own = `${own.slice(0, room - 1)}…`;
+  return own ? `${own}\n\n${kept}` : kept;
 }
+
+/** The longest note the site stores (lib/answers.js NOTE_MAX). */
+export const NOTE_MAX = 2000;
 
 /** The key that remembers "I looked at this answer of someone else's and kept it": a new answer asks again. */
 export function keptKey(answer) {

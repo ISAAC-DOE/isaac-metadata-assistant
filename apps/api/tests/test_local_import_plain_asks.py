@@ -264,8 +264,23 @@ def test_a_sample_id_or_filter_label_is_corrected_with_a_pattern_not_one_literal
     detail = PA.plain_fields(view, q)["plain_detail"]
     assert "{electrode}" in detail and "each electrode keeps its own ID" in detail
     assert "give the wording you want instead, and that is what is recorded" not in detail
-    assert "{filter}" in PA._LABEL_CORRECTION["filter"]
-    assert set(PA._LABEL_CORRECTION) <= {"sample_id", "filter"}
+    q = {**q, "question_id": "Q-3333333333", "label": "filter", "target_field_path": "system.configuration.beam_attenuator",
+         "proposals": [{"group_id": g, "value": f"filter{n}", "first_file": f"{n}_x.dat"} for n, g in enumerate(gids)]}
+    got = PA.plain_fields(view, q)
+    assert got["ask"] == "Are the beam filter settings read from the file names right?"
+    assert "{filter}" in got["plain_detail"] and "so each keeps its own" in got["plain_detail"]
+    assert P.not_plain(S._without_quotes(got["plain_detail"])) is None
+    # a filter its acquisition files overrule is checked on its own: no one-yes wording, so the full text is shown
+    q["proposals"][0]["said"] = {"overruled": {"rule": "x", "file_name": ["filter2"]}}
+    assert "ask" not in PA.plain_fields(view, q)
+
+
+def test_every_label_the_site_can_ask_is_a_label_the_import_proposes():
+    """Re-review: the site's label asks were keyed by field (beam_attenuator, tags), so filter and tag never matched."""
+    from isaac_api.local_import import labels as L
+
+    assert set(S.LABEL_ASKS) <= set(L.LABELS)
+    assert {"filter", "tag", "history", "sample_id"} <= set(S.LABEL_ASKS)
 
 
 @pytest.mark.parametrize("ask, suggested, options, yes", [
@@ -276,6 +291,8 @@ def test_a_sample_id_or_filter_label_is_corrected_with_a_pattern_not_one_literal
      [{"value": "experimental"}, {"value": "computational"}], False),
     ("Is this experimental or computational work?", {"label": "experimental", "value": "experimental"}, [], False),
     ("Is the technique XAS?", {"label": "HERFD-XAS", "value": "HERFD-XAS"}, [], False),
+    ("Is the technique HERFD-XAS?", {"label": "HERFD-XAS", "value": "HERFD-XAS"}, [{"value": "XAS"}, {"value": "HERFD-XAS"}],
+     True),
     ("Which technique was used?", {"label": "XAS", "value": "XAS"}, [], False),
     ("Is the technique HERFD-XAS?", None, [], False),
 ])

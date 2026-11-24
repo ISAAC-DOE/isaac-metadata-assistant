@@ -245,18 +245,21 @@ def test_a_group_confirmed_for_another_reason_has_not_answered_the_remark(tmp_pa
 @pytest.mark.parametrize("line", ["Beam failed at 2am, refilled", "Bad weather, beam dump", "No signal on reference foil",
                                   "discard first scan", "works but bad contact", "Beam dump, discard first scan",
                                   "not bad at all", "Sample holder broken", "sample changer failed", "bad spot on sample",
-                                  "bad I0, sample fine", "sample stage stuck, bad", "Bad spot, moved", "sample looks ok, beam bad"])
+                                  "bad I0, sample fine", "sample stage stuck, bad", "Bad spot, moved", "sample looks ok, beam bad",
+                                  "ZZ9 fine, beam bad"])
 def test_a_remark_about_something_else_is_not_about_the_sample(line):
     from isaac_api.bl15 import notes as N
 
-    assert not N.is_failure_remark(line)
+    assert not N.is_failure_remark(line) and not N.is_failure_remark(line, "ZZ9")
     assert N.is_failure_remark("did not work!") and N.is_failure_remark("Sample failed") and N.is_failure_remark("bad")
 
 
 @pytest.mark.parametrize("line", ["did not work, scans noisy", "Sample did not work, no signal on detector",
                                   "Bad sample, all spots damaged", "Electrode failed, reference broken", "Nothing works",
                                   "bad ring of catalyst", "ZZ9 failed, beam fine", "Sample bad, bad spot",
-                                  "sample holder fine, sample broken"])
+                                  "sample holder fine, sample broken", "Sample OK but failed", "Sample was good but did not work",
+                                  "sample looks fine, no signal", "Electrode is intact, no signal", "sample good before, bad after",
+                                  "Sample position 4 bad", "Bad spots everywhere, discard"])
 def test_a_remark_that_names_the_sample_or_nothing_else_is_about_the_sample(line):
     """Re-review of #352, A: the exclusions never drop a line that names the sample, and are narrowed to the beam."""
     from isaac_api.bl15 import notes as N

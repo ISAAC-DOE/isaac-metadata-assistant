@@ -86,6 +86,21 @@ test('replacing someone else’s answer keeps their note under their name', asyn
   assert.equal(carryNote('mine', before, 'krish verma'), 'mine', 'my own earlier note is mine to change');
   assert.equal(carryNote('mine', { by: 'Krish', note: '' }, 'Angel'), 'mine');
   assert.equal(carryNote(carryNote('x', before, 'Angel'), before, 'Angel'), carryNote('x', before, 'Angel'), 'not added twice');
-  assert.equal(carryNote('a'.repeat(1990), before, 'Angel').length, 2000, 'stays under the note limit');
   assert.equal(carryNote(' x ', null, 'Angel'), 'x');
+});
+
+test('keeping someone else’s answer with a note says who gave the answer', async () => {
+  const { carryNote } = await import('../public/logic.js');
+  assert.equal(carryNote('agree', { by: 'Krish Verma', note: '' }, 'Angel', true), 'agree\n\nAnswer first given by Krish Verma.');
+  assert.equal(carryNote('', { by: 'Krish Verma', note: 'ok' }, 'Angel', true), 'Answer first given by Krish Verma, with the note: ok');
+});
+
+test('a carried note is never dropped: the new words give way, and a note inside them is not mistaken for it', async () => {
+  const { carryNote, NOTE_MAX } = await import('../public/logic.js');
+  const before = { by: 'Krish Verma', note: 'ok' };
+  assert.equal(carryNote('looks ok to me', before, 'Angel'), 'looks ok to me\n\nEarlier note from Krish Verma: ok');
+  const long = carryNote('a'.repeat(2000), before, 'Angel');
+  assert.ok(long.length <= NOTE_MAX && long.endsWith('Earlier note from Krish Verma: ok'), 'theirs kept whole');
+  const huge = carryNote('mine', { by: 'K', note: 'b'.repeat(2000) }, 'Angel');
+  assert.ok(huge.length <= NOTE_MAX && huge.startsWith('Earlier note from K: b'));
 });
