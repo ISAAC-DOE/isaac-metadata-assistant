@@ -852,7 +852,7 @@ def test_a_1_9_0_bundle_still_validates_and_its_first_save_says_what_1_10_0_adde
                         "--value", "cathodic corrosion")
     assert code == 0 and KEPT in err
     after = M.load(b)
-    assert after["format_version"] == B.FORMAT_VERSION == "1.17.0" and len(after["vocabulary_requests"]) == 1
+    assert after["format_version"] == B.FORMAT_VERSION == "1.18.0" and len(after["vocabulary_requests"]) == 1
     [u] = after["format_upgrades"]
     assert u["from_format_version"] == "1.9.0" and B.CHANGES_ADDED_IN["1.10.0"] in u["statement"]
     # the section is part of v1.10.0 only as an optional addition: a bundle without it is valid at 1.10.0
@@ -881,8 +881,9 @@ def test_the_longest_upgrade_statement_fits_the_bundle_schema():
     """Every older version (and an unknown one), every newly writable field and every missing import rule."""
     limit = (json.loads((Path(B.__file__).parent / "bundle-v1.schema.json").read_text(encoding="utf-8"))
              ["properties"]["format_upgrades"]["items"]["properties"]["statement"]["maxLength"])
-    # 1.17.0 raised it from 3000 (the note of each version is appended), as 1.14.0 did from 1500 and 1.10.0 from 600
-    assert limit == 4000
+    # 1.18.0 raised it from 4000, as 1.17.0 did from 3000 (the note of each version is appended), 1.14.0 from 1500 and
+    # 1.10.0 from 600
+    assert limit == 6000
     rules = [(st, rid) for _v, listed in B.IMPORT_RULES_ADDED_IN.items() for st, rid in listed]
     for version in (None, "0.0.1", *B._VERSION_ORDER[:-1]):
         statement = B.upgrade_statement(version, sorted(B._writable_paths()), rules)

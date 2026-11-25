@@ -364,6 +364,12 @@ def save_bundle(bundle_dir: Path, bundle: dict) -> None:
     # local build writes (bundle.refresh_local_write_summaries); the engine's own text is kept.
     # 1.17.0: what reads recorded beside bundle.json is folded in (idempotent: a bundle loaded by `load` has it),
     # whichever loader read this bundle, and the file is removed once the write succeeds
+    newer_rules = bundle.get("fill_rule_set")
+    if isinstance(newer_rules, int) and not isinstance(newer_rules, bool) and newer_rules > B.FILL_RULE_SET:
+        # 1.18.0: a bundle a NEWER fill rule set wrote: this build cannot derive its fills, so it never writes it
+        raise MutationRefused(
+            f"This bundle was written under fill rule set {newer_rules}, newer than this build's ({B.FILL_RULE_SET}): "
+            "this build cannot derive its fills, so nothing was written. Use the newer build that wrote it.", code=5)
     merge_pending_exposures(bundle, Path(bundle_dir))
     pending = (Path(bundle_dir) / PENDING_EXPOSURES_FILE).exists()
     stored_version = bundle.get("format_version")
@@ -425,10 +431,32 @@ def save_bundle(bundle_dir: Path, bundle: dict) -> None:
             decisions_before=len((stored if stored is not None else bundle).get("scientist_decisions") or ()))
         print(f"isaac: {entry['statement']} (bundle format {stored_version} -> {to_version}; "
               "logged in bundle.json format_upgrades)", file=sys.stderr)
+    if not upgrading and B.fill_rule_set_stale(bundle):
+        # 1.18.0: THE FILL RULES CHANGED, THE FORMAT DID NOT (a bundle an earlier fill rule set derived): each value whose
+        # fill moves is logged in `eligibility_rederived`, read from the bundle AS STORED, never silently
+        stored_f = None
+        if B.bundle_path(Path(bundle_dir)).is_file():
+            try:
+                stored_f = B.load_bundle(Path(bundle_dir))
+            except B.BundleInvalid:
+                stored_f = None
+        if stored_f is not None:
+            try:
+                moved_f = [x for x in B.stale_eligibility(stored_f) if x.get("fill_moved")]
+            except (KeyError, TypeError, ValueError):
+                moved_f = []
+            live_f = {("candidate", c["candidate_id"]) for c in bundle.get("candidates") or ()} | {
+                ("missing_value", m["value_id"]) for m in bundle.get("missing_values") or ()}
+            B.record_rederivation(bundle, [x for x in moved_f if (x["kind"], x["id"]) in live_f], to_version=to_version)
     drop_dead_slots(bundle)  # an answer slot no decision names is never left behind as an empty question
     B.refresh_local_write_summaries(bundle)
     B.hold_beamtime_wide_statements(bundle)  # what the import now gives (bundle.BEAMTIME_WIDE_REASON); no format change
     bundle["format_version"] = to_version
+    stored_rules = bundle.get("fill_rule_set")
+    if B.fills_apply(bundle) and not (isinstance(stored_rules, int) and stored_rules > B.FILL_RULE_SET):
+        # 1.18.0: the fill rules this write derives under. A NEWER rule set is never rewritten: the validator below
+        # refuses it (this build cannot derive it), so nothing is written, as for a newer format
+        bundle["fill_rule_set"] = B.FILL_RULE_SET
     for key in ("record_groups", "processing_results", "exposures"):
         bundle.setdefault(key, [])
     B.refresh_questions(bundle)
@@ -492,7 +520,8 @@ def nothing_to_save(bundle: Mapping, result: Mapping) -> bool:
     A slot a ``--only`` answer added in memory is never written either way when nothing was recorded on it."""
     if result.get("recorded") or result.get("split_into_groups"):
         return False
-    return not B.needs_format_upgrade(bundle) and not B.allowed_list_rederivations(bundle)
+    return (not B.needs_format_upgrade(bundle) and not B.allowed_list_rederivations(bundle)
+            and not B.fill_rule_set_stale(bundle))
 
 
 class StaleBundleVersion(MutationRefused):

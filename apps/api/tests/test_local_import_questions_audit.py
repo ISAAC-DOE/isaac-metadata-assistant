@@ -86,6 +86,13 @@ def test_question_ids_of_the_grouped_corpus_are_pinned(grouped):
     # r8: the follows question is asked whenever a chain was held (informational here: it says why)
     assert sorted(q["label"] for q in p["questions"] if q["kind"] == L.KIND) == ["filter", "follows", "history",
                                                                                 "history", "sample_id", "tag"]
+    # 1.18.0 (DEC-96): the one question a rule filled every target of (the domain) is not asked; its id is kept among
+    # the answered, so the pinned ids are the open ones plus it
+    from test_local_import_polish_c3q import filled_out_ids
+
+    filled = filled_out_ids(M.load(grouped))
+    assert len(filled) == 1 and not filled & set(ids)
+    ids = sorted(set(ids) | filled)
     assert len(ids) == 114
     assert hashlib.sha1("\n".join(ids).encode()).hexdigest() == "b23cc1074f8eff80bbb9c2b886300d9ebe993405"
     expected = {

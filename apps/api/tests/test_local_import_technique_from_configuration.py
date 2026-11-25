@@ -111,7 +111,12 @@ def test_an_emission_motor_on_a_line_of_the_scanned_edge_suggests_herfd(herfd):
     data, _ = herfd
     [c] = _suggested(data)
     assert (c["value"], c["run_id"], c["scope"], c["target_field_path"]) == ("HERFD-XAS", None, "beamtime", TECHNIQUE)
-    assert c["value_state"] == B.STATE_NEEDS_REVIEW and not c["eligibility_for_official_record"]["eligible"]
+    # 1.18.0 (DEC-96): this build's instrument-configuration rule counts as isaac.fill.parser_exact.v1: FILLED and
+    # eligible (no longer needs_review and ineligible: exactly the policy DEC-96 replaces); still held as a suggestion
+    # by the readers (extracted_state), and any decision wins
+    assert c["extracted_state"] == B.STATE_NEEDS_REVIEW
+    assert c["value_state"] == B.STATE_FILLED and c["eligibility_for_official_record"]["eligible"]
+    assert c["fill"] == {"rule_id": B.FILL_PARSER_EXACT_RULE_ID, "value": "HERFD-XAS"}
     assert B.value_problem(TECHNIQUE, c["value"]) is None  # one of the schema's own techniques
     reason = c["state_basis"]["not_proposable_reason"]
     assert f"{LINE:g} eV" in reason and "Cu Ka1" in reason and "Cu K absorption edge" in reason
@@ -133,7 +138,10 @@ def test_macro_names_stop_asking_for_the_technique_where_the_instrument_states_i
     assert all(S.NOT_A_TECHNIQUE_REASON in c["state_basis"]["not_proposable_reason"] for c in named)
     assert {lit for c in named for lit in c["observed_literals"]} >= {"Ir_XAS.mac"}
     payload = Q.consolidate(data)
-    asked = [q for q in payload["questions"] if q.get("target_field_path") == TECHNIQUE]
+    # 1.18.0 (DEC-96): the suggestion is FILLED, so it is no longer asked; it stays addressable among the answered,
+    # one beamtime question, with the instrument's technique in its text
+    assert not [q for q in payload["questions"] if q.get("target_field_path") == TECHNIQUE]
+    asked = [q for q in Q.consolidate(data, include_answered=True)["questions"] if q.get("target_field_path") == TECHNIQUE]
     assert len(asked) == 1 and asked[0]["scope"] == "experiment" and asked[0]["kind"] == "confirm_value"
     assert "HERFD-XAS" in asked[0]["text"]
     assert not [m for m in data["missing_values"] if m["target_field_path"] == TECHNIQUE]
@@ -237,16 +245,17 @@ def _xdc_beamtime(src: Path, expt_type: str = "XAS") -> Path:
 def test_an_experiment_file_stating_xas_suggests_xas(tmp_path, capsys):
     data = _import(_xdc_beamtime(tmp_path / "src" / "SYN_BL43_2100-08_ZZ"), tmp_path / "out", capsys)
     [c] = _suggested(data)
-    assert (c["value"], c["run_id"]) == ("XAS", None) and c["value_state"] == B.STATE_NEEDS_REVIEW
+    assert (c["value"], c["run_id"]) == ("XAS", None) and c["value_state"] == B.STATE_FILLED  # 1.18.0 (DEC-96)
     reason = c["state_basis"]["not_proposable_reason"]
     assert "EXPT_TYPE" in reason and "2 of the 2 measurement runs that record it" in reason
     assert "1 other measurement run records nothing about the technique" in reason and "05_SYNZZ_wet_083" in reason
     first = c["evidence"][0]
     assert (first["literal_value"], first["locator"]) == ("XAS", "line:2") and first["relative_path"].endswith(".exp")
     assert not [m for m in data["missing_values"] if m["target_field_path"] == TECHNIQUE]
-    payload = Q.consolidate(data)
-    [asked] = [q for q in payload["questions"] if q.get("target_field_path") == TECHNIQUE]
-    assert asked["kind"] == "confirm_value" and asked["blocking"] is True  # still required, now one confirmation
+    # 1.18.0 (DEC-96): filled, so not asked (no longer "one confirmation"); still found among the answered
+    assert not [q for q in Q.consolidate(data)["questions"] if q.get("target_field_path") == TECHNIQUE]
+    [asked] = [q for q in Q.consolidate(data, include_answered=True)["questions"] if q.get("target_field_path") == TECHNIQUE]
+    assert asked["kind"] == "confirm_value"
 
 
 def test_an_experiment_file_stating_another_word_blocks_the_value(tmp_path, capsys):

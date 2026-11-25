@@ -153,7 +153,8 @@ _OUTSIDE_LIVE_GROUPS = ("Not blocking: every target is in a run no live record g
 
 
 def compositions(bundle: Mapping, bundle_dir: Path | None = None, *,
-                 decision_of: Mapping[tuple[str, str], Mapping] | None = None) -> dict[str, dict]:
+                 decision_of: Mapping[tuple[str, str], Mapping] | None = None,
+                 fill_blocks: Mapping | None = None) -> dict[str, dict]:
     """``{group_id: composition report}`` for every LIVE record group, whatever its status: THE
     ``records.compose_group`` computation ``build-records`` and ``validate`` use, so "blocking" and the nearest
     group are judged by what the composer actually requires, never by a second reading of the schema.
@@ -176,7 +177,7 @@ def compositions(bundle: Mapping, bundle_dir: Path | None = None, *,
         for n, obj in enumerate(bundle[kind]):
             by_run.setdefault(obj.get("run_id"), {"candidates": [], "missing_values": []})[kind].append((n, obj))
     # THE WHOLE-BUNDLE READS (decision log, conflicts, processing) once for every group, never once per group
-    index = R.composition_index(view, decision_of=decision_of)
+    index = R.composition_index(view, decision_of=decision_of, fill_blocks=fill_blocks)
     out = {}
     for g in live_groups(bundle):
         runs = [None] + [run_key_to_id[k] for k in g.get("member_run_keys") or () if k in run_key_to_id]
@@ -771,6 +772,9 @@ def consolidate(bundle: Mapping, *, compositions_out: dict | None = None, includ
     # c7-r LOW-8: AN ANSWER SLOT THAT HOLDS NO ANSWER (deferred, its answer replaced by a defer) is not asked once the
     # beamtime-wide target of its field is answered with a value: that answer fills its run, so the slot is dead. It
     # stays in the bundle (the decision log names it), and `decide --question` still finds it among the answered.
+    # 1.18.0: ONLY a scientist's beamtime-wide answer makes a slot dead. A beamtime-wide FILL does not: a slot a
+    # scientist deferred under it stays asked, and the composer does not carry the fill onto its run
+    # (bundle.runs_a_fill_cannot_reach; a decision, a defer included, always beats a fill)
     beamtime_answered = {o.get("target_field_path") for o in [*bundle["candidates"], *bundle["missing_values"]]
                          if o.get("run_id") is None and o.get("value_state") == B.STATE_SCIENTIST_CONFIRMED}
 
@@ -793,8 +797,12 @@ def consolidate(bundle: Mapping, *, compositions_out: dict | None = None, includ
             back = True
         if m["value_state"] not in _UNANSWERED:
             again = not_eligible_answer(m, "missing_value")
+            # 1.18.0 (DEC-96): a FILLED value is not asked, but it stays ADDRESSABLE: with include_answered it is in
+            # the question that would ask it, under the same id, so `decide --question`, a workbook row and a site
+            # card can still record a correction, and the correction wins
             if again is None and not (include_answered and m.get("extracted_state", B.STATE_MISSING) in _UNANSWERED
-                                      and ("missing_value", m["value_id"]) in decisions):
+                                      and (("missing_value", m["value_id"]) in decisions
+                                           or m["value_state"] == B.STATE_FILLED)):
                 continue
             back = back or again is None
         path, rid = m["target_field_path"], m["run_id"]
@@ -835,26 +843,37 @@ def consolidate(bundle: Mapping, *, compositions_out: dict | None = None, includ
                 again=again)
 
     zone_decided = B.clock_zone_decision(bundle) is not None
+    # 1.18.0: a FILL THE GROUP CANNOT TAKE (its runs filled with different values, or not every measured run has one)
+    # is asked like the value it was read as, blocking or not: the record composer fills nothing for it until a
+    # scientist answers (records.compose_group), so a question must ask it
+    # 1.18.0: each field's run-level targets and decisions, read ONCE for the questions and the compositions below
+    fill_blocks = B.fill_run_blocks(bundle, decisions) if has_groups else None
+    unusable_fills = group_unusable_fills(bundle, group_of, context, decisions, fill_blocks) if has_groups else set()
     for c in bundle["candidates"]:
         path = c["target_field_path"]
         if not path or c["run_id"] in context:
             continue
         again = None
         state = c["value_state"]
+        held_fill = c["candidate_id"] in unusable_fills
+        if held_fill and state == B.STATE_FILLED:
+            state = c.get("extracted_state")  # asked as it was read, never as answered
         if state not in (B.STATE_NEEDS_REVIEW, B.STATE_CANDIDATE_EXTRACTED):
             again = not_eligible_answer(c, "candidate")
             if again is None:
                 # ANSWERED (include_answered): asked as it was extracted, before the answer
                 state = c.get("extracted_state")
+                # 1.18.0: ...and a FILLED candidate likewise (not asked, still addressable, see above)
                 if not (include_answered and state in (B.STATE_NEEDS_REVIEW, B.STATE_CANDIDATE_EXTRACTED)
-                        and B.candidate_decision(bundle, c, decisions) is not None):
+                        and (c["value_state"] == B.STATE_FILLED
+                             or B.candidate_decision(bundle, c, decisions) is not None)):
                     continue
                 if answered_out is not None:
                     answered_out.add(c["candidate_id"])
         if not zone_decided and B.is_local_clock_start(c):
             continue  # nothing to confirm until the clock's zone is stated: the zone question asks that
         blocking = required_for(path, c["run_id"])
-        if again is None and state == B.STATE_CANDIDATE_EXTRACTED and not blocking:
+        if again is None and state == B.STATE_CANDIDATE_EXTRACTED and not blocking and not held_fill:
             continue  # an extracted optional value is not asked about (one a scientist answered unfitly is)
         scope = scope_of_run(c["run_id"])
         add((scope, "confirm_value", path, None), kind="confirm_value", path=path, partition=None,
@@ -882,6 +901,16 @@ def consolidate(bundle: Mapping, *, compositions_out: dict | None = None, includ
             conflict_ids_of = B.conflict_ids_by_candidate(bundle)
             for kind, objs in (("candidate", bundle["candidates"]), ("missing_value", bundle["missing_values"])):
                 for o in objs:
+                    if (o.get("value_state") == B.STATE_FILLED and o.get("target_field_path")
+                            and not (o.get("run_id") is None and o["target_field_path"] in RUN_ONLY_PATHS)):
+                        # 1.18.0: a FILL is held like an answer (the composer pools it the same way); its "decision"
+                        # names the rule, never a person
+                        fill = o.get("fill") or {}
+                        tid = o.get("candidate_id") or o.get("value_id")
+                        held_by_run.setdefault((o.get("run_id"), _composer_path(o["target_field_path"])), []).append(
+                            ({"decision_id": f"fill:{fill.get('rule_id')}", "target": {"kind": kind, "id": tid}},
+                             fill.get("value")))
+                        continue
                     if (not o.get("target_field_path") or o.get("value_state") != B.STATE_SCIENTIST_CONFIRMED
                             or B.unusable_answer_reason(o, writable)
                             or (o.get("run_id") is None and o["target_field_path"] in RUN_ONLY_PATHS)):
@@ -1507,7 +1536,7 @@ def consolidate(bundle: Mapping, *, compositions_out: dict | None = None, includ
 
     completeness = None
     if has_groups:
-        reports = compositions(bundle, decision_of=decisions)
+        reports = compositions(bundle, decision_of=decisions, fill_blocks=fill_blocks)
         if compositions_out is not None:
             compositions_out.update(reports)
         # r7 J2: EVERY live group that cannot become a record as it stands (processing_not_applicable:<code>, no_scans,
@@ -1784,7 +1813,8 @@ STATED_UTC_START_QUESTION_ID = _qid("experiment", STATED_UTC_START_KIND, B.XDC_S
 #: How many groups the beamtime-wide start-time question names as examples (the rest are counted).
 _STATED_UTC_EXAMPLES = 3
 #: The reading states a value it may still settle a start with (a rejected reading never does).
-_STATED_UTC_USABLE_STATES = (B.STATE_CANDIDATE_EXTRACTED, B.STATE_NEEDS_REVIEW, B.STATE_SCIENTIST_CONFIRMED)
+_STATED_UTC_USABLE_STATES = (B.STATE_CANDIDATE_EXTRACTED, B.STATE_NEEDS_REVIEW, B.STATE_FILLED,
+                             B.STATE_SCIENTIST_CONFIRMED)
 #: r6 review M1: SPEC writes ``#E`` once, in the file header, when the file is CREATED (the header's ``#D`` is the same
 #: instant); each scan writes its own ``#D`` later. A run whose first scan starts more than this long after its file
 #: was created is left out: the file-creation instant is too far from the measurement to stand for its start.
@@ -2810,7 +2840,7 @@ def _sample_family_field_answered(bundle: Mapping, group_of: Mapping[str, str]) 
     is never a member's, so it needs no second look."""
     answered = [o for o in (*(bundle.get("candidates") or ()), *(bundle.get("missing_values") or ()))
                 if o.get("target_field_path") in SAMPLE_FAMILY_FIELDS and o.get("run_id") in group_of
-                and o.get("value_state") in (B.STATE_SCIENTIST_CONFIRMED, B.STATE_REJECTED)]
+                and o.get("value_state") in (B.STATE_SCIENTIST_CONFIRMED, B.STATE_REJECTED, B.STATE_FILLED)]
     if not answered:
         return False
     identity = {g["group_id"]: _group_sample_identity(g) for g in live_groups(bundle)}
@@ -4381,6 +4411,115 @@ def targets_for(payload: Mapping, question_id: str, only: str | None = None, fie
     return ids
 
 
+def group_unusable_fills(bundle: Mapping, group_of: Mapping[str, str], context: Container[str] = (),
+                         decision_of: Mapping | None = None, blocks: Mapping | None = None) -> set[str]:
+    """1.18.0: the targets to ASK because a live record group cannot take a fill, mirroring ``records.compose_group``
+    step by step: per group and field, every fill is dropped beside a confirmed value (a beamtime-wide fill beside any),
+    and a run-level fill for a run holding any decision on its own targets for the field; a beamtime-wide fill that
+    stays does not reach a run with such a decision or with an open or differing reading of its own
+    (``bundle.runs_a_fill_cannot_reach``). Then, when the values left disagree or some measured run is not covered:
+    the run-level fills left, and the runs' own targets that stopped the beamtime-wide fill (the fill itself, which the
+    other groups take, is not asked). ``consolidate`` asks each, an optional field included."""
+    from .records import FIELD_REMAP, RUN_ONLY_PATHS
+
+    runs_of: dict[str, set] = {}
+    for rid, gid in group_of.items():
+        if rid not in context:
+            runs_of.setdefault(gid, set()).add(rid)
+    if decision_of is None:
+        decision_of = B._decisions_by_target(bundle.get("scientist_decisions") or ())
+    if blocks is None:
+        blocks = B.fill_run_blocks(bundle, decision_of)
+    by_path: dict[str, list[tuple[str | None, bool, Any, str]]] = {}
+    for kind, objs in (("candidate", bundle["candidates"]), ("missing_value", bundle["missing_values"])):
+        for o in objs:
+            state, path = o.get("value_state"), o.get("target_field_path")
+            if not path or state not in (B.STATE_FILLED, B.STATE_SCIENTIST_CONFIRMED):
+                continue
+            if not (o.get("eligibility_for_official_record") or {}).get("eligible"):
+                continue
+            if o.get("run_id") is None and path in RUN_ONLY_PATHS:
+                continue
+            tid = o.get("candidate_id") or o.get("value_id")
+            if state == B.STATE_FILLED:
+                value = B.fill_value(o)
+            else:
+                d = (B.candidate_decision(bundle, o, decision_of) if kind == "candidate"
+                     else decision_of.get(("missing_value", tid)))
+                value = B.final_value(o.get("value") if kind == "candidate" else None, d, o.get("readings"))
+            by_path.setdefault(FIELD_REMAP.get(path, path), []).append((o.get("run_id"), state == B.STATE_FILLED, value, tid))
+    # INDEXED ONCE (linear, not groups x values): per field, its beamtime rows and its rows per run, kept in bundle
+    # order; only the fields some fill reaches are looked at
+    indexed: dict[str, tuple[list, dict[str, list]]] = {}
+    for path, all_rows in by_path.items():
+        if not any(f for _, f, _, _ in all_rows):
+            continue
+        per_run: dict[str, list] = {}
+        for n, row in enumerate(all_rows):
+            if row[0] is not None:
+                per_run.setdefault(row[0], []).append((n, row))
+        indexed[path] = ([(n, row) for n, row in enumerate(all_rows) if row[0] is None], per_run)
+    out: set[str] = set()
+    for gid, members in runs_of.items():
+        for path, (beamtime_rows, per_run) in indexed.items():
+            mine = [x for r in members for x in per_run.get(r, ())]
+            if not beamtime_rows and not mine:
+                continue
+            rows = [row for _, row in sorted(beamtime_rows + mine, key=lambda x: x[0])]  # bundle order, as before
+            if not any(f for _, f, _, _ in rows):
+                continue
+            all_blocks = blocks.get(path, {})
+            path_blocks = {r: all_blocks[r] for r in members if r in all_blocks}  # this group's runs only
+            confirmed = {r for r, f, _, _ in rows if not f}
+            decided = {r for r, rs in path_blocks.items() if any(dk not in (None, "reject") for _, _, _, dk in rs)}
+            kept = [x for x in rows if not (x[1] and (None in confirmed or (x[0] is None and confirmed)
+                                                      or x[0] in confirmed or x[0] in decided))]
+            fills = [x for x in kept if x[1]]
+            if not fills:
+                continue
+            beamtime = next((x for x in fills if x[0] is None), None)
+            stopped = B.runs_a_fill_cannot_reach(path_blocks, path, beamtime[2]) if beamtime is not None else {}
+            covered = {r for r, _, _, _ in kept} - {None}
+            if beamtime is not None:
+                covered |= members - set(stopped)
+            elif any(r is None for r, _, _, _ in kept):
+                covered |= members
+            values = {json.dumps(v, sort_keys=True, default=str) for _, _, v, _ in kept}
+            if len(values) > 1 or members - covered:
+                out |= {tid for r, _, _, tid in fills if r is not None}
+                out |= {tid for why in stopped.values() for tid in why}
+    return out
+
+
+def fills_asked(bundle: Mapping) -> set[str]:
+    """The ids of FILLED values ``consolidate`` asks anyway (their group cannot take them: :func:`group_unusable_fills`)
+    — what ``bundle status`` leaves out of "filled, not asked", so the two agree."""
+    if not bundle.get("record_groups"):
+        return set()
+    group_of: dict[str, str] = {}
+    run_by_key = {r["run_key"]: r["run_id"] for r in bundle.get("runs") or ()}
+    for g in live_groups(bundle):
+        for key in g.get("member_run_keys") or ():
+            rid = run_by_key.get(key)
+            if rid and rid not in group_of:
+                group_of[rid] = g["group_id"]
+    asked = group_unusable_fills(bundle, group_of, B.context_run_ids(bundle))
+    return {o.get("candidate_id") or o.get("value_id") for o in [*bundle["candidates"], *bundle["missing_values"]]
+            if o.get("value_state") == B.STATE_FILLED and (o.get("candidate_id") or o.get("value_id")) in asked}
+
+
+def filled_targets(bundle: Mapping, ids: Iterable[str]) -> list[str]:
+    """The ids among ``ids`` (candidate or missing-value ids) whose value a registered rule FILLED (1.18.0, DEC-96)
+    and no scientist decided: not asked, but an answer to them is recorded (it wins over the fill). A question whose
+    every target is filled drops out of the open payload; an importer that finds a card's question only among the
+    answered (``consolidate(include_answered=True)``) records its answer on these targets instead of calling it no
+    longer asked."""
+    wanted = set(ids)
+    return [o.get("candidate_id") or o.get("value_id")
+            for o in [*(bundle.get("candidates") or ()), *(bundle.get("missing_values") or ())]
+            if (o.get("candidate_id") or o.get("value_id")) in wanted and o.get("value_state") == B.STATE_FILLED]
+
+
 def processing_blocked_groups(bundle: Mapping) -> dict[str, str]:
     """``{group_id: reason_code}`` for groups whose latest processing result says the
     protocol does not apply (:func:`bundle.processing_blocked_groups`): there is no curve to
@@ -4582,7 +4721,7 @@ def _unasked(bundle: Mapping, group: Mapping, path: str, report: Mapping) -> dic
     reject = f'isaac bundle decide <bundle_dir> --target {gid} --decision reject --by "<your name>"'
     beamtime = [o for o in objs if o.get("run_id") is None]
     own = [o for o in objs if o.get("run_id") is not None
-           and (B.is_answer_slot(o) or o.get("value_state") == B.STATE_SCIENTIST_CONFIRMED)]
+           and (B.is_answer_slot(o) or o.get("value_state") in (B.STATE_SCIENTIST_CONFIRMED, B.STATE_FILLED))]
     if beamtime and own:
         # c7-r MED-2: A BEAMTIME TARGET AND A RUN'S OWN ANSWER (an answer slot, or the run's own target). `--target` on
         # the beamtime one would rewrite every group of the beamtime; the group's own answer is changed through the

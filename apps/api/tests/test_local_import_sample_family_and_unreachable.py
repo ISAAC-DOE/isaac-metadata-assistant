@@ -592,7 +592,7 @@ def test_once_only_an_electrode_asked_again_is_open_the_sample_question_points_a
     the record. The sample question has nothing left to record on; deciding it names the one question still open."""
     fam, members = _zz1(grouped)
     assert [m["question_id"] for m in members] == ["Q-06a397dcc5", "Q-18c613534f", "Q-ff5ccd4538"]
-    assert Q.consolidate(M.load(grouped))["counts"]["blocking"] == 11
+    assert Q.consolidate(M.load(grouped))["counts"]["blocking"] == 10  # 1.18.0 (DEC-96): the domain is filled, not asked
     for m, value in ((members[1], "SYN second oxide"), (members[2], "SYN third oxide"), (members[0], UNFIT)):
         M.decide_question(grouped, question_id=m["question_id"], decision="correct", value=value, by=WHO, orcid=None)
     B = _unfit_from_now_on(monkeypatch)
@@ -601,7 +601,7 @@ def test_once_only_an_electrode_asked_again_is_open_the_sample_question_points_a
     M.save_bundle(grouped, b)
     payload = Q.consolidate(M.load(grouped))
     assert Q.question(payload, fam["question_id"]) is None and Q.question(payload, "Q-06a397dcc5")["asked_again"]
-    assert payload["counts"]["blocking"] == 11
+    assert payload["counts"]["blocking"] == 10  # 1.18.0: the domain is filled, not asked
     with pytest.raises(M.MutationRefused) as refused:
         M.decide_question(grouped, question_id=fam["question_id"], decision="correct", value="SYN shared oxide",
                           by=WHO, orcid=None)
@@ -615,4 +615,4 @@ def test_once_only_an_electrode_asked_again_is_open_the_sample_question_points_a
     answered = Q.question(Q.consolidate(M.load(grouped), include_answered=True), fam["question_id"])
     assert answered["sample_family"]["member_questions"] == [m["question_id"] for m in members]
     assert "kept_apart" not in answered["sample_family"]
-    assert Q.consolidate(M.load(grouped))["counts"]["blocking"] == 10
+    assert Q.consolidate(M.load(grouped))["counts"]["blocking"] == 9  # 1.18.0 (DEC-96): the domain is filled

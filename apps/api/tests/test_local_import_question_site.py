@@ -41,6 +41,17 @@ def _vendored_schema_basis(tmp_path_factory):
         yield
 
 
+@pytest.fixture(scope="module", autouse=True)
+def _domain_still_asked():
+    """Pin the domain QUESTION these tests answer as their plain blocking card: 1.18.0 (DEC-96) fills system.domain
+    from acquisition-only runs (isaac.fill.domain_from_acquisition.v1), so this corpus would no longer ask it. With no
+    acquisition run type registered the rule does not apply, and the site's cards are the ones these tests were written
+    against. The fill itself, and a site answer to a FILLED value, are tested in test_local_import_fill_first.py."""
+    with pytest.MonkeyPatch.context() as mp:
+        mp.setattr(B, "ACQUISITION_READER_IDS", frozenset())
+        yield
+
+
 FOLDER = "SYN_BL00_2100-01_Synthetic"
 WHO = "SYN Scientist"
 AT = "2100-02-01T10:00:00Z"

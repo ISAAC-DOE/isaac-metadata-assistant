@@ -25,7 +25,9 @@ Only a person's decision: the LATEST decision on a value target (a candidate, a 
 candidate) that confirms or corrects a value, recorded as ``scientist_answer`` under a valid ``--by`` name (the CLI,
 the Local Imports page, a template or workbook import all record so), and the beamtime's ``set_clock_time_zone``.
 Never ``defer`` ("I don't know"), never ``reject``, never an AI interpretation, never a value a parser read that no
-person confirmed.
+person confirmed, and never a value a registered fill rule FILLED (1.18.0, DEC-96: ``value_state`` ``filled``): a fill
+is no decision, so :func:`person_values` (which reads decisions only) never sees one, and a filled value's scope keys
+(the facility, beamline, group and organization a person confirmed) are never read from it either.
 
 WHEN: at the moment of the decision, never retroactively (:func:`snapshot` before a write, :func:`after_write`
 after it). A write stores only the decisions IT added, while the memory is on: never a decision recorded before the

@@ -482,13 +482,17 @@ def render_summary(bundle: Mapping) -> str:
     add("")
     add(
         f"Stage: {readiness['stage']}. Values eligible for an official record: "
-        f"{readiness['eligible_value_count']} (only scientist-confirmed values can be). "
-        "Official record ready: no."
+        f"{readiness['eligible_value_count']} (scientist-confirmed values, and values a registered rule filled from "
+        "the evidence). Official record ready: no."
     )
     add("")
     if decisions or readiness["eligible_value_count"]:
-        # the stored next step says no value is confirmed: untrue once a scientist has decided some
-        add(f"{readiness['eligible_value_count']} value(s) are eligible for an official record because a scientist decided them; "
+        # the stored next step says no value is confirmed: untrue once a scientist has decided some (or a rule filled some)
+        filled = counts.get("filled") or 0
+        add(f"{readiness['eligible_value_count']} value(s) are eligible for an official record"
+            + (f" ({filled} filled by a rule from the evidence, not asked: they go into the records as inferred, naming "
+               "the rule, for the scientist to review at the end; the rest because a scientist decided them)" if filled
+               else " because a scientist decided them") + "; "
             f"{counts['needs_review']} still need review and {counts['conflicts']} conflict(s) are listed. This summary describes "
             "the import and the decisions recorded in the bundle. It does not know whether a record has been exported (that is "
             "kept in the folder you exported to, as `isaac-export/index.json`): `isaac bundle build-records` shows each "
@@ -1987,6 +1991,9 @@ def cmd_bundle_check(args) -> int:
     b = bundle["bounds"]
     print(f"VALID: meets {B.FORMAT_ID} {B.FORMAT_VERSION} (schema, bounds, references, value states).")
     print(f"  value states: {', '.join(f'{k} {v}' for k, v in sorted(states.items()))}")
+    if (bundle.get("counts") or {}).get("filled"):
+        # 1.18.0: candidates AND missing values a registered rule filled (counts.filled), not asked
+        print(f"  filled by a rule (candidates and missing values, not asked): {bundle['counts']['filled']}")
     print(
         f"  bounds: {len(bundle['runs'])}/{b['max_runs']} runs, "
         f"{len(bundle['candidates'])}/{b['max_candidates']} candidates, "

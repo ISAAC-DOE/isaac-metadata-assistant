@@ -263,10 +263,14 @@ def test_excerpt_shows_raw_text_and_refuses_a_changed_source(bdir, tmp_path):
 
 
 def test_an_ai_annotation_never_sets_a_state_above_needs_review(bdir):
+    # 1.18.0 (DEC-96, superseding DEC-84's "never above needs_review" for a value a registered rule fills): an AI
+    # reading that DISAGREES with a filled value lifts it to needs_review (no fill), an agreeing one leaves the fill;
+    # an AI reading ALONE (a missing value) is still needs_review and never eligible. Updated from "an agreeing reading
+    # lifts an extracted value to needs_review and nothing is eligible": exactly the policy DEC-96 replaces.
     b = M.load(bdir)
-    ready = next(c for c in b["candidates"] if c["value_state"] == "candidate_extracted")
-    miss = b["missing_values"][0]
-    M.annotate(bdir, target_id=ready["candidate_id"], value=ready["value"], excerpt_locator=None,
+    ready = next(c for c in b["candidates"] if c["value_state"] in ("filled", "candidate_extracted"))
+    miss = next(m for m in b["missing_values"] if m["value_state"] == "missing")
+    M.annotate(bdir, target_id=ready["candidate_id"], value="2100-06-01T00:00:00+00:00", excerpt_locator=None,
                source_id=None, model_id="m", blind=False, rationale="")
     M.annotate(bdir, target_id=miss["value_id"], value="anything", excerpt_locator=None,
                source_id=None, model_id="m", blind=False, rationale="")
@@ -275,7 +279,9 @@ def test_an_ai_annotation_never_sets_a_state_above_needs_review(bdir):
     assert by[ready["candidate_id"]]["value_state"] == "needs_review"
     assert next(m for m in b["missing_values"] if m["value_id"] == miss["value_id"])["value_state"] == "needs_review"
     assert any(e["method"] == "ai_interpretation" for e in by[ready["candidate_id"]]["evidence"])
-    assert b["readiness"]["eligible_value_count"] == 0
+    eligible = [o for o in [*b["candidates"], *b["missing_values"]] if o["eligibility_for_official_record"]["eligible"]]
+    assert all(o["value_state"] == "filled" for o in eligible) and b["readiness"]["eligible_value_count"] == len(eligible)
+    assert ready["candidate_id"] not in {o.get("candidate_id") for o in eligible}  # the reading the AI disputed
     conflict = b["conflicts"][0]["conflict_id"]
     with pytest.raises(M.MutationRefused):
         M.annotate(bdir, target_id=conflict, value="x", excerpt_locator=None, source_id=None,

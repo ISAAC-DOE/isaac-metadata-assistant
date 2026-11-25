@@ -186,6 +186,9 @@ def test_reaction_drive_and_catalysis_block_only_once_the_composer_requires_them
     # a reaction statement the files hold for run-001, NOT confirmed (in memory): the composer requires nothing more
     c = json.loads(json.dumps(next(c for c in b["candidates"] if c["run_id"] == "run-001" and c["target_field_path"])))
     c.update(candidate_id="cand-rx", target_field_path="context.electrochemistry.reaction", value="OER", value_state=B.STATE_NEEDS_REVIEW)
+    # 1.18.0: the copied candidate may be a FILLED one; as a needs-review statement it carries no fill and is not eligible
+    c.pop("fill", None)
+    c["eligibility_for_official_record"] = {"eligible": False, "reason": "needs review (synthetic)"}
     b["candidates"].append(c)
     conditional = [q for q in Q.consolidate(b)["questions"] if q["target_field_path"] in B.REACTION_REQUIRED_PATHS]
     assert conditional and not any(q["blocking"] for q in conditional)

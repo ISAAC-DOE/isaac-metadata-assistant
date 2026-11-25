@@ -166,6 +166,15 @@ def status(bundle_dir: Path, *, shown_as: str | None = None) -> dict:
         "record_groups": {"live": len(live), "by_status": dict(sorted(by_status.items())),
                           "not_live": len(groups) - len(live), "cannot_export": len(cannot)},
         "questions": counts,
+        # 1.18.0 (DEC-96): values a registered rule filled (not asked; the scientist reviews them at the end)
+        # ...only those NOT asked anyway: a fill its record group cannot take is asked (questions.fills_asked), as the
+        # questions list shows
+        "values_filled": sum(1 for o in [*(bundle.get("candidates") or ()), *(bundle.get("missing_values") or ())]
+                             if o.get("value_state") == B.STATE_FILLED) - len(Q.fills_asked(bundle)),
+        # 1.18.0: where the naming (counter) question stands: a file-name number read by its position is filled only
+        # once it is settled (bundle.naming_check: not_grouped / counter_question_open / grouped_no_counter_question /
+        # decided)
+        "naming": B.naming_check(bundle),
         "processing": {"last_utc": _last_processing(bundle_dir), "live_results_by_state": dict(sorted(by_state.items())),
                        "results_of_groups_no_longer_live": gone, "groups_awaiting_a_curve_decision": pending_curve,
                        "groups_not_processed": unprocessed},
@@ -237,6 +246,9 @@ def _lines(f: Mapping) -> list[str]:
                      f"{q.get('optional', 0)} optional.")
     else:
         lines.append(f"Open questions: not counted ({(q or {}).get('unavailable')}); `isaac bundle check` says why.")
+    if f.get("values_filled"):
+        lines.append(f"Filled from the evidence by a rule, not asked: {f['values_filled']} value(s); they go into the "
+                     "records as inferred, naming the rule, for the scientist to review at the end.")
     p = f["processing"]
     if p["live_results_by_state"] or p["last_utc"]:
         states = ", ".join(f"{n} {s.replace('_', ' ')}" for s, n in p["live_results_by_state"].items())

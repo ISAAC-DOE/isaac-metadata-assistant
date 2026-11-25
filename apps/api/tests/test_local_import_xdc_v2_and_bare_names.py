@@ -395,7 +395,15 @@ def id_summary(name: str, tmp_path: Path) -> dict:
         "missing": [[m["value_id"], key_of.get(m["run_id"]), m["target_field_path"]] for m in data["missing_values"]],
         "questions": sorted(q["question_id"] for q in qs),
         "groups": sorted([g["group_id"], g["role"], g["member_run_keys"]] for g in G.propose_record_groups(data)),
+        # 1.18.0: the questions not asked only because a rule filled every target (kept under include_answered)
+        "filled_out": _filled_out(data),
     }
+
+
+def _filled_out(data) -> set:
+    from test_local_import_polish_c3q import filled_out_ids
+
+    return filled_out_ids(data)
 
 
 def base_pin(summary: dict) -> dict:
@@ -466,14 +474,16 @@ def test_every_id_the_build_before_gave_stands_and_new_ones_only_follow(name, tm
     assert gated["missing"] == [m for m in now["missing"] if m in gated["missing"]]  # the same ids, the same order
     assert {m[2] for m in now["missing"] if m not in gated["missing"]} <= set(S.MENTION_GATED_FIELDS_DEFAULT)
     assert all(gated[part] == now[part] for part in ("runs", "candidates", "groups"))
-    assert set(pin["questions"]) <= set(gated["questions"])
+    # 1.18.0 (DEC-96): a pinned question every target of which a rule now fills (the domain) is not asked; its id
+    # is kept among the answered
+    assert set(pin["questions"]) <= set(gated["questions"]) | gated["filled_out"]
     for part in ("runs", "candidates", "missing"):
         n, digest = pin[part]
         assert len(now[part]) >= n and _digest(now[part][:n]) == digest, part
-    assert set(pin["questions"]) <= set(now["questions"])
+    assert set(pin["questions"]) <= set(now["questions"]) | now["filled_out"]  # 1.18.0: as above
     assert set(pin["groups"]) <= {g[0] for g in now["groups"]}
-    if name in ("a_only", "parents"):  # nothing new to find: everything is as it was
-        assert base_pin(now) == pin
+    if name in ("a_only", "parents"):  # nothing new to find: everything is as it was (the filled question kept aside)
+        assert base_pin({**now, "questions": sorted(set(now["questions"]) | now["filled_out"])}) == pin
     if name == "mixed_version":  # the 2.0 scans in 4.0 series change nothing; the 2.0-only run only follows
         assert [r[1] for r in now["runs"]][pin["runs"][0]:] == ["ssrl_xdc_v1:a/SYNOLD"]
         values = {(c[1], c[2]): c[3] for c in now["candidates"]}

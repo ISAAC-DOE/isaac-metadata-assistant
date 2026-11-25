@@ -92,7 +92,10 @@ def test_a_bundle_the_1_14_0_build_wrote_stays_valid_takes_decisions_and_is_told
     shutil.copytree(BUNDLE_1_14_0, out)
     old = json.loads((out / "bundle.json").read_text())
     assert old["format_version"] == "1.14.0" and not old.get("format_upgrades")
-    assert B.validate_bundle(old) == []  # the 1.16.0 rules are not applied to what an older build imported
+    # the 1.16.0 rules are not applied to what an older build imported; 1.18.0 (DEC-96) fills its undisputed values,
+    # so it is STALE (never INVALID) until its next write, and only for those fills
+    errors, stale = B.validate_allowing_stale(old)
+    assert errors == [] and stale and all(s["value_state"] == B.STATE_FILLED for s in stale)
     M.decide(out, target_ids=["experiment"], decision="defer", value=None, by="SYN Scientist", orcid=None)
     saved = json.loads((out / "bundle.json").read_text())
     assert saved["format_version"] == B.FORMAT_VERSION and B.validate_bundle(saved) == []
