@@ -153,7 +153,8 @@ _OUTSIDE_LIVE_GROUPS = ("Not blocking: every target is in a run no live record g
 
 
 def compositions(bundle: Mapping, bundle_dir: Path | None = None, *,
-                 decision_of: Mapping[tuple[str, str], Mapping] | None = None) -> dict[str, dict]:
+                 decision_of: Mapping[tuple[str, str], Mapping] | None = None,
+                 fill_blocks: Mapping | None = None) -> dict[str, dict]:
     """``{group_id: composition report}`` for every LIVE record group, whatever its status: THE
     ``records.compose_group`` computation ``build-records`` and ``validate`` use, so "blocking" and the nearest
     group are judged by what the composer actually requires, never by a second reading of the schema.
@@ -176,7 +177,7 @@ def compositions(bundle: Mapping, bundle_dir: Path | None = None, *,
         for n, obj in enumerate(bundle[kind]):
             by_run.setdefault(obj.get("run_id"), {"candidates": [], "missing_values": []})[kind].append((n, obj))
     # THE WHOLE-BUNDLE READS (decision log, conflicts, processing) once for every group, never once per group
-    index = R.composition_index(view, decision_of=decision_of)
+    index = R.composition_index(view, decision_of=decision_of, fill_blocks=fill_blocks)
     out = {}
     for g in live_groups(bundle):
         runs = [None] + [run_key_to_id[k] for k in g.get("member_run_keys") or () if k in run_key_to_id]
@@ -870,7 +871,9 @@ def consolidate(bundle: Mapping, *, compositions_out: dict | None = None, includ
     # 1.18.0: a FILL THE GROUP CANNOT TAKE (its runs filled with different values, or not every measured run has one)
     # is asked like the value it was read as, blocking or not: the record composer fills nothing for it until a
     # scientist answers (records.compose_group), so a question must ask it
-    unusable_fills = group_unusable_fills(bundle, group_of, context, decisions) if has_groups else set()
+    # 1.18.0: each field's run-level targets and decisions, read ONCE for the questions and the compositions below
+    fill_blocks = B.fill_run_blocks(bundle, decisions) if has_groups else None
+    unusable_fills = group_unusable_fills(bundle, group_of, context, decisions, fill_blocks) if has_groups else set()
     for c in bundle["candidates"]:
         path = c["target_field_path"]
         if not path or c["run_id"] in context:
@@ -1572,7 +1575,7 @@ def consolidate(bundle: Mapping, *, compositions_out: dict | None = None, includ
 
     completeness = None
     if has_groups:
-        reports = compositions(bundle, decision_of=decisions)
+        reports = compositions(bundle, decision_of=decisions, fill_blocks=fill_blocks)
         if compositions_out is not None:
             compositions_out.update(reports)
         # r7 J2: EVERY live group that cannot become a record as it stands (processing_not_applicable:<code>, no_scans,
@@ -4448,7 +4451,7 @@ def targets_for(payload: Mapping, question_id: str, only: str | None = None, fie
 
 
 def group_unusable_fills(bundle: Mapping, group_of: Mapping[str, str], context: Container[str] = (),
-                         decision_of: Mapping | None = None) -> set[str]:
+                         decision_of: Mapping | None = None, blocks: Mapping | None = None) -> set[str]:
     """1.18.0: the targets to ASK because a live record group cannot take a fill, mirroring ``records.compose_group``
     step by step: per group and field, every fill is dropped beside a confirmed value (a beamtime-wide fill beside any),
     and a run-level fill for a run holding any decision on its own targets for the field; a beamtime-wide fill that
@@ -4464,7 +4467,8 @@ def group_unusable_fills(bundle: Mapping, group_of: Mapping[str, str], context: 
             runs_of.setdefault(gid, set()).add(rid)
     if decision_of is None:
         decision_of = B._decisions_by_target(bundle.get("scientist_decisions") or ())
-    blocks = B.fill_run_blocks(bundle, decision_of)
+    if blocks is None:
+        blocks = B.fill_run_blocks(bundle, decision_of)
     by_path: dict[str, list[tuple[str | None, bool, Any, str]]] = {}
     for kind, objs in (("candidate", bundle["candidates"]), ("missing_value", bundle["missing_values"])):
         for o in objs:
@@ -4483,13 +4487,28 @@ def group_unusable_fills(bundle: Mapping, group_of: Mapping[str, str], context: 
                      else decision_of.get(("missing_value", tid)))
                 value = B.final_value(o.get("value") if kind == "candidate" else None, d, o.get("readings"))
             by_path.setdefault(FIELD_REMAP.get(path, path), []).append((o.get("run_id"), state == B.STATE_FILLED, value, tid))
+    # INDEXED ONCE (linear, not groups x values): per field, its beamtime rows and its rows per run, kept in bundle
+    # order; only the fields some fill reaches are looked at
+    indexed: dict[str, tuple[list, dict[str, list]]] = {}
+    for path, all_rows in by_path.items():
+        if not any(f for _, f, _, _ in all_rows):
+            continue
+        per_run: dict[str, list] = {}
+        for n, row in enumerate(all_rows):
+            if row[0] is not None:
+                per_run.setdefault(row[0], []).append((n, row))
+        indexed[path] = ([(n, row) for n, row in enumerate(all_rows) if row[0] is None], per_run)
     out: set[str] = set()
     for gid, members in runs_of.items():
-        for path, all_rows in by_path.items():
-            rows = [r for r in all_rows if r[0] is None or r[0] in members]
+        for path, (beamtime_rows, per_run) in indexed.items():
+            mine = [x for r in members for x in per_run.get(r, ())]
+            if not beamtime_rows and not mine:
+                continue
+            rows = [row for _, row in sorted(beamtime_rows + mine, key=lambda x: x[0])]  # bundle order, as before
             if not any(f for _, f, _, _ in rows):
                 continue
-            path_blocks = blocks.get(path, {})
+            all_blocks = blocks.get(path, {})
+            path_blocks = {r: all_blocks[r] for r in members if r in all_blocks}  # this group's runs only
             confirmed = {r for r, f, _, _ in rows if not f}
             decided = {r for r, rs in path_blocks.items() if any(dk not in (None, "reject") for _, _, _, dk in rs)}
             kept = [x for x in rows if not (x[1] and (None in confirmed or (x[0] is None and confirmed)
@@ -4498,8 +4517,7 @@ def group_unusable_fills(bundle: Mapping, group_of: Mapping[str, str], context: 
             if not fills:
                 continue
             beamtime = next((x for x in fills if x[0] is None), None)
-            stopped = ({r: why for r, why in B.runs_a_fill_cannot_reach(path_blocks, path, beamtime[2]).items()
-                        if r in members} if beamtime is not None else {})
+            stopped = B.runs_a_fill_cannot_reach(path_blocks, path, beamtime[2]) if beamtime is not None else {}
             covered = {r for r, _, _, _ in kept} - {None}
             if beamtime is not None:
                 covered |= members - set(stopped)

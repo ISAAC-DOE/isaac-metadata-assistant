@@ -488,19 +488,28 @@ def reading_witnesses(obj: Mapping, index: Mapping) -> list[dict]:
 _FILL_WITNESS_FILES = 5
 
 
-def _fill_witnesses(bundle: Mapping, m: Mapping, measured_ids: set) -> tuple[list[dict], str | None]:
+def _fill_witness_index(bundle: Mapping) -> dict:
+    """What :func:`_fill_witnesses` reads from the WHOLE bundle, built once per composition index (the sources by id,
+    each source's non-file-name statements in bundle order, each run by id with its bundle position)."""
+    statements: dict[str, list] = {}
+    for e in bundle.get("extended_context") or ():
+        if e.get("source_id") and not str(e.get("locator") or "").lower().startswith("filename"):
+            statements.setdefault(e["source_id"], []).append(e)
+    return {"source_of": {s.get("source_id"): s for s in bundle.get("sources") or ()}, "statements": statements,
+            "runs": {r.get("run_id"): (n, r) for n, r in enumerate(bundle.get("runs") or ())}}
+
+
+def _fill_witnesses(bundle: Mapping, m: Mapping, measured_ids: set, idx: Mapping | None = None) -> tuple[list[dict], str | None]:
     """``(witnesses, note)`` for a MISSING value a rule filled. For :data:`bundle.FILL_DOMAIN_RULE_ID`: for each of the
     GROUP's measured runs (a window of :data:`_FILL_WITNESS_FILES`), one literal header statement its acquisition
     reader read from its acquisition file (the line, its real locator and the reader's id), and in ``note`` what the
     rule rests on: which reader read each run (never the classifier's prose presented as a quote)."""
     if (m.get("fill") or {}).get("rule_id") != B.FILL_DOMAIN_RULE_ID:
         return [], None
-    source_of = {s.get("source_id"): s for s in bundle.get("sources") or ()}
-    statements: dict[str, list] = {}
-    for e in bundle.get("extended_context") or ():
-        if e.get("source_id") and not str(e.get("locator") or "").lower().startswith("filename"):
-            statements.setdefault(e["source_id"], []).append(e)
-    runs = [r for r in bundle.get("runs") or () if r.get("run_id") in measured_ids]
+    if idx is None:
+        idx = _fill_witness_index(bundle)
+    source_of, statements = idx["source_of"], idx["statements"]
+    runs = [r for _, r in sorted(idx["runs"][rid] for rid in measured_ids if rid in idx["runs"])]
     readers = sorted({str(B.run_reader_id(bundle, r, source_of)) for r in runs})
     out = []
     for r in runs:
@@ -634,7 +643,8 @@ def _read_series_file(path: Path) -> tuple[list[float], list[float]] | str:
     return (xs, ys) if xs else "the file holds no data rows"
 
 
-def composition_index(bundle: Mapping, decision_of: Mapping[tuple[str, str], Mapping] | None = None) -> dict:
+def composition_index(bundle: Mapping, decision_of: Mapping[tuple[str, str], Mapping] | None = None,
+                      fill_blocks: Mapping | None = None) -> dict:
     """What :func:`compose_group` reads from the WHOLE bundle (the decision log, the conflicts, the processing
     results), read once. A caller composing many groups of ONE bundle builds it once and passes it to each
     call, so composing every group is linear in the bundle, not (groups x decisions); the result is exactly
@@ -649,7 +659,7 @@ def composition_index(bundle: Mapping, decision_of: Mapping[tuple[str, str], Map
         "decisions": decision_of,
         "conflict_ids_of": B.conflict_ids_by_candidate(bundle),
         # 1.18.0: each field's run-level targets and their decisions: what a beamtime-wide fill cannot reach for a run
-        "fill_blocks": B.fill_run_blocks(bundle, decision_of),
+        "fill_blocks": B.fill_run_blocks(bundle, decision_of) if fill_blocks is None else fill_blocks,
         "processing_blocked": B.processing_blocked_groups(bundle),
         # read only for an approved result: none, nothing to read
         "processing_state": (B.processing_state_decisions(bundle)
@@ -922,7 +932,10 @@ def compose_group(bundle: Mapping, group: Mapping, bundle_dir: Path, index: dict
             continue
         if m["value_state"] == B.STATE_FILLED:
             # 1.18.0: a missing value a registered rule filled (system.domain from the acquisition files)
-            witnesses, note = _fill_witnesses(bundle, m, measured_ids)
+            memo = index["memo"]
+            if "fill_witness_index" not in memo:  # once per composition index, never per group
+                memo["fill_witness_index"] = _fill_witness_index(bundle)
+            witnesses, note = _fill_witnesses(bundle, m, measured_ids, memo["fill_witness_index"])
             witnesses += reading_witnesses(m, index)
             proposals.setdefault(FIELD_REMAP.get(m["target_field_path"], m["target_field_path"]), []).append(
                 (B.fill_value(m), witnesses + [fill_derivation(m, "value_id", note)], m["value_id"]))
@@ -949,7 +962,8 @@ def compose_group(bundle: Mapping, group: Mapping, bundle_dir: Path, index: dict
         blocked: dict[str, list[str]] = {}
         if filled_opts:
             confirmed_runs = {run_of.get(i) for _, _, i in options if i not in filled_ids}
-            rows = index["fill_blocks"].get(path, {})
+            all_rows = index["fill_blocks"].get(path, {})
+            rows = {r: all_rows[r] for r in measured_ids if r in all_rows}  # this group's runs only (linear in the group)
             decided_runs = {r for r, rs in rows.items() if any(dk not in (None, "reject") for _, _, _, dk in rs)}
             dropped = [o for o in filled_opts
                        if None in confirmed_runs
@@ -960,8 +974,7 @@ def compose_group(bundle: Mapping, group: Mapping, bundle_dir: Path, index: dict
             options = [o for o in options if o not in dropped]
             beamtime_fill = next((o for o in options if o[2] in filled_ids and run_of.get(o[2]) is None), None)
             if beamtime_fill is not None:
-                blocked = {r: why for r, why in B.runs_a_fill_cannot_reach(rows, path, beamtime_fill[0]).items()
-                           if r in measured_ids}
+                blocked = B.runs_a_fill_cannot_reach(rows, path, beamtime_fill[0])
         if not options:
             continue  # every option was a fill a decision beat: nothing to compose (each is listed in not_composed)
         distinct = {json.dumps(v, sort_keys=True) for v, _, _ in options}
