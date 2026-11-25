@@ -528,6 +528,21 @@ def _sample_reading_text(groups: Sequence[str], written: Mapping[str, Sequence[t
                      for key, lits in spellings.items())
 
 
+def left_out_filled_text(left: Sequence[tuple[str | None, str]], stem_of_run: Mapping[str, str]) -> str:
+    """1.19.0 (re-review M1): the sentence a question ends with when it leaves out targets a registered rule FILLED
+    (``questions skip filled values``): how many, for which runs (their file stems; ``the beamtime`` for a beamtime
+    value), and how to correct one (``decide --target``, or the end review). ``""`` when it leaves none out."""
+    if not left:
+        return ""
+    names = sorted({stem_of_run.get(r) or r if r else "the beamtime" for r, _ in left})
+    ids = [tid for _, tid in left]
+    shown = ", ".join(names[:5]) + (f" and {len(names) - 5} more" if len(names) > 5 else "")
+    return (f" Left out, because a rule filled the value from the evidence: {len(ids)} value(s), for {shown}; "
+            f"to change one, `isaac bundle decide <bundle_dir> --target {ids[0]} --decision correct --value <value> "
+            '--by "<your name>"`' + (f" (its id; the others: {', '.join(ids[1:4])}{'…' if len(ids) > 4 else ''})"
+                                      if len(ids) > 1 else "") + ", or change it in the end review.")
+
+
 def _qid(*parts: str) -> str:
     return "Q-" + hashlib.sha1("|".join(parts).encode("utf-8")).hexdigest()[:10]
 
@@ -735,6 +750,9 @@ def consolidate(bundle: Mapping, *, compositions_out: dict | None = None, includ
         return [c for _, c in kept[:_HINTS_PER_QUESTION]]
 
     buckets: dict[tuple, dict] = {}
+    # 1.19.0 (re-review M1): the FILLED targets each question leaves out (not asked: a rule filled them), by the
+    # question's key, so its text names the runs it leaves out and how to correct one
+    filled_left_out: dict[tuple, list[tuple[str | None, str]]] = {}
 
     def add(key: tuple, *, kind: str, path: str | None, target: dict, run_id: str | None, scope: str,
             blocking: str | None, partition: str | None = None, field: str | None = None, again: dict | None = None):
@@ -790,6 +808,7 @@ def consolidate(bundle: Mapping, *, compositions_out: dict | None = None, includ
             continue  # a condition label's answer: asked and shown by its own question (labels.label_questions)
         again = None
         back = False  # asked here only because it was answered (answered_out)
+        left_filled = False  # 1.19.0: not asked because a rule filled it; its question says so
         if not include_answered and dead_slot(m):
             continue
         if answered_out is not None and include_answered and dead_slot(m):
@@ -802,7 +821,9 @@ def consolidate(bundle: Mapping, *, compositions_out: dict | None = None, includ
             if again is None and not (include_answered and m.get("extracted_state", B.STATE_MISSING) in _UNANSWERED
                                       and (("missing_value", m["value_id"]) in decisions
                                            or m["value_state"] == B.STATE_FILLED)):
-                continue
+                if include_answered or m["value_state"] != B.STATE_FILLED or B.is_answer_slot(m):
+                    continue
+                left_filled = True
             back = back or again is None
         path, rid = m["target_field_path"], m["run_id"]
         if rid in context:
@@ -831,6 +852,10 @@ def consolidate(bundle: Mapping, *, compositions_out: dict | None = None, includ
             scope, partition = "experiment", "sample=unrecorded"
         else:
             scope = scope_of_run(rid)
+        if left_filled:
+            key = (scope, "missing_value", path, partition) if blocking else (scope, "optional_values", None, partition)
+            filled_left_out.setdefault(key, []).append((rid, m["value_id"]))
+            continue
         if blocking:
             add((scope, "missing_value", path, partition), kind="missing_value", path=path, partition=partition,
                 target={"kind": "missing_value", "id": m["value_id"]}, run_id=rid, scope=scope, blocking=blocking, again=again)
@@ -852,6 +877,7 @@ def consolidate(bundle: Mapping, *, compositions_out: dict | None = None, includ
             continue
         again = None
         state = c["value_state"]
+        left_filled = False  # 1.19.0: not asked because a rule filled it; its question says so
         held_fill = c["candidate_id"] in unusable_fills
         if held_fill and state == B.STATE_FILLED:
             state = c.get("extracted_state")  # asked as it was read, never as answered
@@ -864,7 +890,9 @@ def consolidate(bundle: Mapping, *, compositions_out: dict | None = None, includ
                 if not (include_answered and state in (B.STATE_NEEDS_REVIEW, B.STATE_CANDIDATE_EXTRACTED)
                         and (c["value_state"] == B.STATE_FILLED
                              or B.candidate_decision(bundle, c, decisions) is not None)):
-                    continue
+                    if include_answered or c["value_state"] != B.STATE_FILLED:
+                        continue
+                    left_filled = True
                 if answered_out is not None:
                     answered_out.add(c["candidate_id"])
         if not zone_decided and B.is_local_clock_start(c):
@@ -873,6 +901,9 @@ def consolidate(bundle: Mapping, *, compositions_out: dict | None = None, includ
         if again is None and state == B.STATE_CANDIDATE_EXTRACTED and not blocking and not held_fill:
             continue  # an extracted optional value is not asked about (one a scientist answered unfitly is)
         scope = scope_of_run(c["run_id"])
+        if left_filled:
+            filled_left_out.setdefault((scope, "confirm_value", path, None), []).append((c["run_id"], c["candidate_id"]))
+            continue
         add((scope, "confirm_value", path, None), kind="confirm_value", path=path, partition=None,
             target={"kind": "candidate", "id": c["candidate_id"]}, run_id=c["run_id"], scope=scope, blocking=blocking,
             again=again)
@@ -984,6 +1015,7 @@ def consolidate(bundle: Mapping, *, compositions_out: dict | None = None, includ
                 from .mutations import reach_index as _reach_index
                 reach_index = _reach_index(bundle)  # r4-c HIGH-2: built once, for every field of every partition
             field_reach = _optional_field_reach(bundle, q["fields"], reach_index) if scope == "experiment" and has_groups else {}
+            left = filled_left_out.get((scope, kind, path, partition)) or []
             questions.append(
                 {
                     "question_id": qid,
@@ -1024,6 +1056,9 @@ def consolidate(bundle: Mapping, *, compositions_out: dict | None = None, includ
                                        + (f"   # a number ({', '.join(numeric_fields)}): add --json, e.g. --value -0.8 --json" if numeric_fields else "")),
                 }
             )
+            if left:
+                questions[-1]["text"] += left_out_filled_text(left, stem_of_run)
+                questions[-1]["left_out_as_filled"] = [{"run_id": r, "target_id": t} for r, t in left]
             continue
         node = _node(schema, path)
         passing_said = None
@@ -1169,6 +1204,8 @@ def consolidate(bundle: Mapping, *, compositions_out: dict | None = None, includ
                 text = text.replace(" (see the hints)", "", 1)
             text += S.technique_hints_left_out_sentence(code_left_out)
         text += _asked_again_text(q["asked_again"], {path: enum})
+        left = filled_left_out.get((scope, kind, path, partition)) or []
+        text += left_out_filled_text(left, stem_of_run)
         value_arg = "<value>" + (" --json" if numeric else "")
         qid = _qid(scope, kind, path, partition or "")
         if passing_said:
@@ -1226,6 +1263,8 @@ def consolidate(bundle: Mapping, *, compositions_out: dict | None = None, includ
             entry["lands_in_record"] = not never
             if never:
                 entry["informational"] = True
+        if left:
+            entry["left_out_as_filled"] = [{"run_id": r, "target_id": t} for r, t in left]
         if q["asked_again"]:
             entry["asked_again"] = q["asked_again"]
             entry["reason"] = "answer_not_eligible_for_official_record"

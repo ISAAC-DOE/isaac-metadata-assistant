@@ -58,7 +58,7 @@ def test_a_built_bundle_meets_v1_and_round_trips(bundle, tmp_path):
     assert loaded == bundle
     assert B.check_bundle(tmp_path) == []
     assert loaded["format"] == "isaac.local-import-bundle"
-    assert loaded["format_version"] == "1.18.0"  # 1.18.0 the filled state (DEC-96); 1.17.0 consents and reads that write nothing; 1.16.0 the second audit import rules; 1.15.0 the export-anyway decision; 1.14.0 the audit import rules; 1.13.0 MERGE-folder outputs; 1.12.0 scan notes; 1.11.0 the engine-classified processed outputs; 1.2.0 added processed_outputs; 1.3.0 absorber readings + a larger writable set; 1.4.0 the clock-zone decision; 1.5.0 control_mode writable; 1.6.0 the DEC-91 capture decisions; 1.7.0 current_setpoint_mA_cm2 writable; 1.8.0 the log bounds raised; 1.9.0 the last-token counter; 1.10.0 vocabulary_requests (all additive)
+    assert loaded["format_version"] == "1.19.0"  # 1.19.0 the checked readings and their fills (DEC-97); 1.18.0 the filled state (DEC-96); 1.17.0 consents and reads that write nothing; 1.16.0 the second audit import rules; 1.15.0 the export-anyway decision; 1.14.0 the audit import rules; 1.13.0 MERGE-folder outputs; 1.12.0 scan notes; 1.11.0 the engine-classified processed outputs; 1.2.0 added processed_outputs; 1.3.0 absorber readings + a larger writable set; 1.4.0 the clock-zone decision; 1.5.0 control_mode writable; 1.6.0 the DEC-91 capture decisions; 1.7.0 current_setpoint_mA_cm2 writable; 1.8.0 the log bounds raised; 1.9.0 the last-token counter; 1.10.0 vocabulary_requests (all additive)
     assert loaded["is_official_record"] is False
     assert "NOT an official ISAAC record" in loaded["official_record_notice"]
     assert loaded["ai_interpretations"] == [] and loaded["scientist_decisions"] == []

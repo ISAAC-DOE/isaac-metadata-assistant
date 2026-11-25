@@ -12,9 +12,9 @@ deterministic schema validators decide. A bundle carries the first three and is
 judged by none of the official validators — it is not a record.
 
 THE STATE RULE, IN ONE SENTENCE: parser output can produce only
-:data:`PARSER_STATES`; a registered fill rule (:data:`FILL_RULES`, 1.18.0) makes an
-undecided value ``filled``; an AI interpretation alone can lift a value to ``needs_review``
-and never higher; only a ``scientist_decisions`` entry produces ``scientist_confirmed``
+:data:`PARSER_STATES`; a registered fill rule (:data:`FILL_RULES`, 1.18.0; since 1.19.0 one of
+them rests on a CHECKED, stated AI reading) makes an undecided value ``filled``; an AI interpretation no
+fill rule takes can lift a value to ``needs_review`` and never higher; only a ``scientist_decisions`` entry produces ``scientist_confirmed``
 or ``rejected``, and a decision always wins over a fill. The validator recomputes this for every value and refuses a bundle
 whose stored state disagrees, so a hand-edited ``"value_state":
 "scientist_confirmed"`` is a schema-valid but contract-INVALID bundle.
@@ -145,7 +145,17 @@ FORMAT_ID = "isaac.local-import-bundle"
 #: decision always wins. A 1.2.0-1.17.0 bundle whose values this build fills is STALE (:func:`stale_eligibility`)
 #: until its next write, which logs each moved value in ``eligibility_rederived``; the upgrade is disclosed
 #: (:data:`CHANGES_ADDED_IN`).
-FORMAT_VERSION = "1.18.0"
+#: 1.19.0 (slice 2 of DEC-96, DEC-97): a reading a Claude reading pass gave keeps the quote check its load made
+#: (``ai_interpretations[].quote_check``: result, checker, reading-pass id, and the checked file's path, source id and
+#: ``content_sha256``, and ``reading_sha256`` over what the reading says) and its finding's scope
+#: (``ai_interpretations[].scope``), and one fill rule rests on it (:data:`FILL_READING_STATED_RULE_ID`, a stated
+#: reading whose quote itself states the value; ``fill.readings`` and ``fill.reading_pass_ids`` name the readings a fill
+#: rests on or agrees with). An INFERRED reading never fills: an inference from indirect quotes is a judgment, so the
+#: scientist is asked (it stays a suggestion on the question). A 1.18.0 validator refuses the new fields and the new
+#: rule id, hence the version. :data:`FILL_RULE_SET` 2: a 1.18.0 bundle (rule set 1) is STALE where
+#: a value moves, and its next write re-derives it; a reading without the block never fills, so an older bundle's
+#: readings fill only once loaded again with the check (the checked reading is recorded beside the older one).
+FORMAT_VERSION = "1.19.0"
 #: The electrochemical control mode. Its allowed values are the official schema's enum (read at
 #: runtime by :func:`value_problem`); the schema's conditional rules key the set-point a record
 #: requires on it (:func:`required_record_paths`). Never defaulted, never derived.
@@ -171,7 +181,7 @@ VALUE_IDS_APPEND_FROM = "1.5.0"
 IMPORT_RULES_ADDED_IN: Mapping[str, tuple] = {
     "1.4.0": (("generic:ssrl_xdc_v1", "ssrl_xdc_scan_start_v1"),),
 }
-_VERSION_ORDER = ("1.0.0", "1.1.0", "1.2.0", "1.3.0", "1.4.0", "1.5.0", "1.6.0", "1.7.0", "1.8.0", "1.9.0", "1.10.0", "1.11.0", "1.12.0", "1.13.0", "1.14.0", "1.15.0", "1.16.0", "1.17.0", "1.18.0")
+_VERSION_ORDER = ("1.0.0", "1.1.0", "1.2.0", "1.3.0", "1.4.0", "1.5.0", "1.6.0", "1.7.0", "1.8.0", "1.9.0", "1.10.0", "1.11.0", "1.12.0", "1.13.0", "1.14.0", "1.15.0", "1.16.0", "1.17.0", "1.18.0", "1.19.0")
 #: A change a format version made that moves no eligibility and adds no import rule, but that the
 #: first save by a newer build still DISCLOSES in its ``format_upgrades`` entry (never silently).
 CHANGES_ADDED_IN: Mapping[str, str] = {
@@ -214,6 +224,10 @@ CHANGES_ADDED_IN: Mapping[str, str] = {
                "filled, rules isaac.fill.parser_exact.v1, isaac.fill.stored_convention.v1, "
                "isaac.fill.domain_from_acquisition.v1): it goes into a draft as inferred, naming its rule, for review at "
                "the end, and any decision wins over it"),
+    "1.19.0": ("1.19.0 keeps each Claude reading's quote check (quote_check) and scope; a stated reading whose checked "
+               "quote itself states the value fills it (isaac.fill.reading_stated.v1), never an inferred one, a sample's "
+               "own label as its material, or a beamtime reading on a run-level or sample field; an older reading fills "
+               "only once its findings are loaded again"),
 }
 #: A field composed into a draft only beside another of the SAME run (interim decision for the
 #: set-point, pending domain-owner review; ``records.compose_group`` applies it). The CURRENT
@@ -460,17 +474,43 @@ FILL_STORED_CONVENTION_RULE = (
     "dry or NoElectrolyte is ex_situ) is filled under every exclusion of isaac.fill.parser_exact.v1, naming the "
     "convention."
 )
+#: 1.19.0 (slice 2 of DEC-96, DEC-97): a value a CHECKED Claude reading states (see :data:`FILL_READING_STATED_RULE`).
+FILL_READING_STATED_RULE_ID = "isaac.fill.reading_stated.v1"
+FILL_READING_STATED_RULE = (
+    f"{FILL_READING_STATED_RULE_ID}: a value a Claude reading pass gives a field with strength stated, whose quote the "
+    "loader found in the file it cites, whose stored quote check names the bytes the import read (the bundle's own "
+    "source hash) and the reading as it was checked, and whose quote itself states the value (the number or a declared "
+    "unit conversion of it, the list member or a registered synonym, every significant word of free text), is filled "
+    "where its field takes it and no other reading, file value or open reading of that field for that run (or the "
+    "beamtime) disagrees, under every exclusion of isaac.fill.parser_exact.v1; never an inferred or unchecked reading, a "
+    "sample's own label as its material, a beamtime-scoped reading on a run-level or sample field (or with any "
+    "target dissenting), a reading bound to runs by their names before the naming is settled, a time, the potential "
+    "scale or the control mode."
+)
+#: The fill rules that rest on an AI reading (each needs the reading's stored quote check, :func:`reading_quote_problem`).
+#: ONE: an INFERRED reading never fills (DEC-97, after a real-beamtime replay: an inference from indirect quotes is a
+#: judgment, so the scientist is asked; the reading stays a suggestion shown with the question).
+READING_FILL_RULES = frozenset({FILL_READING_STATED_RULE_ID})
+#: 1.19.0: the quote checker whose stored result a reading fill may rest on (``reading_check``, run by ``annotate
+#: --from-readings``; its result is kept on each reading as ``quote_check``). A block naming another checker never fills.
+QUOTE_CHECKER_ID = "isaac.reading_check.v1"
+#: The most readings a ``fill`` block lists as its witnesses (by interpretation id, sorted).
+MAX_FILL_READINGS = 50
 #: THE REGISTERED FILL RULES, ``rule id -> rule text``. A stored ``fill.rule_id`` outside it is refused by the schema.
 FILL_RULES: Mapping[str, str] = {
     FILL_PARSER_EXACT_RULE_ID: FILL_PARSER_EXACT_RULE,
     FILL_STORED_CONVENTION_RULE_ID: FILL_STORED_CONVENTION_RULE,
     FILL_DOMAIN_RULE_ID: FILL_DOMAIN_RULE,
+    FILL_READING_STATED_RULE_ID: FILL_READING_STATED_RULE,
 }
 #: THE FILL RULE SET a bundle was derived under, stored as ``fill_rule_set`` by every writer of a bundle this build
 #: fills. Raised whenever a rule is added or any rule's exclusions change, so a bundle an earlier rule set wrote (same
 #: format label) is STALE, never INVALID, and its next write re-derives and logs each moved value
 #: (:func:`fill_rule_set_stale`). 1: slice 1 of DEC-96 (parser_exact, stored_convention, domain_from_acquisition).
-FILL_RULE_SET = 1
+#: 2: slice 2 (DEC-97, format 1.19.0): the reading rule, a sample's own label never filled as its material (any rule),
+#: an electrolyte name carrying a concentration or a pH never filled (any rule), and a run's own AI reading that differs now stops a
+#: beamtime-wide fill reaching that run (:func:`fill_run_blocks`), as a run's own differing file reading already did.
+FILL_RULE_SET = 2
 #: The format a bundle STORES fills at. A 1.2.0-1.17.0 bundle (one the next save raises to this build's version) is
 #: derived with fills too, so its stored states disagree with this build's: STALE, not INVALID (:func:`stale_eligibility`).
 FILLS_FROM_FORMAT = "1.18.0"
@@ -527,8 +567,12 @@ AUTHORITIES: Mapping[str, str] = {
         "made of the evidence: candidates[] values, conflicts[] recommendations, "
         "ai_interpretations[]. Since 1.18.0 (DEC-96) a value a registered fill rule "
         "supports (fill.rule_id) and no scientist decided is filled: it goes into a draft "
-        "as inferred, naming its rule, and the scientist reviews it at the end. Anything "
-        "else stays a suggestion; an AI interpretation alone can raise a value to "
+        "as inferred, naming its rule, and the scientist reviews it at the end. Since "
+        "1.19.0 (DEC-97) one of those rules rests on a stated AI reading whose quote check "
+        "is stored on it and ties it to the bundle's own source bytes, and whose quote "
+        "itself states the value (isaac.fill.reading_stated.v1), never an inferred reading "
+        "and never a beamtime reading on a run-level or sample field. Anything else stays a "
+        "suggestion; an unchecked AI interpretation alone can raise a value to "
         "needs_review and never higher."
     ),
     "scientist_confirmation": (
@@ -1930,7 +1974,8 @@ def derive_value_state(
     2. otherwise, with no decision at all, a registered fill rule (``fill_rule``, from
        :func:`fill_rule_for`, 1.18.0) makes ``candidate_extracted`` / ``needs_review`` / ``missing``
        ``filled`` — never a conflict. The rule itself already refuses a value an AI reading
-       DISAGREES with, so an AGREEING reading never stops a fill and a disagreeing one always does;
+       DISAGREES with, so an AGREEING reading never stops a fill and a disagreeing one always does.
+       Since 1.19.0 (DEC-97) one rule rests on a CHECKED, stated AI reading itself (:data:`READING_FILL_RULES`);
     3. otherwise an AI interpretation lifts ``missing``/``unmapped``/
        ``candidate_extracted`` to ``needs_review`` — never higher, and never a conflict;
     4. otherwise the parser's own state stands.
@@ -2183,7 +2228,8 @@ def fill_context(bundle: Mapping, decision_of: Mapping | None = None) -> dict:
         if isinstance(target, Mapping):
             ai.setdefault((str(target.get("kind")), str(target.get("id"))), []).append(i.get("proposed_value"))
     apply = fills_apply(bundle)
-    return {
+    source_of = {src.get("source_id"): src for src in bundle.get("sources") or () if isinstance(src, Mapping)}
+    ctx = {
         "apply": apply,
         "ai": ai,
         "naming_settled": apply and naming_check(bundle) in NAMING_SETTLED,
@@ -2194,7 +2240,158 @@ def fill_context(bundle: Mapping, decision_of: Mapping | None = None) -> dict:
         "writable": _writable_paths(),
         "domain_stated": {c.get("value") for c in bundle.get("candidates") or ()
                           if c.get("target_field_path") == DOMAIN_PATH and c.get("value") is not None},
+        # 1.19.0 (DEC-97): the readings a reading fill may rest on, and every reading of a field for a run
+        **(_reading_context(bundle, source_of) if apply else {"checked": {}, "ai_field": {}, "run_sources": {},
+                                                             "target_of": {}}),
+        "source_of": source_of,
+        # D3 / D5: each run's own sample labels, and whether the beamtime has exactly one sample
+        "sample_labels": _sample_labels_by_run(bundle) if apply else {},
+        "one_sample": apply and _one_sample(bundle),
     }
+    # D6: a beamtime finding one of whose targets dissents fills none of them
+    ctx["dissented_findings"] = _dissented_findings(bundle, ctx, decision_of) if apply and ctx["checked"] else set()
+    return ctx
+
+
+def reading_quote_problem(i: Mapping, source_of: Mapping) -> str | None:
+    """1.19.0 (design item 6): why the STORED quote check of the AI reading ``i`` does not let a fill rest on it, else
+    ``None``. A reading fills only when its ``quote_check`` block says the check PASSED, by :data:`QUOTE_CHECKER_ID`, in
+    a named reading pass, over the very quote the reading keeps (``quote_sha256``), and every file it names is one of
+    the bundle's own sources at the same path with the same ``content_sha256``: a file the import did not read has no
+    hash tying it to the bundle, and a block whose hash is not the source's is stale or forged (the validator refuses
+    the latter, :func:`quote_check_errors`). A reading WITHOUT the block (an older bundle, ``annotate --target``, a check
+    that did not run) never fills."""
+    qc = i.get("quote_check")
+    if not isinstance(qc, Mapping):
+        return "no stored quote check (an older bundle, `annotate --target`, or a load that did not check the quotes)"
+    if qc.get("result") != "pass":
+        return "its quote check did not pass"
+    if qc.get("checker") != QUOTE_CHECKER_ID:
+        return f"checked by {qc.get('checker')!r}, not {QUOTE_CHECKER_ID}"
+    if not isinstance(qc.get("reading_pass_id"), str) or not qc["reading_pass_id"]:
+        return "its quote check names no reading pass"
+    quote = i.get("quote")
+    if not isinstance(quote, str) or not quote.strip() or (
+            hashlib.sha256(quote.encode("utf-8")).hexdigest() != qc.get("quote_sha256")):
+        return "the quote it keeps is not the quote that was checked"
+    files = [f for f in qc.get("files") or () if isinstance(f, Mapping)]
+    if not files:
+        return "its quote check names no file"
+    for f in files:
+        src = source_of.get(f.get("source_id")) if f.get("source_id") is not None else None
+        if src is None:
+            return "its quote is in a file the import did not read: no hash ties it to this bundle"
+        if src.get("relative_path") != f.get("path") or not src.get("content_sha256") or (
+                src.get("content_sha256") != f.get("content_sha256")):
+            return "its quote check names bytes that are not this bundle's source"
+    named = {f.get("source_id") for f in files}
+    if any(r.get("source_id") not in named for r in i.get("source_refs") or () if isinstance(r, Mapping)):
+        return "it cites a source its quote check did not read"
+    if qc.get("reading_sha256") != reading_sha256(i):
+        return "the reading is not the one that was checked (reading_sha256)"
+    if qc.get("reading_pass_id") != reading_pass_id_of((i.get("model") or {}).get("model_id"), qc.get("findings_sha256")):
+        return "its reading-pass id is not the one its model and findings give"
+    return None
+
+
+#: D4: what ``quote_check.reading_sha256`` covers: everything a reading SAYS (its target, value, strength, scope and
+#: fields, its citation, its quote) and where its quote was checked (each file's path, source id, bytes and lines).
+READING_SHA_FIELDS = ("target", "proposed_value", "strength", "scope", "field_path", "finding_field_path", "run_ids",
+                      "source_refs", "excerpt_locator", "source_path", "quote")
+
+
+def reading_sha256(i: Mapping) -> str:
+    """D4 (review I1): the sha256 of a reading as it was checked (:data:`READING_SHA_FIELDS`, and the checked files'
+    ``path``, ``source_id``, ``content_sha256`` and ``lines``), in canonical JSON. Written by ``annotate --from-readings
+    --apply``, recomputed by the validator: a hand edit of the value, the strength or the scope, or a block copied onto
+    another target, no longer matches. It catches an edit or a copy, NOT someone who deliberately recomputes the hashes:
+    a bundle is a local file, and nothing in it is signed."""
+    qc = i.get("quote_check") if isinstance(i.get("quote_check"), Mapping) else {}
+    payload = {k: i.get(k) for k in READING_SHA_FIELDS}
+    payload["files"] = [{k: f.get(k) for k in ("path", "source_id", "content_sha256", "lines")}
+                        for f in qc.get("files") or () if isinstance(f, Mapping)]
+    canonical = json.dumps(payload, sort_keys=True, separators=(",", ":"), ensure_ascii=False, default=str)
+    return hashlib.sha256(canonical.encode("utf-8")).hexdigest()
+
+
+def reading_pass_id_of(model_id: Any, findings_sha256: Any) -> str:
+    """THE READING PASS's id: ``rp-`` and the first 32 hex digits of the sha256 of the model id, a newline and the
+    findings' canonical sha256 (``mutations.findings_sha256``). Deterministic, so the validator recomputes it."""
+    digest = hashlib.sha256(f"{model_id}\n{findings_sha256}".encode("utf-8")).hexdigest()
+    return f"rp-{digest[:32]}"
+
+
+def quote_check_errors(i: Mapping, source_of: Mapping) -> list[str]:
+    """1.19.0: the CONTRACT errors of an AI reading's stored ``quote_check`` block (the validator's; the schema checks
+    its shape): the quote it keeps is not the one checked, or a file it names by a bundle source id is not that source
+    (another path, or another ``content_sha256``: stale or forged), or a file at a source's path is named with no source
+    id. A failed or unchecked reading is not an error (it never fills); a file the import did not read is not one either
+    (it cannot fill: :func:`reading_quote_problem`)."""
+    qc = i.get("quote_check")
+    if not isinstance(qc, Mapping):
+        return []
+    iid = i.get("interpretation_id")
+    out = []
+    quote = i.get("quote")
+    if not isinstance(quote, str) or hashlib.sha256(quote.encode("utf-8")).hexdigest() != qc.get("quote_sha256"):
+        out.append(f"interpretation: {iid} quote_check.quote_sha256 is not the sha256 of the quote it keeps")
+    by_path = {src.get("relative_path"): src for src in source_of.values()}
+    for f in qc.get("files") or ():
+        sid = f.get("source_id")
+        if sid is None:
+            if f.get("path") in by_path:
+                out.append(f"interpretation: {iid} quote_check names {f.get('path')!r}, a source of this bundle, without "
+                           "its source id")
+            continue
+        src = source_of.get(sid)
+        if src is None:
+            out.append(f"reference: interpretation {iid} quote_check names unknown source {sid}")
+        elif src.get("relative_path") != f.get("path"):
+            out.append(f"interpretation: {iid} quote_check names {sid} at {f.get('path')!r}, but that source is "
+                       f"{src.get('relative_path')!r}")
+        elif src.get("content_sha256") != f.get("content_sha256"):
+            out.append(f"interpretation: {iid} quote_check content_sha256 for {sid} is not the bundle's own "
+                       "sources[].content_sha256 (a stale or edited check)")
+    if qc.get("reading_sha256") != reading_sha256(i):
+        out.append(f"interpretation: {iid} quote_check.reading_sha256 is not the sha256 of the reading it keeps (its "
+                   "target, value, strength, scope, citation or quote was edited, or the block was copied from another "
+                   "reading)")
+    if qc.get("reading_pass_id") != reading_pass_id_of((i.get("model") or {}).get("model_id"), qc.get("findings_sha256")):
+        out.append(f"interpretation: {iid} quote_check.reading_pass_id is not rp- + sha256(model id, newline, "
+                   "findings_sha256)")
+    return out
+
+
+def _reading_context(bundle: Mapping, source_of: Mapping) -> dict:
+    """1.19.0: ``checked`` — ``(kind, id) -> [reading]`` for every AI reading of a candidate or missing value whose stored
+    quote check holds (:func:`reading_quote_problem`) and whose strength is ``stated``; ``ai_field`` —
+    ``(run_id, path) -> [(target, value)]`` for EVERY AI reading of a candidate or missing value (checked or not: an
+    unchecked reading can still disagree); ``run_sources`` — ``run_id -> {source ids}`` of each run's own files (its
+    acquisition and scans), for :func:`reading_scope_problem`'s naming gate."""
+    where = {("candidate", str(c.get("candidate_id"))): (c.get("run_id"), c.get("target_field_path"))
+             for c in bundle.get("candidates") or ()}
+    where.update({("missing_value", str(m.get("value_id"))): (m.get("run_id"), m.get("target_field_path"))
+                  for m in bundle.get("missing_values") or ()})
+    target_of = {("candidate", str(c.get("candidate_id"))): c for c in bundle.get("candidates") or ()}
+    target_of.update({("missing_value", str(m.get("value_id"))): m for m in bundle.get("missing_values") or ()})
+    checked: dict[tuple[str, str], list] = {}
+    ai_field: dict[tuple, list] = {}
+    for i in bundle.get("ai_interpretations") or ():
+        t = i.get("target") if isinstance(i, Mapping) else None
+        if not isinstance(t, Mapping):
+            continue
+        key = (str(t.get("kind")), str(t.get("id")))
+        if key not in where:
+            continue
+        rid, path = where[key]
+        if path:
+            ai_field.setdefault((rid, path), []).append((key, i.get("proposed_value")))
+        if i.get("strength") == "stated" and reading_quote_problem(i, source_of) is None:
+            checked.setdefault(key, []).append(i)  # DEC-97: an INFERRED reading never fills
+    run_sources = {r.get("run_id"): {x for x in [r.get("acquisition_source_id"),
+                                                 *(sc.get("source_id") for sc in r.get("scans") or ())] if x}
+                   for r in bundle.get("runs") or ()}
+    return {"checked": checked, "ai_field": ai_field, "run_sources": run_sources, "target_of": target_of}
 
 
 def _readings_of(bundle: Mapping, decision_of: Mapping) -> dict[tuple[str | None, str], list[tuple[str, Any]]]:
@@ -2217,13 +2414,18 @@ def _readings_of(bundle: Mapping, decision_of: Mapping) -> dict[tuple[str | None
 
 
 def _other_reading_dissents(c: Mapping, ctx: Mapping) -> bool:
-    path, rid, value = c.get("target_field_path"), c.get("run_id"), c.get("value")
+    return _field_dissents(c.get("run_id"), c.get("target_field_path"), c.get("candidate_id"), c.get("value"), ctx)
+
+
+def _field_dissents(rid: str | None, path: str | None, own_id: str | None, value: Any, ctx: Mapping) -> bool:
+    """Whether another undecided-or-confirmed reading (a candidate no scientist rejected) of ``path`` for run ``rid`` —
+    or for the beamtime — other than ``own_id`` is open (no value) or states another value than ``value``: ONE dissent
+    means no fill. A BEAMTIME value is refused only by another beamtime reading: a run's own open or differing reading
+    blocks it for that run alone (:func:`fill_run_blocks`), so the groups without such a run still take it."""
     readings = ctx["readings_of"]
-    # a BEAMTIME value is refused only by another beamtime reading: a run's own open or differing reading blocks it for
-    # that run alone (fill_run_blocks), so the groups without such a run still take it
     pools = ([readings.get((None, path), [])] if rid is None
              else [readings.get((rid, path), []), readings.get((None, path), [])])
-    return any(cid != c.get("candidate_id") and (v is None or not _same_fill_value(path, v, value))
+    return any(cid != own_id and (v is None or not _same_fill_value(path, v, value))
                for pool in pools for cid, v in pool)
 
 
@@ -2238,6 +2440,8 @@ def fill_run_blocks(bundle: Mapping, decision_of: Mapping | None = None) -> dict
         decision_of = _decisions_by_target(bundle.get("scientist_decisions") or ())
     conflict_ids_of = conflict_ids_by_candidate(bundle)
     out: dict[str, dict[str, list[tuple]]] = {}
+    dk: dict[tuple[str, str], str | None] = {}
+    where: dict[tuple[str, str], tuple] = {}
     for kind, section, key in (("candidate", "candidates", "candidate_id"), ("missing_value", "missing_values", "value_id")):
         for o in bundle.get(section) or ():
             path, rid = o.get("target_field_path"), o.get("run_id")
@@ -2247,6 +2451,18 @@ def fill_run_blocks(bundle: Mapping, decision_of: Mapping | None = None) -> dict
                  else decision_of.get((kind, o[key])))
             out.setdefault(FIELD_REMAP.get(path, path), {}).setdefault(rid, []).append(
                 (kind, o[key], o.get("value") if kind == "candidate" else None, (d or {}).get("decision")))
+            dk[(kind, str(o[key]))] = (d or {}).get("decision")
+            where[(kind, str(o[key]))] = (FIELD_REMAP.get(path, path), rid, o[key])
+    # 1.19.0 (FILL_RULE_SET 2): A RUN'S OWN AI READING is one of its readings too: a reading of the run's own target that
+    # states another value stops a beamtime-wide fill for that run (``("reading", target id, value, its target's
+    # decision)``), so a group is never composed with a beamtime value its own run's reading contradicts
+    for i in bundle.get("ai_interpretations") or ():
+        t = i.get("target") if isinstance(i, Mapping) else None
+        at = where.get((str((t or {}).get("kind")), str((t or {}).get("id")))) if isinstance(t, Mapping) else None
+        if at is None or i.get("proposed_value") is None:
+            continue
+        p, rid, tid = at
+        out[p][rid].append(("reading", tid, i.get("proposed_value"), dk.get((t["kind"], str(t["id"])))))
     return out
 
 
@@ -2257,9 +2473,11 @@ def runs_a_fill_cannot_reach(rows_by_run: Mapping[str, Sequence[tuple]], path: s
     (no value) or differs. Such a run takes no fill; its group is asked."""
     out: dict[str, list[str]] = {}
     for rid, rows in rows_by_run.items():
-        why = [tid for kind, tid, v, dk in rows
-               if dk != "reject" and (dk is not None
-                                      or (kind == "candidate" and (v is None or not _same_fill_value(path, v, value))))]
+        why = list(dict.fromkeys(
+            tid for kind, tid, v, dk in rows
+            if dk != "reject" and (dk is not None
+                                   or (kind in ("candidate", "reading")
+                                       and (v is None or not _same_fill_value(path, v, value))))))
         if why:
             out[rid] = why
     return out
@@ -2364,6 +2582,8 @@ def _fill_exclusions_pass(bundle: Mapping, c: Mapping, ctx: Mapping) -> bool:
         #               before the naming is settled (naming_check)
     if _ai_disagrees(ctx, ("candidate", str(c.get("candidate_id"))), path, value):
         return False
+    if fill_value_problem(path, value, c.get("run_id"), ctx) is not None:
+        return False  # 1.19.0: a sample's own label as its material; an electrolyte name carrying a concentration
     return value_problem(path, value) is None  # a value its field refuses is asked, never filled
 
 
@@ -2405,20 +2625,316 @@ def stored_convention_applies(bundle: Mapping, c: Mapping, ctx: Mapping) -> str 
     return rid if _fill_exclusions_pass(bundle, c, ctx) else None
 
 
+# --- the reading rule (1.19.0, slice 2 of DEC-96, DEC-97) -----------------------------------------------------------
+
+
+def reading_run_level(path: str, ctx: Mapping) -> bool:
+    """DEC-69 FOR READINGS (design item 3, review I2/I3): whether a reading scoped to the WHOLE beamtime may never fill
+    ``path``, nor a beamtime-level target of it: ``records.RUN_ONLY_PATHS`` (environment, reaction, cell type) and the
+    composer's name for each (``records.FIELD_REMAP``), every ``context.reaction.*`` field, the run's measurement
+    conditions (the potential and current set-points, the potential scale, the control mode), and every ``sample.*``
+    field — a beamtime statement about ONE sample must not fill every sample — unless the beamtime has exactly one
+    sample (``ctx["one_sample"]``: every measurement run has the same sample id and the same file-name sample token),
+    when a statement about the beamtime's sample is a statement about every run's. Only a reading scoped to the runs it
+    names fills these, on those runs."""
+    from .records import FIELD_REMAP, RUN_ONLY_PATHS  # local: records imports this module
+
+    if path in RUN_ONLY_PATHS or path in {FIELD_REMAP.get(p, p) for p in RUN_ONLY_PATHS}:
+        return True
+    if path.startswith("context.reaction.") or path in (
+            "context.electrochemistry.potential_setpoint_V", CURRENT_SETPOINT_PATH,
+            "context.electrochemistry.potential_scale", CONTROL_MODE_PATH):
+        return True
+    return path.startswith("sample.") and not ctx.get("one_sample")
+
+
+def reading_never_fills(path: str | None) -> bool:
+    """The fields no reading fills (the review's exclusions, adopted for slice 1, kept for readings): the potential scale
+    and the control mode (:data:`PARSER_EXACT_NEVER_FILLS`), and any time (a ``*_utc`` field: a time a file states is
+    on its clock, whose zone is the scientist's statement, never inferred)."""
+    return not path or path in PARSER_EXACT_NEVER_FILLS or path.endswith("_utc")
+
+
+def reading_scope_problem(i: Mapping, obj: Mapping, path: str, ctx: Mapping) -> str | None:
+    """Why the checked reading ``i`` may not fill ``obj`` (its target) for its scope, else ``None``. DEC-69 (design item
+    3): a reading scoped to the whole beamtime (``scope: experiment``) never fills a run-level field
+    (:func:`reading_run_level`), and no beamtime-level target of one is ever filled by a reading; and one target of
+    such a finding dissenting means it fills none (:func:`_dissented_findings`, review I4). A reading scoped to the runs
+    it names fills only those runs' own targets (its targets are theirs by construction,
+    ``suggestions.readings_to_interpretations``). THE NAMING GATE: a runs-scoped reading whose quote is in a file that
+    is NOT one of the run's own files (a logbook, a readme) was bound to the run by the READER, through the run's name
+    (the reader matched "sample 3" to the names it took the sample number from): as with a logbook section bound only
+    by the name's sample number (:func:`_bound_by_name_number`), it fills only once the naming is settled
+    (:func:`naming_check`). A quote in the run's own acquisition file needs no name to reach it. A reading with no scope
+    recorded (written before 1.19.0) never fills, nor one offered unsplit on several fields."""
+    scope = i.get("scope")
+    if scope not in ("experiment", "runs"):
+        return "no scope recorded"
+    if i.get("finding_field_path"):
+        return "offered unsplit on several fields (the scientist splits it)"
+    run_level = reading_run_level(path, ctx)
+    rid = obj.get("run_id")
+    if run_level and (scope == "experiment" or rid is None):
+        return "DEC-69: a beamtime reading never fills a run-level or sample field"
+    if scope == "experiment" and _finding_key(i) in ctx.get("dissented_findings", ()):
+        return "another target of the same beamtime finding dissents: it fills none"
+    if scope == "runs":
+        if rid is None:
+            return "a reading of named runs fills only those runs"
+        files = {f.get("source_id") for f in (i.get("quote_check") or {}).get("files") or ()}
+        if not ctx["naming_settled"] and not files <= ctx["run_sources"].get(rid, set()):
+            return "bound to its run by the run's name, before the naming is settled"
+    return None
+
+
+def _finding_key(i: Mapping) -> tuple:
+    """ONE finding of one reading pass (every target it reached shares it)."""
+    return ((i.get("quote_check") or {}).get("reading_pass_id"), i.get("finding_id"))
+
+
+def sample_labels(run_id: str | None, ctx: Mapping) -> set[str]:
+    """D3: the run's own sample LABELS, as :func:`reading_tie.label_key` keys: its file-name sample token (what the
+    file-name reader read for the sample's name or id), its ``sample_id`` and ``group_token``, and the code a logbook
+    sample heading (``Sample 3 ZZ9 in base (SYNTHETIC)``) gives it. A beamtime value (``run_id`` ``None``): every run's."""
+    labels = ctx.get("sample_labels") or {}
+    if run_id is None:
+        return set().union(*labels.values()) if labels else set()
+    return set(labels.get(run_id, ()))
+
+
+def _sample_labels_by_run(bundle: Mapping) -> dict[str, set[str]]:
+    from .reading_tie import heading_codes, label_key
+
+    out: dict[str, set[str]] = {}
+    for r in bundle.get("runs") or ():
+        out[r.get("run_id")] = {label_key(x) for x in (r.get("sample_id"), r.get("group_token")) if x} - {""}
+    for c in bundle.get("candidates") or ():
+        rid = c.get("run_id")
+        if rid not in out:
+            continue
+        sample_field = (c.get("statement_key") in ("sample_name", "sample_or_electrode_number", "sample_id")
+                        or (c.get("target_field_path") or "") in ("sample.material.name", "sample.sample_id"))
+        for e in c.get("evidence") or ():
+            if e.get("method") == "ai_interpretation":
+                continue
+            if sample_field and _read_from_file_name(e) and isinstance(e.get("literal_value"), str):
+                out[rid].add(label_key(e["literal_value"]))
+            for n in e.get("normalization") or ():
+                to = n.get("to") if isinstance(n, Mapping) else None
+                if isinstance(to, Mapping) and isinstance(to.get("section"), str):
+                    out[rid] |= heading_codes(to["section"])
+    return {rid: labels - {""} for rid, labels in out.items()}
+
+
+def _one_sample(bundle: Mapping) -> bool:
+    """D5: the beamtime has exactly ONE sample: every measurement run has the same ``sample_id`` and the same file-name
+    sample token (and at least one run says which), and (re-review hardening c: ``sample_id`` comes from the file name)
+    the logbook's sample headings, as the readers read them or a reading quotes them, give at most one sample code."""
+    from .reading_tie import heading_codes
+
+    codes: set[str] = set()
+    for c in bundle.get("candidates") or ():
+        for e in c.get("evidence") or ():
+            for n in e.get("normalization") or ():
+                to = n.get("to") if isinstance(n, Mapping) else None
+                if isinstance(to, Mapping) and isinstance(to.get("section"), str):
+                    codes |= heading_codes(to["section"])
+    for i in bundle.get("ai_interpretations") or ():
+        if isinstance(i, Mapping) and isinstance(i.get("quote"), str):
+            codes |= heading_codes(i["quote"])
+    if len(codes) > 1:
+        return False
+    token_of: dict[str, set] = {}
+    for c in bundle.get("candidates") or ():
+        if c.get("statement_key") == "sample_name" and c.get("run_id"):
+            token_of.setdefault(c["run_id"], set()).update(
+                e.get("literal_value") for e in c.get("evidence") or () if _read_from_file_name(e))
+    seen = {(r.get("sample_id"), tuple(sorted(map(str, token_of.get(r.get("run_id"), ())))))
+            for r in bundle.get("runs") or () if r.get("run_candidate")}
+    return len(seen) == 1 and next(iter(seen)) != (None, ())
+
+
+def fill_value_problem(path: str | None, value: Any, run_id: str | None, ctx: Mapping, quotes: Sequence[str] = ()) -> str | None:
+    """Why ``value`` is never FILLED at ``path`` for ``run_id`` by ANY rule (a file rule or a reading), else ``None``:
+    a sample's own label as its material (D3: a ``sample.material.*`` value equal, without case or punctuation, to the
+    run's file-name sample token, sample id or logbook heading code, or to a heading code in the reading's own quotes;
+    and, re-review I2, one ANY of whose words is such a label: ``ZZ1 film`` is the sample's label and one word, never
+    its material — a sample named after its material is then asked, which is acceptable — or whose run-together text
+    holds one of 3 or more characters with a letter: ``ZZ 1 film``), and an electrolyte name that
+    carries a concentration or a pH (M2)."""
+    from .reading_tie import electrolyte_name_problem, heading_codes, label_key, words
+
+    if not path:
+        return None
+    if path.startswith("sample.material.") and isinstance(value, str):
+        labels = sample_labels(run_id, ctx)
+        for q in quotes:
+            labels |= heading_codes(q)
+        joined = label_key(value)
+        if joined and (joined in labels or any(w in labels for w in words(value)) or any(
+                len(lab) >= 3 and any(ch.isalpha() for ch in lab) and lab in joined for lab in labels)):
+            # ...and one whose run-together text holds a label of 3 or more characters with a letter ("ZZ 1 film")
+            return "a sample's own label is not its material"
+    if path == "context.electrochemistry.electrolyte.name":
+        return electrolyte_name_problem(value)
+    return None
+
+
+def reading_ties(i: Mapping, path: str) -> bool:
+    """D2: the reading's quote, AS STORED (possibly truncated), states its value (:func:`reading_tie.tie_problem`)."""
+    from .reading_tie import tie_problem
+
+    return tie_problem(path, i.get("proposed_value"), i.get("quote"), allowed_values(path)) is None
+
+
+def _reading_candidate_ok(bundle: Mapping, c: Mapping, ctx: Mapping, value: Any) -> bool:
+    """The shared exclusions (:func:`_fill_exclusions_pass`) as they apply to a reading of a CANDIDATE: never a value a
+    convention of another beamtime resolved, a disagreement or a held value, a local clock time, a candidate with a
+    contradicting witness or a cell named in passing, one a conflict names, one whose file value is a position-read
+    name number before the naming is settled, and never against the candidate's own file value."""
+    sb = c.get("state_basis") or {}
+    if sb.get("review_status") == "resolved" or sb.get("resolved_by_rule") is not None or c.get("standing_resolution"):
+        return False
+    if sb.get("unresolved_reason") is not None or sb.get("not_proposable_reason") in HELD_REASONS:
+        return False
+    if c.get("extracted_state") not in _FILLABLE or c.get("kind") != "field":
+        return False
+    if is_local_clock_start(c) or c.get("local_clock") or any(
+            isinstance(n, Mapping) and n.get("step") in (LOCAL_CLOCK_READ_STEP, LOCAL_CLOCK_CONVERT_STEP)
+            for e in c.get("evidence") or () for n in e.get("normalization") or ()):
+        return False
+    witnesses = [e for e in c.get("evidence") or () if e.get("method") != "ai_interpretation"]
+    if any(e.get("relation") == "contradicts" for e in witnesses) or any(
+            passing_witness_term(c, e) is not None for e in witnesses):
+        return False
+    if ctx["conflict_ids_of"].get(c.get("candidate_id")):
+        return False
+    if not ctx["naming_settled"] and any(_position_dependent(e) or _bound_by_name_number(e)
+                                         for e in witnesses if e.get("relation") == "supports"):
+        return False
+    return c.get("value") is None or _same_fill_value(c.get("target_field_path"), c.get("value"), value)
+
+
+def _target_dissents(bundle: Mapping, key: tuple[str, str], obj: Mapping, value: Any, ctx: Mapping,
+                     decision: Mapping | None) -> bool:
+    """D6: whether ONE target disagrees with ``value``: a scientist's decision on it that rejects it or gives another
+    value (a defer is no statement), an AI reading of it, its own file value, another reading of the field for its run
+    (or the beamtime), an AI reading of another target of the field for its run (or the beamtime), or the sources
+    disagreeing about the field."""
+    path, rid = obj.get("target_field_path"), obj.get("run_id")
+    if decision is not None and decision.get("decision") not in NEUTRAL_DECISIONS:
+        if decision.get("decision") == "reject":
+            return True
+        final = final_value(obj.get("value") if key[0] == "candidate" else None, decision, obj.get("readings"))
+        if final is None or not _same_fill_value(path, final, value):
+            return True
+    if _ai_disagrees(ctx, key, path, value):
+        return True
+    if key[0] == "candidate" and obj.get("value") is not None and not _same_fill_value(path, obj.get("value"), value):
+        return True
+    if _field_dissents(rid, path, obj.get("candidate_id") if key[0] == "candidate" else None, value, ctx):
+        return True
+    pools = [(rid, path)] + ([(None, path)] if rid is not None else [])
+    if any(t != key and not _same_fill_value(path, v, value) for p in pools for t, v in ctx["ai_field"].get(p, ())):
+        return True
+    disputed = ctx["disputed"]
+    return (rid, path) in disputed or (None, path) in disputed or (rid is None and any(p == path for _, p in disputed))
+
+
+def _dissented_findings(bundle: Mapping, ctx: Mapping, decision_of: Mapping) -> set[tuple]:
+    """D6 (review I4): the beamtime-scoped findings (``(reading pass, finding id)``) one of whose targets dissents
+    (:func:`_target_dissents`): such a finding fills NONE of its targets. Readings only; slice 1's per-run scoping of a
+    file value's beamtime fill is unchanged."""
+    out: set[tuple] = set()
+    for key, readings in ctx["checked"].items():
+        obj = ctx["target_of"].get(key)
+        if obj is None:
+            continue
+        decision = (candidate_decision(bundle, obj, decision_of, ctx["conflict_ids_of"]) if key[0] == "candidate"
+                    else decision_of.get(key))
+        for i in readings:
+            if i.get("scope") != "experiment" or _finding_key(i) in out:
+                continue
+            if _target_dissents(bundle, key, obj, i.get("proposed_value"), ctx, decision):
+                out.add(_finding_key(i))
+    return out
+
+
+def reading_fill_for(bundle: Mapping, kind: str, obj: Mapping, ctx: Mapping) -> tuple[str, Any, list[Mapping]] | None:
+    """:data:`FILL_READING_STATED_RULE` for ONE undecided candidate or missing value: ``(rule id, value, the readings it
+    rests on)``, else ``None``. The readings are the CHECKED ``stated`` ones of this target (:func:`reading_quote_problem`)
+    whose quote itself states the value (:func:`reading_ties`) and whose scope lets them fill it
+    (:func:`reading_scope_problem`); every AI reading of the target, checked or not, must state the same value; never a
+    value no rule fills (:func:`fill_value_problem`); and the same dissent rules as every fill: another reading of the
+    field for the run (or the beamtime), a file value, or an AI reading of another target of the field for the run (or
+    the beamtime), open or differing, means no fill; nor where the sources disagree. An INFERRED reading never fills."""
+    key = (kind, str(obj.get("candidate_id") if kind == "candidate" else obj.get("value_id")))
+    readings = ctx["checked"].get(key) or []
+    path = obj.get("target_field_path")
+    if not readings or not path or "[]" in path or path not in ctx["writable"] or reading_never_fills(path):
+        return None
+    value = readings[0].get("proposed_value")
+    if value is None or value_problem(path, value) is not None or _ai_disagrees(ctx, key, path, value):
+        return None
+    usable = [i for i in readings if reading_ties(i, path) and reading_scope_problem(i, obj, path, ctx) is None]
+    if not usable or fill_value_problem(path, value, obj.get("run_id"), ctx, [str(i.get("quote")) for i in readings]):
+        return None
+    rid = obj.get("run_id")
+    own = obj.get("candidate_id") if kind == "candidate" else None
+    if kind == "candidate":
+        if not _reading_candidate_ok(bundle, obj, ctx, value):
+            return None
+    elif obj.get("extracted_state", STATE_MISSING) != STATE_MISSING:
+        return None
+    if _field_dissents(rid, path, own, value, ctx):
+        return None
+    if kind == "missing_value" and any(ctx["readings_of"].get((rid, path), ())):
+        return None  # a candidate of the same field for this run carries the value (and its fill), never two fills
+    pools = [(rid, path)] + ([(None, path)] if rid is not None else [])
+    if any(t != key and not _same_fill_value(path, v, value) for p in pools for t, v in ctx["ai_field"].get(p, ())):
+        return None  # an AI reading of another target of this field for this run (or the beamtime) disagrees
+    disputed = ctx["disputed"]
+    if (rid, path) in disputed or (None, path) in disputed or (rid is None and any(p == path for _, p in disputed)):
+        return None
+    return FILL_READING_STATED_RULE_ID, value, usable
+
+
+def _agreeing_readings(kind: str, obj: Mapping, value: Any, ctx: Mapping) -> list[Mapping]:
+    """The CHECKED stated readings of ``obj`` whose quote states ``value``: listed on a file rule's fill as witnesses
+    (design item 6: a file fill and a reading fill that agree are one fill, under the file rule)."""
+    key = (kind, str(obj.get("candidate_id") if kind == "candidate" else obj.get("value_id")))
+    path = obj.get("target_field_path")
+    return [i for i in ctx["checked"].get(key) or ()
+            if _same_fill_value(path, i.get("proposed_value"), value) and reading_ties(i, str(path))]
+
+
+def _with_readings(rule_id: str, value: Any, readings: Sequence[Mapping]) -> tuple:
+    """``(rule id, value, reading ids, reading-pass ids)``: what :func:`_set_fill` stores (sorted, at most
+    :data:`MAX_FILL_READINGS` of each)."""
+    ids = sorted({str(i.get("interpretation_id")) for i in readings})[:MAX_FILL_READINGS]
+    passes = sorted({str((i.get("quote_check") or {}).get("reading_pass_id")) for i in readings})[:MAX_FILL_READINGS]
+    return rule_id, value, ids, passes
+
+
 def fill_rule_for(bundle: Mapping, kind: str, obj: Mapping, decision: Mapping | None,
-                  ctx: Mapping) -> tuple[str, Any] | None:
-    """``(rule id, value)`` of the registered fill rule that supports ``obj`` (a candidate or a missing value), or
-    ``None``. Never for a value a scientist decided (any decision, a defer included: a decision always wins), and
-    never for a bundle this build does not fill (:func:`fills_apply`)."""
+                  ctx: Mapping) -> tuple | None:
+    """``(rule id, value, reading ids, reading-pass ids)`` of the registered fill rule that supports ``obj`` (a
+    candidate or a missing value), or ``None``. Never for a value a scientist decided (any decision, a defer included:
+    a decision always wins), and never for a bundle this build does not fill (:func:`fills_apply`). A FILE rule comes
+    first; a checked reading that agrees with it is listed as its witness (one fill, under the file rule), and one that
+    disagrees blocks it (``_ai_disagrees``); a reading rule (1.19.0) fills only where no file rule does."""
     if not ctx["apply"] or decision is not None:
         return None
     path = obj.get("target_field_path")
     if kind == "candidate":
         if parser_exact_applies(bundle, obj, ctx):
-            return FILL_PARSER_EXACT_RULE_ID, obj.get("value")
+            return _with_readings(FILL_PARSER_EXACT_RULE_ID, obj.get("value"),
+                                  _agreeing_readings(kind, obj, obj.get("value"), ctx))
         if stored_convention_applies(bundle, obj, ctx):
-            return FILL_STORED_CONVENTION_RULE_ID, obj.get("value")
-        return None
+            return _with_readings(FILL_STORED_CONVENTION_RULE_ID, obj.get("value"),
+                                  _agreeing_readings(kind, obj, obj.get("value"), ctx))
+        got = reading_fill_for(bundle, kind, obj, ctx)
+        return _with_readings(*got) if got else None
     if kind == "missing_value" and path == DOMAIN_PATH and obj.get("extracted_state", STATE_MISSING) == STATE_MISSING:
         if not ctx["acquisition_only"] or ctx["domain_stated"] - {DOMAIN_FILL_VALUE}:
             return None  # a file states another domain: asked, never overridden
@@ -2426,7 +2942,11 @@ def fill_rule_for(bundle: Mapping, kind: str, obj: Mapping, decision: Mapping | 
             return None
         if _ai_disagrees(ctx, ("missing_value", str(obj.get("value_id"))), path, DOMAIN_FILL_VALUE):
             return None
-        return FILL_DOMAIN_RULE_ID, DOMAIN_FILL_VALUE
+        return _with_readings(FILL_DOMAIN_RULE_ID, DOMAIN_FILL_VALUE,
+                              _agreeing_readings(kind, obj, DOMAIN_FILL_VALUE, ctx))
+    if kind == "missing_value":
+        got = reading_fill_for(bundle, kind, obj, ctx)
+        return _with_readings(*got) if got else None
     return None
 
 
@@ -3553,12 +4073,17 @@ def _xdc_start_candidate(g, run_scans: Sequence[Mapping], run_id: str, bundle_ci
     return cand, anomaly
 
 
-def _set_fill(obj: dict, fill: tuple[str, Any] | None) -> None:
-    """``obj["fill"] = {rule_id, value}`` for a filled value, else no ``fill`` key (1.18.0)."""
+def _set_fill(obj: dict, fill: tuple | None) -> None:
+    """``obj["fill"] = {rule_id, value}`` for a filled value, else no ``fill`` key (1.18.0). 1.19.0: with
+    ``readings`` and ``reading_pass_ids`` when checked AI readings support it (a reading rule's own, or readings that
+    agree with a file rule's value), each sorted."""
     if fill is None:
         obj.pop("fill", None)
-    else:
-        obj["fill"] = {"rule_id": fill[0], "value": fill[1]}
+        return
+    obj["fill"] = {"rule_id": fill[0], "value": fill[1]}
+    if len(fill) > 2 and fill[2]:
+        obj["fill"]["readings"] = list(fill[2])
+        obj["fill"]["reading_pass_ids"] = list(fill[3])
 
 
 def apply_derivations(bundle: dict) -> dict:
@@ -7377,6 +7902,12 @@ def validate_bundle(bundle: Any, *, max_errors: int = 50, encoded: bytes | None 
             errors.append(f"interpretation: {i['interpretation_id']} reads {i['field_path']} but targets a {i['target']['kind']}, not a record group")
         if not (is_absorber_element if half == "element" else is_absorber_edge)(i.get("proposed_value")):
             errors.append(f"interpretation: {i['interpretation_id']} {i['field_path']} {i.get('proposed_value')!r} is not an absorber {half}")
+    # 1.19.0 (DEC-97): A STORED QUOTE CHECK IS TIED TO THIS BUNDLE'S OWN SOURCES. Its shape is the schema's; here, the
+    # quote it keeps is the one checked, and every file it names by a source id is that source at its path with its
+    # content_sha256 — so a stale or edited check is refused, never filled from (bundle.reading_quote_problem)
+    qc_sources = {src["source_id"]: src for src in bundle["sources"]}
+    for i in bundle["ai_interpretations"]:
+        errors.extend(quote_check_errors(i, qc_sources))
     groups_by_id = {g["group_id"]: g for g in [*(bundle.get("record_groups") or ()), *(bundle.get("superseded_record_groups") or ())]}
     key_of_run = {r["run_id"]: r["run_key"] for r in bundle["runs"]}
     for i in bundle["ai_interpretations"]:

@@ -259,7 +259,8 @@ def test_excerpt_shows_raw_text_and_refuses_a_changed_source(bdir, tmp_path):
         M.excerpt(b, c["candidate_id"], source=None)
 
 
-# --- AI interpretation never above needs_review ------------------------------------------------------
+# --- an UNCHECKED AI interpretation (annotate --target) never above needs_review --------------------------
+# (1.19.0, DEC-97: a reading whose quote check is stored on it can fill; see test_local_import_fill_readings.py)
 
 
 def test_an_ai_annotation_never_sets_a_state_above_needs_review(bdir):

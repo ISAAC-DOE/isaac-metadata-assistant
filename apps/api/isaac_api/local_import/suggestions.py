@@ -17,8 +17,10 @@ Three things a scientist is shown so they can answer in one step instead of look
   questions, never a value: a column name or a folder name is not a statement of a facility.
 * :func:`readings_to_interpretations` - a Claude reading pass's findings file
   (``isaac.reading_findings``) turned into AI interpretations on the bundle's targets (record
-  groups, for an absorber finding). Each one cites its file, locator and quote, and can lift a
-  value to ``needs_review`` and never higher (``bundle.derive_value_state``).
+  groups, for an absorber finding). Each one cites its file, locator and quote, and on its own can lift a
+  value to ``needs_review`` and never higher (``bundle.derive_value_state``); since 1.19.0 (DEC-97) a reading whose
+  quote check is stored on it, strength ``stated``, and whose quote itself states the value can fill it under
+  ``bundle.FILL_READING_STATED_RULE_ID``; an inferred reading never fills.
 """
 
 from __future__ import annotations
@@ -711,6 +713,12 @@ def readings_to_interpretations(bundle: Mapping, findings: Mapping, *, model_id:
             "finding_id": fid,
             # A group target does not say which field it reads; a value target does.
             "field_path": path if absorber else None,
+            # 1.19.0: what the finding says it is about (`experiment`: the whole beamtime; `runs`: the runs it names).
+            # A beamtime-scoped reading never fills a run-level field (DEC-69, bundle.reading_scope_problem)
+            "scope": scope,
+            # 1.19.0: the field the finding named, when it was offered unsplit on several fields (the electrolyte as a
+            # whole on its name and its concentration): splitting it is the scientist's step, so it never fills
+            "finding_field_path": path if (not absorber and path in FIELD_EXPANSIONS and members != [path]) else None,
             "model": {"model_id": model_id},
         }
         for t in targets:
@@ -743,7 +751,9 @@ def ai_hints(bundle: Mapping, target_ids: Iterable[str], *, limit: int = 5) -> l
                 "model_id": (i.get("model") or {}).get("model_id"),
                 "targets": 0,
                 "note": ("Suggested by an AI reading of the files. Not file evidence: no parser read this value, and the quote "
-                         "is as the reader gave it. Confirm it, or correct it; it is never used on its own."),
+                         "is as the reader gave it. Confirm it, or correct it: it is asked because no registered reading "
+                         "rule filled it (an inference, an unchecked quote, a quote that does not state the value, a "
+                         "disagreement, or a run-level or sample field read for the whole beamtime)."),
             }
         h["targets"] += 1
     return sorted(by_value.values(), key=lambda h: -h["targets"])[:limit]

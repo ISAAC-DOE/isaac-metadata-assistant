@@ -868,12 +868,55 @@ def quote_root(bundle: Mapping, explicit: str | Path | None) -> Path | None:
     return root
 
 
+def findings_sha256(findings: Mapping) -> str:
+    """1.19.0: the sha256 of a findings file AS PARSED, in canonical JSON (keys sorted, no whitespace, UTF-8): the same
+    findings give the same digest however the file is laid out, and any change to a finding gives another."""
+    canonical = json.dumps(findings, sort_keys=True, separators=(",", ":"), ensure_ascii=False, allow_nan=False)
+    return hashlib.sha256(canonical.encode("utf-8")).hexdigest()
+
+
+def reading_pass_id(findings: Mapping, model_id: str) -> str:
+    """1.19.0: THE READING PASS's id, one per ``annotate --from-readings --apply``: ``rp-`` and the first 32 hex digits
+    of the sha256 of the model id, a newline, and :func:`findings_sha256`. Deterministic, never a clock or a random
+    number, so anyone holding the findings file and the model id can recompute it and tie a reading (and a fill that
+    rests on it) to the pass that made it; applying the same file again records nothing new (each reading is kept
+    once) and would name the same pass."""
+    return B.reading_pass_id_of(model_id, findings_sha256(findings))
+
+
+def stored_quote_check(bundle: Mapping, result: Mapping | None, *, quote: Any, pass_id: str,
+                       findings: Mapping) -> dict | None:
+    """1.19.0: the ``quote_check`` block one reading keeps, from its finding's check result (``reading_check``), or
+    ``None`` when no check ran for it. ``files`` names the file the quote was found in: its path as the folder spells it,
+    its bundle ``source_id`` (``None`` for a file the import did not read), its ``content_sha256`` at the check, and the
+    ``lines`` a plain-text quote occupies; ``quote_sha256`` ties the stored quote to the check."""
+    if not isinstance(result, Mapping) or not result.get("content_sha256"):
+        return None
+    path = str(result.get("canonical_path") or result.get("path") or "")
+    source_id = next((s["source_id"] for s in bundle.get("sources") or () if s.get("relative_path") == path), None)
+    entry = {"path": path[:500], "source_id": source_id, "content_sha256": result["content_sha256"]}
+    if result.get("lines"):
+        entry["lines"] = list(result["lines"])
+    if result.get("at"):
+        entry["at"] = str(result["at"])[:300]
+    return {
+        "result": "pass" if result.get("result") == "pass" else "fail",
+        "checker": B.QUOTE_CHECKER_ID,
+        "reading_pass_id": pass_id,
+        "findings_sha256": findings_sha256(findings),
+        "quote_sha256": hashlib.sha256(str(quote or "")[:300].encode("utf-8")).hexdigest(),
+        "files": [entry],
+    }
+
+
 def check_readings(bundle: Mapping, findings: Mapping, root: Path) -> dict:
     """:func:`reading_check.report` of every finding in ``findings`` against ``root``. Reads only."""
     from . import reading_check as RC
 
     if not isinstance(findings, Mapping) or not isinstance(findings.get("findings"), list):
         raise MutationRefused("The findings file must be a JSON object with a `findings` list.")
+    if (problem := B.non_finite_problem(findings)) is not None:
+        raise MutationRefused(f"The findings file holds a value that is not standard JSON: {problem}. Nothing was checked.")
     results = RC.check_findings(findings["findings"], root, sources=bundle.get("sources") or ())
     return {**RC.report(results, root_label=Path(root).name), "_by_finding": {r["finding"]: r for r in results}}
 
@@ -893,6 +936,10 @@ def annotate_from_readings(bundle_dir: Path, findings: Mapping, *, model_id: str
     from . import scan_notes as SN
     from . import suggestions as S
 
+    if (problem := B.non_finite_problem(findings)) is not None:
+        # review M1: Python's json reads NaN / Infinity; a findings file holding one is refused, never a traceback
+        raise MutationRefused(f"The findings file holds a value that is not standard JSON: {problem}. Nothing was "
+                              "checked or recorded.")
     current_bundle: list = []
 
     def plan(bundle):
@@ -914,15 +961,27 @@ def annotate_from_readings(bundle_dir: Path, findings: Mapping, *, model_id: str
             raise MutationRefused(str(exc)) from exc
         # ``field_path`` is part of the identity: one group can be read as element ``K``
         # (potassium) and edge ``K`` from one line, and those are two readings.
+        # 1.19.0: a reading an EARLIER build recorded without its quote check (no `quote_check` block: it never fills)
+        # is not "already recorded" when this call checks the quotes: the checked reading is recorded beside it (the
+        # log is append-only), so loading the same findings again is how an older bundle's readings become checkable
+        # 1.19.0: the finding's scope and its quote (a corrected quote is a new reading, review M5) are part of what a
+        # reading says (a beamtime statement never fills a run-level
+        # field; the same words scoped to the runs they name do), so it is part of its identity; a reading an earlier
+        # build recorded has none and is taken as either
         seen = {
             (i["target"]["kind"], i["target"]["id"], json.dumps(i.get("proposed_value"), sort_keys=True),
-             i.get("source_path"), i.get("excerpt_locator"), i.get("field_path"), json.dumps(i.get("run_ids")))
+             i.get("source_path"), i.get("excerpt_locator"), i.get("field_path"), json.dumps(i.get("run_ids")),
+             i.get("quote"), i.get("scope"))
             for i in bundle.get("ai_interpretations") or ()
+            if not (quote_check is not None and quote_check.get("_by_finding") is not None and i.get("quote_check") is None)
         }
         fresh, repeated = [], 0
         for t, f in out["planned"]:
             key = (t["kind"], t["id"], json.dumps(f["proposed_value"], sort_keys=True), f["source_path"], f["excerpt_locator"],
-                   f["field_path"], json.dumps(f["run_ids"]))
+                   f["field_path"], json.dumps(f["run_ids"]), f.get("quote"), f.get("scope"))
+            if key[:-1] + (None,) in seen:
+                repeated += 1
+                continue
             if key in seen:
                 repeated += 1
                 continue
@@ -964,16 +1023,28 @@ def annotate_from_readings(bundle_dir: Path, findings: Mapping, *, model_id: str
 
     def change(bundle):
         out, fresh, repeated, quote_check = plan(bundle)
+        by_finding = (quote_check or {}).get("_by_finding") or {}
+        pass_id = reading_pass_id(findings, model_id)
         for t, f in fresh:
             kind, obj = resolve_target(bundle, t["id"])
             if kind not in _INTERPRETABLE:
                 raise MutationRefused(f"An AI interpretation cannot target a {kind}.")
-            _add_interpretation(
+            extra = {k: f.get(k) for k in ("source_path", "quote", "strength", "finding_id", "field_path", "run_ids", "scope",
+                                        "finding_field_path")}
+            # 1.19.0 (design item 6): THE CHECK THIS WRITE MADE, KEPT ON THE READING, so it stays checkable later and a
+            # fill rule can rest on it (bundle.reading_quote_checked). Only a check this call ran is stored:
+            # `check_quotes=False` (this package's synthetic tests) stores none, and such a reading never fills.
+            extra["quote_check"] = stored_quote_check(bundle, by_finding.get(f["finding_id"]), quote=f.get("quote"),
+                                                      pass_id=pass_id, findings=findings)
+            entry = _add_interpretation(
                 bundle, kind, obj, t["id"], value=f["proposed_value"], rationale=f["rationale"],
                 source_refs=f["source_refs"], excerpt_locator=f["excerpt_locator"], model_id=model_id,
                 is_blind=False, basis="A reading pass over the files; not requested as blind.",
-                extra={k: f[k] for k in ("source_path", "quote", "strength", "finding_id", "field_path", "run_ids")},
+                extra=extra,
             )
+            if "quote_check" in entry:
+                # D4: the reading AS CHECKED (target, value, strength, scope, citation, quote, files and lines)
+                entry["quote_check"]["reading_sha256"] = B.reading_sha256(entry)
         notes_new, notes_repeated = 0, 0
         if out.get("scan_notes"):
             held = len(bundle.get("scan_notes") or ())

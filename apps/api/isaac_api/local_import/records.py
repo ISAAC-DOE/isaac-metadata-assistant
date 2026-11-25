@@ -9,7 +9,10 @@ ONLY from:
 * 1.18.0 (DEC-96): candidates and missing values a registered fill rule FILLED (``filled``, eligible, no decision),
   composed as ``status: "inferred"`` with a ``{"source_type": "derivation", "rule": <rule id>}`` evidence entry
   (:func:`fill_derivation`), and only when every measured run of the group has the same filled-or-confirmed value
-  (a beamtime-wide one covers every run; DEC-69 still holds: no beamtime value fills a run-only field);
+  (a beamtime-wide one covers every run; DEC-69 still holds: no beamtime value fills a run-only field); 1.19.0
+  (DEC-97): a value a CHECKED Claude reading filled (``isaac.fill.reading_stated.v1``) also
+  carries each reading's quote as a witness (``method: ai_interpretation``, :func:`reading_witnesses`) and its
+  derivation names the reading passes;
 * the group's processing result a scientist APPROVED (series, qc, the E0 descriptor).
 
 Beamtime-scope confirmed values (facility, beamline, technique, ...) apply to every
@@ -438,9 +441,47 @@ def fill_derivation(obj: Mapping, id_key: str, note: str | None = None) -> dict:
     }
     if rule_id == B.FILL_STORED_CONVENTION_RULE_ID:
         entry["convention_rule"] = B._rule_id(obj.get("rule"))  # the reviewed engine convention that derived it
+    if fill.get("readings"):
+        # 1.19.0: the checked AI readings it rests on (a reading rule) or that agree with it (a file rule), and the
+        # reading passes that made them (quote_check.reading_pass_id)
+        entry["readings"] = list(fill["readings"])
+        entry["reading_pass_ids"] = list(fill.get("reading_pass_ids") or ())
+        if rule_id in B.READING_FILL_RULES:
+            entry["basis"] = ("filled from a Claude reading of the files whose quote was checked against the file the "
+                              "import read; no scientist decided it. The scientist reviews it at the end, and any "
+                              "decision replaces it")
     if note:
         entry["note"] = note
     return entry
+
+
+def reading_witnesses(obj: Mapping, index: Mapping) -> list[dict]:
+    """1.19.0: one QUOTED witness per checked AI reading a fill names (``fill.readings``): the file it cites (as the
+    folder spells it), its locator, the reader's verbatim quote, ``method: ai_interpretation`` with the model id, and
+    the quote check that ties it to the file the import read (its reading pass and the file's ``content_sha256``).
+    ``source_type: document``, the shape ``draft_validator`` reads as observed evidence; ``relation: supports``."""
+    out = []
+    for iid in (obj.get("fill") or {}).get("readings") or ():
+        i = (index.get("reading_of") or {}).get(iid)
+        if i is None:
+            continue
+        qc = i.get("quote_check") or {}
+        f = next(iter(qc.get("files") or ()), {})
+        out.append({
+            "source_type": "document",
+            "source_file": f.get("path") or i.get("source_path") or "(unlocated)",
+            "locator": i.get("excerpt_locator"),
+            "quote": i.get("quote"),
+            "method": "ai_interpretation",
+            "method_id": (i.get("model") or {}).get("model_id"),
+            "relation": "supports",
+            "interpretation_id": iid,
+            "strength": i.get("strength"),
+            "reading_pass_id": qc.get("reading_pass_id"),
+            "quote_check": {"result": qc.get("result"), "checker": qc.get("checker"),
+                            "content_sha256": f.get("content_sha256"), "at": f.get("at")},
+        })
+    return out
 
 
 #: How many acquisition files a domain fill cites (the rule rests on every run; the sidecar shows a window).
@@ -621,6 +662,9 @@ def composition_index(bundle: Mapping, decision_of: Mapping[tuple[str, str], Map
                    **{m["value_id"]: m["run_id"] for m in bundle["missing_values"]}},
         "obj_of": {**{c["candidate_id"]: ("candidate", c) for c in bundle["candidates"]},
                    **{m["value_id"]: ("missing_value", m) for m in bundle["missing_values"]}},
+        # 1.19.0: the AI readings a fill names (fill.readings), by id: each becomes a quoted witness of the value
+        "reading_of": {i.get("interpretation_id"): i for i in bundle.get("ai_interpretations") or ()
+                       if isinstance(i, Mapping) and i.get("quote_check") is not None},
         # read when first needed, then kept: B.required_record_paths(control_mode=...) per mode (it reads the
         # schema file each call), and B.clock_zone_decision (only a confirmed local-clock start time asks for it)
         "required_by_mode": {},
@@ -841,7 +885,7 @@ def compose_group(bundle: Mapping, group: Mapping, bundle_dir: Path, index: dict
             # 1.18.0 (DEC-96): a value a registered rule FILLED (no decision): the file's witnesses, then the
             # derivation naming the rule, so the draft carries it as `inferred` and the sidecar names the rule
             value = B.fill_value(c)
-            witnesses = _witnesses(c, value, None, zone_confirmed)
+            witnesses = _witnesses(c, value, None, zone_confirmed) + reading_witnesses(c, index)
             proposals.setdefault(FIELD_REMAP.get(path, path), []).append(
                 (value, witnesses + [fill_derivation(c, "candidate_id")], c["candidate_id"]))
             filled_ids.add(c["candidate_id"])
@@ -879,6 +923,7 @@ def compose_group(bundle: Mapping, group: Mapping, bundle_dir: Path, index: dict
         if m["value_state"] == B.STATE_FILLED:
             # 1.18.0: a missing value a registered rule filled (system.domain from the acquisition files)
             witnesses, note = _fill_witnesses(bundle, m, measured_ids)
+            witnesses += reading_witnesses(m, index)
             proposals.setdefault(FIELD_REMAP.get(m["target_field_path"], m["target_field_path"]), []).append(
                 (B.fill_value(m), witnesses + [fill_derivation(m, "value_id", note)], m["value_id"]))
             filled_ids.add(m["value_id"])

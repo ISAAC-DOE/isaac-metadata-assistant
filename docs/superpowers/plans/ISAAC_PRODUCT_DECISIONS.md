@@ -376,7 +376,7 @@ The orchestrator was Opus 5.5, under the `DEC-17` disclosed fallback.
 | **DEC-81** | **Claude Code is the first supported assistant for the local workflow.** Claude Desktop and a simpler scientist installer come later. | DECIDED 2026-10-28 | owner | Claude Code can run the CLI on local folders. |
 | **DEC-82** | **Real SSRL data may be read by Claude in this session**, to polish the skill. The data stays outside the repository and is never committed. | APPROVED 2026-10-28 | owner (project owner approval). Angel gave data-owner consent in Slack. | SLAC's institutional question (H5) remains open. See `docs/local-first-data-flows.md`. |
 | **DEC-83** | **Schema Proposals is a website section** that drafts and tracks vocabulary proposals in the upstream portal's `add_term` / `add_category` format. ISAAC never approves or applies a proposal. | DECIDED 2026-10-28 | owner | Proposals are stored in the temporary workspace on hosted, which is disclosed. Identity is unverified, so `proposed_by` is null. |
-| **DEC-84** | **AI readings are suggestions.** They can never be stronger than `needs_review`. Only a scientist decision yields `scientist_confirmed`, and a local decision's identity is `local_unverified`. ORCID is credit, never authentication. **SUPERSEDED IN PART 2026-11-25 by `DEC-96`:** a value a registered fill rule supports is `filled` (eligible, `inferred`); only a scientist decision still yields `scientist_confirmed`. | DECIDED 2026-10-28 | owner direction; identity contract §9.1 | See `docs/local-import-bundle-contract.md` and `docs/orcid-account-linking-design.md`. |
+| **DEC-84** | **AI readings are suggestions.** They can never be stronger than `needs_review`. Only a scientist decision yields `scientist_confirmed`, and a local decision's identity is `local_unverified`. ORCID is credit, never authentication. **SUPERSEDED IN PART 2026-11-25 by `DEC-96`:** a value a registered fill rule supports is `filled` (eligible, `inferred`); only a scientist decision still yields `scientist_confirmed`. **Narrowed further by `DEC-97` (1.19.0):** a STATED Claude reading whose quote check is stored on it and whose quote itself states the value is the evidence of one registered rule (`isaac.fill.reading_stated.v1`); an inferred or unchecked reading is still never above `needs_review`. | DECIDED 2026-10-28 | owner direction; identity contract §9.1 | See `docs/local-import-bundle-contract.md` and `docs/orcid-account-linking-design.md`. |
 | **DEC-85** | **The six-step design of `isaac.xas.v0` is the working protocol**: read channels → calibrate only with a scientist's approval → flag glitches (never drop) → merge → normalize → QC, with the scientists' own Athena results preferred and compared. | APPROVED 2026-10-28 | project owner (Krish), after the protocol TL;DR | This approves the **approach**, not the scientific values. `protocol_status` stays `draft_unreviewed` and the seven `protocol_questions` (energy column, new spot, step numbers, foil shift, Athena E0 frame, dead time, Athena version of record) remain for Angel/Oscar. Every per-group scientist approval in §10 of the protocol still applies. |
 | **DEC-86** | **Maximum-quality output comes first.** Claude may read more of a scientist's data where that improves the result. Permission is granted at a higher level, by the ISAAC usage agreement scientists sign, not by per-file friction. | DECIDED 2026-10-28 | project owner | The agreement does not exist yet. Until it does, the skill's one data-flow question (Step 1) stays. Nothing here permits sending data anywhere other than the Claude model service, committing real data, or uploading. |
 | **DEC-87** | **Maximum inference: the skill reads every file and shows each finding as a cited suggestion beside the question it answers.** **SUPERSEDED IN PART 2026-11-25 by `DEC-96`:** a finding a registered fill rule supports is filled, not only shown; the reading pass and its citations stand. The design has five parts. (1) A Claude reading pass over all of a beamtime's documents, images, spreadsheets and run names produces one findings file, loaded with `annotate --from-readings`. (2) The absorber is suggested from the scientists' processed-output headers and confirmed once with `set_absorber`. (3) Facility hints come from ~~the acquisition-system match~~ the scan headers' detector column names, when they name a known system's columns (corrected 2026-10-29: the acquisition system is a build default, not a match; see `DEC-88`), and the folder name. (4) A metadata-template round trip is answered once per beamtime. (5) Readers cover nested ZIPs, Larch sessions and Igor experiments. Electrolyte, pH and potential scale become answerable. | DECIDED 2026-10-28 | project owner ("start and finish… this should be how we approach it") | Everything AI-read is `needs_review` at most and cited to a file, locator and quote. Only a scientist decision is `scientist_confirmed` (`DEC-84`). A finding is never assigned to a beamtime by guess. Element and edge stay sidecar-only (`implicit[]`), because the schema has no field for them. Template answer cells always start empty, and a raw template can never be imported. Measured on two real beamtimes: missing key fields 48.3% → 13.5% and 40.1% → 10.5% (`docs/evidence/local-import-real-corpus-coverage-2026-10-28.md`). |
@@ -508,6 +508,64 @@ qualitative judgment; at the end the scientist reviews the final records and cha
   its evidence, and the draft validator refuses an `inferred` field without a stated derivation rule.
 - **Not in slice 1:** reading fills (slice 2), folder and people fills (slice 3), the end review, `bundle status`'s
   "not yet reviewed" line, SKILL.md and the question site (slice 4), the replay harness (slice 5).
+
+### DEC-97
+*(2026-11-25; slice 2 of `DEC-96`, under the same owner decision; design `docs/fill-first-design-2026-11-25.md`,
+review findings 3, 6 and 9. Revised the same day by the orchestrator after a replay on a real beamtime, outside the
+repository, and an independent review: the first version filled 21 values right and 62 wrong.)*
+
+**Fills from checked, STATED Claude readings; local bundle format 1.19.0, fill rule set 2.** Extends `DEC-96`; every
+supersession `DEC-96` lists stands, and this narrows `DEC-84` and `DEC-87` further.
+
+- **A reading stays checkable later.** `annotate --from-readings --apply` stores, on each interpretation, the quote
+  check it made (`quote_check`: result, checker `isaac.reading_check.v1`, the reading-pass id, the findings' sha256,
+  the kept quote's sha256, a `reading_sha256` over the reading itself — target, value, strength, scope, citation,
+  quote, files and lines — and the checked file's path, source id, `content_sha256` and lines) and the finding's
+  scope. The reading-pass id is DETERMINISTIC — `rp-` + 32 hex of sha256(model id, newline, sha256 of the findings
+  as parsed in canonical JSON) — so it can be recomputed from the findings file and the model id and needs no clock
+  or random number. The bundle validator recomputes `reading_sha256` and the pass id, and refuses a block whose hash
+  is not the bundle's own `sources[].content_sha256` or whose kept quote is not the one checked, so a value edited by
+  hand, a flipped strength or a block copied onto another target cannot fill. **This catches edits and copies, not
+  someone who deliberately recomputes the hashes:** nothing in a local bundle is signed. A reading without the block
+  (an older bundle, `annotate --target`) NEVER fills.
+- **One rule, `isaac.fill.reading_stated.v1`.** A `stated` reading whose stored check holds fills the field it names
+  only when **its quote itself states the value** (the lexical tie, checked against the quote as stored): the number
+  with its field's own unit or a declared conversion (never with another unit, never inside a heading such as
+  "Sample 1", bare only for a unitless field such as the pH; so "room temperature" never fills a temperature); the list
+  member's own words or a registered synonym (explicit, small, in code, each tested), with no negation earlier in the
+  same clause; every significant word of free text.
+  And only where its field takes the value, no other reading, file value or open reading of the field for the run (or
+  the beamtime) disagrees — slice 1's dissent rule, plus any AI reading of the field for the run — under the slice 1
+  exclusions (no conflict, no potential scale, no control mode, no time, no local clock, no position-read name number
+  before the naming is settled).
+- **An inferred reading never fills** (the orchestrator's decision D1, after the replay filled 13 wrong
+  environments from two quotes that state none): an inference from indirect quotes is a judgment, so the scientist is
+  asked, and the reading stays a suggestion shown with the question. The first version's
+  `isaac.fill.reading_inferred.v1` is removed.
+- **A sample's own label is not its material** (D3, the replay's other 49 wrong fills: a sample heading's code read
+  as the material). A `sample.material.*` value equal, without case or punctuation, to the run's file-name sample token,
+  sample id or a logbook sample heading's code — or with any word that is one ("ZZ1 film") — is never filled, by any
+  rule. Nor is an electrolyte name carrying a
+  concentration or a pH.
+- **DEC-69 for readings (design item 3, reviews I2–I4).** A reading scoped to the whole beamtime never fills a
+  run-level field (environment, reaction and every `context.reaction.*` field, cell type, and the run's measurement
+  conditions: set-points, scale, control mode), nor any `sample.*` field unless the beamtime has exactly one sample; and
+  one dissenting target stops the whole beamtime finding (readings only; slice 1's per-run scoping of file values is
+  unchanged). Only a reading scoped to the runs it names fills run-level fields, on those runs. A runs-scoped reading
+  whose quote is in a file other than the run's own reached the run through the reader's matching of a statement to run
+  NAMES, so it waits for the naming (`naming_check`), as a logbook section bound only by the name's sample number does.
+- **Precedence unchanged.** Any decision, a defer included, beats a fill. A file rule and a reading that agree are
+  ONE fill under the file rule, with the reading listed as a witness; if they disagree there is no fill.
+- **Answer memory** never learns a reading fill; a correction by `decide`, workbook or site import is recorded and wins.
+  A question that leaves out filled runs says which, and how to correct one (`decide --target`); a site card lists them.
+- **Supersedes, explicitly:** `DEC-84`'s "AI readings never above `needs_review`" now holds for every reading but a
+  checked, stated one whose quote states the value; `DEC-87`'s "everything AI-read is `needs_review` at most"
+  likewise; the contract's §4 item 2, §6 and §20 text, and `bundle.AUTHORITIES` (updated in place, marked).
+- **The truth plane is unchanged.** The composed draft carries each reading's quote as a `document` witness with
+  `method: ai_interpretation` and the derivation entry `{"source_type": "derivation", "rule":
+  "isaac.fill.reading_stated.v1", …, "reading_pass_ids"}`, the shapes `draft_validator` already accepts.
+- **Not decided here:** whether a checked logbook line that states the potential scale may fill it (DEC-88's gate is
+  kept: readings never fill the scale or the control mode in this slice), and whether readings may fill times.
 
 ### What `DEC-76`…`DEC-84` do NOT change
 - **The website's truth plane.** `schema/` and the `src/isaac_records` validators and export are unedited. *(True for `DEC-76`…`DEC-84`; `DEC-95` later re-vendored `schema/` and edited the truth plane, disclosed there.)* The only change in `src/isaac_records/cli.py` is the additive `import` / `bundle` dispatch.

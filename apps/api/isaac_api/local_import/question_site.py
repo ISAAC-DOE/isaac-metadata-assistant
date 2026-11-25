@@ -671,6 +671,38 @@ def _show_everything(view: _View, card: dict) -> None:
         "rows": [[r["label"], str(r["count"]), r["example"]] for r in rows]})
 
 
+def _show_left_out_fills(view: _View, card: dict) -> None:
+    """1.19.0 (re-review M1): a card whose questions leave out measurements a rule FILLED (``left_out_as_filled``:
+    questions skip filled values) lists them first among its context — each measurement and the value filled — so the
+    scientist sees which runs this answer does NOT cover, and that they can change any of them in the final review. On
+    a card about one sample, only that sample's measurements (by the file-name sample token)."""
+    left = [x for m in card.get("_questions") or () for x in m.get("left_out_as_filled") or ()]
+    if not left:
+        return
+    objs = {o.get("candidate_id") or o.get("value_id"): o
+            for o in [*(view.bundle.get("candidates") or ()), *(view.bundle.get("missing_values") or ())]}
+    tokens: dict[str, set] = {}
+    for c in view.bundle.get("candidates") or ():
+        if c.get("statement_key") == "sample_name" and c.get("run_id"):
+            tokens.setdefault(c["run_id"], set()).update(
+                str(e.get("literal_value")) for e in c.get("evidence") or ()
+                if str(e.get("locator") or "").startswith("filename"))
+    sample_words = set(str(card.get("_sample") or "").replace("(", " ").replace(",", " ").split())
+    rows = []
+    for x in left:
+        rid = x.get("run_id")
+        if sample_words and rid and not (tokens.get(rid, set()) & sample_words):
+            continue
+        run = view.runs.get(rid) or {}
+        value = B.fill_value(objs.get(x.get("target_id")) or {})
+        rows.append([str(run.get("stem") or "the whole beamtime"), "" if value is None else str(value)])
+    if rows:
+        card.setdefault("_first_context", []).append({
+            "kind": "values", "label": f"Filled from your files, so not asked here: {len(rows)} measurement(s)",
+            "source": "ISAAC's fill rules; you can change any of these in the final review",
+            "columns": ["Measurement", "Filled value"], "rows": rows[:MAX_ITEMS]})
+
+
 def _assemble_detail(card: dict) -> None:
     """A value card's detail once its hints are settled: the lead, then what one answer covers (a card for several
     measurements), else an alternative a reading names, else what to do. Never more than two sentences."""
@@ -1319,6 +1351,7 @@ def export_site(bundle_dir: Path, out: Path, *, suggestions: Path | None = None,
     for card in cards:
         _assemble_detail(card)
         _show_everything(view, card)
+        _show_left_out_fills(view, card)
 
     # every card's calls, dry-run on a temporary copy of bundle.json (not even a lock file in the bundle folder)
     kept: list[dict] = []
