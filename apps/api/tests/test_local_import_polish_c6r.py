@@ -223,6 +223,10 @@ def test_the_cli_and_the_web_page_agree_on_an_older_bundle(older, tmp_path, monk
 
 def test_a_save_that_holds_a_stored_extracted_value_logs_each_and_says_so_once(older, capsys):
     held = _held_ids(older)
+    # 1.18.0 (DEC-96): the fixture's "older build" derives with this build's rules, under which the un-held logbook
+    # cell-type reading (DEC-71's lexicon, a reading) was FILLED and so eligible; the hold takes it out of the record
+    was_eligible = {c["candidate_id"]: c["eligibility_for_official_record"]["eligible"]
+                    for c in B.load_bundle(older)["candidates"] if c["candidate_id"] in held}
     capsys.readouterr()
     M.mutate(older, lambda b: None)
     err = capsys.readouterr().err
@@ -232,7 +236,8 @@ def test_a_save_that_holds_a_stored_extracted_value_logs_each_and_says_so_once(o
     log = [r for r in stored.get("eligibility_rederived") or () if r["reason"] == B.BEAMTIME_WIDE_REDERIVED_REASON]
     assert {r["id"] for r in log} == held
     for r in log:
-        assert (r["kind"], r["value_state"], r["eligible_before"], r["eligible_now"]) == ("candidate", "needs_review", False, False)
+        assert (r["kind"], r["value_state"], r["eligible_now"]) == ("candidate", "needs_review", False)
+        assert r["eligible_before"] is was_eligible[r["id"]]
         assert r["target_field_path"] == CELL
     assert all(c["extracted_state"] == "needs_review" for c in stored["candidates"] if c["candidate_id"] in held)
     # held now as stored: a later save logs and says nothing

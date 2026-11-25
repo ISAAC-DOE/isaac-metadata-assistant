@@ -192,7 +192,8 @@ def test_summary_collapses_a_folders_repeated_unread_lines(bdir):
 
 def test_summary_after_decisions_does_not_say_nothing_is_confirmed(bdir):
     fresh = cli.render_summary(M.load(bdir))
-    assert "Nothing" in fresh and "No value here is confirmed" in fresh  # an import with no decision says so
+    # an import with no decision says nothing is confirmed by a scientist; 1.18.0 (DEC-96): what a rule filled is said
+    assert "Nothing" in fresh and "here is confirmed by a scientist" in fresh and "filled by a rule from the evidence" in fresh
     _decide_everything(bdir)
     b = M.load(bdir)
     text = cli.render_summary(b)
@@ -200,7 +201,12 @@ def test_summary_after_decisions_does_not_say_nothing_is_confirmed(bdir):
     n = len(b["scientist_decisions"])
     assert f"Scientist decisions recorded: {n} (" in text and "confirm on record group" in text
     eligible = b["readiness"]["eligible_value_count"]
-    assert f"{eligible} value(s) are eligible for an official record because a scientist decided them" in text
+    filled = b["counts"].get("filled") or 0  # 1.18.0 (DEC-96): values a rule filled are said apart
+    if filled:
+        assert f"{eligible} value(s) are eligible for an official record ({filled} filled by a rule" in text
+        assert "the rest because a scientist decided them" in text
+    else:
+        assert f"{eligible} value(s) are eligible for an official record because a scientist decided them" in text
     assert "does not know whether a record has been exported" in text and "isaac-export/index.json" in text
 
 

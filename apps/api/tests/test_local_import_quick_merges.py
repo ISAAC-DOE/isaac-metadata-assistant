@@ -352,7 +352,7 @@ def test_a_1_10_0_bundle_still_validates_and_its_first_save_says_what_1_11_0_add
     assert B.check_bundle(out) == []
     M.group(out)
     saved = M.load(out)
-    assert saved["format_version"] == B.FORMAT_VERSION == "1.17.0"
+    assert saved["format_version"] == B.FORMAT_VERSION == "1.18.0"
     [u] = saved["format_upgrades"]
     assert u["from_format_version"] == "1.10.0" and B.CHANGES_ADDED_IN["1.11.0"] in u["statement"]
     # review L5: the runs it still holds of the quick merges are named, and re-import is said to fix them

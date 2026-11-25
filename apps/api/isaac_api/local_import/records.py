@@ -6,6 +6,10 @@ ONLY from:
 
 * candidates that are ``scientist_confirmed`` AND eligible (decision value applied);
 * ``missing_values`` a scientist answered (``confirm``/``correct`` with a value);
+* 1.18.0 (DEC-96): candidates and missing values a registered fill rule FILLED (``filled``, eligible, no decision),
+  composed as ``status: "inferred"`` with a ``{"source_type": "derivation", "rule": <rule id>}`` evidence entry
+  (:func:`fill_derivation`), and only when every measured run of the group has the same filled-or-confirmed value
+  (a beamtime-wide one covers every run; DEC-69 still holds: no beamtime value fills a run-only field);
 * the group's processing result a scientist APPROVED (series, qc, the E0 descriptor).
 
 Beamtime-scope confirmed values (facility, beamline, technique, ...) apply to every
@@ -406,6 +410,75 @@ def _zone_less_clock(path: str | None, literal: Any, value: Any) -> bool:
         return False
 
 
+#: 1.18.0: why a value a rule filled is not composed beside a scientist's decision about the same field (DEC-96).
+FILL_BEATEN_BY_DECISION = ("a scientist decided this field for this run (or the whole beamtime); a decision always wins "
+                           "over a value a rule filled, so the filled value is not used")
+#: 1.18.0: why a value a rule filled is not composed for a group some of whose measured runs lack it (a merged group).
+FILL_NOT_EVERY_RUN = ("filled by a rule for {covered} of this record group's {total} measured runs only (runs with no "
+                      "filled or confirmed value for {path}, or whose own reading of it is open or differs, or was "
+                      "decided otherwise (a defer included): {lacking}), so the group fills nothing for it until every "
+                      "run has the same value; answer it for the group, and the answer goes in")
+
+
+def fill_derivation(obj: Mapping, id_key: str, note: str | None = None) -> dict:
+    """THE DERIVATION ENTRY of a value a registered rule filled (1.18.0, DEC-96), in the one shape
+    ``draft_validator`` accepts for ``status: "inferred"`` (the ``context.temperature_basis`` precedent, DEC-76):
+    ``{"source_type": "derivation", "rule": <rule id>, ...}``. The sidecar keeps only ``evidence``, so this entry is
+    the mark that the field was inferred, and by which rule."""
+    fill = obj.get("fill") or {}
+    rule_id = fill.get("rule_id")
+    entry = {
+        "source_type": "derivation",
+        "rule": rule_id,
+        "rule_text": B.FILL_RULES.get(rule_id),
+        id_key: obj.get(id_key),
+        "value": fill.get("value"),
+        "basis": ("filled from the evidence by a registered rule; no scientist decided it. The scientist reviews it "
+                  "at the end, and any decision replaces it"),
+    }
+    if rule_id == B.FILL_STORED_CONVENTION_RULE_ID:
+        entry["convention_rule"] = B._rule_id(obj.get("rule"))  # the reviewed engine convention that derived it
+    if note:
+        entry["note"] = note
+    return entry
+
+
+#: How many acquisition files a domain fill cites (the rule rests on every run; the sidecar shows a window).
+_FILL_WITNESS_FILES = 5
+
+
+def _fill_witnesses(bundle: Mapping, m: Mapping, measured_ids: set) -> tuple[list[dict], str | None]:
+    """``(witnesses, note)`` for a MISSING value a rule filled. For :data:`bundle.FILL_DOMAIN_RULE_ID`: for each of the
+    GROUP's measured runs (a window of :data:`_FILL_WITNESS_FILES`), one literal header statement its acquisition
+    reader read from its acquisition file (the line, its real locator and the reader's id), and in ``note`` what the
+    rule rests on: which reader read each run (never the classifier's prose presented as a quote)."""
+    if (m.get("fill") or {}).get("rule_id") != B.FILL_DOMAIN_RULE_ID:
+        return [], None
+    source_of = {s.get("source_id"): s for s in bundle.get("sources") or ()}
+    statements: dict[str, list] = {}
+    for e in bundle.get("extended_context") or ():
+        if e.get("source_id") and not str(e.get("locator") or "").lower().startswith("filename"):
+            statements.setdefault(e["source_id"], []).append(e)
+    runs = [r for r in bundle.get("runs") or () if r.get("run_id") in measured_ids]
+    readers = sorted({str(B.run_reader_id(bundle, r, source_of)) for r in runs})
+    out = []
+    for r in runs:
+        reader = B.run_reader_id(bundle, r, source_of)
+        sids = [r.get("acquisition_source_id")] + [sc.get("source_id") for sc in r.get("scans") or ()]
+        st = next((e for sid in sids if sid for e in statements.get(sid, ()) if e.get("parser_id") == reader), None)
+        if st is None:
+            continue
+        out.append({"source_type": "document",
+                    "source_file": (source_of.get(st["source_id"]) or {}).get("relative_path") or "(unlocated)",
+                    "locator": st.get("locator"), "quote": str(st.get("raw_literal")),
+                    "method": "deterministic_parser", "method_id": reader, "relation": "context"})
+        if len(out) >= _FILL_WITNESS_FILES:
+            break
+    note = (f"every one of the record group's {len(runs)} measured run(s) was read by a beamline acquisition reader "
+            f"({', '.join(readers)}); each quote is a header line that reader read from the run's own file")
+    return out, note
+
+
 def _candidate_confirmation(candidate: Mapping, decision: Mapping, value: Any, path: str, witnesses: Sequence[Mapping]) -> dict:
     """The scientist's confirmation of a composed candidate value, with its PROVENANCE: a
     ``scientist_correction`` (``correct``, or a value no file witness states) names the value it
@@ -529,9 +602,13 @@ def composition_index(bundle: Mapping, decision_of: Mapping[tuple[str, str], Map
     from . import suggestions as S
 
     results = bundle.get("processing_results") or ()
+    if decision_of is None:
+        decision_of = B._decisions_by_target(bundle.get("scientist_decisions") or ())
     return {
-        "decisions": B._decisions_by_target(bundle.get("scientist_decisions") or ()) if decision_of is None else decision_of,
+        "decisions": decision_of,
         "conflict_ids_of": B.conflict_ids_by_candidate(bundle),
+        # 1.18.0: each field's run-level targets and their decisions: what a beamtime-wide fill cannot reach for a run
+        "fill_blocks": B.fill_run_blocks(bundle, decision_of),
         "processing_blocked": B.processing_blocked_groups(bundle),
         # read only for an approved result: none, nothing to read
         "processing_state": (B.processing_state_decisions(bundle)
@@ -728,6 +805,7 @@ def compose_group(bundle: Mapping, group: Mapping, bundle_dir: Path, index: dict
         "processing": None,
     }
     proposals: dict[str, list[tuple[Any, list, str]]] = {}
+    filled_ids: set[str] = set()  # 1.18.0: the contributing values a registered rule filled (no decision)
 
     def _confirmed_but_unfit(obj: Mapping, id_key: str) -> None:
         # A scientist's answer the official field cannot hold (e.g. "-0.8 V" for a number) is
@@ -759,6 +837,15 @@ def compose_group(bundle: Mapping, group: Mapping, bundle_dir: Path, index: dict
         if "[]" in path:
             report["not_composed"].append({"candidate_id": c["candidate_id"], "path": path, "reason": "an array path; composed only from structured blocks"})
             continue
+        if c["value_state"] == B.STATE_FILLED:
+            # 1.18.0 (DEC-96): a value a registered rule FILLED (no decision): the file's witnesses, then the
+            # derivation naming the rule, so the draft carries it as `inferred` and the sidecar names the rule
+            value = B.fill_value(c)
+            witnesses = _witnesses(c, value, None, zone_confirmed)
+            proposals.setdefault(FIELD_REMAP.get(path, path), []).append(
+                (value, witnesses + [fill_derivation(c, "candidate_id")], c["candidate_id"]))
+            filled_ids.add(c["candidate_id"])
+            continue
         d = B.candidate_decision(bundle, c, decisions, index["conflict_ids_of"])
         value = B.final_value(c["value"], d, c.get("readings"))
         witnesses = _witnesses(c, value, d, zone_confirmed)
@@ -789,6 +876,13 @@ def compose_group(bundle: Mapping, group: Mapping, bundle_dir: Path, index: dict
             continue
         if not (m["run_id"] in measured_ids or m["run_id"] is None):
             continue
+        if m["value_state"] == B.STATE_FILLED:
+            # 1.18.0: a missing value a registered rule filled (system.domain from the acquisition files)
+            witnesses, note = _fill_witnesses(bundle, m, measured_ids)
+            proposals.setdefault(FIELD_REMAP.get(m["target_field_path"], m["target_field_path"]), []).append(
+                (B.fill_value(m), witnesses + [fill_derivation(m, "value_id", note)], m["value_id"]))
+            filled_ids.add(m["value_id"])
+            continue
         d = decisions[("missing_value", m["value_id"])]
         value = B.final_value(None, d)
         asked = L.slot_question_text(m) if L.is_label_slot(m) else f"What is {m['target_field_path']}?"
@@ -800,17 +894,71 @@ def compose_group(bundle: Mapping, group: Mapping, bundle_dir: Path, index: dict
 
     fields: dict[str, dict] = {}
     for path, options in sorted(proposals.items()):
+        # 1.18.0 (DEC-96): A DECISION ALWAYS BEATS A FILL, BEFORE the disagreement check, so an answer is never
+        # outvoted by, nor made to disagree with, a fill. Every fill is dropped beside a confirmed value of the field
+        # in the group (the same run, or the whole beamtime; a beamtime-wide fill beside any confirmed value), and a
+        # run-level fill for a run that holds ANY decision on its own targets for the field (a defer included). A
+        # beamtime-wide fill that stays does not reach a run with such a decision, or with an open or differing reading
+        # of its own (bundle.runs_a_fill_cannot_reach): that run lacks the value below, so its group is asked.
+        filled_opts = [o for o in options if o[2] in filled_ids]
+        blocked: dict[str, list[str]] = {}
+        if filled_opts:
+            confirmed_runs = {run_of.get(i) for _, _, i in options if i not in filled_ids}
+            rows = index["fill_blocks"].get(path, {})
+            decided_runs = {r for r, rs in rows.items() if any(dk not in (None, "reject") for _, _, _, dk in rs)}
+            dropped = [o for o in filled_opts
+                       if None in confirmed_runs
+                       or (run_of.get(o[2]) is None and confirmed_runs)
+                       or run_of.get(o[2]) in confirmed_runs or run_of.get(o[2]) in decided_runs]
+            for _, _, i in dropped:
+                report["not_composed"].append({_id_key(i): i, "path": path, "reason": FILL_BEATEN_BY_DECISION})
+            options = [o for o in options if o not in dropped]
+            beamtime_fill = next((o for o in options if o[2] in filled_ids and run_of.get(o[2]) is None), None)
+            if beamtime_fill is not None:
+                blocked = {r: why for r, why in B.runs_a_fill_cannot_reach(rows, path, beamtime_fill[0]).items()
+                           if r in measured_ids}
+        if not options:
+            continue  # every option was a fill a decision beat: nothing to compose (each is listed in not_composed)
         distinct = {json.dumps(v, sort_keys=True) for v, _, _ in options}
         if len(distinct) > 1:
+            kinds = {i in filled_ids for _, _, i in options}
             report["disagreements"].append(
                 {"path": path, "values": [v for v, _, _ in options], "from": [i for _, _, i in options],
-                 "reason": "confirmed values differ inside one record group; nothing is filled"}
+                 "reason": ("confirmed values differ inside one record group; nothing is filled" if kinds == {False} else
+                            "values a rule filled differ inside one record group (no scientist decided them); nothing "
+                            "is filled until a scientist answers it for the group" if kinds == {True} else
+                            "a confirmed value and a value a rule filled differ inside one record group; nothing is "
+                            "filled until a scientist answers it for the group")}
             )
             continue
         value = options[0][0]
         evidence = [e for _, ev, _ in options for e in ev]
-        fields[path] = {"value": value, "status": "verified", "evidence": evidence}
-        report["filled"].append({"path": path, "from": [i for _, _, i in options]})
+        from_ids = [i for _, _, i in options]
+        by_rule = [i for i in from_ids if i in filled_ids]
+        if by_rule:
+            # 1.18.0: A FILL COVERS EVERY MEASURED RUN OR FILLS NOTHING (review finding 2): the group's every measured
+            # run has this same filled-or-confirmed value (or a beamtime-wide one covers it, where it reaches); a
+            # merged group with partial coverage is not filled, and says why
+            covered = {index["run_of"].get(i) for i in from_ids} - {None}
+            if any(index["run_of"].get(i) is None for i in by_rule):
+                covered |= measured_ids - set(blocked)
+            elif any(index["run_of"].get(i) is None for i in from_ids):
+                covered |= measured_ids  # a beamtime-wide confirmed value
+            lacking = sorted(measured_ids - covered)
+            if lacking:
+                reason = FILL_NOT_EVERY_RUN.format(path=path, covered=len(measured_ids & covered),
+                                                   total=len(measured_ids),
+                                                   lacking=", ".join(lacking[:5]) + ("…" if len(lacking) > 5 else ""))
+                for i in from_ids:
+                    report["not_composed"].append({_id_key(i): i, "path": path, "reason": reason})
+                continue
+        # "inferred" whenever ANY contributing value was filled by a rule; "verified" only if every one is confirmed
+        fields[path] = {"value": value, "status": "inferred" if by_rule else "verified", "evidence": evidence}
+        report["filled"].append({"path": path, "from": from_ids})
+        if by_rule:
+            report.setdefault("filled_by_rule", []).append({
+                "path": path, "from": by_rule,
+                "rules": sorted({(index["obj_of"][i][1].get("fill") or {}).get("rule_id") for i in by_rule})})
     # AN ANSWER SLOT BELONGS TO ITS RUN (c7-r MED-3): a slot holds one run's answer to a field the import asks once for
     # the whole beamtime. A group (a merged one, say) fills the field from slots only when EVERY member run is covered
     # — by a slot or an answer of its own (the same value, or the check above already said they differ), or by the
@@ -1691,6 +1839,12 @@ def _start_time_differ_warnings(bundle: Mapping, group: Mapping, member_ids: set
          "values": values[:5]}
     if qid:
         w["command"] = f"isaac bundle show question <bundle_dir> {qid}"
+    elif w["targets"]:
+        # 1.18.0 (DEC-96): runs whose start times a rule FILLED with different instants (a merged group), and no
+        # start-time question asks them (a filled value is not asked): the scientist says which start the record takes
+        w["command"] = (f"isaac bundle decide <bundle_dir> --target {w['targets'][0]} --decision correct --value "
+                        '<the UTC start of the record> --by "<your name>"'
+                        + (f"   # and the same for {', '.join(w['targets'][1:4])}" if len(w["targets"]) > 1 else ""))
     return [{**w, "text": start_time_text(w)}]
 
 
@@ -2039,7 +2193,7 @@ def with_question_commands(bundle: Mapping, warnings: list[dict], payload: Mappi
     payload = payload or Q.consolidate(bundle)
     out = []
     for w in warnings:
-        cmd = Q.command_for_targets(payload, w.get("targets") or (), w["needs"], w["group_id"]) or w["command"]
+        cmd = Q.command_for_targets(payload, w.get("targets") or (), w["needs"], w["group_id"]) or w.get("command")
         w = {**w, "command": cmd}
         if w.get("fields"):
             # r6h H3: one command per field the warning names (an in-situ record's electrolyte, cell type, ...)

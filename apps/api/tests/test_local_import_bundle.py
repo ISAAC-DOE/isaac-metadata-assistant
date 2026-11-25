@@ -58,7 +58,7 @@ def test_a_built_bundle_meets_v1_and_round_trips(bundle, tmp_path):
     assert loaded == bundle
     assert B.check_bundle(tmp_path) == []
     assert loaded["format"] == "isaac.local-import-bundle"
-    assert loaded["format_version"] == "1.17.0"  # 1.17.0 consents and reads that write nothing; 1.16.0 the second audit import rules; 1.15.0 the export-anyway decision; 1.14.0 the audit import rules; 1.13.0 MERGE-folder outputs; 1.12.0 scan notes; 1.11.0 the engine-classified processed outputs; 1.2.0 added processed_outputs; 1.3.0 absorber readings + a larger writable set; 1.4.0 the clock-zone decision; 1.5.0 control_mode writable; 1.6.0 the DEC-91 capture decisions; 1.7.0 current_setpoint_mA_cm2 writable; 1.8.0 the log bounds raised; 1.9.0 the last-token counter; 1.10.0 vocabulary_requests (all additive)
+    assert loaded["format_version"] == "1.18.0"  # 1.18.0 the filled state (DEC-96); 1.17.0 consents and reads that write nothing; 1.16.0 the second audit import rules; 1.15.0 the export-anyway decision; 1.14.0 the audit import rules; 1.13.0 MERGE-folder outputs; 1.12.0 scan notes; 1.11.0 the engine-classified processed outputs; 1.2.0 added processed_outputs; 1.3.0 absorber readings + a larger writable set; 1.4.0 the clock-zone decision; 1.5.0 control_mode writable; 1.6.0 the DEC-91 capture decisions; 1.7.0 current_setpoint_mA_cm2 writable; 1.8.0 the log bounds raised; 1.9.0 the last-token counter; 1.10.0 vocabulary_requests (all additive)
     assert loaded["is_official_record"] is False
     assert "NOT an official ISAAC record" in loaded["official_record_notice"]
     assert loaded["ai_interpretations"] == [] and loaded["scientist_decisions"] == []
@@ -201,9 +201,13 @@ def test_parser_output_never_yields_scientist_confirmed(bundle):
     }
     assert B.STATE_SCIENTIST_CONFIRMED not in states
     assert B.STATE_REJECTED not in states
-    assert states <= B.PARSER_STATES
-    assert not any(c["eligibility_for_official_record"]["eligible"] for c in bundle["candidates"])
-    assert bundle["readiness"]["eligible_value_count"] == 0
+    # 1.18.0 (DEC-96, the owner's decision of 2026-11-25): a value a registered fill rule supports is `filled`
+    # (eligible, never confirmed). Updated from "states <= PARSER_STATES" and "nothing eligible": exactly the policy
+    # DEC-96 replaces. What still holds: parser output never yields a scientist's state, and only fills are eligible.
+    assert states <= B.PARSER_STATES | {B.STATE_FILLED}
+    eligible = [o for o in [*bundle["candidates"], *bundle["missing_values"]] if o["eligibility_for_official_record"]["eligible"]]
+    assert all(o["value_state"] == B.STATE_FILLED and o["fill"]["rule_id"] in B.FILL_RULES for o in eligible)
+    assert bundle["readiness"]["eligible_value_count"] == len(eligible)
     with pytest.raises(ValueError):
         B.derive_value_state(B.STATE_SCIENTIST_CONFIRMED, decision=None, interpreted=False)
 
@@ -218,6 +222,7 @@ def test_a_hand_edited_confirmation_is_refused(bundle):
 
 def test_a_scientist_decision_is_the_only_way_to_confirmed(bundle):
     c = _cand(bundle, value_state="candidate_extracted")
+    filled_before = bundle["readiness"]["eligible_value_count"]  # 1.18.0 (DEC-96): the values a rule filled
     bundle["scientist_decisions"].append(
         {
             "decision_id": "d-1",
@@ -234,9 +239,9 @@ def test_a_scientist_decision_is_the_only_way_to_confirmed(bundle):
     # Without re-deriving, the stored state still says candidate_extracted: refused.
     assert any(c["candidate_id"] in e for e in B.validate_bundle(bundle))
     B.apply_derivations(bundle)
-    assert c["value_state"] == "scientist_confirmed"
+    assert c["value_state"] == "scientist_confirmed" and "fill" not in c
     assert c["eligibility_for_official_record"]["eligible"] is True
-    assert bundle["readiness"]["eligible_value_count"] == 1
+    assert bundle["readiness"]["eligible_value_count"] == filled_before + 1
     assert B.validate_bundle(bundle) == []
 
 
@@ -268,6 +273,10 @@ def test_missing_stays_missing_and_nothing_is_defaulted(bundle):
     assert bundle["missing_values"]
     for m in bundle["missing_values"]:
         assert m["value"] is None
+        if m["target_field_path"] == B.DOMAIN_PATH and m["run_id"] is None:
+            # 1.18.0 (DEC-96): the one registered rule for a missing value, from the acquisition files, never a default
+            assert m["value_state"] == "filled" and m["fill"]["rule_id"] == B.FILL_DOMAIN_RULE_ID
+            continue
         assert m["value_state"] == "missing"
         assert m["eligibility_for_official_record"]["eligible"] is False
     # DEC-69: no environment / reaction / cell value is filled for a run that states none

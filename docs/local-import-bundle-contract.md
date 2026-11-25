@@ -1,6 +1,6 @@
 # ISAAC Local Import Bundle — contract v1
 
-Status: **v1.17.0** (the scientist's consent to Claude reading the files, and their name, kept in `consents` so a second session reads it with `isaac bundle status` instead of asking again; a command that only reads never writes `bundle.json`, and the values it prints are recorded beside it in `exposures.pending.jsonl`, 2026-11-23, §9 "What 1.17.0 added"; v1.16.0 the second round of the 18 Nov 2026 audit's import rules: the potential an SSRL XDC run's name writes, as a suggestion that needs review; a scan title naming other scans makes a processed output, never a run; an overwritten macro, two comment-line events and a position within motor resolution are no conflicts; the clock zone an #E / #D pair gives is suggested; a BL4-3 standard named as one proposes the role reference and the scanned range a witness for the absorber, 2026-11-22, §9 "What 1.16.0 added"; v1.15.0 the `export_despite_completeness` record-group decision: a record the local record-completeness gate holds is exported anyway, for that record body, and later exports keep it, 2026-11-22, §9 "What 1.15.0 added"; v1.14.0 four import rules of the 18 Nov 2026 audit: a signed potential token in a file name, the technique from the instrument configuration, pellet-standard fields asked only where mentioned, and a comment line left over from an earlier run flagged; every id an earlier build gave stands on a re-import, 2026-11-19, §9 "What 1.14.0 added"; v1.13.0 a file whose own scan title states an average beside SPEC acquisitions — the scientists' averages, such as a PyMca `.mca` — is a processed output linked by legacy number, never a run; a `MERGE` folder alone only flags a run; and a processed product's file name is no longer read as a condition or sample reading of its run, 2026-11-18, §9 "What 1.13.0 added"; v1.12.0 a reading pass's quotes are checked against the cited file when it is loaded, and its notes about a run's scans are kept as `scan_notes`, AI readings never decisions, 2026-11-17, §9 "What 1.12.0 added"; v1.11.0 a file the engine classifies `processed_spectrum` — the scientists' quick merges — is a processed output linked by legacy number, never a run, 2026-11-09, §9 "What 1.11.0 added"; v1.10.0 an answer refused only because it is not on its field's list is kept as a vocabulary request, `vocabulary_requests`, and `bundle propose-terms` drafts it, 2026-10-30, §9 "What 1.10.0 added", §29; v1.9.0 (`set_counter_positions` may name the LAST file-name token, `--positions last`, and a scientist's merge has a working path, 2026-10-30, §9 "What 1.9.0 added", §27; v1.8.0 the bounds on `scientist_decisions` and `ai_interpretations` raised to 200,000, so an append-only log can no longer lock a bundle; decide refuses a value its field refuses, 2026-10-29, §9 "What 1.8.0 added", §25; v1.7.0 `context.electrochemistry.current_setpoint_mA_cm2` answerable, so a confirmed galvanostatic record can complete, 2026-10-29, §9 "What 1.7.0 added", DEC-92; v1.6.0 capture decisions — keep apart, the Athena result of record, "no counter" — a merge decision applied as one combined group, and question ids that survive answers, 2026-10-29, §9 "What 1.6.0 added"; v1.5.0 control mode answerable the same day; v1.4.0 the SSRL XDC scan start time, the instrument clock's time zone and its binding, 2026-10-29, §9 "What 1.4.0 added"; v1.3.0 absorber readings on record groups, a larger writable set and STALE bundles, the same day; v1.2.0 processed outputs 2026-10-28; v1.1.0 LOCAL-2 and v1.0.0 LOCAL-1 the same day). Machine contract:
+Status: **v1.18.0** (fill first, review at the end: the value state `filled` — a value a registered fill rule supports, `isaac.fill.parser_exact.v1`, `isaac.fill.stored_convention.v1` or `isaac.fill.domain_from_acquisition.v1`, and no scientist decided — is eligible, goes into a draft as `inferred` naming its rule, and is not asked; a decision always wins; a 1.2.0–1.17.0 bundle is STALE until its next write, which logs each filled value, 2026-11-25, DEC-96, §9 "What 1.18.0 added"; v1.17.0 the scientist's consent to Claude reading the files, and their name, kept in `consents` so a second session reads it with `isaac bundle status` instead of asking again; a command that only reads never writes `bundle.json`, and the values it prints are recorded beside it in `exposures.pending.jsonl`, 2026-11-23, §9 "What 1.17.0 added"; v1.16.0 the second round of the 18 Nov 2026 audit's import rules: the potential an SSRL XDC run's name writes, as a suggestion that needs review; a scan title naming other scans makes a processed output, never a run; an overwritten macro, two comment-line events and a position within motor resolution are no conflicts; the clock zone an #E / #D pair gives is suggested; a BL4-3 standard named as one proposes the role reference and the scanned range a witness for the absorber, 2026-11-22, §9 "What 1.16.0 added"; v1.15.0 the `export_despite_completeness` record-group decision: a record the local record-completeness gate holds is exported anyway, for that record body, and later exports keep it, 2026-11-22, §9 "What 1.15.0 added"; v1.14.0 four import rules of the 18 Nov 2026 audit: a signed potential token in a file name, the technique from the instrument configuration, pellet-standard fields asked only where mentioned, and a comment line left over from an earlier run flagged; every id an earlier build gave stands on a re-import, 2026-11-19, §9 "What 1.14.0 added"; v1.13.0 a file whose own scan title states an average beside SPEC acquisitions — the scientists' averages, such as a PyMca `.mca` — is a processed output linked by legacy number, never a run; a `MERGE` folder alone only flags a run; and a processed product's file name is no longer read as a condition or sample reading of its run, 2026-11-18, §9 "What 1.13.0 added"; v1.12.0 a reading pass's quotes are checked against the cited file when it is loaded, and its notes about a run's scans are kept as `scan_notes`, AI readings never decisions, 2026-11-17, §9 "What 1.12.0 added"; v1.11.0 a file the engine classifies `processed_spectrum` — the scientists' quick merges — is a processed output linked by legacy number, never a run, 2026-11-09, §9 "What 1.11.0 added"; v1.10.0 an answer refused only because it is not on its field's list is kept as a vocabulary request, `vocabulary_requests`, and `bundle propose-terms` drafts it, 2026-10-30, §9 "What 1.10.0 added", §29; v1.9.0 (`set_counter_positions` may name the LAST file-name token, `--positions last`, and a scientist's merge has a working path, 2026-10-30, §9 "What 1.9.0 added", §27; v1.8.0 the bounds on `scientist_decisions` and `ai_interpretations` raised to 200,000, so an append-only log can no longer lock a bundle; decide refuses a value its field refuses, 2026-10-29, §9 "What 1.8.0 added", §25; v1.7.0 `context.electrochemistry.current_setpoint_mA_cm2` answerable, so a confirmed galvanostatic record can complete, 2026-10-29, §9 "What 1.7.0 added", DEC-92; v1.6.0 capture decisions — keep apart, the Athena result of record, "no counter" — a merge decision applied as one combined group, and question ids that survive answers, 2026-10-29, §9 "What 1.6.0 added"; v1.5.0 control mode answerable the same day; v1.4.0 the SSRL XDC scan start time, the instrument clock's time zone and its binding, 2026-10-29, §9 "What 1.4.0 added"; v1.3.0 absorber readings on record groups, a larger writable set and STALE bundles, the same day; v1.2.0 processed outputs 2026-10-28; v1.1.0 LOCAL-2 and v1.0.0 LOCAL-1 the same day). Machine contract:
 [`apps/api/isaac_api/local_import/bundle-v1.schema.json`](../apps/api/isaac_api/local_import/bundle-v1.schema.json)
 (JSON Schema draft 2020-12) plus the checks in
 [`bundle.py`](../apps/api/isaac_api/local_import/bundle.py) `validate_bundle` that JSON
@@ -72,9 +72,13 @@ being read is refused (the next import would read the bundle as a source).
 
 1. **Source evidence** — what a file literally says, at a locator. Never rewritten;
    normalisation is recorded *beside* the literal (`evidence[].normalization`), not over it.
-2. **Extraction / interpretation** — what deterministic readers, stored rules and (later) AI
-   interpretations made of the evidence. Suggestions. An AI interpretation can raise a value
-   to `needs_review` and never higher.
+2. **Extraction / interpretation** — what deterministic readers, stored rules and AI
+   interpretations made of the evidence. ~~Suggestions. An AI interpretation can raise a value
+   to `needs_review` and never higher.~~ **Superseded 2026-11-25 by DEC-96 (1.18.0):** a value a
+   REGISTERED fill rule supports (`bundle.FILL_RULES`, carried as `fill.rule_id`) and no scientist
+   decided is `filled`: it goes into a draft as `inferred` with a derivation entry naming the rule,
+   and the scientist reviews it at the end. Everything else stays a suggestion, and an AI
+   interpretation on its own still raises a value to `needs_review` and never higher.
 3. **Scientist confirmation** — `scientist_decisions[]` only. The sole producer of
    `scientist_confirmed` and `rejected`. Recorded by the local user;
    `decided_by.basis: self_reported_local_user` says this build cannot verify identity.
@@ -104,8 +108,8 @@ says how many the value rests on and `evidence_truncated` says when the list is 
 
 ## 6. Value states
 
-`source_recorded | candidate_extracted | needs_review | conflicting | scientist_confirmed |
-rejected | unmapped | missing`. Mapped from the EXISTING contracts — not a second machine:
+`source_recorded | candidate_extracted | needs_review | conflicting | filled | scientist_confirmed |
+rejected | unmapped | missing` (`filled` since 1.18.0, DEC-96). Mapped from the EXISTING contracts — not a second machine:
 
 The single key is `SemanticCandidate.review_status` (itself derived from `kind`, `determinism`, `unresolved_reason`, `not_proposable_reason`, `resolved_by_rule` and the target path); `bl15/mapping.py` statuses are listed only as what they usually produce — measured on the 9-run fixture, `deterministic`/`normalized` concepts also land in `needs_review` (e.g. a local-time timestamp) and `needs_domain_review` lands in `unmapped` 3 times.
 
@@ -125,28 +129,48 @@ The single key is `SemanticCandidate.review_status` (itself derived from `kind`,
 |---|---|---|
 | `scientist_decisions` `confirm` / `choose_reading` / `provide_value` | `scientist_confirmed` | `proposals.STATE_ACCEPTED` (which on the server also needs a trusted actor) |
 | `scientist_decisions` `reject` | `rejected` | `proposals.STATE_REJECTED` |
-| `ai_interpretations` on a `missing` / `unmapped` / `candidate_extracted` value | `needs_review` | — (an interpretation is never a proposal acceptance) |
+| no decision at all (not even a `defer`), and a registered fill rule supports the value (1.18.0, DEC-96; the `fill` block names the rule and the value) | `filled` | — (no person accepted it: the end review is where the scientist sees it) |
+| `ai_interpretations` on a `missing` / `unmapped` / `candidate_extracted` value no rule fills | `needs_review` | — (an interpretation is never a proposal acceptance) |
 
-The derivation is `bundle.derive_value_state(extracted_state, decision, interpreted)`; the
+The derivation is `bundle.derive_value_state(extracted_state, decision, interpreted, fill_rule)`,
+in this order: a decision decides; else a fill rule (`bundle.fill_rule_for`) makes the value
+`filled`; else an AI interpretation lifts it to `needs_review`; else the parser's state stands. An
+AI reading that AGREES with the value never stops a fill; one that disagrees (another value, or
+none) always does, because the rule itself refuses it. The
 validator recomputes it for every candidate, missing value and conflict and refuses a bundle
-whose stored `value_state` differs. `scientist_confirmed` and `rejected` are **not**
+whose stored `value_state` (or `fill` block) differs, so a hand-written `filled` no rule gives is
+contract-INVALID. `filled` is not an `extracted_state` (schema enum). `scientist_confirmed` and `rejected` are **not**
 `extracted_state` values (schema enum), so parser output cannot produce them; a hand-edited
 `"value_state": "scientist_confirmed"` with no decision is contract-invalid. A later decision
 for the same target supersedes an earlier one (last wins). A conflict stays `conflicting`
 under an AI interpretation. **Missing stays missing**: no default, no room-temperature
-assumption, and a beamtime fact is never copied onto a run (DEC-69: environment, reaction
+assumption (since 1.18.0 a missing value is `filled` only by a registered rule that names its
+evidence, today only `system.domain` from the acquisition files — a rule, never a default), and a
+beamtime fact is never copied onto a run (DEC-69: environment, reaction
 and cell type are never filled from a beamtime statement); `missing_values[].value` is the
 schema constant `null`.
 
 ### Eligibility for an official record
 
-`eligibility_for_official_record: {eligible, reason}` per value. **Rule: eligible only when
+`eligibility_for_official_record: {eligible, reason}` per value. ~~**Rule: eligible only when
 `value_state == scientist_confirmed` AND there is a value AND the target path has a write
 route in this build (`PROPOSAL_TARGET_PATHS`).** Nothing a parser or AI produced is eligible
 on its own — not even `candidate_extracted`, because on the server such a value still needs
-a trusted person to accept the proposal. "Eligible" means "may be carried into a draft for
-review and `isaac export`", never "is official". Every v1 bundle `isaac import` writes
-therefore has `readiness.eligible_value_count == 0`.
+a trusted person to accept the proposal. … Every v1 bundle `isaac import` writes
+therefore has `readiness.eligible_value_count == 0`.~~ **Superseded 2026-11-25 by DEC-96
+(1.18.0): eligible only when `value_state` is `scientist_confirmed` OR `filled`, AND there is a
+value (for a filled value, the value its rule fills), AND the target path has a write route in
+this build (`bundle._writable_paths`), AND the value fits its field.** A `candidate_extracted`
+value no rule fills, and anything an AI reading alone gave, is still not eligible. A filled value
+composes into a draft as `status: "inferred"` with the evidence entry
+`{"source_type": "derivation", "rule": "<rule id>", …}` (`records.fill_derivation`, the shape
+`draft_validator` accepts, as `context.temperature_basis` does under DEC-76), and the field is
+`inferred` whenever ANY contributing value is filled (`verified` only when every one is
+confirmed). A filled value composes into a record group only when every measured run of the
+group has the same filled or confirmed value (or a beamtime-wide one covers them all); DEC-69
+still holds. "Eligible" means "may be carried into a draft for review and `isaac export`",
+never "is official". A fresh import's `readiness.eligible_value_count` is therefore the number of
+values a rule filled (`counts.filled`).
 
 ## 7. Bounds
 
@@ -1056,6 +1080,150 @@ C4 and C7 of the 22 Nov 2026 plan; skill audit of 18 Nov 2026, findings 10, 13 a
   An older build that writes a bundle with a pending exposures file ignores the file; this build folds it in later.
 - **The upgrade is disclosed**: the first write of an older bundle appends one `format_upgrades` entry whose
   statement includes `bundle.CHANGES_ADDED_IN["1.17.0"]`.
+
+### What 1.18.0 added (fill first, review at the end — DEC-96)
+
+The project owner's decision of 2026-11-25 (`docs/fill-first-design-2026-11-25.md`): do not ask
+what the evidence already answers; fill it, and the scientist reviews the final records at the end.
+Slice 1 of that design. **This changes the state derivation and the eligibility rule, which §9's
+rules above call a major change;** it is labelled a minor version, 1.18.0, by the design's own
+decision, and the stale path below is what keeps every older bundle readable rather than refused.
+
+- **One new value state, `filled`** (`bundle.STATE_FILLED`; the schema's `value_state` enum, never
+  `extracted_state`), and one optional block on candidates and missing values, `fill`
+  (`{rule_id, value}`, `$defs/fill`; `rule_id` one of `bundle.FILL_RULES`). Derived on every
+  write; the validator re-derives both and refuses a stored `filled` or `fill` no rule gives.
+- **Three registered rules** (each an id and one sentence, `bundle.FILL_RULES`). The two candidate
+  rules share every exclusion (`bundle._fill_exclusions_pass`):
+  - `isaac.fill.parser_exact.v1` — STRICTLY a reading: a `candidate_extracted` value with
+    determinism `deterministic` and no INFERENCE step (`bundle._inferred_derive_rule_ids`): a
+    `derive` step counts as inference when its rule is not the same witness's own reading rule, or is
+    a registered convention (`STORED_CONVENTION_RULES`). A reader mapping its own term to the
+    vocabulary — DEC-71's logbook lexicon, identified by its rule ids (`bundle._logbook_rule_ids`),
+    which writes a normalize step and then a derive step under ONE rule (a logbook flow-cell statement →
+    `flow_cell`) — is reading and is filled. Also this build's own instrument-configuration
+    technique rule (1.14.0, `isaac.suggest.technique_from_configuration.v1`, valued only when every
+    run agrees).
+  - `isaac.fill.stored_convention.v1` — a value one of the engine's REVIEWED stored conventions
+    derived (`bundle.STORED_CONVENTION_RULES`, an explicit allowlist): today only
+    `bl15.environment.dry_sample_is_ex_situ.v1` (DEC-70: a measurement whose own name says `dry`,
+    or `NoElectrolyte` — read as the medium `none` by the file-name reader, no second rule — is
+    `ex_situ`). The candidate's own rule must be that convention and every `derive` step must name
+    it; the draft's derivation entry names both the fill rule and the convention
+    (`convention_rule`). **Not on the list:** DEC-71's logbook lexicon (`bl15.notes.*_statement.v1`),
+    which is not an inference convention: its term mapping is reading, filled under `parser_exact`
+    above, with every DEC-71 safeguard in force (a negated, hedged, ambiguous or passing sentence, or a
+    beamtime-wide one, gives no value or is held).
+  - **The shared exclusions — never:** a value a convention or standing resolution from ANOTHER
+    beamtime gave (`review_status: resolved`, `resolved_by_rule`, `standing_resolution`);
+    `context.electrochemistry.potential_scale` or `control_mode` (`bundle.PARSER_EXACT_NEVER_FILLS`:
+    `control_mode_by_run`, which the questions read, counts only confirmed modes); a local clock
+    time; a beamtime value of a run-only field (DEC-69); a field the sources disagree about for
+    that run (a conflicting candidate, or a conflict naming it); **any other reading of the same
+    field for the same run (or the beamtime) whose value differs or is none, unless a scientist
+    rejected it** (`bundle._other_reading_dissents`: every SPEC run holds
+    an #E epoch start beside an #D local start with no value until a zone is stated, so the epoch is
+    not filled while the #D reading is open; the design's "one dissenting witness means no fill");
+    a value read from a file-name number by its POSITION before the naming is settled (below); a
+    held value (beamtime-wide notes, a cell named in passing); a `contradicts` witness; a value its
+    field refuses; or a value an AI reading disagrees with.
+  - `isaac.fill.domain_from_acquisition.v1` — `system.domain = "experimental"` when every run's
+    acquisition was read by a beamline acquisition READER (`bundle.ACQUISITION_READER_IDS`: SPEC,
+    SSRL XDC, XDI, MCA, XES table; a reference pellet or an alignment scan the SPEC reader read
+    counts — measured on a real BL15-2 beamtime; the headerless two-column reader does not) and no
+    source is classified as a calculation output (`bundle.CALCULATION_OUTPUT_SOURCE_TYPES`, empty
+    today: the classifier has no such class). A candidate stating another domain, or a disagreeing
+    AI reading, blocks it. The draft cites, for the group's own measured runs, a literal header line
+    each run's reader read (real locator, reader id), and says in a `note` which readers read them.
+- **File-name readings and the naming question.** The file-name reader recognises every token by
+  its shape or word wherever it sits (`dry`, `NoElectrolyte`, `100mV`), and its ONE ordering rule is
+  the bare-integer ordinal (`bl15.filenames.bare_integer_ordinal.v1`: the first bare number the
+  legacy number, the second the sample/electrode number;
+  `bundle.POSITION_DEPENDENT_NAME_RULES`). Only a value read under that rule waits for the naming:
+  it is filled once `bundle.naming_check` says `decided` (a `set_counter_positions` /
+  `set_not_counter_positions` decision, nothing open) or `grouped_no_counter_question` (the grouping
+  step ran, `grouping_questions` is stored, and it asks no counter question); at `not_grouped` (a
+  fresh import) and `counter_question_open` it is not. Eligibility therefore moves blocked → filled
+  as the workflow advances (import, `bundle group`, the counter answer). `bundle status` shows the
+  outcome (`facts.naming`). **The same wait applies to a logbook reading bound to its run only through
+  the name's sample number** (`bundle._bound_by_name_number`): a sample section that lists no file
+  numbers (its reading has a `section`, an integer `sample_number` and no `file_numbers`; it reaches
+  the runs whose name's second bare integer is that number), or a beamtime sentence naming samples
+  (`named_samples`, mapped by the same token). **A section that lists file numbers is not gated:**
+  it binds through the run's legacy number, a literal agreement of the logbook's File Number column
+  with the number the name leads with, and no counter decision changes which number that is
+  (`runs[].legacy_number` is read once at import; a counter answer is read only by grouping).
+- **A decision always wins.** Any decision on the target, a `defer` included, means no fill: a
+  `correct` or `confirm` makes it `scientist_confirmed`, a `reject` `rejected`, a `defer` leaves the
+  parser's state (asked again). In a record group, BEFORE the disagreement check, a filled value is
+  dropped wherever a scientist confirmed the same field for the same run (a beamtime-wide fill
+  beside any confirmed value of the field), and a run-level fill is dropped for a run holding ANY
+  decision on its own targets for the field, a defer included (`records.FILL_BEATEN_BY_DECISION`).
+- **A beamtime-wide fill is scoped per run.** A run's own decision on the field (a defer on its
+  answer slot included; a `reject` of a reading is no statement about the value), or a run's own
+  undecided reading that is open or differs, stops a beamtime-wide fill for THAT run only
+  (`bundle.fill_run_blocks`, `bundle.runs_a_fill_cannot_reach`): the groups without such a run
+  compose the fill; a group holding one composes nothing for the field and is asked (its run's own
+  reading, or its slot). A scientist REJECTING a run's own missing value (or reading) does not stop
+  a beamtime-wide fill reaching that run: a reject means "no statement here", not "this value is
+  wrong for this run". Measured on a real BL15-2 replay: the instrument-configuration technique
+  (90 of 90 recording runs) beside one reference pellet whose name says `transmission`. A
+  beamtime-wide answer SLOT is dead only under a scientist's beamtime-wide answer, never under a
+  fill, so a slot deferred under a fill stays asked.
+- **Composition.** A filled value composes as `inferred` with a derivation entry naming its rule;
+  only when every measured run of the group has the same filled or confirmed value; a disagreement
+  is worded by state (confirmed, filled, or one of each). **Asked when the group cannot take it:**
+  a fill whose group's runs were filled with different values, or not every run has one
+  (`questions.group_unusable_fills`, mirroring the composer step by step), is asked like the value it
+  was read as, an optional field included; for a beamtime-wide fill a run does not take, that run's
+  own targets are asked, not the fill.
+- **Not asked, still addressable.** `questions.consolidate` asks no filled value and none is
+  blocking (except the ones above), and a fill counts where an answer does in the conflict cover and
+  the sample family. With `include_answered` a filled
+  target is back in the question that would ask it, under the same id, so `decide --question`,
+  `bundle answers import` (a workbook row) and `bundle site import` (a card exported before the fill)
+  record a correction, and it wins. A site card is recorded so only when EVERY target of the
+  question it covers is filled (`question_site_import._Ctx.filled_cover`); a card over a filled
+  target and one a scientist answered since is reported as answered since, never written over the
+  newer answer. Answer memory never learns a fill (it reads decisions only).
+- **Counts.** `counts.filled` counts candidates AND missing values a rule filled (unlike the other
+  state counts, which count candidates only), present at 1.18.0+; `readiness.eligible_value_count`
+  counts filled values; `bundle check` lists `filled` among the candidate states and prints
+  `counts.filled`; `bundle status` counts the filled values NO question asks (`counts.filled` less
+  `questions.fills_asked`), so it agrees with the questions; the Local Imports page's counts carry
+  `filled`.
+- **The fill rule set** (`fill_rule_set`, optional, written by every write of a bundle this build
+  fills; `bundle.FILL_RULE_SET`, raised whenever a rule is added or any exclusion changes). A 1.18.0+
+  bundle an earlier rule set wrote (or with none recorded) whose stored fills disagree with this
+  build's is STALE, not INVALID (`bundle.fill_rule_set_stale`); its next write re-derives it and logs
+  each value whose fill moved (either way) in `eligibility_rederived`, with no `format_upgrades`
+  entry (the format did not change). A NEWER rule set than this build's is refused as a newer
+  format is (`validate` errors `format: fill_rule_set N is newer…`; a write is refused, never
+  rewritten).
+- **An older bundle is STALE, not INVALID.** A 1.2.0–1.17.0 bundle (one the next save labels
+  1.18.0: it holds `processed_outputs`, `bundle.fills_apply`) is derived with fills, so its stored
+  states disagree; `bundle.stale_eligibility` lists each value a rule now fills (reason naming the
+  rule), `check` prints `STALE:`, `validate` / `export` refuse it with the remedy, and the next
+  write raises it to 1.18.0, appends one `format_upgrades` entry (with
+  `bundle.CHANGES_ADDED_IN["1.18.0"]`) and logs every filled value in `eligibility_rederived`
+  (`value_state: filled`, eligible false → true), as 1.3.0 did. A 1.0.0/1.1.0 bundle without
+  `processed_outputs` keeps its label on a save and is never filled.
+- **`format_upgrades[].statement` may be up to 6000 characters** (4000 before): an older bundle's
+  statement appends every later version's note, and with the run lists of 1.11.0–1.16.0 it passed
+  4000 once 1.18.0's note was added.
+- **A fill rests on hand-editable inputs.** The candidates, evidence and decisions a fill is derived
+  from live in `bundle.json` like everything else, so an edit to them moves the fill on the next
+  derivation; the validator re-derives every fill from what the bundle holds, which proves the fill
+  follows its rule, not that the inputs are what the import read (the same trust every derived state
+  here has).
+- **Known pre-existing behaviour, unchanged:** CONFIRMED values compose into a merged group with
+  partial coverage (one run confirmed, another with nothing for the field) as they did before
+  1.18.0; only a fill must cover every measured run.
+- **Known gap:** a field a rule filled for some runs of a group and that is optional is asked only
+  through `group_unusable_fills`; a fill that no group holds (a run outside every live group) is
+  neither composed nor asked, as an extracted value was before.
+- **Not in this slice:** the reading fills (`reading_stated`, `reading_inferred`), the folder and
+  people fills, the end review (`bundle review`), and SKILL.md (slices 2–4 of the design).
 
 ## 10. Exit codes (`isaac import` / `isaac bundle`)
 

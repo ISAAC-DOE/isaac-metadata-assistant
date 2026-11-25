@@ -98,7 +98,8 @@ def test_c1_record_overrides_are_an_allowlist():
 @pytest.mark.parametrize("command", [["bundle", "build-records"], ["bundle", "validate"], ["bundle", "export", "--out", "OUT"]])
 def test_i1_an_edited_eligibility_is_refused_by_every_record_command(bdir, tmp_path, capsys, command):
     b = json.loads((bdir / "bundle.json").read_text())
-    c = next(c for c in b["candidates"] if c["target_field_path"])
+    # 1.18.0 (DEC-96): a filled value is eligible already; edit one that is not
+    c = next(c for c in b["candidates"] if c["target_field_path"] and not c["eligibility_for_official_record"]["eligible"])
     c["eligibility_for_official_record"] = {"eligible": True, "reason": "edited"}
     (bdir / "bundle.json").write_bytes(B.encode(b))
     argv = [a if a != "OUT" else str(tmp_path / "out") for a in command]

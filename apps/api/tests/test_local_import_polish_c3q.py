@@ -46,6 +46,15 @@ NAME = "context.electrochemistry.electrolyte.name"
 GOLDEN_IDS = (114, "3bf65cb80750510688304b08df0911fcc0bb57debff05686dbaf46b01e50321e")
 
 
+def filled_out_ids(bundle) -> set[str]:
+    """1.18.0 (DEC-96): the ids of questions that dropped out of the open list ONLY because a registered rule filled
+    every target (here system.domain, isaac.fill.domain_from_acquisition.v1). Their ids are kept, under
+    ``consolidate(include_answered=True)``; adding them back is how the golden ids still pin that no id moved."""
+    answered = Q.consolidate(bundle, include_answered=True, explain_counter=False)
+    return {q["question_id"] for q in answered["questions"]
+            if q.get("targets") and len(Q.filled_targets(bundle, [t["id"] for t in q["targets"]])) == len(q["targets"])}
+
+
 def _run(capsys, *argv):
     code = cli.main([str(a) for a in argv])
     cap = capsys.readouterr()
@@ -95,6 +104,9 @@ def test_every_question_id_of_the_synthetic_grouped_bundle_is_unchanged(grouped)
     ids = sorted(q["question_id"] for q in questions
                  if q["kind"] != L.KIND and q["question_id"] != Q.potential_scale_question_id()
                  and not q.get("sample_family"))
+    filled = filled_out_ids(M.load(grouped))
+    assert len(filled) == 1 and not filled & set(ids)  # 1.18.0: the domain question, filled, not asked
+    ids = sorted(set(ids) | filled)
     assert (len(ids), hashlib.sha256("\n".join(ids).encode()).hexdigest()) == GOLDEN_IDS
     # each sample question asks only questions above, every one of which keeps its id (ZZ1, ZZ2, ZZ3: three each)
     families = [q for q in questions if q.get("sample_family")]

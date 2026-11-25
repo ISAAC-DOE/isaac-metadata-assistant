@@ -30,7 +30,7 @@ from isaac_api.local_import import questions as Q
 from isaac_api.local_import import records as R
 
 from test_local_import_grouping_cli import FIXTURE, _folder
-from test_local_import_polish_c3q import GOLDEN_IDS, SCALE, SETPOINT, _group_of_run, _miss
+from test_local_import_polish_c3q import GOLDEN_IDS, SCALE, SETPOINT, _group_of_run, _miss, filled_out_ids
 from test_local_import_polish_c4a import _add_athena, _approve, _exported
 from test_local_import_records import (  # noqa: F401  (fixtures)
     BY, SEMANTICS, _cand, _decide_everything, bdir, fake_upstream, pristine)
@@ -247,7 +247,9 @@ def test_an_unknown_question_is_still_not_found(grouped, capsys):
 def test_open_ids_are_unchanged_and_an_answered_question_keeps_its_id(grouped, capsys):
     payload = Q.consolidate(M.load(grouped))
     ids = _ids(payload)
-    assert (len(ids), hashlib.sha256("\n".join(ids).encode()).hexdigest()) == GOLDEN_IDS
+    # 1.18.0 (DEC-96): the one question a rule filled every target of keeps its id among the answered
+    assert (len(set(ids) | filled_out_ids(M.load(grouped))),
+            hashlib.sha256("\n".join(sorted(set(ids) | filled_out_ids(M.load(grouped)))).encode()).hexdigest()) == GOLDEN_IDS
     assert _run(capsys, *_absorber_argv(grouped))[0] == 0
     b = M.load(grouped)
     assert set(_ids(Q.consolidate(b))) == set(ids) - {ABSORBER}

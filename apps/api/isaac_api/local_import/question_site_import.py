@@ -115,6 +115,8 @@ class _Ctx:
         qid, field = cover.get("question_id"), cover.get("field")
         q = Q.question(self.open, qid)
         if q is None:
+            if self.filled_cover(cover):
+                return True  # 1.18.0: its targets were FILLED by a rule, not answered: the scientist's answer is recorded
             # C1: a sample question leaves the open list once only one of its electrodes is open; its answer still
             # records on the ones still open (decide --question: never on one answered on its own question)
             return self.sample_question(qid) and any(Q.question(self.open, m) is not None
@@ -122,6 +124,25 @@ class _Ctx:
         if q["kind"] == "condition_label":  # its targets are the runs still proposed a label
             return bool(q.get("proposals"))
         return all(bool(Q.targets_for(self.open, qid, sc, field)) for sc in list(cover.get("only_scopes") or ()) or [None])
+
+    def filled_cover(self, cover: Mapping) -> bool:
+        """1.18.0 (DEC-96): the cover's question is no longer open only because a registered rule FILLED its targets
+        (no scientist answered them): in every scope (and field) the call names, EVERY target is filled. Such an answer
+        is a correction of the fill, never "no longer asked", and ``decide --question`` records it (it wins). When any
+        target was answered by a scientist since (the question is not open, so none is open), the card is not this:
+        ``decide --question`` would write over that newer answer, so it is reported as answered since, as before."""
+        from . import questions as Q
+
+        if self._answered is None:
+            self._answered = Q.consolidate(self.bundle, include_answered=True, explain_counter=False)
+        qid, field = cover.get("question_id"), cover.get("field")
+        if Q.question(self._answered, qid) is None:
+            return False
+        for sc in list(cover.get("only_scopes") or ()) or [None]:
+            ids = Q.targets_for(self._answered, qid, sc, field)
+            if not ids or len(Q.filled_targets(self.bundle, ids)) != len(ids):
+                return False
+        return True
 
     def sample_question(self, qid: str | None) -> bool:
         """Whether ``qid`` is a sample question (C1: ``sample_family``), open or answered."""

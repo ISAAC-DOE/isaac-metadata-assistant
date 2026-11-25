@@ -120,7 +120,10 @@ def test_the_same_disagreement_in_a_bundle_of_this_version_is_invalid_not_stale(
 def test_build_records_rederives_under_the_lock_and_lists_what_only_this_build_composes(old_bundle):
     b, cid = old_bundle
     result = R.build_records(b)
-    assert [x["id"] for x in result["eligibility_rederived_now"]] == [cid]
+    # 1.18.0 (DEC-96): the same re-derivation also logs each value this build FILLS (the old build asked it); the
+    # newly-writable set-point is still the one value whose eligibility moved for the 1.3.0 reason
+    assert [x["id"] for x in result["eligibility_rederived_now"] if x["value_state"] != B.STATE_FILLED] == [cid]
+    assert all(x["eligible_now"] for x in result["eligibility_rederived_now"] if x["value_state"] == B.STATE_FILLED)
     data = _json(b)
     assert data["format_version"] == B.FORMAT_VERSION and B.validate_bundle(data) == []
     [log] = data["eligibility_rederived"]
@@ -203,7 +206,9 @@ def test_a_bundle_the_committed_old_build_made_is_stale_then_rederived(tmp_path,
     out = capsys.readouterr().out
     assert out.startswith("STALE:") and cid in out
     result = R.build_records(b)
-    assert [x["id"] for x in result["eligibility_rederived_now"]] == [cid]
+    # 1.18.0 (DEC-96): the re-derivation also logs each value this build FILLS; the set-point is still the one value
+    # whose eligibility moved for the 1.3.0 reason
+    assert [x["id"] for x in result["eligibility_rederived_now"] if x["value_state"] != B.STATE_FILLED] == [cid]
     [d] = result["drafts"]
     comp = json.loads((b / R.DRAFTS_DIR / f"{d['group_id']}.composition.json").read_text())
     assert [x["candidate_id"] for x in comp["composed_only_by_this_build"]] == [cid]

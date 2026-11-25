@@ -57,15 +57,17 @@ def _run(capsys, *argv):
 
 
 def test_the_version_follows_1_16_0_by_the_existing_mechanism():
-    assert B.FORMAT_VERSION == "1.17.0" == B._VERSION_ORDER[-1] and B._VERSION_ORDER[-2] == "1.16.0"
+    # 1.18.0 (DEC-96) follows 1.17.0 by the same mechanism: read by position, as the 1.16.0 test does
+    assert B._VERSION_ORDER.index("1.17.0") == B._VERSION_ORDER.index("1.16.0") + 1
     schema = B.bundle_schema()
-    assert schema["properties"]["format_version"]["enum"][-2:] == ["1.16.0", "1.17.0"]
+    enum = schema["properties"]["format_version"]["enum"]
+    assert enum.index("1.17.0") == enum.index("1.16.0") + 1
     assert "1.17.0" in schema["properties"]["format_version"]["description"]
     blocks = [b for b in schema.get("allOf") or ()
               if (b.get("if") or {}).get("properties", {}).get("format_version", {}).get("const") == "1.17.0"]
     assert blocks and blocks[0]["then"]["required"] == ["processed_outputs"]
     assert "consents" in schema["properties"] and "consent" in schema["$defs"]
-    assert B.changes_since("1.16.0") == [B.CHANGES_ADDED_IN["1.17.0"]]
+    assert B.changes_since("1.16.0")[0] == B.CHANGES_ADDED_IN["1.17.0"]
     assert "consent" in B.CHANGES_ADDED_IN["1.17.0"] and M.PENDING_EXPOSURES_FILE in B.CHANGES_ADDED_IN["1.17.0"]
 
 
@@ -76,7 +78,7 @@ def test_an_older_bundle_stays_valid_and_its_first_write_says_it_was_upgraded(bd
     assert B.validate_bundle(json.loads((bdir / "bundle.json").read_text())) == []
     M.record_consent(bdir, by="SYN Scientist")
     saved = json.loads((bdir / "bundle.json").read_text())
-    assert saved["format_version"] == "1.17.0" and B.validate_bundle(saved) == []
+    assert saved["format_version"] == B.FORMAT_VERSION and B.validate_bundle(saved) == []
     [u] = [u for u in saved.get("format_upgrades") or () if u.get("from_format_version") == "1.16.0"]
     assert B.CHANGES_ADDED_IN["1.17.0"] in u["statement"]
 
@@ -91,7 +93,7 @@ def test_the_1_14_0_builds_bundle_is_read_by_status_and_upgraded_by_recording_co
     code, text, _ = _run(capsys, "bundle", "consent", str(out), "--by", "SYN Scientist")
     assert code == 0
     saved = json.loads((out / "bundle.json").read_text())
-    assert saved["format_version"] == "1.17.0" and B.validate_bundle(saved) == []
+    assert saved["format_version"] == B.FORMAT_VERSION and B.validate_bundle(saved) == []
     assert [c["given_by"]["name"] for c in saved["consents"]] == ["SYN Scientist"]
 
 

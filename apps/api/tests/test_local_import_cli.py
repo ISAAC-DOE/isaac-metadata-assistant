@@ -382,7 +382,8 @@ def test_show_returns_one_object_or_not_found(imported, capsys):
 def test_check_refuses_a_tampered_bundle(imported, tmp_path, capsys):
     out, bundle = imported
     tampered = json.loads(json.dumps(bundle))
-    target = next(c for c in tampered["candidates"] if c["value_state"] == "candidate_extracted")
+    # 1.18.0 (DEC-96): the undisputed parser values are filled; a hand-written confirmation is refused all the same
+    target = next(c for c in tampered["candidates"] if c["value_state"] in ("candidate_extracted", "filled"))
     target["value_state"] = "scientist_confirmed"
     (tmp_path / "bundle.json").write_bytes(B.encode(tampered))
     code, stdout, _ = _run(capsys, "bundle", "check", str(tmp_path))

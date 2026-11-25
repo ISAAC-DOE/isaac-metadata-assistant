@@ -12,9 +12,10 @@ deterministic schema validators decide. A bundle carries the first three and is
 judged by none of the official validators — it is not a record.
 
 THE STATE RULE, IN ONE SENTENCE: parser output can produce only
-:data:`PARSER_STATES`; an AI interpretation can lift a value to ``needs_review`` and
-never higher; only a ``scientist_decisions`` entry produces ``scientist_confirmed``
-or ``rejected``. The validator recomputes this for every value and refuses a bundle
+:data:`PARSER_STATES`; a registered fill rule (:data:`FILL_RULES`, 1.18.0) makes an
+undecided value ``filled``; an AI interpretation alone can lift a value to ``needs_review``
+and never higher; only a ``scientist_decisions`` entry produces ``scientist_confirmed``
+or ``rejected``, and a decision always wins over a fill. The validator recomputes this for every value and refuses a bundle
 whose stored state disagrees, so a hand-edited ``"value_state":
 "scientist_confirmed"`` is a schema-valid but contract-INVALID bundle.
 """
@@ -135,7 +136,16 @@ FORMAT_ID = "isaac.local-import-bundle"
 #: an older bundle is upgraded by the next write, never by a look. ``format_upgrades[].statement`` may be up to 4000
 #: characters (3000 before: the statement of a 1.7.0 bundle's upgrade, which appends every later version's note, passed
 #: it). A 1.16.0 validator refuses the new section and the longer statement, hence the version. Nothing becomes newly writable; the upgrade is disclosed (:data:`CHANGES_ADDED_IN`).
-FORMAT_VERSION = "1.17.0"
+#: 1.18.0 (the project owner's decision of 2026-11-25, "fill first, review at the end",
+#: ``docs/fill-first-design-2026-11-25.md``; DEC-96): the value state ``filled`` (:data:`STATE_FILLED`) and the
+#: optional ``candidates[].fill`` / ``missing_values[].fill`` block. A value a registered fill rule supports
+#: (:data:`FILL_RULES`: :data:`FILL_PARSER_EXACT_RULE_ID`, :data:`FILL_DOMAIN_RULE_ID`) and no scientist decided is
+#: ``filled``: eligible, composed into a draft as ``inferred`` with a derivation entry naming its rule, and not asked.
+#: Derived, never trusted: the validator re-derives it and refuses a stored ``filled`` no rule gives. A scientist
+#: decision always wins. A 1.2.0-1.17.0 bundle whose values this build fills is STALE (:func:`stale_eligibility`)
+#: until its next write, which logs each moved value in ``eligibility_rederived``; the upgrade is disclosed
+#: (:data:`CHANGES_ADDED_IN`).
+FORMAT_VERSION = "1.18.0"
 #: The electrochemical control mode. Its allowed values are the official schema's enum (read at
 #: runtime by :func:`value_problem`); the schema's conditional rules key the set-point a record
 #: requires on it (:func:`required_record_paths`). Never defaulted, never derived.
@@ -161,7 +171,7 @@ VALUE_IDS_APPEND_FROM = "1.5.0"
 IMPORT_RULES_ADDED_IN: Mapping[str, tuple] = {
     "1.4.0": (("generic:ssrl_xdc_v1", "ssrl_xdc_scan_start_v1"),),
 }
-_VERSION_ORDER = ("1.0.0", "1.1.0", "1.2.0", "1.3.0", "1.4.0", "1.5.0", "1.6.0", "1.7.0", "1.8.0", "1.9.0", "1.10.0", "1.11.0", "1.12.0", "1.13.0", "1.14.0", "1.15.0", "1.16.0", "1.17.0")
+_VERSION_ORDER = ("1.0.0", "1.1.0", "1.2.0", "1.3.0", "1.4.0", "1.5.0", "1.6.0", "1.7.0", "1.8.0", "1.9.0", "1.10.0", "1.11.0", "1.12.0", "1.13.0", "1.14.0", "1.15.0", "1.16.0", "1.17.0", "1.18.0")
 #: A change a format version made that moves no eligibility and adds no import rule, but that the
 #: first save by a newer build still DISCLOSES in its ``format_upgrades`` entry (never silently).
 CHANGES_ADDED_IN: Mapping[str, str] = {
@@ -200,6 +210,10 @@ CHANGES_ADDED_IN: Mapping[str, str] = {
     "1.17.0": ("1.17.0 keeps the scientist's consent to Claude reading these files, and their name (consents; `bundle "
                "consent`, `bundle status`); a read no longer writes bundle.json: the values it prints go to "
                "exposures.pending.jsonl, folded in by the next write"),
+    "1.18.0": ("1.18.0 fills, without asking, a value a registered rule supports and no scientist decided (value state "
+               "filled, rules isaac.fill.parser_exact.v1, isaac.fill.stored_convention.v1, "
+               "isaac.fill.domain_from_acquisition.v1): it goes into a draft as inferred, naming its rule, for review at "
+               "the end, and any decision wins over it"),
 }
 #: A field composed into a draft only beside another of the SAME run (interim decision for the
 #: set-point, pending domain-owner review; ``records.compose_group`` applies it). The CURRENT
@@ -365,6 +379,12 @@ STATE_SCIENTIST_CONFIRMED = "scientist_confirmed"
 STATE_REJECTED = "rejected"
 STATE_UNMAPPED = "unmapped"
 STATE_MISSING = "missing"
+#: 1.18.0 (DEC-96, the owner's decision of 2026-11-25): a value a registered fill rule (:data:`FILL_RULES`)
+#: supports and no scientist decided. Eligible (:func:`eligibility_for_official_record`), composed as ``inferred``
+#: with a derivation entry naming the rule (``records.compose_group``), not asked (``questions.consolidate``), and
+#: reviewed by the scientist at the end. NEVER a parser ``extracted_state`` (:data:`PARSER_STATES`): only
+#: :func:`derive_value_state` gives it, and the validator re-derives it.
+STATE_FILLED = "filled"
 
 VALUE_STATES = frozenset(
     {
@@ -372,6 +392,7 @@ VALUE_STATES = frozenset(
         STATE_CANDIDATE_EXTRACTED,
         STATE_NEEDS_REVIEW,
         STATE_CONFLICTING,
+        STATE_FILLED,
         STATE_SCIENTIST_CONFIRMED,
         STATE_REJECTED,
         STATE_UNMAPPED,
@@ -393,6 +414,94 @@ PARSER_STATES = frozenset(
 #: in it: an interpretation cannot settle a disagreement between sources, so it stays
 #: ``conflicting`` until a scientist chooses.
 _AI_LIFTABLE = frozenset({STATE_MISSING, STATE_UNMAPPED, STATE_CANDIDATE_EXTRACTED})
+
+#: The parser states a fill rule may fill (never ``conflicting``, ``unmapped`` or ``source_recorded``): a value the
+#: readers extracted, a build-time suggestion the readers HOLD for review only because it is a suggestion (the
+#: technique rule, :func:`fill_rule_for`), and a missing value a rule supplies (``system.domain``).
+_FILLABLE = frozenset({STATE_CANDIDATE_EXTRACTED, STATE_NEEDS_REVIEW, STATE_MISSING})
+
+# --- fill rules (1.18.0, DEC-96) ---------------------------------------------------------------------------------
+#
+# THE OWNER'S DECISION (2026-11-25, docs/fill-first-design-2026-11-25.md): do not ask what the evidence already
+# answers. A value a REGISTERED rule supports, and that no scientist decided, is filled; the scientist reviews the
+# final records at the end and changes anything. CLAUDE.md §5 ("a field may be inferred only by a documented/stored
+# rule") holds by construction: every fill names its rule here, carries its evidence into the draft, and is
+# re-derived by the validator. A scientist decision (any, a defer included) always wins over a fill.
+
+#: A value a deterministic reader read from the files, with no disagreement (see :data:`FILL_PARSER_EXACT_RULE`).
+FILL_PARSER_EXACT_RULE_ID = "isaac.fill.parser_exact.v1"
+FILL_PARSER_EXACT_RULE = (
+    f"{FILL_PARSER_EXACT_RULE_ID}: a value a deterministic reader of this build, or this build's own instrument-"
+    "configuration rule, read from the files with no disagreement, no contradicting witness and no other open or "
+    "differing reading of the same field for the same run is filled (a reader's own term mapping, such as the logbook "
+    "lexicon, is a reading); never an inferred value, a convention another beamtime resolved, a file-name number read by its position before the naming is settled, the potential "
+    "scale, the control mode, a local clock time, a beamtime fact on a run-level field, or a value an AI reading "
+    "disagrees with."
+)
+#: ``system.domain`` = ``experimental`` from the acquisition files (see :data:`FILL_DOMAIN_RULE`).
+FILL_DOMAIN_RULE_ID = "isaac.fill.domain_from_acquisition.v1"
+FILL_DOMAIN_RULE = (
+    f"{FILL_DOMAIN_RULE_ID}: system.domain is experimental when every run of the import (a reference or alignment "
+    "scan included) was read by a beamline acquisition reader (SPEC, SSRL XDC, XDI, MCA, XES table) and no file is a "
+    "calculation output; otherwise nothing is filled."
+)
+#: A value a REVIEWED stored convention of the engine derived (see :data:`FILL_STORED_CONVENTION_RULE`).
+FILL_STORED_CONVENTION_RULE_ID = "isaac.fill.stored_convention.v1"
+#: The stored conventions :data:`FILL_STORED_CONVENTION_RULE_ID` fills, each reviewed by the domain owner. ONE today:
+#: DEC-70, a measurement whose own file name says it was dry or had no electrolyte (``NoElectrolyte`` is read as the
+#: medium ``none`` by the file-name reader's own ``bl15.filenames.electrolyte_negation.v1``: no second environment
+#: rule) is ``ex_situ``; confirmed by the domain owner on 2026-10-12 and by the scientist on a real beamtime. NOT the
+#: DEC-71 logbook lexicon (``bl15.notes.*_statement.v1``): its readings are excluded until a reading rule (slice 2)
+#: checks the sentence it rests on.
+STORED_CONVENTION_RULES = frozenset({"bl15.environment.dry_sample_is_ex_situ.v1"})
+FILL_STORED_CONVENTION_RULE = (
+    f"{FILL_STORED_CONVENTION_RULE_ID}: a value one of the engine's reviewed stored conventions derived from what a "
+    "file states (today only bl15.environment.dry_sample_is_ex_situ.v1, DEC-70: a measurement whose own file name says "
+    "dry or NoElectrolyte is ex_situ) is filled under every exclusion of isaac.fill.parser_exact.v1, naming the "
+    "convention."
+)
+#: THE REGISTERED FILL RULES, ``rule id -> rule text``. A stored ``fill.rule_id`` outside it is refused by the schema.
+FILL_RULES: Mapping[str, str] = {
+    FILL_PARSER_EXACT_RULE_ID: FILL_PARSER_EXACT_RULE,
+    FILL_STORED_CONVENTION_RULE_ID: FILL_STORED_CONVENTION_RULE,
+    FILL_DOMAIN_RULE_ID: FILL_DOMAIN_RULE,
+}
+#: THE FILL RULE SET a bundle was derived under, stored as ``fill_rule_set`` by every writer of a bundle this build
+#: fills. Raised whenever a rule is added or any rule's exclusions change, so a bundle an earlier rule set wrote (same
+#: format label) is STALE, never INVALID, and its next write re-derives and logs each moved value
+#: (:func:`fill_rule_set_stale`). 1: slice 1 of DEC-96 (parser_exact, stored_convention, domain_from_acquisition).
+FILL_RULE_SET = 1
+#: The format a bundle STORES fills at. A 1.2.0-1.17.0 bundle (one the next save raises to this build's version) is
+#: derived with fills too, so its stored states disagree with this build's: STALE, not INVALID (:func:`stale_eligibility`).
+FILLS_FROM_FORMAT = "1.18.0"
+#: :data:`FILL_DOMAIN_RULE_ID`: the run source types an acquisition reader gives (the engine's SPEC reader and the
+#: generic SSRL XDC, XDI, MCA and XES-table readers). A headerless two-column run is NOT one: such a file may be a
+#: computed or exported spectrum as well as a measurement, so it blocks the fill.
+ACQUISITION_RUN_SOURCE_TYPES = frozenset({
+    "spec_acquisition", "generic:ssrl_xdc_v1", "generic:xdi_v1", "generic:mca_v1", "generic:xes_tab_v1"})
+#: :data:`FILL_DOMAIN_RULE_ID`: the READERS that read a beamline acquisition. The rule rests on the reader that read
+#: each run's acquisition file, not on the classifier's run type: a reference pellet (``standard_or_reference``) or an
+#: alignment scan (``alignment``) the SPEC reader read is a beamline measurement too (measured on a real BL15-2
+#: beamtime: 90 + 3 + 1 runs, every one read by ``bl15_spec_acquisition_v1``). The headerless two-column reader
+#: (``two_column_reader_v1``) is NOT one.
+ACQUISITION_READER_IDS = frozenset({
+    "bl15_spec_acquisition_v1", "ssrl_xdc_reader_v1", "xdi_reader_v1", "mca_reader_v1", "xes_tab_reader_v1"})
+#: The one file-name reading whose meaning depends on token POSITIONS (the order of the bare numbers in a name):
+#: ``bl15.filenames.bare_integer_ordinal.v1`` makes the first bare integer the legacy number and the second the
+#: sample/electrode number. Every other file-name reading is recognised by its own SHAPE or word, wherever it sits
+#: (``bl15/filenames.py``: "WHY NOT POSITIONAL"; ``dry``, ``NoElectrolyte`` by the medium/state lexicon, ``100mV`` by
+#: its unit), so a misread counter position cannot change it. A position-read value is filled only once the naming is
+#: settled (:func:`naming_check`).
+POSITION_DEPENDENT_NAME_RULES = frozenset({"bl15.filenames.bare_integer_ordinal.v1"})
+#: :data:`FILL_DOMAIN_RULE_ID`: source classifications that are a calculation's output. The classifier gives none
+#: today (``bl15.classify``), so the rule rests on the run readers above; a classification added here blocks it.
+CALCULATION_OUTPUT_SOURCE_TYPES: frozenset = frozenset()
+DOMAIN_PATH = "system.domain"
+DOMAIN_FILL_VALUE = "experimental"
+#: :data:`FILL_PARSER_EXACT_RULE_ID` never fills these (the review's findings, adopted): the potential scale (a
+#: judgment unless a file or logbook line states it, DEC-88's gate) and the control mode (``control_mode_by_run``,
+#: which the questions read, counts only confirmed modes, so questions and composer stay in agreement).
+PARSER_EXACT_NEVER_FILLS = frozenset({"context.electrochemistry.potential_scale", CONTROL_MODE_PATH})
 
 #: ``SemanticCandidate.review_status`` -> the bundle's extracted state. THE ONE
 #: MAPPING from the existing contract; see the contract doc's table.
@@ -416,13 +525,16 @@ AUTHORITIES: Mapping[str, str] = {
     "extraction_interpretation": (
         "What the deterministic readers, stored rules and (later) AI interpretations "
         "made of the evidence: candidates[] values, conflicts[] recommendations, "
-        "ai_interpretations[]. Suggestions only; an AI interpretation can raise a value "
-        "to needs_review and never higher."
+        "ai_interpretations[]. Since 1.18.0 (DEC-96) a value a registered fill rule "
+        "supports (fill.rule_id) and no scientist decided is filled: it goes into a draft "
+        "as inferred, naming its rule, and the scientist reviews it at the end. Anything "
+        "else stays a suggestion; an AI interpretation alone can raise a value to "
+        "needs_review and never higher."
     ),
     "scientist_confirmation": (
         "scientist_decisions[] only. The sole source of scientist_confirmed and "
-        "rejected. Recorded by the local user; this build cannot verify identity, and "
-        "decided_by.basis says so."
+        "rejected, and a decision always wins over a fill. Recorded by the local user; "
+        "this build cannot verify identity, and decided_by.basis says so."
     ),
     "deterministic_schema_validation": (
         "The official ISAAC schema and validators (`isaac validate --official`, "
@@ -1807,22 +1919,30 @@ def derive_value_state(
     *,
     decision: Mapping | None,
     interpreted: bool,
+    fill_rule: str | None = None,
 ) -> str:
-    """The state a value is in, from what the parser found plus what was recorded.
+    """The state a value is in, from what the parser found plus what was recorded. IN THIS ORDER:
 
-    * a scientist decision decides: ``reject`` -> ``rejected``; ``confirm``,
-      ``correct``, ``choose_reading``, ``provide_value`` or ``approve`` ->
-      ``scientist_confirmed``; ``needs_changes`` -> ``needs_review``; ``defer``
-      decides nothing;
-    * otherwise an AI interpretation lifts ``missing``/``unmapped``/
-      ``candidate_extracted`` to ``needs_review`` — never higher, and never a conflict;
-    * otherwise the parser's own state stands.
+    1. a scientist decision decides: ``reject`` -> ``rejected``; ``confirm``,
+       ``correct``, ``choose_reading``, ``provide_value`` or ``approve`` ->
+       ``scientist_confirmed``; ``needs_changes`` -> ``needs_review``; ``defer``
+       decides no state, but it is still a decision: it blocks a fill (step 2);
+    2. otherwise, with no decision at all, a registered fill rule (``fill_rule``, from
+       :func:`fill_rule_for`, 1.18.0) makes ``candidate_extracted`` / ``needs_review`` / ``missing``
+       ``filled`` — never a conflict. The rule itself already refuses a value an AI reading
+       DISAGREES with, so an AGREEING reading never stops a fill and a disagreeing one always does;
+    3. otherwise an AI interpretation lifts ``missing``/``unmapped``/
+       ``candidate_extracted`` to ``needs_review`` — never higher, and never a conflict;
+    4. otherwise the parser's own state stands.
 
     ``extracted_state`` outside :data:`PARSER_STATES` is refused: that is how a
-    parser-produced ``scientist_confirmed`` is made impossible rather than unlikely.
+    parser-produced ``scientist_confirmed`` (or ``filled``) is made impossible rather than unlikely.
+    A ``fill_rule`` outside :data:`FILL_RULES` is refused the same way.
     """
     if extracted_state not in PARSER_STATES:
         raise ValueError(f"{extracted_state!r} is not a state parser output can produce")
+    if fill_rule is not None and fill_rule not in FILL_RULES:
+        raise ValueError(f"{fill_rule!r} is not a registered fill rule")
     kind = decision.get("decision") if decision is not None else None
     if kind is not None and kind not in NEUTRAL_DECISIONS:
         if kind == "reject":
@@ -1831,6 +1951,8 @@ def derive_value_state(
             return STATE_NEEDS_REVIEW
         if kind in CONFIRMING_DECISIONS:
             return STATE_SCIENTIST_CONFIRMED
+    if fill_rule is not None and decision is None and extracted_state in _FILLABLE:
+        return STATE_FILLED
     if interpreted and extracted_state in _AI_LIFTABLE:
         return STATE_NEEDS_REVIEW
     return extracted_state
@@ -1843,36 +1965,48 @@ def eligibility_for_official_record(
     value: Any,
     writable_paths: frozenset[str],
 ) -> dict:
-    """``{eligible, reason}`` — CONSERVATIVE BY DESIGN.
+    """``{eligible, reason}``.
 
-    Eligible ONLY when a scientist confirmed the value, there is a value, and this
-    build has a write route for its target path. Nothing a parser or an AI produced is
-    ever eligible on its own: even a ``candidate_extracted`` value the server would let
-    a person PROPOSE still needs a person to accept it there (the accept route's
-    trusted-actor gate). "Eligible" means "may be carried into a draft for review and
-    ``isaac export``" — never "is official".
+    Eligible ONLY when a scientist confirmed the value OR a registered fill rule filled it
+    (``filled``, 1.18.0, DEC-96: the owner's decision of 2026-11-25, which replaces the earlier
+    "only scientist-confirmed" rule), there is a value, and this build has a write route for its
+    target path. Any other state is not eligible: a ``candidate_extracted`` value no rule fills,
+    and anything an AI reading alone gave. A filled value goes into a draft as ``inferred`` with a
+    derivation entry naming its rule, and the scientist reviews it at the end. "Eligible" means
+    "may be carried into a draft for review and ``isaac export``" — never "is official". For a
+    filled value ``value`` is the value its rule fills.
     """
-    if value_state != STATE_SCIENTIST_CONFIRMED:
+    if value_state not in (STATE_SCIENTIST_CONFIRMED, STATE_FILLED):
         return {
             "eligible": False,
             "reason": (
-                f"Not confirmed by a scientist (state: {value_state}). Only a "
-                "scientist-confirmed value can go toward an official record."
+                f"Not confirmed by a scientist and filled by no rule (state: {value_state}). Only a "
+                "scientist-confirmed or rule-filled value can go toward an official record."
             ),
         }
+    said = "Confirmed" if value_state == STATE_SCIENTIST_CONFIRMED else "Filled"
     if value is None:
-        return {"eligible": False, "reason": "Confirmed, but there is no value to carry."}
+        return {"eligible": False, "reason": f"{said}, but there is no value to carry."}
     if not target_field_path or target_field_path not in writable_paths:
         return {
             "eligible": False,
             "reason": (
-                "Confirmed, but this build has no write path for its official field, so "
+                f"{said}, but this build has no write path for its official field, so "
                 "it stays evidence."
             ),
         }
     problem = value_problem(target_field_path, value)
     if problem is not None:
-        return {"eligible": False, "reason": f"{UNFIT_REASON_PREFIX}{problem}"}
+        return {"eligible": False, "reason": f"{UNFIT_REASON_PREFIX if said == 'Confirmed' else 'Filled, but the value does not fit the official field: '}{problem}"}
+    if value_state == STATE_FILLED:
+        return {
+            "eligible": True,
+            "reason": (
+                "Filled by a registered rule from the evidence (no scientist decided it) and this build can write "
+                "its official field. It goes into a draft as inferred, naming its rule; the scientist reviews it at "
+                "the end, and it becomes official only through a reviewed draft and `isaac export`."
+            ),
+        }
     return {
         "eligible": True,
         "reason": (
@@ -1884,6 +2018,422 @@ def eligibility_for_official_record(
 
 #: How :func:`eligibility_for_official_record` begins the reason of a confirmed value its field refuses.
 UNFIT_REASON_PREFIX = "Confirmed, but the value does not fit the official field: "
+
+
+# --- which fill rule supports a value (1.18.0, DEC-96) ------------------------------------------------------------
+
+
+def fills_apply(bundle: Mapping) -> bool:
+    """Whether this build derives fills for ``bundle``: a bundle the next save labels with this build's version, i.e.
+    one that holds ``processed_outputs`` (every 1.2.0+ bundle; ``mutations.save_bundle`` raises exactly those). A
+    1.0.0 / 1.1.0 bundle without it keeps its older label on a save and is never filled. A 1.2.0-1.17.0 bundle is
+    derived with fills, so until its next write its stored states disagree with this build's: STALE
+    (:func:`stale_eligibility`), never INVALID."""
+    return "processed_outputs" in bundle
+
+
+def fill_rule_set_stale(bundle: Mapping) -> bool:
+    """Whether ``bundle`` STORES fills (1.18.0+) derived under another fill rule set than this build's
+    (an OLDER :data:`FILL_RULE_SET`, or none recorded): its stored fills may disagree with this build's, which is
+    STALE, not INVALID, and its next write re-derives and logs each moved value. A NEWER rule set is not stale: this
+    build cannot derive it, and the validator refuses it as it refuses a newer format."""
+    stored = bundle.get("fill_rule_set")
+    older = stored is None or (isinstance(stored, int) and not isinstance(stored, bool) and stored < FILL_RULE_SET)
+    return fills_apply(bundle) and fill_stored_at(bundle.get("format_version")) and older
+
+
+def fill_stored_at(version: str | None) -> bool:
+    """Whether a bundle labelled ``version`` STORES fills (:data:`FILLS_FROM_FORMAT` or later)."""
+    if version not in _VERSION_ORDER:
+        return False
+    return _VERSION_ORDER.index(version) >= _VERSION_ORDER.index(FILLS_FROM_FORMAT)
+
+
+def naming_question_open(bundle: Mapping) -> bool:
+    """Whether this beamtime's naming question (the grouping step's ``naming_counter_positions`` question, stored in
+    ``grouping_questions``) still has a position no scientist ruled on (a counter, ``set_counter_positions``, or not
+    one, ``set_not_counter_positions``). Read from the grouping step's own question and the decisions only — never
+    from ``questions.consolidate`` — with the same "open position" rule the consolidated question uses. While it is
+    open, a value read from a file-name token is never filled: a misread naming convention would fill every run
+    wrongly."""
+    from .grouping import LAST_POSITION, last_token_positions
+
+    said_counter: set = set()
+    for d in bundle.get("scientist_decisions") or ():
+        if (isinstance(d, Mapping) and d.get("decision") == "set_counter_positions"
+                and d.get("target") == {"kind": "experiment", "id": "experiment"}
+                and decider_name_problem((d.get("decided_by") or {}).get("name")) is None):
+            said_counter = {p for p in d.get("positions") or () if isinstance(p, int) and not isinstance(p, bool)}
+    said_not = set(not_counter_positions(bundle))
+    ruled = said_counter | said_not
+    for gq in bundle.get("grouping_questions") or ():
+        if not isinstance(gq, Mapping) or gq.get("kind") != "naming_counter_positions":
+            continue
+        asked = [int(p) for p in gq.get("positions") or () if isinstance(p, int) and not isinstance(p, bool)]
+        if not asked:
+            return True  # a counter question that names no position: open until a scientist answers it
+        if LAST_POSITION in asked and LAST_POSITION in said_counter:
+            asked = [p for p in asked if p != LAST_POSITION]
+        last_at = last_token_positions(bundle) if LAST_POSITION in asked else []
+        open_last = [p for p in last_at if p not in ruled]
+        if [p for p in asked if p not in ruled and not (p == LAST_POSITION and last_at and not open_last)]:
+            return True
+    return False
+
+
+def naming_check(bundle: Mapping) -> str:
+    """Where this beamtime's naming (counter-position) question stands, read from the grouping step's stored
+    questions and the decisions only: ``counter_question_open`` (a position no scientist ruled on), ``decided`` (a
+    ``set_counter_positions`` / ``set_not_counter_positions`` decision exists and nothing is open), ``grouped_no_counter
+    _question`` (the grouping step has run, ``grouping_questions`` is stored, and it found no counter ambiguity), or
+    ``not_grouped`` (the grouping step has not run: the import alone cannot say). A file-name value read by its
+    position (:data:`POSITION_DEPENDENT_NAME_RULES`) is filled only at ``decided`` or ``grouped_no_counter_question``,
+    so eligibility moves blocked -> filled as the workflow advances (import, then ``bundle group``, then the counter
+    answer). ``bundle status`` shows it."""
+    if naming_question_open(bundle):
+        return "counter_question_open"
+    if any(isinstance(d, Mapping) and d.get("decision") in ("set_counter_positions", NOT_COUNTER_DECISION)
+           and d.get("target") == {"kind": "experiment", "id": "experiment"}
+           and decider_name_problem((d.get("decided_by") or {}).get("name")) is None
+           for d in bundle.get("scientist_decisions") or ()):
+        return "decided"
+    return "grouped_no_counter_question" if isinstance(bundle.get("grouping_questions"), list) else "not_grouped"
+
+
+#: :func:`naming_check` outcomes under which a position-read file-name value may be filled.
+NAMING_SETTLED = frozenset({"decided", "grouped_no_counter_question"})
+
+
+def _position_dependent(e: Mapping) -> bool:
+    """A file-name witness whose value depends on token positions (:data:`POSITION_DEPENDENT_NAME_RULES`)."""
+    return _read_from_file_name(e) and any(
+        isinstance(n, Mapping) and n.get("rule_id") in POSITION_DEPENDENT_NAME_RULES for n in e.get("normalization") or ())
+
+
+def _bound_by_name_number(e: Mapping) -> bool:
+    """A LOGBOOK witness that reaches its run only through a number read by POSITION from the run's file name, the
+    sample/electrode number (``group_token``, the name's second bare integer): a sample section that lists no file
+    numbers (``historical_import``: ``logbook_by_sample`` / ``_section_reaches``, the reading's ``to`` holds a
+    ``section``, an integer ``sample_number`` and no ``file_numbers``; the candidate's rule then says "the number is the
+    only link"), or a beamtime sentence naming samples (``named_samples``, mapped onto the runs by the same token,
+    ``named_applies``). If that position is a run counter, the binding is wrong for every run it reaches, so such a
+    value is filled only once the naming is settled (:func:`naming_check`).
+
+    NOT position-gated, and why (round 4, checked against the code): a section that LISTS file numbers binds a run
+    through its ``legacy_number`` — the logbook's own File Number column equal to the number the name leads with. That
+    is a literal agreement of two sources, not a reading of the token's role, and no counter decision can change which
+    number is the legacy number: ``runs[].legacy_number`` is read once at import by the engine (``bl15/relate.py``,
+    the leading token) and nothing rewrites it; ``set_counter_positions`` / ``set_not_counter_positions`` are read only
+    by grouping (which runs are repeats of one measurement). Pinned by ``test_local_import_fill_first.py``."""
+    lexicon = _logbook_rule_ids()
+    for n in e.get("normalization") or ():
+        to = n.get("to") if isinstance(n, Mapping) else None
+        if not isinstance(to, Mapping) or n.get("rule_id") not in lexicon:
+            continue
+        number = to.get("sample_number")
+        if to.get("section") and not to.get("file_numbers") and isinstance(number, int) and not isinstance(number, bool):
+            return True
+        if not to.get("section") and to.get("named_samples"):
+            return True
+    return False
+
+
+def _read_from_file_name(e: Mapping) -> bool:
+    """A witness read from a FILE NAME (a ``filename`` / ``filename token N`` locator, or a file-name reader)."""
+    locator = str(e.get("locator") or "").strip().lower()
+    return locator.startswith("filename") or "filename" in str(e.get("method_id") or "").lower()
+
+
+def _same_fill_value(path: str | None, a: Any, b: Any) -> bool:
+    from .records import same_value  # local: records imports this module
+
+    return same_value(path, a, b)
+
+
+def run_reader_id(bundle: Mapping, run: Mapping, source_of: Mapping | None = None) -> str | None:
+    """The reader that read ``run``'s acquisition: a generic run's own reader, else the reader block of the engine
+    run's acquisition source."""
+    own = (run.get("reader") or {}).get("reader_id")
+    if own:
+        return own
+    if source_of is None:
+        source_of = {s.get("source_id"): s for s in bundle.get("sources") or ()}
+    return ((source_of.get(run.get("acquisition_source_id")) or {}).get("reader") or {}).get("reader_id")
+
+
+def _acquisition_only(bundle: Mapping) -> bool:
+    """:data:`FILL_DOMAIN_RULE_ID`'s evidence: at least one run, every run's acquisition read by an acquisition reader
+    (:data:`ACQUISITION_READER_IDS`: a reference or alignment scan the SPEC reader read counts), and no source
+    classified as a calculation output."""
+    runs = list(bundle.get("runs") or ())
+    source_of = {s.get("source_id"): s for s in bundle.get("sources") or ()}
+    if not runs or any(run_reader_id(bundle, r, source_of) not in ACQUISITION_READER_IDS for r in runs):
+        return False
+    return not any((s.get("classification") or {}).get("source_type") in CALCULATION_OUTPUT_SOURCE_TYPES
+                   for s in bundle.get("sources") or ())
+
+
+def fill_context(bundle: Mapping, decision_of: Mapping | None = None) -> dict:
+    """What :func:`fill_rule_for` reads from the whole bundle, read once per derivation."""
+    if decision_of is None:
+        decision_of = _decisions_by_target(bundle.get("scientist_decisions") or ())
+    ai: dict[tuple[str, str], list] = {}
+    for i in bundle.get("ai_interpretations") or ():
+        target = i.get("target") if isinstance(i, Mapping) else None
+        if isinstance(target, Mapping):
+            ai.setdefault((str(target.get("kind")), str(target.get("id"))), []).append(i.get("proposed_value"))
+    apply = fills_apply(bundle)
+    return {
+        "apply": apply,
+        "ai": ai,
+        "naming_settled": apply and naming_check(bundle) in NAMING_SETTLED,
+        "readings_of": _readings_of(bundle, decision_of) if apply else {},
+        "acquisition_only": apply and _acquisition_only(bundle),
+        "conflict_ids_of": conflict_ids_by_candidate(bundle),
+        "disputed": _disputed(bundle),
+        "writable": _writable_paths(),
+        "domain_stated": {c.get("value") for c in bundle.get("candidates") or ()
+                          if c.get("target_field_path") == DOMAIN_PATH and c.get("value") is not None},
+    }
+
+
+def _readings_of(bundle: Mapping, decision_of: Mapping) -> dict[tuple[str | None, str], list[tuple[str, Any]]]:
+    """``(run_id, path) -> [(candidate id, value)]`` of every candidate a scientist has not REJECTED (rejected
+    readings witness nothing). One other reading of the same field for the same run (or the beamtime) whose value
+    differs or is none — an open #D local start beside an #E epoch, say — means no fill: the design's "one dissenting
+    witness means no fill". For a BEAMTIME value only another beamtime reading counts here; a run's own dissent blocks
+    it for that run (:func:`fill_run_blocks`)."""
+    conflict_ids_of = conflict_ids_by_candidate(bundle)
+    out: dict[tuple[str | None, str], list[tuple[str, Any]]] = {}
+    for c in bundle.get("candidates") or ():
+        path = c.get("target_field_path")
+        if not path:
+            continue
+        d = candidate_decision(bundle, c, decision_of, conflict_ids_of)
+        if d is not None and d.get("decision") == "reject":
+            continue
+        out.setdefault((c.get("run_id"), path), []).append((c.get("candidate_id"), c.get("value")))
+    return out
+
+
+def _other_reading_dissents(c: Mapping, ctx: Mapping) -> bool:
+    path, rid, value = c.get("target_field_path"), c.get("run_id"), c.get("value")
+    readings = ctx["readings_of"]
+    # a BEAMTIME value is refused only by another beamtime reading: a run's own open or differing reading blocks it for
+    # that run alone (fill_run_blocks), so the groups without such a run still take it
+    pools = ([readings.get((None, path), [])] if rid is None
+             else [readings.get((rid, path), []), readings.get((None, path), [])])
+    return any(cid != c.get("candidate_id") and (v is None or not _same_fill_value(path, v, value))
+               for pool in pools for cid, v in pool)
+
+
+def fill_run_blocks(bundle: Mapping, decision_of: Mapping | None = None) -> dict[str, dict[str, list[tuple]]]:
+    """``{composer path: {run_id: [(kind, target id, value, decision kind or None)]}}``: every RUN-level candidate and
+    missing value of a field, with its governing decision. What a BEAMTIME-wide fill cannot reach for a run
+    (:func:`runs_a_fill_cannot_reach`); the composer (``records.compose_group``) and the questions
+    (``questions.group_unusable_fills``) both read it, so they agree."""
+    from .records import FIELD_REMAP  # local: records imports this module
+
+    if decision_of is None:
+        decision_of = _decisions_by_target(bundle.get("scientist_decisions") or ())
+    conflict_ids_of = conflict_ids_by_candidate(bundle)
+    out: dict[str, dict[str, list[tuple]]] = {}
+    for kind, section, key in (("candidate", "candidates", "candidate_id"), ("missing_value", "missing_values", "value_id")):
+        for o in bundle.get(section) or ():
+            path, rid = o.get("target_field_path"), o.get("run_id")
+            if not path or rid is None:
+                continue
+            d = (candidate_decision(bundle, o, decision_of, conflict_ids_of) if kind == "candidate"
+                 else decision_of.get((kind, o[key])))
+            out.setdefault(FIELD_REMAP.get(path, path), {}).setdefault(rid, []).append(
+                (kind, o[key], o.get("value") if kind == "candidate" else None, (d or {}).get("decision")))
+    return out
+
+
+def runs_a_fill_cannot_reach(rows_by_run: Mapping[str, Sequence[tuple]], path: str, value: Any) -> dict[str, list[str]]:
+    """``{run_id: [the run's own target ids that stop it]}`` for a BEAMTIME-wide fill of ``value`` at ``path``: a run
+    with a scientist's decision on its own target for the field (a ``defer`` included: a decision always wins; a
+    ``reject`` of a reading is no statement about the value), or with an undecided reading of its own that is open
+    (no value) or differs. Such a run takes no fill; its group is asked."""
+    out: dict[str, list[str]] = {}
+    for rid, rows in rows_by_run.items():
+        why = [tid for kind, tid, v, dk in rows
+               if dk != "reject" and (dk is not None
+                                      or (kind == "candidate" and (v is None or not _same_fill_value(path, v, value))))]
+        if why:
+            out[rid] = why
+    return out
+
+
+def _disputed(bundle: Mapping) -> set[tuple[str | None, str]]:
+    """``(run_id, path)`` pairs the SOURCES DISAGREE about: a conflicting candidate's, and every run a conflict names
+    (with its candidate's path). A fill never applies there, even to another candidate of the same run and field (an
+    epoch start time beside an open #D / #E disagreement, say): the scientist is asked."""
+    path_of = {c.get("candidate_id"): c.get("target_field_path") for c in bundle.get("candidates") or ()}
+    out: set[tuple[str | None, str]] = set()
+    for c in bundle.get("candidates") or ():
+        if c.get("extracted_state") == STATE_CONFLICTING and c.get("target_field_path"):
+            out.add((c.get("run_id"), c["target_field_path"]))
+    for cf in bundle.get("conflicts") or ():
+        path = path_of.get(cf.get("candidate_id"))
+        if path:
+            for rid in cf.get("run_ids") or [None]:
+                out.add((rid, path))
+    return out
+
+
+def _ai_disagrees(ctx: Mapping, key: tuple[str, str], path: str | None, value: Any) -> bool:
+    """An AI reading of this target that does not state ``value`` (another value, or none): it blocks a fill. A
+    reading that states the same value does not."""
+    return any(not (v is not None and _same_fill_value(path, v, value)) for v in ctx["ai"].get(key, ()))
+
+
+def _technique_suggestion(candidate: Mapping) -> bool:
+    """The build's own instrument-configuration rule (1.14.0, ``suggestions.TECHNIQUE_RULE_ID``): one beamtime
+    candidate for ``system.technique``, VALUED only when every run that records the technique states the same one,
+    and held for review only because the readers mark every build-time suggestion so. It is THIS build's rule about
+    THESE files (not a convention another beamtime resolved), so :data:`FILL_PARSER_EXACT_RULE_ID` counts it."""
+    return (candidate.get("statement_key") == "technique_from_configuration"
+            and _rule_id(candidate.get("rule")) == "isaac.suggest.technique_from_configuration.v1"
+            and candidate.get("target_field_path") == "system.technique" and candidate.get("run_id") is None)
+
+
+def _derive_rule_ids(c: Mapping) -> set[str]:
+    """The rule ids of every ``derive`` step on the candidate's file witnesses (a value an engine rule derived)."""
+    return {n.get("rule_id") for e in c.get("evidence") or () if e.get("method") != "ai_interpretation"
+            for n in e.get("normalization") or () if isinstance(n, Mapping) and n.get("step") == "derive"}
+
+
+def _inferred_derive_rule_ids(c: Mapping) -> set[str]:
+    """The ``derive`` steps that are INFERENCE, not reading: one whose rule is not the SAME witness's own reading
+    (normalize) rule, or one of the registered inference conventions (:data:`STORED_CONVENTION_RULES`). A reader
+    that maps its own term to the vocabulary writes a normalize step and then a derive step under ONE rule id (the
+    DEC-71 logbook lexicon, identified by its rule ids, :func:`_logbook_rule_ids`: a logbook flow-cell statement ->
+    ``flow_cell`` under ``bl15.notes.cell_type_statement.v1``): that is the reader reading, and counts as a reading."""
+    out: set[str] = set()
+    lexicon = _logbook_rule_ids()
+    for e in c.get("evidence") or ():
+        if e.get("method") == "ai_interpretation":
+            continue
+        steps = [n for n in e.get("normalization") or () if isinstance(n, Mapping)]
+        own = {n.get("rule_id") for n in steps if n.get("step") != "derive"}
+        for n in steps:
+            rid = n.get("rule_id")
+            if n.get("step") != "derive":
+                continue
+            if rid in STORED_CONVENTION_RULES or not (rid in own and rid in lexicon):
+                out.add(rid)
+    return out
+
+
+def _fill_exclusions_pass(bundle: Mapping, c: Mapping, ctx: Mapping) -> bool:
+    """THE EXCLUSIONS every candidate fill rule shares (:data:`FILL_PARSER_EXACT_RULE`,
+    :data:`FILL_STORED_CONVENTION_RULE`). Every exclusion is a test (``test_local_import_fill_first.py``)."""
+    from .records import RUN_ONLY_PATHS  # local: records imports this module
+
+    path, value = c.get("target_field_path"), c.get("value")
+    sb = c.get("state_basis") or {}
+    if sb.get("review_status") == "resolved" or sb.get("resolved_by_rule") is not None or c.get("standing_resolution"):
+        return False  # a convention rule or standing resolution confirmed on ANOTHER beamtime
+    if sb.get("unresolved_reason") is not None or sb.get("not_proposable_reason") in HELD_REASONS:
+        return False  # a disagreement, or a beamtime-wide / passing-mention hold
+    if path in PARSER_EXACT_NEVER_FILLS:
+        return False
+    if is_local_clock_start(c) or c.get("local_clock") or any(
+            isinstance(n, Mapping) and n.get("step") in (LOCAL_CLOCK_READ_STEP, LOCAL_CLOCK_CONVERT_STEP)
+            for e in c.get("evidence") or () for n in e.get("normalization") or ()):
+        return False  # a local clock time: its zone is the scientist's statement, never inferred
+    if c.get("run_id") is None and path in RUN_ONLY_PATHS:
+        return False  # DEC-69: a beamtime fact never fills a run-level field
+    witnesses = [e for e in c.get("evidence") or () if e.get("method") != "ai_interpretation"]
+    if not witnesses or any(e.get("relation") == "contradicts" for e in witnesses):
+        return False
+    if any(passing_witness_term(c, e) is not None for e in witnesses):
+        return False  # a cell named only in passing
+    if ctx["conflict_ids_of"].get(c.get("candidate_id")):
+        return False  # a conflict names it: the sources disagree somewhere about it
+    disputed = ctx["disputed"]
+    if (c.get("run_id"), path) in disputed or (None, path) in disputed or (
+            c.get("run_id") is None and any(p == path for _, p in disputed)):
+        return False  # the sources disagree about this field for this run (or the beamtime): asked, never filled
+    if _other_reading_dissents(c, ctx):
+        return False  # another reading of the same field for this run is open or differs: one dissent, no fill
+    if not ctx["naming_settled"] and any(_position_dependent(e) or _bound_by_name_number(e)
+                                         for e in witnesses if e.get("relation") == "supports"):
+        return False  # a file-name number read by its POSITION (or a logbook line bound to its run only through one)
+        #               before the naming is settled (naming_check)
+    if _ai_disagrees(ctx, ("candidate", str(c.get("candidate_id"))), path, value):
+        return False
+    return value_problem(path, value) is None  # a value its field refuses is asked, never filled
+
+
+def _candidate_fillable(c: Mapping, ctx: Mapping) -> bool:
+    path = c.get("target_field_path")
+    return (c.get("kind") == "field" and bool(path) and c.get("value") is not None and "[]" not in path
+            and path in ctx["writable"])
+
+
+def parser_exact_applies(bundle: Mapping, c: Mapping, ctx: Mapping) -> bool:
+    """:data:`FILL_PARSER_EXACT_RULE`, for ONE undecided candidate: STRICTLY a deterministic reading (determinism
+    ``deterministic``, no ``derive`` step of an engine rule; this build's own technique rule is the one derived value
+    it counts), then the shared exclusions."""
+    from .suggestions import TECHNIQUE_RULE_ID  # local: suggestions imports this module
+
+    if not _candidate_fillable(c, ctx):
+        return False
+    sb = c.get("state_basis") or {}
+    extracted = c.get("extracted_state")
+    technique = extracted == STATE_NEEDS_REVIEW and _technique_suggestion(c)
+    if extracted != STATE_CANDIDATE_EXTRACTED and not technique:
+        return False
+    if sb.get("determinism") != "deterministic":
+        return False  # an inferred value (a stored convention's): isaac.fill.stored_convention.v1, if it is one
+    if _inferred_derive_rule_ids(c) - ({TECHNIQUE_RULE_ID} if technique else set()):
+        return False  # a value an engine rule INFERRED is not a reading (a reader's own term mapping is one)
+    return _fill_exclusions_pass(bundle, c, ctx)
+
+
+def stored_convention_applies(bundle: Mapping, c: Mapping, ctx: Mapping) -> str | None:
+    """:data:`FILL_STORED_CONVENTION_RULE`, for ONE undecided candidate: the convention's rule id when the
+    candidate's value is what one of :data:`STORED_CONVENTION_RULES` derived (its own rule, and every ``derive`` step
+    names it), then the shared exclusions; else ``None``."""
+    if not _candidate_fillable(c, ctx) or c.get("extracted_state") != STATE_CANDIDATE_EXTRACTED:
+        return None
+    rid = _rule_id(c.get("rule"))
+    if rid not in STORED_CONVENTION_RULES or not (_derive_rule_ids(c) <= {rid}):
+        return None
+    return rid if _fill_exclusions_pass(bundle, c, ctx) else None
+
+
+def fill_rule_for(bundle: Mapping, kind: str, obj: Mapping, decision: Mapping | None,
+                  ctx: Mapping) -> tuple[str, Any] | None:
+    """``(rule id, value)`` of the registered fill rule that supports ``obj`` (a candidate or a missing value), or
+    ``None``. Never for a value a scientist decided (any decision, a defer included: a decision always wins), and
+    never for a bundle this build does not fill (:func:`fills_apply`)."""
+    if not ctx["apply"] or decision is not None:
+        return None
+    path = obj.get("target_field_path")
+    if kind == "candidate":
+        if parser_exact_applies(bundle, obj, ctx):
+            return FILL_PARSER_EXACT_RULE_ID, obj.get("value")
+        if stored_convention_applies(bundle, obj, ctx):
+            return FILL_STORED_CONVENTION_RULE_ID, obj.get("value")
+        return None
+    if kind == "missing_value" and path == DOMAIN_PATH and obj.get("extracted_state", STATE_MISSING) == STATE_MISSING:
+        if not ctx["acquisition_only"] or ctx["domain_stated"] - {DOMAIN_FILL_VALUE}:
+            return None  # a file states another domain: asked, never overridden
+        if path not in ctx["writable"] or value_problem(path, DOMAIN_FILL_VALUE) is not None:
+            return None
+        if _ai_disagrees(ctx, ("missing_value", str(obj.get("value_id"))), path, DOMAIN_FILL_VALUE):
+            return None
+        return FILL_DOMAIN_RULE_ID, DOMAIN_FILL_VALUE
+    return None
+
+
+def fill_value(obj: Mapping) -> Any:
+    """The value a ``filled`` candidate or missing value carries (its ``fill`` block), else ``None``."""
+    f = obj.get("fill")
+    return f.get("value") if isinstance(f, Mapping) else None
 
 
 def unusable_answer_reason(obj: Mapping, writable: frozenset[str] | None = None) -> str | None:
@@ -3003,6 +3553,14 @@ def _xdc_start_candidate(g, run_scans: Sequence[Mapping], run_id: str, bundle_ci
     return cand, anomaly
 
 
+def _set_fill(obj: dict, fill: tuple[str, Any] | None) -> None:
+    """``obj["fill"] = {rule_id, value}`` for a filled value, else no ``fill`` key (1.18.0)."""
+    if fill is None:
+        obj.pop("fill", None)
+    else:
+        obj["fill"] = {"rule_id": fill[0], "value": fill[1]}
+
+
 def apply_derivations(bundle: dict) -> dict:
     """Recompute every DERIVED state in place and return ``bundle``.
 
@@ -3018,15 +3576,19 @@ def apply_derivations(bundle: dict) -> dict:
     zone_d = clock_zone_decision(bundle)
     eligible = 0
     conflict_ids_of = conflict_ids_by_candidate(bundle)  # r6h H4: read once, not once per candidate
+    fill_ctx = fill_context(bundle, decision_of)  # 1.18.0: which registered fill rule supports each undecided value
     for c in bundle["candidates"]:
         key = ("candidate", c["candidate_id"])
         d = candidate_decision(bundle, c, decision_of, conflict_ids_of)
-        state = derive_value_state(c["extracted_state"], decision=d, interpreted=key in interpreted)
+        fill = fill_rule_for(bundle, "candidate", c, d, fill_ctx)
+        state = derive_value_state(c["extracted_state"], decision=d, interpreted=key in interpreted,
+                                   fill_rule=fill[0] if fill else None)
         c["value_state"] = state
+        _set_fill(c, fill if state == STATE_FILLED else None)
         c["eligibility_for_official_record"] = eligibility_for_official_record(
             state,
             target_field_path=c["target_field_path"],
-            value=final_value(c["value"], d, c.get("readings")),
+            value=fill[1] if state == STATE_FILLED else final_value(c["value"], d, c.get("readings")),
             writable_paths=writable,
         )
         if state == STATE_SCIENTIST_CONFIRMED and is_local_clock_start(c):
@@ -3040,8 +3602,11 @@ def apply_derivations(bundle: dict) -> dict:
     for m in bundle["missing_values"]:
         key = ("missing_value", m["value_id"])
         d = decision_of.get(key)
-        state = derive_value_state(STATE_MISSING, decision=d, interpreted=key in interpreted)
+        fill = None if is_label_slot(m) else fill_rule_for(bundle, "missing_value", m, d, fill_ctx)
+        state = derive_value_state(STATE_MISSING, decision=d, interpreted=key in interpreted,
+                                   fill_rule=fill[0] if fill else None)
         m["value_state"] = state
+        _set_fill(m, fill if state == STATE_FILLED else None)
         if is_label_slot(m):
             # a condition label's slot (labels.py): its own write route and value check, never the writable set
             m["eligibility_for_official_record"] = slot_eligibility(state, m, final_value(None, d))
@@ -3049,7 +3614,7 @@ def apply_derivations(bundle: dict) -> dict:
             m["eligibility_for_official_record"] = eligibility_for_official_record(
                 state,
                 target_field_path=m["target_field_path"],
-                value=final_value(None, d),
+                value=fill[1] if state == STATE_FILLED else final_value(None, d),
                 writable_paths=writable,
             )
         eligible += m["eligibility_for_official_record"]["eligible"]
@@ -3129,6 +3694,12 @@ def apply_derivations(bundle: dict) -> dict:
             "rejected": states.count(STATE_REJECTED),
         }
     )
+    if fill_stored_at(bundle.get("format_version")):
+        # 1.18.0: candidates AND missing values a rule filled (an older label has no such count: no fill is stored there)
+        counts["filled"] = states.count(STATE_FILLED) + sum(
+            1 for m in bundle["missing_values"] if m["value_state"] == STATE_FILLED)
+    else:
+        counts.pop("filled", None)
     if "processed_outputs" in bundle:  # absent in a 1.0/1.1 bundle: no counts are expected
         counts.update(processed_output_counts(bundle["processed_outputs"]))
     bundle["counts"] = counts
@@ -3439,9 +4010,11 @@ def _hold_for_review(candidate: dict) -> None:
     sb.update(review_status="needs_review", proposable=False, not_proposable_reason=BEAMTIME_WIDE_REASON,
               not_proposable_summary=BEAMTIME_WIDE_SUMMARY)
     candidate["extracted_state"] = STATE_NEEDS_REVIEW
-    if candidate.get("value_state") == STATE_CANDIDATE_EXTRACTED:
-        # no decision and no AI interpretation governs it (either would have given another state)
+    if candidate.get("value_state") in (STATE_CANDIDATE_EXTRACTED, STATE_FILLED):
+        # no decision and no AI interpretation governs it (either would have given another state); 1.18.0: a value a
+        # fill rule filled has no decision either, and a held value is never filled (HELD_REASONS)
         candidate["value_state"] = STATE_NEEDS_REVIEW
+        candidate.pop("fill", None)
         candidate["eligibility_for_official_record"] = eligibility_for_official_record(
             STATE_NEEDS_REVIEW, target_field_path=candidate.get("target_field_path"), value=candidate.get("value"),
             writable_paths=frozenset())
@@ -3630,8 +4203,9 @@ def _clear_passing_mention(candidate: dict, readings: Sequence[tuple[str, str]])
               not_proposable_summary=passing_mention_summary(readings))
     candidate["value"] = None
     candidate["extracted_state"] = STATE_NEEDS_REVIEW
-    if candidate.get("value_state") == STATE_CANDIDATE_EXTRACTED:
+    if candidate.get("value_state") in (STATE_CANDIDATE_EXTRACTED, STATE_FILLED):
         candidate["value_state"] = STATE_NEEDS_REVIEW
+        candidate.pop("fill", None)
     candidate["eligibility_for_official_record"] = eligibility_for_official_record(
         candidate.get("value_state") or STATE_NEEDS_REVIEW, target_field_path=candidate.get("target_field_path"),
         value=None, writable_paths=frozenset())
@@ -3645,22 +4219,30 @@ def hold_beamtime_wide_statements(bundle: dict) -> list[str]:
     what :func:`apply_derivations` would store, and the held bundle validates as the stored one does.
     r5 B1: then clears the value a sentence that names the cell only in passing gave
     (:func:`clear_passing_cell_mentions`), counted the same way."""
-    held, moved = [], 0
+    held, moved, unfilled = [], 0, 0
     for c in bundle.get("candidates") or ():
         if c.get("extracted_state") == STATE_CANDIDATE_EXTRACTED and beamtime_wide_statement(c):
             was = c.get("value_state")
             _hold_for_review(c)
             moved += was == STATE_CANDIDATE_EXTRACTED and c.get("value_state") == STATE_NEEDS_REVIEW
+            unfilled += was == STATE_FILLED and c.get("value_state") == STATE_NEEDS_REVIEW
             held.append(c["candidate_id"])
-    was_extracted = {c["candidate_id"] for c in bundle.get("candidates") or ()
-                     if c.get("value_state") == STATE_CANDIDATE_EXTRACTED}
+    was = {c["candidate_id"]: c.get("value_state") for c in bundle.get("candidates") or ()
+           if c.get("value_state") in (STATE_CANDIDATE_EXTRACTED, STATE_FILLED)}
     for cid in clear_passing_cell_mentions(bundle):
-        moved += cid in was_extracted  # the ids returned stay the beamtime-wide holds (`held_statement` counts those)
+        # the ids returned stay the beamtime-wide holds (`held_statement` counts those)
+        moved += was.get(cid) == STATE_CANDIDATE_EXTRACTED
+        unfilled += was.get(cid) == STATE_FILLED
     counts = bundle.get("counts")
-    if moved and isinstance(counts, dict) and isinstance(counts.get("candidate_extracted"), int):
+    if (moved or unfilled) and isinstance(counts, dict) and isinstance(counts.get("candidate_extracted"), int):
         counts["candidate_extracted"] -= moved
-        counts["needs_review"] = int(counts.get("needs_review") or 0) + moved
-        blocking = (bundle.get("readiness") or {}).get("blocking")
+        counts["needs_review"] = int(counts.get("needs_review") or 0) + moved + unfilled
+        if unfilled and isinstance(counts.get("filled"), int):
+            counts["filled"] -= unfilled  # 1.18.0: a filled value held for review is no longer filled, nor eligible
+        readiness = bundle.get("readiness") or {}
+        if unfilled and isinstance(readiness.get("eligible_value_count"), int):
+            readiness["eligible_value_count"] -= unfilled
+        blocking = readiness.get("blocking")
         if isinstance(blocking, dict):
             blocking["needs_review"] = counts["needs_review"]
     return held
@@ -5562,8 +6144,9 @@ def build_bundle(
         },
         "next_step": (
             "Review the conflicts and the values that need review with the scientist who "
-            "ran the beamtime, and look at the unread files. No value here is confirmed, "
-            "and none is eligible for an official record until a scientist confirms it."
+            "ran the beamtime, and look at the unread files. No value here is confirmed by a "
+            "scientist; a value a registered rule filled from the evidence (value state filled) "
+            "is not asked and goes into a draft as inferred, for the scientist to review at the end."
         ),
     }
 
@@ -5587,6 +6170,7 @@ def build_bundle(
     bundle = {
         "format": FORMAT_ID,
         "format_version": FORMAT_VERSION,
+        "fill_rule_set": FILL_RULE_SET,  # 1.18.0: the fill rules this import was derived under
         "is_official_record": False,
         "official_record_notice": OFFICIAL_RECORD_NOTICE,
         "bundle_id": bundle_id or new_record_id(),
@@ -6372,7 +6956,11 @@ def stale_eligibility(bundle: Mapping) -> list[dict]:
     added = _added_since(bundle.get("format_version"))
     has_non_finite = next(iter(non_finite_numbers(bundle.get("scientist_decisions") or ())), None) is not None
     moved = allowed_list_rederivations(bundle)
-    if not added and not has_non_finite:
+    # 1.18.0: a bundle an older build stored, which the next save labels 1.18.0+, is derived WITH fills; and a 1.18.0+
+    # bundle an earlier fill rule set derived is re-derived under this build's (fill_rule_set_stale)
+    older_label = fills_apply(bundle) and not fill_stored_at(bundle.get("format_version"))
+    fill_pending = older_label or fill_rule_set_stale(bundle)
+    if not added and not has_non_finite and not fill_pending:
         return moved
     expected = apply_derivations(json.loads(json.dumps(bundle)))
     decision_of = _decisions_by_target(bundle.get("scientist_decisions") or ())
@@ -6382,6 +6970,27 @@ def stale_eligibility(bundle: Mapping) -> list[dict]:
             path = obj.get("target_field_path")
             before = bool((obj.get("eligibility_for_official_record") or {}).get("eligible"))
             now = bool(e["eligibility_for_official_record"]["eligible"])
+            moved_fill = (STATE_FILLED in (e["value_state"], obj.get("value_state"))
+                          and (e["value_state"] != obj.get("value_state")
+                               or json.dumps(e.get("fill"), sort_keys=True) != json.dumps(obj.get("fill"), sort_keys=True)))
+            if fill_pending and moved_fill:
+                stored_by = (f"the storing build ({bundle.get('format_version')})" if older_label else
+                             f"the fill rule set that stored it ({bundle.get('fill_rule_set', 'none recorded')}; this "
+                             f"build's is {FILL_RULE_SET})")
+                if e["value_state"] == STATE_FILLED:
+                    rule_id = (e.get("fill") or {}).get("rule_id")
+                    why = (f"this build fills it by rule {rule_id} (DEC-96: a value a registered rule supports and no "
+                           f"scientist decided is filled, not asked); {stored_by} stored it as {obj.get('value_state')}"
+                           ": " + ("eligible now" if now else "not eligible now") + "; it goes into a draft as inferred, "
+                           "naming its rule, and any decision wins over it")
+                else:
+                    why = (f"this build's fill rules no longer fill it ({stored_by} filled it by rule "
+                           f"{(obj.get('fill') or {}).get('rule_id')}): it is {e['value_state']} now and "
+                           + ("eligible" if now else "not eligible") + "; it is asked again")
+                out.append({"kind": kind, "id": obj[key], "target_field_path": path, "run_id": obj.get("run_id"),
+                            "value_state": e["value_state"], "eligible_before": before, "eligible_now": now,
+                            "decision_id": None, "fill_moved": True, "reason": why[:600]})
+                continue
             d = candidate_decision(bundle, obj, decision_of) if kind == "candidate" else decision_of.get((kind, obj[key]))
             if before and not now and d is not None and non_finite_problem(
                     final_value(obj.get("value") if kind == "candidate" else None, d, obj.get("readings"))) is not None:
@@ -6553,11 +7162,27 @@ def validate_allowing_stale(bundle: Any, *, max_errors: int = 50) -> tuple[list[
     fixed = json.loads(json.dumps(bundle))
     expected = apply_derivations(json.loads(json.dumps(bundle)))
     ids = {(s["kind"], s["id"]) for s in stale}
+    filled_ids = {(s["kind"], s["id"]) for s in stale if s.get("fill_moved")}
     for kind, section, key in (("candidate", "candidates", "candidate_id"), ("missing_value", "missing_values", "value_id")):
         for obj, e in zip(fixed[section], expected[section]):
             if (kind, obj[key]) in ids:
                 obj["eligibility_for_official_record"] = e["eligibility_for_official_record"]
+            if (kind, obj[key]) in filled_ids:
+                # 1.18.0: the value this build fills, taken as this build derives it (state, fill block)
+                obj["value_state"] = e["value_state"]
+                if "fill" in e:
+                    obj["fill"] = e["fill"]
+                else:
+                    obj.pop("fill", None)
     fixed["readiness"]["eligible_value_count"] = expected["readiness"]["eligible_value_count"]
+    if filled_ids:
+        # ...and only the counts a fill moves (the candidates' state counts and the missing values still missing)
+        for k in ("candidate_extracted", "needs_review", "unmapped", "conflicting_candidates", "scientist_confirmed",
+                  "rejected", "filled"):
+            if k in expected["counts"]:
+                fixed["counts"][k] = expected["counts"][k]
+        fixed["readiness"]["blocking"]["missing"] = expected["readiness"]["blocking"]["missing"]
+        fixed["readiness"]["blocking"]["needs_review"] = expected["readiness"]["blocking"]["needs_review"]
     return validate_bundle(fixed, max_errors=max_errors), stale
 
 
@@ -6894,6 +7519,12 @@ def validate_bundle(bundle: Any, *, max_errors: int = 50, encoded: bytes | None 
             if e.get("run_id") is not None:
                 errors.append(f"consistency: extended_context {e['entry_id']} is attributed to a processed output AND a run")
 
+    frs = bundle.get("fill_rule_set")
+    if isinstance(frs, int) and not isinstance(frs, bool) and frs > FILL_RULE_SET:
+        # 1.18.0: a NEWER fill rule set than this build derives, refused as a newer format is: never rewritten
+        errors.append(f"format: fill_rule_set {frs} is newer than this build's ({FILL_RULE_SET}): this build cannot "
+                      "derive its fills; use a newer build")
+        return errors[:max_errors]
     # THE STATE RULE — recomputed, never trusted. ONE derivation (`apply_derivations`)
     # is used both to write a bundle and to check one.
     for c in bundle["candidates"]:
@@ -6929,6 +7560,10 @@ def validate_bundle(bundle: Any, *, max_errors: int = 50, encoded: bytes | None 
             )
         if c["eligibility_for_official_record"]["eligible"] != e["eligibility_for_official_record"]["eligible"]:
             errors.append(f"eligibility: {c['candidate_id']} eligibility disagrees with its state")
+        if json.dumps(c.get("fill"), sort_keys=True) != json.dumps(e.get("fill"), sort_keys=True):
+            # 1.18.0: a fill is re-derived, never trusted (a hand-written fill no rule gives is refused)
+            errors.append(f"state: {c['candidate_id']} fill {c.get('fill')!r} is not what the registered fill rules give "
+                          f"({e.get('fill')!r})")
         if is_local_clock_start(c):
             # THE CONVERSION IS RE-RUN, NEVER TRUSTED: value, steps, reasons and block are what the
             # witness and the latest zone decision give.
@@ -6940,6 +7575,9 @@ def validate_bundle(bundle: Any, *, max_errors: int = 50, encoded: bytes | None 
             errors.append(f"state: {m['value_id']} is {m['value_state']} but only {e['value_state']} is supported")
         if m["eligibility_for_official_record"]["eligible"] != e["eligibility_for_official_record"]["eligible"]:
             errors.append(f"eligibility: {m['value_id']} eligibility disagrees with its state")
+        if json.dumps(m.get("fill"), sort_keys=True) != json.dumps(e.get("fill"), sort_keys=True):
+            errors.append(f"state: {m['value_id']} fill {m.get('fill')!r} is not what the registered fill rules give "
+                          f"({e.get('fill')!r})")
     for c, e in zip(bundle["conflicts"], expected["conflicts"]):
         if c["value_state"] != e["value_state"]:
             errors.append(f"state: {c['conflict_id']} is {c['value_state']} but only {e['value_state']} is supported")

@@ -314,9 +314,12 @@ def test_a_write_needs_the_version_it_was_shown_and_a_cli_write_in_between_is_no
     r = client.post(url, json={"decision": "correct", "value": "ex_situ", "by": BY})
     assert r.status_code == 428 and (root / "alpha" / "bundle.json").read_bytes() == before
     shown = _version(client)
-    other = _question(root / "alpha", lambda x: x["kind"] == "missing_value" and x["target_field_path"] == "system.domain")
+    # another open question answered at the terminal (1.18.0, DEC-96: system.domain, used here before, is now filled
+    # from the acquisition files and not asked; the research group is still asked)
+    other = _question(root / "alpha", lambda x: x["kind"] == "missing_value"
+                      and x["target_field_path"] == "attribution.produced_by.group")
     assert cli.main(["bundle", "decide", str(root / "alpha"), "--question", other["question_id"], "--decision", "correct",
-                     "--value", "experimental", "--by", "Someone at the terminal"]) == 0
+                     "--value", "SYN group", "--by", "Someone at the terminal"]) == 0
     after_cli = (root / "alpha" / "bundle.json").read_bytes()
     r = client.post(url, json={"decision": "correct", "value": "ex_situ", "by": BY, "expected_version": shown})
     assert r.status_code == 412 and r.json()["error"] == "stale_bundle_version"
