@@ -51,7 +51,8 @@ ACTIONS = ("accept", "value", "dont_know")
 _YES = frozenset({"yes", "y", "true"})
 _NO = frozenset({"no", "n", "false"})
 #: the decisions that answer what a target card asks: an earlier one of them means the card is no longer asked
-_TARGET_FAMILIES = (frozenset({B.DOSE_READING_DECISION}), frozenset({"confirm", "reject", "split", "merge"}),
+_TARGET_FAMILIES = (frozenset({B.DOSE_READING_DECISION}), frozenset({B.ENVIRONMENT_CONVENTION_DECISION}),
+                    frozenset({"confirm", "reject", "split", "merge"}),
                     frozenset(B.PROCESSING_STATE_DECISIONS))
 
 

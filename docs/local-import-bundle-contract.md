@@ -1,6 +1,6 @@
 # ISAAC Local Import Bundle — contract v1
 
-Status: **v1.19.0** (fills from CHECKED, STATED Claude readings: `annotate --from-readings --apply` keeps each reading's quote check — result, checker, a reading-pass id, the checked file's `content_sha256` and a `reading_sha256` over the reading itself, all recomputed by the validator — and its scope; `isaac.fill.reading_stated.v1` fills what a checked stated reading's quote itself states (the number, the list member, every significant word), never an inferred reading, a sample's own label as its material, or a beamtime reading on a run-level or sample field; fill rule set 2, so a 1.18.0 bundle is STALE where a value moves, 2026-11-25, DEC-97, §9 "What 1.19.0 added"; v1.18.0 fill first, review at the end: the value state `filled` — a value a registered fill rule supports, `isaac.fill.parser_exact.v1`, `isaac.fill.stored_convention.v1` or `isaac.fill.domain_from_acquisition.v1`, and no scientist decided — is eligible, goes into a draft as `inferred` naming its rule, and is not asked; a decision always wins; a 1.2.0–1.17.0 bundle is STALE until its next write, which logs each filled value, 2026-11-25, DEC-96, §9 "What 1.18.0 added"; v1.17.0 the scientist's consent to Claude reading the files, and their name, kept in `consents` so a second session reads it with `isaac bundle status` instead of asking again; a command that only reads never writes `bundle.json`, and the values it prints are recorded beside it in `exposures.pending.jsonl`, 2026-11-23, §9 "What 1.17.0 added"; v1.16.0 the second round of the 18 Nov 2026 audit's import rules: the potential an SSRL XDC run's name writes, as a suggestion that needs review; a scan title naming other scans makes a processed output, never a run; an overwritten macro, two comment-line events and a position within motor resolution are no conflicts; the clock zone an #E / #D pair gives is suggested; a BL4-3 standard named as one proposes the role reference and the scanned range a witness for the absorber, 2026-11-22, §9 "What 1.16.0 added"; v1.15.0 the `export_despite_completeness` record-group decision: a record the local record-completeness gate holds is exported anyway, for that record body, and later exports keep it, 2026-11-22, §9 "What 1.15.0 added"; v1.14.0 four import rules of the 18 Nov 2026 audit: a signed potential token in a file name, the technique from the instrument configuration, pellet-standard fields asked only where mentioned, and a comment line left over from an earlier run flagged; every id an earlier build gave stands on a re-import, 2026-11-19, §9 "What 1.14.0 added"; v1.13.0 a file whose own scan title states an average beside SPEC acquisitions — the scientists' averages, such as a PyMca `.mca` — is a processed output linked by legacy number, never a run; a `MERGE` folder alone only flags a run; and a processed product's file name is no longer read as a condition or sample reading of its run, 2026-11-18, §9 "What 1.13.0 added"; v1.12.0 a reading pass's quotes are checked against the cited file when it is loaded, and its notes about a run's scans are kept as `scan_notes`, AI readings never decisions, 2026-11-17, §9 "What 1.12.0 added"; v1.11.0 a file the engine classifies `processed_spectrum` — the scientists' quick merges — is a processed output linked by legacy number, never a run, 2026-11-09, §9 "What 1.11.0 added"; v1.10.0 an answer refused only because it is not on its field's list is kept as a vocabulary request, `vocabulary_requests`, and `bundle propose-terms` drafts it, 2026-10-30, §9 "What 1.10.0 added", §29; v1.9.0 (`set_counter_positions` may name the LAST file-name token, `--positions last`, and a scientist's merge has a working path, 2026-10-30, §9 "What 1.9.0 added", §27; v1.8.0 the bounds on `scientist_decisions` and `ai_interpretations` raised to 200,000, so an append-only log can no longer lock a bundle; decide refuses a value its field refuses, 2026-10-29, §9 "What 1.8.0 added", §25; v1.7.0 `context.electrochemistry.current_setpoint_mA_cm2` answerable, so a confirmed galvanostatic record can complete, 2026-10-29, §9 "What 1.7.0 added", DEC-92; v1.6.0 capture decisions — keep apart, the Athena result of record, "no counter" — a merge decision applied as one combined group, and question ids that survive answers, 2026-10-29, §9 "What 1.6.0 added"; v1.5.0 control mode answerable the same day; v1.4.0 the SSRL XDC scan start time, the instrument clock's time zone and its binding, 2026-10-29, §9 "What 1.4.0 added"; v1.3.0 absorber readings on record groups, a larger writable set and STALE bundles, the same day; v1.2.0 processed outputs 2026-10-28; v1.1.0 LOCAL-2 and v1.0.0 LOCAL-1 the same day). Machine contract:
+Status: **v1.20.0** (the folder, the people and the held potential: the sample measurements held at a potential their own files give, with corroboration that they were electrochemical, take the environment convention the scientist gives ONCE for the beamtime (`set_environment_convention`: operando, in situ, or per run), asked by one question that covers each run's own environment question meanwhile; the facility and beamline the folder name and the SPEC fingerprint agree on, for each run whose own headers carry the fingerprint; the producing organization as that facility; the producing group from the PI the folder names, beside a second source that agrees; the import keeps the readme's header lines; fill rule set 3, so a 1.19.0 bundle is STALE where a value moves, 2026-11-25, DEC-98, §9 "What 1.20.0 added"; v1.19.0 fills from CHECKED, STATED Claude readings: `annotate --from-readings --apply` keeps each reading's quote check — result, checker, a reading-pass id, the checked file's `content_sha256` and a `reading_sha256` over the reading itself, all recomputed by the validator — and its scope; `isaac.fill.reading_stated.v1` fills what a checked stated reading's quote itself states (the number, the list member, every significant word), never an inferred reading, a sample's own label as its material, or a beamtime reading on a run-level or sample field; fill rule set 2, so a 1.18.0 bundle is STALE where a value moves, 2026-11-25, DEC-97, §9 "What 1.19.0 added"; v1.18.0 fill first, review at the end: the value state `filled` — a value a registered fill rule supports, `isaac.fill.parser_exact.v1`, `isaac.fill.stored_convention.v1` or `isaac.fill.domain_from_acquisition.v1`, and no scientist decided — is eligible, goes into a draft as `inferred` naming its rule, and is not asked; a decision always wins; a 1.2.0–1.17.0 bundle is STALE until its next write, which logs each filled value, 2026-11-25, DEC-96, §9 "What 1.18.0 added"; v1.17.0 the scientist's consent to Claude reading the files, and their name, kept in `consents` so a second session reads it with `isaac bundle status` instead of asking again; a command that only reads never writes `bundle.json`, and the values it prints are recorded beside it in `exposures.pending.jsonl`, 2026-11-23, §9 "What 1.17.0 added"; v1.16.0 the second round of the 18 Nov 2026 audit's import rules: the potential an SSRL XDC run's name writes, as a suggestion that needs review; a scan title naming other scans makes a processed output, never a run; an overwritten macro, two comment-line events and a position within motor resolution are no conflicts; the clock zone an #E / #D pair gives is suggested; a BL4-3 standard named as one proposes the role reference and the scanned range a witness for the absorber, 2026-11-22, §9 "What 1.16.0 added"; v1.15.0 the `export_despite_completeness` record-group decision: a record the local record-completeness gate holds is exported anyway, for that record body, and later exports keep it, 2026-11-22, §9 "What 1.15.0 added"; v1.14.0 four import rules of the 18 Nov 2026 audit: a signed potential token in a file name, the technique from the instrument configuration, pellet-standard fields asked only where mentioned, and a comment line left over from an earlier run flagged; every id an earlier build gave stands on a re-import, 2026-11-19, §9 "What 1.14.0 added"; v1.13.0 a file whose own scan title states an average beside SPEC acquisitions — the scientists' averages, such as a PyMca `.mca` — is a processed output linked by legacy number, never a run; a `MERGE` folder alone only flags a run; and a processed product's file name is no longer read as a condition or sample reading of its run, 2026-11-18, §9 "What 1.13.0 added"; v1.12.0 a reading pass's quotes are checked against the cited file when it is loaded, and its notes about a run's scans are kept as `scan_notes`, AI readings never decisions, 2026-11-17, §9 "What 1.12.0 added"; v1.11.0 a file the engine classifies `processed_spectrum` — the scientists' quick merges — is a processed output linked by legacy number, never a run, 2026-11-09, §9 "What 1.11.0 added"; v1.10.0 an answer refused only because it is not on its field's list is kept as a vocabulary request, `vocabulary_requests`, and `bundle propose-terms` drafts it, 2026-10-30, §9 "What 1.10.0 added", §29; v1.9.0 (`set_counter_positions` may name the LAST file-name token, `--positions last`, and a scientist's merge has a working path, 2026-10-30, §9 "What 1.9.0 added", §27; v1.8.0 the bounds on `scientist_decisions` and `ai_interpretations` raised to 200,000, so an append-only log can no longer lock a bundle; decide refuses a value its field refuses, 2026-10-29, §9 "What 1.8.0 added", §25; v1.7.0 `context.electrochemistry.current_setpoint_mA_cm2` answerable, so a confirmed galvanostatic record can complete, 2026-10-29, §9 "What 1.7.0 added", DEC-92; v1.6.0 capture decisions — keep apart, the Athena result of record, "no counter" — a merge decision applied as one combined group, and question ids that survive answers, 2026-10-29, §9 "What 1.6.0 added"; v1.5.0 control mode answerable the same day; v1.4.0 the SSRL XDC scan start time, the instrument clock's time zone and its binding, 2026-10-29, §9 "What 1.4.0 added"; v1.3.0 absorber readings on record groups, a larger writable set and STALE bundles, the same day; v1.2.0 processed outputs 2026-10-28; v1.1.0 LOCAL-2 and v1.0.0 LOCAL-1 the same day). Machine contract:
 [`apps/api/isaac_api/local_import/bundle-v1.schema.json`](../apps/api/isaac_api/local_import/bundle-v1.schema.json)
 (JSON Schema draft 2020-12) plus the checks in
 [`bundle.py`](../apps/api/isaac_api/local_import/bundle.py) `validate_bundle` that JSON
@@ -1390,6 +1390,176 @@ its material; and a beamtime finding is held to every sample and every target it
   Question ids are unchanged (the left-out targets were never part of the open question).
 - **Not in this slice:** the folder and people fills, the end review and SKILL.md (slices 3–4).
 
+### What 1.20.0 added (the folder, the people and the held potential — DEC-98, slice 3 of DEC-96)
+
+Slice 3 of `docs/fill-first-design-2026-11-25.md`. The format moves because four rule ids join `fill.rule_id`, one
+experiment decision joins `scientist_decisions[].decision` (`set_environment_convention`), and the import keeps a new
+optional field; a 1.19.0 validator refuses all three. Fill rule set 3.
+
+All four are rules of MISSING values, tried after the file rules of candidates and before the reading rule
+(`bundle.folder_fill_for`). A candidate of the field for the run (or the beamtime) leaves the missing value to it,
+whatever its value (never two fills); any decision on the target, a defer included, beats the fill; a checked stated
+reading that agrees is listed on the fill, one that disagrees blocks it. Every value is re-derived on each write and
+by the validator, and its witnesses are re-derived when the draft is composed (`bundle.folder_fill_witnesses`, from id
+indexes and a run-to-fingerprint-line map built once per fill context), never stored.
+
+- **`isaac.fill.environment_from_held_potential.v1` — a per-beamtime convention, answered ONCE.** Why a question and
+  not a fixed value: the beamline scientist answered `operando` for every potential-held run of one real beamtime,
+  set-points below the reaction onset included, while another real beamtime's own filled metadata sheet calls the same
+  class of runs `in situ`. Which word a beamtime uses is the scientist's convention; a fixed rule would write a wrong
+  value on every run of a beamtime that uses the other one. So:
+  - **A run qualifies** (`bundle.environment_basis`) when ALL hold:
+    - **its own files give a set-point**: a run-scoped `context.electrochemistry.potential_setpoint_V` candidate with a
+      finite value, determinism `deterministic`, every file witness a `deterministic_parser` one (a file-name token
+      such as `100mV`, or a header or macro line), its sources agreeing, not conflicting, not held, no conflict naming
+      it, no `contradicts` witness, no other reading of the set-point for the run open or differing, no AI reading of
+      it disagreeing, and no scientist rejecting it (a confirm or correct leaves it a set-point). **The potential scale
+      plays no part** and is not required; DEC-88's gate on the set-point itself composing is unchanged;
+    - **something shows it was electrochemical** (`bundle._held_potential_facts`): for the run or the whole beamtime, a
+      candidate no scientist rejected, a scientist's answer, or a checked stated reading, with a VALUE at the
+      electrolyte name or concentration, the pH, the cell type, the reaction or the control mode (never a value that
+      states nothing, such as `not_reported`, nor one saying there was no electrolyte); or a reading of any field,
+      of ANY strength, whose quote passed the quote check and has a sentence naming chronoamperometry,
+      chronopotentiometry or a potentiostat with no negation in it — corroboration is the checked quote's own words
+      (the experiment was electrochemical), never the reading's value, so an inferred reading counts this way and only
+      this way. Round 4 (`bundle._quote_corroboration`): such a quote corroborates only when the matched sentence holds
+      no word of a plan or an intent (`planned`, `will`, `would`, `should`, `intended`, `could`, `unable`, `may`, …;
+      round 5: `May` beside a day or a year is a date, and `next` counts only in "next beamtime / time / week /
+      visit"), and the clause that names the control is not conditional (round 5: the sentence is cut at commas and
+      "then", and only an `if` / `unless` in the control's own clause, or a sentence that opens with one and has no
+      "then", stops it: "if it drifted it was reset, then chronoamperometry continued" corroborates); the quote holds
+      no word saying something was dry, ex situ or without electrolyte (anywhere; `dry` right before a purge gas or
+      a box — `dry N2`, `dry Ar`, `dry box` — is no dry sample), nor as-is, nor open circuit (`OCV`, `OCP`), anywhere,
+      except an open-circuit step tied to the control that FOLLOWS it in the same sentence ("OCV for 5 min, then
+      chronoamperometry at 1.4 V", "chronoamperometry after OCV"; "chronoamperometry, then measured at OCV" still
+      stops it — kept quote-wide, not only in the matched sentence, so an OCV said of a sample elsewhere in the quote
+      never becomes operando); and the reading's own value says none of those (an environment reading proposing
+      `ex_situ` never corroborates). A quote that names a sample — `sample <code>` with a CASE-SENSITIVE code (a
+      digit, or two or more capitals: "samples were measured" names none), a `Sample <n> <code>` heading, or a run's
+      own sample label (slice 2's `sample_labels`) — corroborates only the runs carrying that label, none when no run
+      does (an unknown code names another sample: "for sample ZZ9 only"); a quote naming no sample corroborates the
+      reading's own scope. Round 6: the samples are read only from the CONTROL'S OWN CLAUSE (the matched sentence cut
+      at `,`, `;` and "then"); a sample named anywhere else in the quote ("ZZ1 held at OCV, then chronoamperometry on
+      ZZ2", "…; ZZ1 was kept in the dry box") means the quote speaks of several samples in several states, and it
+      corroborates nothing. The leading-"if" test sets aside a leading `<word>:` or date prefix ("Note: if it held,
+      chronoamperometry …" is a condition). A file name's `acid` / `base` is NOT corroboration: the reader gives it no value;
+    - **it is a sample measurement a record is built from**: not `standard_or_reference` or `alignment`,
+      `grouping.run_role` says `sample`, no live record group holding it has another role, `run_candidate` is true and
+      it is not kept only as context (the question and the fill reach exactly the same runs). The groups' status and role are now derived before the fills
+      in `apply_derivations`, so a `set_role` or a reject of a group is read in the same derivation (before, a reject
+      after `set_role reference` was refused as INVALID);
+    - **nothing blocks it**: no environment word in the run's own name (split at `_`, `-`, spaces and dots: `insitu`,
+      `exsitu`, `ex-situ`, `in situ`, `operando`, `postmortem`, `air`, `ambient`, `pristine`, `vacuum`, open circuit
+      `OCV` / `OCP` / `atOCV` / `OCV-1`, `dry` / `dried`, `NoElectrolyte`, `asIs` / `as is`, each with digits after it
+      too (`insitu1`, `dry2`); `exs` is not on the list, because it could not be checked against real run names; never `after`, since a
+      potential-held run is named `after500Cycling_100mV`); nothing — a candidate, an answer or a reading of any
+      strength, of the run or of the beamtime — saying open circuit or no electrolyte (`none`, `None (dry)`, `dry`,
+      `no electrolyte`, `without`, `not used`, `n/a`, a concentration of zero): such a value blocks and never
+      corroborates; no STATED reading of its environment (such a run is asked on its own, never covered by the
+      question); no candidate of the
+      environment for the run or the beamtime (the dry convention's `ex_situ`, a logbook term, a sheet value); and the
+      sources not disagreeing about the environment.
+  - **The question** (`questions.ENV_CONVENTION_KIND`, `environment_convention`; its id `ENV_CONVENTION_QUESTION_ID`,
+    from its scope, kind and field only): asked once, at experiment scope and blocking, while at least one qualifying
+    run has an undecided environment and no convention is recorded: "N measurements were taken in electrolyte while
+    the cell was held at a potential (for example <two or three run names at their set-points>). Is their measurement
+    environment operando or in situ?" Its answers are `operando`, `in_situ` and `per_run` (it differs by
+    measurement). Its hints are the runs' own set-point tokens and the corroborating quotes or answers; an INFERRED
+    reading of those runs' environment is shown only as "an earlier reading suggested …", never as the answer.
+    `covers_value_ids` names the runs it reaches, and `earlier_reading_runs` the runs an inferred reading suggested an
+    environment for.
+  - **While it is open, each run's own environment question it reaches is covered**: a question all of whose targets
+    it reaches is no longer blocking and names it in `covered_by` (its id unchanged); one that also asks other runs
+    keeps only those (`covered_by_convention` lists the ones it leaves out). So the blocking list shows one question,
+    not one per run.
+  - **The answer** — `decide --question <its id> --decision set_environment_convention --value operando|in_situ|per_run`,
+    or `decide --target experiment` with the same decision; a value off that list is refused by `decide` and by the
+    validator. Latest wins. **The answer is bound to the runs it was asked about:** the decision keeps their
+    environment value ids (`environment_convention_covers`). When later evidence (a reading, a regroup) brings more
+    runs under it, they are filled too — one answer for the beamtime, every fill reviewed at the end — but never
+    silently: the fill's derivation note says the run qualified after the answer, `bundle status` says "N more
+    measurement(s) now take it" (`facts.environment_convention.more_since_the_answer`), and the question re-opens,
+    OPTIONAL, under its own id ("N more measurements now take your answer"), with `extends_to_value_ids`. The question
+    site has no card for the re-opened question; the status line gives the `decide --question <id>` command. Answering
+    it again with the same value records a new decision covering them (it is never "nothing new") and closes it.
+    `operando` / `in_situ`: every qualifying run is filled with that value under the rule
+    (`bundle.environment_fill_basis`), except a run whose STATED reading of its environment (checked or not) gives
+    another value, which stays asked; an INFERRED reading that differs no longer blocks, since the scientist settled
+    the convention. `per_run`: nothing is filled, and each run's environment question is asked again, under its id.
+  - **The draft** cites the set-point's file witnesses, the corroboration (each candidate's file witness, each reading's
+    quote, each answer) and the convention answer itself (a `user_confirmation`), and the derivation's `note` says what
+    it rests on. Answer memory never learns the convention (it reads value decisions only), so it is never suggested
+    as a run's answer on another beamtime.
+  - **The question site** asks it on one beamtime card (`question_site.ENV_CONVENTION_TARGET_ID`), with the three
+    answers, the runs it covers (named in its detail, the first three and "and N more", and listed with their
+    set-points), the runs an earlier inferred reading suggested an environment for, and the corroborating quotes; the card records the same decision on the
+    experiment, and `site import` brings it back (an answer recorded since is "no longer asked"). The covered per-run
+    questions get no card of their own while it is open.
+- **`isaac.fill.facility_from_folder.v1`** — `system.facility.facility_name` and `system.facility.beamline`, the two
+  fields the facility hints already suggested (`template.HINTED_PATHS`), for every run (`bundle.folder_facility`,
+  `bundle.facility_identified`). The folder name's facility word (the token right before its BL token, as the hints
+  read it) must equal the facility of every SPEC fingerprint match (case aside), and its BL token must agree with
+  every match's beamline (`bundle._beamline_agrees`); the fingerprint's spelling is the value (`SSRL`, `BL15-2`). The
+  beamline is filled only when the folder names the same beamline exactly (a folder that states no branch the
+  fingerprint states fills only the facility). **Each run needs its own evidence:** at least one of the run's own
+  header lines the fingerprint matched (a detector column or the SPEC account); a run without one is not filled.
+  Never when the fingerprint disagrees with the folder (`disagrees_with_folder_name`), either source is missing, the
+  matches name several facilities or beamlines, a candidate, an answer or a reading anywhere in the bundle names
+  another facility name or beamline, or **a scientist REJECTS any facility name, beamline or producing-organization
+  target**: a rejected fill says the identity is wrong somewhere, so neither field is filled for any run, nor the
+  organization. `site`, `organization` and `endstation` are not filled. The fingerprint's own `statement` now says
+  that the two agreeing hints are this rule's evidence; with a disagreeing folder or several beamlines it still says
+  "Both are hints, never answers".
+- **`isaac.fill.organization_from_facility.v1`** — `attribution.produced_by.organization`, the beamtime: the facility
+  `facility_from_folder` identified, beside at least one run's fingerprint line. The scientist answered on 2026-11-25
+  that the producing organisation is the facility named in the beamtime folder. Never when no facility is identified
+  so, the facility is disputed (a reject included), or a candidate, an answer or a reading names another organization.
+- **`isaac.fill.group_from_folder_pi.v1`** — `attribution.produced_by.group`, the beamtime (`bundle.folder_pi`,
+  `bundle.group_from_folder`). The folder must be `<FACILITY>_<BEAMLINE>_<YYYY-MM>_<Surname>_<project>`, and the PI
+  token must look like a surname (`bundle.surname_like`): letters of any script with an inner hyphen or apostrophe at
+  most, a capital first, a lower-case letter somewhere (so an acronym is not one), not an element symbol or a formula
+  (`bundle.reads_as_chemistry`: each hyphen part a run of element symbols, each optionally followed by digits or
+  x / y / z, so `Pt`, `Co`, `IrOx`, `TiON`, `Cu-Zn` are refused; a word like `Brown` is not a run of symbols), and
+  no part of it a technique word or one of `bundle.NOT_A_SURNAME`'s project, housekeeping, month and group words
+  (`Lab`, `Group`, `Team`: `Mehta-Lab` is refused). **A second source must agree**: the readme's month header
+  (`# 2031-01_Surname`, or `2031-01_Surname` without the `#`: a readme line that is the month token alone, round 4;
+  round 5: or `2031-01_Surname_<project>` when the project is the folder's own),
+  a SPEC `#F` data path with `<YYYY-MM>_<Surname>`, a contributor whose name ends in it, or a
+  full name ending in it at a labelled position; the folder's token alone is not filled (it stays asked, with the
+  folder as its hint). A label's separator is `:`, `=`, a dash with spaces round it (`# PI - Bob Smith`,
+  `PI – Bob Smith`), or a dash right before a capital (`PI-Bob Smith`). A trailing comma segment naming an
+  institution (University, Institute, Lab, Laboratory, Center / Centre, Inc, College, National, School, Department)
+  is dropped before the people are counted (`PI: Ada Quillfeather, University of …` names one person). **A PI line takes precedence** (`PI:` or `Principal investigator:`, in any case: `# PI: bob
+  smith` names a person; a PI line naming several people, `PI: Bob Smith and Ada Quillfeather`, means no fill, since
+  the field holds one group): when one names people, one of them must end in the folder's surname, else no fill; a users
+  or group line only backs a match up and never overrides a PI line (`# PI: Bob Smith` beside `# Users: Ada
+  Quillfeather, Cy Jones` is not filled, in either order); without a PI line, a users or group line that names people,
+  none of them the folder's PI, stops it too. A full name is taken from a PI line first, and from a users or group
+  line or a contributor only when no PI line gives one. **A full name is read only from a labelled position** — `PI:`, `Principal investigator:`,
+  `Users:`, `Group:` on a readme header line or in a checked stated reading, "group of <name>", or a contributor's
+  name — never from any capitalised words ("Thanks Ada Quillfeather" names no PI). The value is "<full name> group"
+  when exactly one such full name is found, else "<Surname> group" exactly as the folder writes it. Never when the
+  readme's header or a data path names ANOTHER name-like token right after the beamtime's month, whatever its case
+  (two candidate PIs); when a labelled line names people and none of them ends in the folder's surname (`# PI: Bob
+  Smith`, `# Users: Bob Smith, Cy Jones`); or when a candidate, an answer or a reading names another group. A SPEC
+  `#C … User = <account>` line is never read as a labelled position: it names an account. **The owner's direction:**
+  when the folder literally names the PI, asking "is this the X group?" wastes the scientist's time. This supersedes
+  the skill's "never name the group from the folder name" (SKILL.md is rewritten in slice 4).
+- **The readme's header lines** (`experiment.beamtime_header_lines`, optional): the import reads the shared readme's
+  first 20 lines and keeps, as literals with their source, path and line, up to 8 that are comment lines (`#`), label
+  the PI, the group or the users, or are a month token alone (`2031-01_Surname`). The readme reader still assigns them no concept. The group rule fills only a
+  bundle that holds this field (possibly empty), so a bundle imported before 1.20.0 takes the group fill only once
+  it is imported again; the other three rules need nothing new and apply on its next write.
+- **Fill rule set 3** (`bundle.FILL_RULE_SET`). A 1.19.0 bundle (rule set 2) whose re-derived fills differ is STALE,
+  never INVALID; its next write raises it to 1.20.0 (with `bundle.CHANGES_ADDED_IN["1.20.0"]` in its
+  `format_upgrades` entry) and logs each moved value in `eligibility_rederived`. A newer rule set is still refused.
+- **Questions, status, composition.** A filled target is left out of its question with the 1.19.0 wording ("Left out,
+  because a rule filled the value from the evidence…", `left_out_as_filled`), and question ids do not move;
+  `counts.filled` and `bundle status`'s `values_filled` count the new fills; a filled value composes as `inferred` with
+  the derivation entry `{"source_type": "derivation", "rule": <rule id>, …, "note"}` and only when every measured run
+  of the group has the same filled or confirmed value. The folder's name is cited as a `file_listing` witness.
+- **Not in this slice:** the end review and SKILL.md (slice 4).
+
 ## 10. Exit codes (`isaac import` / `isaac bundle`)
 
 0 ok · 1 `check` found the bundle invalid, or STALE (stored by an older build, §9 "What 1.3.0
@@ -1826,7 +1996,10 @@ added"; an inferred finding, the absorber and the facility hints are still never
   Since 2026-10-29 the bundle applies the same test to the system's own name: `display_name`
   is present only when some run's headers carry its columns (§22).
   Hints are text and never an answer: a file layout or a folder name is not a statement of where
-  data was taken.
+  data was taken. **Since 1.20.0 (DEC-98)** the two hints together are the evidence of one fill rule: where the
+  folder name's facility word and BL token and the SPEC fingerprint name the same facility and beamline, the
+  facility name and the beamline are filled (`isaac.fill.facility_from_folder.v1`, §9 "What 1.20.0 added"); one
+  hint alone, or two that disagree, still only shows.
 - **A Claude reading pass**: `bundle annotate <bundle> --from-readings <findings.json> --model <id>`.
   - The file has format `isaac.reading_findings`. Each finding gives `field_path`, `value`,
     `applies_to` (`experiment`, or `runs` with exact run labels), `source.path`,

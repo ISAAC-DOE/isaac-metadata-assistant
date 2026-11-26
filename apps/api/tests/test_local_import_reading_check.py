@@ -316,7 +316,7 @@ def test_scan_notes_round_trip_through_apply_list_show_and_the_accessor(beamtime
     done = M.annotate_from_readings(out, notes, model_id="m", apply=True, root=bt)
     assert done["scan_notes"] == 3 and done["interpretations"] == 0
     bundle = _load(out)
-    assert bundle["format_version"] == B.FORMAT_VERSION == "1.19.0" and B.validate_bundle(bundle) == []
+    assert bundle["format_version"] == B.FORMAT_VERSION == "1.20.0" and B.validate_bundle(bundle) == []
     rid = next(r["run_id"] for r in bundle["runs"] if r["stem"] == "SYN_cell")
     got = SN.scan_notes_for_run(bundle, rid)
     assert [(n["action"], n["scans"]) for n in got] == [("exclude", [1]), ("start_from", [5]), ("flag", [])]

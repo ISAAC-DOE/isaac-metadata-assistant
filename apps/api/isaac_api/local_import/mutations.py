@@ -3329,6 +3329,11 @@ def _decide_arguments(*, target_ids, decision, by, orcid, qc_status, element, ed
         problem = B.dose_reading_problem(value)
         if problem is not None:
             raise MutationRefused(f"{problem}. Nothing was recorded.")
+    if decision == B.ENVIRONMENT_CONVENTION_DECISION:
+        problem = B.environment_convention_problem(value)
+        if problem is not None:
+            raise MutationRefused(f"{problem} (one answer for the beamtime's potential-held measurements). Nothing was "
+                                  "recorded.")
     if decision == B.ROLE_DECISION:
         problem = B.role_problem(value)
         if problem is not None:
@@ -3409,6 +3414,9 @@ def plain_statement(bundle: Mapping, planned: Sequence[tuple[str, Mapping]], tar
         B.CLOCK_ZONE_DECISION: f"instrument clock time zone {value} recorded",
         B.ROLE_DECISION: f"role {value!r} recorded (the scientist's word on what the group is; its status is unchanged)",
         B.DOSE_READING_DECISION: f"dose reading {value!r} recorded",
+        B.ENVIRONMENT_CONVENTION_DECISION: (
+            f"environment {value!r} recorded for the measurements held at a potential" if value != B.ENVIRONMENT_CONVENTION_PER_RUN
+            else "\"it differs by measurement\" recorded: each potential-held measurement's environment is asked on its own"),
     }.get(decision, f"{decision} recorded")
     cand_path = {c["candidate_id"]: c.get("target_field_path") for c in bundle.get("candidates") or ()}
     context = B.context_run_ids(bundle)  # r2-a L4: a run kept as context (an exported file) is no measurement run
@@ -3680,10 +3688,14 @@ def record_decision(
             # renumbering, `g1-v01` may now be another curve, and re-selecting it is a new statement
             identity = (B.athena_version_identity(next(v for v in obj.get("athena_versions") or () if v.get("version_id") == value))
                         if decision == B.ATHENA_SELECT_DECISION else None)
+            # 1.20.0 (round 3, I-1): the environment convention binds to the runs it was asked about, so an answer
+            # restated after more runs qualified is a new statement (it covers them), never "nothing new"
+            covers = (B.environment_convention_covers_now(bundle) if decision == B.ENVIRONMENT_CONVENTION_DECISION
+                      and kind == "experiment" else None)
             signature = (decision, json.dumps(value, sort_keys=True), decided_by["name"], orcid,
                          json.dumps(split_into or []), json.dumps(merge_with or []), qc_status, qc_note, element, edge,
                          json.dumps(positions or []), json.dumps(binding, sort_keys=True), json.dumps(identity, sort_keys=True),
-                         json.dumps(acknowledged.get(tid)))
+                         json.dumps(acknowledged.get(tid)), json.dumps(covers))
             if prior is not None and (
                 prior.get("decision"),
                 json.dumps(prior.get("value"), sort_keys=True),
@@ -3699,6 +3711,7 @@ def record_decision(
                 json.dumps(prior.get("clock_zone_binding"), sort_keys=True),
                 json.dumps(prior.get("athena_version_provenance"), sort_keys=True),
                 json.dumps(prior.get("same_conditions_tokens")),
+                json.dumps(prior.get(B.ENVIRONMENT_CONVENTION_COVERS_KEY) if covers is not None else None),
             ) == signature and not record_unchanged and not (
                     kind == "processing_result" and decision == "approve" and approval_is_stale(prior, obj)) and not (
                     restated_after_request(bundle, kind, obj, prior, request_index)) and not (
@@ -3742,6 +3755,8 @@ def record_decision(
                 entry["athena_version_provenance"] = identity
             if binding is not None:
                 entry["clock_zone_binding"] = binding
+            if covers is not None:
+                entry[B.ENVIRONMENT_CONVENTION_COVERS_KEY] = covers
             if kind == "processing_result" and decision == "approve":
                 # AN APPROVAL BINDS TO EXACTLY THIS RESULT'S FILES (and their hashes).
                 entry["approved_files"] = approval_files(obj)

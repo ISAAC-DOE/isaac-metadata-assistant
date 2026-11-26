@@ -40,7 +40,10 @@ targets) leaves every other open question's id unchanged. What an answer can sti
 question that was withheld until it existed — the documented unlocks: a stated clock zone
 unlocks the start-time confirmations it gives; a stated control mode makes its set-point
 required (that missing value moves from the optional question to a blocking one); a later zone
-change re-asks the confirmations it undid. None of these renames an existing question.
+change re-asks the confirmations it undid; and (1.20.0, DEC-98) an answer to an electrochemical field is
+corroboration, so runs held at a potential then qualify and the beamtime's environment-convention question
+(:data:`ENV_CONVENTION_QUESTION_ID`, fixed by scope, kind and field) is ADDED. None of these renames an existing
+question.
 
 An ANSWERED question keeps its id too: ``consolidate(include_answered=True)`` puts its answered targets back,
 so ``decide --question`` re-answers it (a later decision replaces an earlier one) and ``bundle show question``
@@ -111,6 +114,8 @@ ALLOWED_DECISIONS: Mapping[str, tuple[str, ...]] = {
     # C6: keep the records despite the logbook's remark (confirm the groups, recorded WITH this question's id), or leave
     # them out (reject). No `defer`: a group's defer makes it a proposal again, which is a grouping act, not this answer
     "logbook_quality_remark": ("confirm", "reject"),
+    # 1.20.0 (DEC-98): the beamtime's environment convention for its potential-held measurements, answered once
+    "environment_convention": (B.ENVIRONMENT_CONVENTION_DECISION,),
 }
 #: A ``confirm_value`` question whose targets carry NO value (the files hold text, no value this
 #: build derives from it): there is nothing to confirm, so ``confirm`` is not offered. The kind —
@@ -128,7 +133,8 @@ VALUE_KINDS = ("missing_value", "optional_values", "confirm_value", "resolve_con
 #: The kinds an ANSWERED question of is still found under its id (``consolidate(include_answered=True)``):
 #: ``decide --question`` re-answers it and ``bundle show question`` shows it with ``status`` and its answers.
 RESOLVABLE_WHEN_ANSWERED = VALUE_KINDS + ("confirm_absorber", "naming_counter_positions", "clock_time_zone",
-                                          "stated_utc_start_times", "dose_reading", "logbook_quality_remark")
+                                          "stated_utc_start_times", "dose_reading", "logbook_quality_remark",
+                                          "environment_convention")
 #: r6 I1: the beamtime-wide start-time question (:func:`_stated_utc_start_question`): one answer for every group whose
 #: start-time disagreement the files settle with an instant they state in UTC. Its targets are conflicts.
 STATED_UTC_START_KIND = "stated_utc_start_times"
@@ -1594,6 +1600,13 @@ def consolidate(bundle: Mapping, *, compositions_out: dict | None = None, includ
     _covered_by_run_decisions(questions, covered_conflicts, beamtime_decision_ids)
     _fold_into_file_restart(questions, bundle, decisions)
     _say_the_one_group(questions)
+    # 1.20.0 (DEC-98): the beamtime's environment convention, asked ONCE for its potential-held measurements; while it is
+    # open, each run's own environment question it reaches is covered by it (its id unchanged)
+    env_q = _environment_convention_question(bundle, include_answered=include_answered)
+    if env_q is not None:
+        questions.append(env_q)
+        if B.environment_convention_decision(bundle) is None:
+            _cover_by_environment_convention(questions, env_q)
     if has_groups:
         beamtime_start = _stated_utc_start_question(questions, bundle, group_of, run_by_id, decisions)
         if beamtime_start is not None:
@@ -1750,6 +1763,168 @@ def _dose_reading_question(bundle: Mapping, groups: Sequence[Mapping], *, includ
                            "folder you imported>   # one group differs: isaac bundle decide <bundle_dir> --target "
                            f'<group id> --decision {B.DOSE_READING_DECISION} --value {values} --by "<your name>"'),
     }
+
+
+#: 1.20.0 (DEC-98): ONE experiment-scope question, its id from its kind and field only (DEC-91): the measurements taken
+#: in electrolyte while the cell was held at a potential (``bundle.environment_convention_targets``) — operando or in
+#: situ? Answered with ``set_environment_convention`` on the experiment (``operando`` / ``in_situ``: the rule
+#: ``bundle.FILL_ENVIRONMENT_RULE_ID`` fills every such run; ``per_run``: each run's environment is asked).
+ENV_CONVENTION_KIND = "environment_convention"
+ENV_CONVENTION_QUESTION_ID = _qid("experiment", ENV_CONVENTION_KIND, B.ENVIRONMENT_PATH)
+_ENV_CONVENTION_EXAMPLES = 3
+ENV_CONVENTION_WORDS = {
+    "operando": "measured while the reaction ran under the potential (the cell held at it during the scan)",
+    "in_situ": "measured in the cell, in electrolyte, under the potential, which this beamtime calls in situ",
+    "per_run": "it differs by measurement: nothing is filled, and each measurement's environment is asked on its own",
+}
+
+
+def _environment_convention_question(bundle: Mapping, *, include_answered: bool = False) -> dict | None:
+    """The beamtime-wide environment-convention question, or ``None``: asked while at least one potential-held run
+    (``bundle.environment_convention_targets``) has no environment and no convention is recorded. Once answered it is
+    kept only for ``include_answered`` (``decide --question`` re-answers it, ``bundle show question`` shows it)."""
+    answered = B.environment_convention_decision(bundle)
+    ctx = B.fill_context(bundle)
+    # round 3, I-1: an operando / in situ answer that now reaches runs it was not given for re-opens the question,
+    # OPTIONAL, under its own id: the fill goes on (one answer for the beamtime), and it is said
+    extension = B.environment_convention_extension(bundle, ctx) if answered is not None else []
+    if answered is not None and not include_answered and not extension:
+        return None
+    targets = B.environment_convention_targets(bundle, ctx, include_filled=answered is not None)
+    if not targets:
+        return None
+    runs = {r["run_id"]: r for r in bundle.get("runs") or ()}
+    cands = {c["candidate_id"]: c for c in bundle.get("candidates") or ()}
+    readings = {i.get("interpretation_id"): i for i in bundle.get("ai_interpretations") or ()}
+    decisions = {d.get("decision_id"): d for d in bundle.get("scientist_decisions") or ()}
+
+    def stem(rid):
+        return str((runs.get(rid) or {}).get("stem") or rid)
+
+    examples, hints, seen = [], [], set()
+    for t in targets[:_ENV_CONVENTION_EXAMPLES]:
+        c = cands.get(t["setpoints"][0]) or {}
+        ev = next((e for e in c.get("evidence") or () if e.get("method") != "ai_interpretation"), {})
+        examples.append(f"{stem(t['run_id'])} at {c.get('value'):g} V" if isinstance(c.get("value"), (int, float))
+                        else stem(t["run_id"]))
+        hints.append({"kind": "file_literal", "candidate_id": c.get("candidate_id"), "run_id": t["run_id"],
+                      "literal": ev.get("literal_value"), "relative_path": ev.get("relative_path"),
+                      "locator": ev.get("locator"), "note": "the run's own set-point, as its file states it"})
+    for t in targets:
+        for kind, ref in t["corroboration"]:
+            if (kind, ref) in seen or len(seen) >= _ENV_CONVENTION_EXAMPLES:
+                continue
+            seen.add((kind, ref))
+            if kind == "reading" and ref in readings:
+                i = readings[ref]
+                hints.append({"kind": "reading", "interpretation_id": ref, "literal": i.get("quote"),
+                              "relative_path": i.get("source_path"), "locator": i.get("excerpt_locator"),
+                              "note": "a checked reading of the files: why these runs count as electrochemical"})
+            elif kind == "candidate" and ref in cands:
+                c = cands[ref]
+                ev = next((e for e in c.get("evidence") or () if e.get("method") != "ai_interpretation"), {})
+                hints.append({"kind": "file_literal", "candidate_id": ref, "literal": ev.get("literal_value"),
+                              "relative_path": ev.get("relative_path"), "locator": ev.get("locator"),
+                              "note": f"{c.get('target_field_path')}: why these runs count as electrochemical"})
+            elif kind == "decision" and ref in decisions:
+                hints.append({"kind": "answer", "decision_id": ref, "literal": decisions[ref].get("value"),
+                              "note": "a scientist's answer: why these runs count as electrochemical"})
+    earlier = sorted({str(v) for t in targets for _, v, s in t["env_readings"] if v is not None and s != "stated"})
+    earlier_runs = [(t["run_id"], v) for t in targets for _, v, s in t["env_readings"] if v is not None and s != "stated"]
+    for v in earlier[:2]:
+        hints.append({"kind": "earlier_reading", "literal": v,
+                      "note": f"an earlier reading suggested {v} for some of these runs: a hint only, never the answer"})
+    n = len(targets)
+    qid = ENV_CONVENTION_QUESTION_ID
+    values = "|".join(B.ENVIRONMENT_CONVENTIONS)
+    if extension:
+        given_for = answered.get(B.ENVIRONMENT_CONVENTION_COVERS_KEY)
+        newly = [stem(t["run_id"]) for t in targets if t["value_id"] in set(extension)]
+        return {
+            "question_id": qid, "partition": None, "tier": TIER_OPTIONAL, "blocking": False,
+            "why": ("Optional: your answer already fills these measurements too (one answer for the beamtime); this says "
+                    "so, and lets you confirm it for them or answer per measurement."),
+            "kind": ENV_CONVENTION_KIND, "scope": "experiment", "target_field_path": None, "field": B.ENVIRONMENT_PATH,
+            "rule_id": B.FILL_ENVIRONMENT_RULE_ID,
+            "text": (f"Answered ({answered.get('value')}, {answered.get('decision_id')}"
+                     + (f", for {len(given_for)} measurement(s)" if isinstance(given_for, list) else "")
+                     + f"). {len(extension)} more measurement{'s' if len(extension) != 1 else ''} now take your answer "
+                     f"(for example {', '.join(newly[:_ENV_CONVENTION_EXAMPLES])}"
+                     + (f" and {len(newly) - _ENV_CONVENTION_EXAMPLES} more" if len(newly) > _ENV_CONVENTION_EXAMPLES else "")
+                     + "): they qualified after it. Answer again with the same value to confirm it for them, or per_run "
+                       "to have each measurement asked on its own."),
+            "applies_to": {"runs": n, "targets": 1, "runs_since_the_answer": len(extension)},
+            "targets": [{"kind": "experiment", "id": "experiment"}],
+            "per_scope_targets": {"experiment": ["experiment"]},
+            "covers_value_ids": [t["value_id"] for t in targets],
+            "extends_to_value_ids": list(extension),
+            "hints": hints,
+            "allowed_values": list(B.ENVIRONMENT_CONVENTIONS),
+            "answered": {"value": answered.get("value"), "decision_id": answered.get("decision_id")},
+            "answer_command": (f"isaac bundle decide <bundle_dir> --question {qid} --decision "
+                               f'{B.ENVIRONMENT_CONVENTION_DECISION} --value {values} --by "<your name>"'),
+        }
+    return {
+        "question_id": qid,
+        "partition": None,
+        "tier": TIER_BLOCKING if answered is None else TIER_OPTIONAL,
+        "blocking": answered is None,
+        "why": ("Required: every record needs its measurement environment, and one answer here gives it for all of "
+                f"these {n} measurements (each run's own environment question is covered by this one meanwhile)."),
+        "kind": ENV_CONVENTION_KIND,
+        "scope": "experiment",
+        "target_field_path": None,
+        "field": B.ENVIRONMENT_PATH,
+        "rule_id": B.FILL_ENVIRONMENT_RULE_ID,
+        "text": (("Answered. " if answered is not None else "")
+                 + f"{n} measurement{'s were' if n != 1 else ' was'} taken in electrolyte while the cell was held at a "
+                 f"potential (for example {'; '.join(examples)}). Is their measurement environment operando or in "
+                 "situ? " + " ".join(f"`{k}`: {v}." for k, v in ENV_CONVENTION_WORDS.items())
+                 + " One answer for the beamtime: a measurement whose own files, an answer or a stated reading give "
+                   "another environment is still asked on its own."),
+        "applies_to": {"runs": n, "targets": 1},
+        "targets": [{"kind": "experiment", "id": "experiment"}],
+        "per_scope_targets": {"experiment": ["experiment"]},
+        "covers_value_ids": [t["value_id"] for t in targets],
+        "earlier_reading_runs": earlier_runs,
+        "hints": hints,
+        "allowed_values": list(B.ENVIRONMENT_CONVENTIONS),
+        **({"answered": {"value": answered.get("value"), "decision_id": answered.get("decision_id")}}
+           if answered is not None else {}),
+        "answer_command": (f"isaac bundle decide <bundle_dir> --question {qid} --decision "
+                           f'{B.ENVIRONMENT_CONVENTION_DECISION} --value {values} --by "<your name>"'),
+    }
+
+
+def _cover_by_environment_convention(questions: list[dict], env_q: Mapping) -> None:
+    """While the environment convention is open, a run's own environment question that it reaches is COVERED by it:
+    a question all of whose targets it asks is no longer blocking (``covered_by`` names it; its id unchanged); one that
+    also asks other runs keeps those only (``covered_by_convention`` lists the ones it leaves out). An answer of
+    ``per_run`` gives every one back, as asked before."""
+    pending = set(env_q.get("covers_value_ids") or ())
+    qid = env_q["question_id"]
+    for q in questions:
+        if q is env_q or q.get("kind") not in VALUE_KINDS:
+            continue
+        mine = {t["id"] for t in q.get("targets") or () if t.get("kind") == "missing_value" and t["id"] in pending}
+        if not mine:
+            continue
+        if all(t.get("kind") == "missing_value" and t["id"] in pending for t in q.get("targets") or ()):
+            q.update(blocking=False, tier=TIER_OPTIONAL, covered_by=qid)
+            q["why"] = (f"Not blocking: every measurement it asks about was held at a potential, and question {qid} asks "
+                        "their environment once for the beamtime; answer that one.")
+            q["text"] += f" Covered by question {qid}, which asks these measurements' environment once."
+            continue
+        q["targets"] = [t for t in q["targets"] if t["id"] not in mine]
+        q["per_scope_targets"] = {sc: [i for i in ids if i not in mine] for sc, ids in (q.get("per_scope_targets") or {}).items()
+                                  if [i for i in ids if i not in mine]}
+        if q.get("fields"):
+            q["fields"] = {f: [i for i in ids if i not in mine] for f, ids in q["fields"].items() if [i for i in ids if i not in mine]}
+        if isinstance(q.get("applies_to"), dict):
+            q["applies_to"]["targets"] = len(q["targets"])
+        q["covered_by_convention"] = sorted(mine)
+        q["text"] += (f" {len(mine)} of its measurements, held at a potential, are asked once by question {qid}, and "
+                      "left out here.")
 
 
 #: finding 1 (audit of 18 Nov 2026): the id of the beamtime-wide potential-scale question (DEC-91: from its scope,

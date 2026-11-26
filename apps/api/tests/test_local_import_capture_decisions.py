@@ -74,6 +74,13 @@ def _answer(bundle: dict, payload: dict, q: dict, *, partial: bool) -> tuple[str
                  by=BY, orcid=None, note=None)
         B.apply_derivations(bundle)
         return None, only is not None
+    elif q["kind"] == Q.ENV_CONVENTION_KIND:
+        # 1.20.0 (DEC-98): the beamtime's environment convention, an experiment decision
+        M.record_decision(bundle, target_ids=["experiment"], decision=B.ENVIRONMENT_CONVENTION_DECISION, value="operando",
+                          by=BY, orcid=None)
+        B.refresh_questions(bundle)
+        B.apply_derivations(bundle)
+        return None, False
     else:  # pragma: no cover - a new kind must be added here
         raise AssertionError(f"unhandled question kind {q['kind']}")
     targets = Q.targets_for(payload, q["question_id"], only, field)
@@ -96,6 +103,11 @@ def _unlock_allowed(answered: dict, field: str | None, new: dict) -> bool:
     """The documented unlocks (questions.py docstring): never a rename of an existing question."""
     if answered["kind"] == "clock_time_zone":
         return new["kind"] == "confirm_value" and new["target_field_path"] == B.XDC_START_PATH
+    if new["kind"] == "environment_convention":
+        # 1.20.0 (DEC-98): a scientist's answer to an electrochemical field is corroboration, so runs held at a
+        # potential now qualify and the beamtime's convention question is ADDED (its id fixed by scope, kind and field)
+        return new["question_id"] == Q.ENV_CONVENTION_QUESTION_ID and bool(
+            {field, answered.get("target_field_path")} & B.ECHEM_CORROBORATION_PATHS)
     if B.CONTROL_MODE_PATH in (field, answered.get("target_field_path")):
         return new["kind"] == "missing_value" and new["target_field_path"] in SETPOINT_PATHS
     if answered["kind"] == L.KIND and new["kind"] == L.KIND:
@@ -162,7 +174,7 @@ def test_answering_any_question_leaves_every_other_open_id_unchanged(grouped, tm
     seen |= _check_every_kind(M.load(x))
     kinds = {k for k, _ in seen}
     assert kinds >= {"missing_value", "optional_values", "confirm_value", "resolve_conflict", "confirm_absorber",
-                     "naming_counter_positions", "clock_time_zone"}, kinds
+                     "naming_counter_positions", "clock_time_zone", "environment_convention"}, kinds
     assert ("missing_value", "sample=unrecorded") in seen and ("missing_value", "sample=<reading>") in seen
 
 

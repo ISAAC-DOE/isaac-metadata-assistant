@@ -503,11 +503,19 @@ def _fill_witnesses(bundle: Mapping, m: Mapping, measured_ids: set, idx: Mapping
     """``(witnesses, note)`` for a MISSING value a rule filled. For :data:`bundle.FILL_DOMAIN_RULE_ID`: for each of the
     GROUP's measured runs (a window of :data:`_FILL_WITNESS_FILES`), one literal header statement its acquisition
     reader read from its acquisition file (the line, its real locator and the reader's id), and in ``note`` what the
-    rule rests on: which reader read each run (never the classifier's prose presented as a quote)."""
-    if (m.get("fill") or {}).get("rule_id") != B.FILL_DOMAIN_RULE_ID:
-        return [], None
+    rule rests on: which reader read each run (never the classifier's prose presented as a quote). 1.20.0 (DEC-98): for
+    a slice 3 rule (:data:`bundle.FOLDER_FILL_RULES`), what that rule rests on (``bundle.folder_fill_witnesses``: the
+    run's set-point and the corroboration; the folder's name and the SPEC headers' matched lines; the readme or data
+    path and the full name), re-derived from the bundle, never trusted from it."""
+    rule = (m.get("fill") or {}).get("rule_id")
     if idx is None:
         idx = _fill_witness_index(bundle)
+    if rule in B.FOLDER_FILL_RULES:
+        if "fill_ctx" not in idx:  # once per composition index
+            idx["fill_ctx"] = B.fill_context(bundle)
+        return B.folder_fill_witnesses(bundle, m, idx["fill_ctx"], sorted(measured_ids))
+    if rule != B.FILL_DOMAIN_RULE_ID:
+        return [], None
     source_of, statements = idx["source_of"], idx["statements"]
     runs = [r for _, r in sorted(idx["runs"][rid] for rid in measured_ids if rid in idx["runs"])]
     readers = sorted({str(B.run_reader_id(bundle, r, source_of)) for r in runs})

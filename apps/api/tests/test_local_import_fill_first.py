@@ -119,10 +119,11 @@ def test_filled_is_a_value_state_and_never_a_parser_state():
     assert "filled" in schema["$defs"]["value_state"]["enum"]
     assert "filled" not in schema["$defs"]["extracted_state"]["enum"]
     assert set(schema["$defs"]["fill"]["properties"]["rule_id"]["enum"]) == set(B.FILL_RULES)
-    # 1.19.0 (slice 2, DEC-97) adds the one reading rule (an inferred reading never fills)
+    # 1.19.0 (slice 2, DEC-97) adds the one reading rule (an inferred reading never fills); 1.20.0 (slice 3, DEC-98)
+    # the folder, people and held-potential rules
     assert set(B.FILL_RULES) == {B.FILL_PARSER_EXACT_RULE_ID, B.FILL_STORED_CONVENTION_RULE_ID, B.FILL_DOMAIN_RULE_ID,
-                                 B.FILL_READING_STATED_RULE_ID}
-    assert B.FORMAT_VERSION == "1.19.0" == B._VERSION_ORDER[-1]
+                                 B.FILL_READING_STATED_RULE_ID} | B.FOLDER_FILL_RULES
+    assert B.FORMAT_VERSION == "1.20.0" == B._VERSION_ORDER[-1]
     for rule_id, text in B.FILL_RULES.items():
         assert text.startswith(rule_id + ": ") and text.count(". ") == 0, rule_id  # one sentence, named by its id
     with pytest.raises(ValueError):
