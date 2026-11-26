@@ -2587,6 +2587,45 @@ def cmd_bundle_build_records(args) -> int:
     return _mutation(run)
 
 
+def cmd_bundle_review(args) -> int:
+    """``isaac bundle review <dir> [--field <path>] [--limit N] [--json]``: the end review of the built records (1.21.0,
+    DEC-99; :mod:`.review`). Reads only. ``--accept --by "<name>"`` previews the ONE review decision over every value
+    it lists; ``--apply`` records it."""
+    from . import mutations as M
+    from . import review as RV
+
+    bundle_dir = Path(args.bundle_dir).expanduser()
+    if args.limit is not None and (args.limit < 1 or args.limit > MAX_LIMIT):
+        _err(f"--limit must be 1..{MAX_LIMIT}.")
+        return EXIT_USAGE
+    if args.accept and args.limit is not None:
+        _err("--accept records every value the review lists, so it does not take --limit: show the whole list first "
+             "(`isaac bundle review <bundle_dir>`). Nothing was recorded.")
+        return EXIT_USAGE
+    if (args.apply or args.by or args.version or args.listing) and not args.accept:
+        _err("--apply, --by, --listing and --version go with --accept. Nothing was recorded.")
+        return EXIT_USAGE
+    try:
+        if args.accept:
+            out = RV.accept(bundle_dir, by=args.by, orcid=args.orcid, note=args.note, fields=args.field,
+                            apply=args.apply, listing=args.listing, expected_version=args.version,
+                            shown_as=args.bundle_dir)
+            _print(out)
+            return EXIT_OK
+        out = RV.review(bundle_dir, fields=args.field, limit=args.limit, shown_as=args.bundle_dir)
+    except RV.ReviewRefused as exc:
+        _err(str(exc))
+        return exc.code
+    except M.MutationRefused as exc:
+        _err(str(exc))
+        return exc.code
+    if args.json:
+        _print(out)
+    else:
+        print(RV.render(out))
+    return EXIT_OK
+
+
 def cmd_bundle_validate(args) -> int:
     """Exit 0 only when EVERY draft is exportable and there is at least one; 1 otherwise (each verdict printed)."""
     from . import records as R
@@ -3277,6 +3316,29 @@ def build_parser(prog: str = "isaac") -> argparse.ArgumentParser:
     q.add_argument("--test-marker", action="store_true", help="SELF-TESTS ONLY: write the fixed self-test marker into the series and QC notes")
     q.add_argument("--full", action="store_true", help="print every draft and skipped group (default: counts and the first few; drafts/index.json has them all)")
     q.set_defaults(func=cmd_bundle_build_records)
+
+    q = bsub.add_parser("review", help="the end review: every value a rule filled in the built records, by field, with "
+                                       "why, and the scans kept and dropped (reads only); --accept records the "
+                                       "scientist's yes")
+    q.add_argument("bundle_dir")
+    q.add_argument("--field", action="append",
+                   help="only this field; give it again for more (its full path, either as the record composes it, "
+                        "e.g. context.reaction.name, or as `bundle questions` prints it, e.g. "
+                        "context.electrochemistry.reaction)")
+    q.add_argument("--limit", type=int, help="show at most N fields (the listing; never with --accept)")
+    q.add_argument("--json", action="store_true", help="print the listing as JSON, with the ids")
+    q.add_argument("--accept", action="store_true",
+                   help="the scientist says the listed values are right: preview the ONE review decision (--apply "
+                        "records it)")
+    q.add_argument("--by", help="with --accept: the name of the person who reviewed the records")
+    q.add_argument("--orcid")
+    q.add_argument("--note", help="with --accept: the scientist's own words, kept with the decision")
+    q.add_argument("--apply", action="store_true", help="with --accept: record the review (default: preview)")
+    q.add_argument("--listing", help="with --accept: the listing digest `bundle review` printed (needed with --apply; "
+                                     "refused if the values changed since they were shown)")
+    q.add_argument("--version", help="with --accept: the bundle_version the listing printed; refused if the bundle "
+                                     "changed since")
+    q.set_defaults(func=cmd_bundle_review)
 
     q = bsub.add_parser("validate", help="validate drafts: draft, export dry-run, official, exactness, offline portal")
     q.add_argument("bundle_dir")

@@ -4,7 +4,7 @@ Read this at Step 7. Open another file only on its trigger:
 
 | Trigger | File |
 |---|---|
-| before you send the "values to confirm" message | `condition-labels.md` |
+| before you send the "values still proposed" message | `condition-labels.md` |
 | a start-time or clock question is listed, or a record warns "start time left out" | `start-times-and-clock.md` |
 | the scientist takes the template, or says a filled sheet is theirs | `template-and-own-sheet.md` |
 | they keep a word that is not on a field's list | `vocabulary-requests.md` |
@@ -13,6 +13,12 @@ Read this at Step 7. Open another file only on its trigger:
 | they would rather answer a few at a time on a small site, or a site's `answers.json` came back | `question-site.md` |
 
 ## What the list gives you
+
+**What a rule filled is not asked.** A value a registered rule fills from the evidence (a reader's value with nothing
+disagreeing, a checked stated reading, the facility and group the folder and a second source agree on, the beamtime's
+environment convention) is not in the list: it goes into the records as inferred, naming its rule, and the scientist
+sees it in the end review (`bundle review`, Step 10). A question that left out filled values says so ("Left out, because a
+rule filled the value from the evidence"). To correct one now: `decide --target <its id> --decision correct`.
 
 `<isaac> bundle questions <bundle> --blocking-only --limit 10` (add `--no-context` for a large page). Read the JSON page. `--plain` (`--plain --detail`) prints the asks as text for a person reading the terminal; it leaves out `minimum_for_one_group`, the counts, the answer commands, the context and the evidence, so do not work from it.
 
@@ -37,7 +43,7 @@ Read this at Step 7. Open another file only on its trigger:
 - In `--scope group:<id>`, a question shows only what is still open for that group.
 - A printed command with `<placeholders>` is a template. Fill it from the scientist's answer; never run it as it is.
 
-## Three messages, in this order
+## The messages, in this order
 
 **Message 1: what the records cannot go out without.** The blocking questions.
 
@@ -47,10 +53,27 @@ Read this at Step 7. Open another file only on its trigger:
   `--only group:<id>` answers one group differently.
 - Questions that share a reading (`same_reading_group`): ask once ("is ZZ1 the same material in all 38 groups?").
   On yes, run the question's `same_reading_command`.
+- Keep the environment convention out of the numbered list: it is the next message.
 
-**Message 2: values to confirm.** ISAAC already proposes these from the files. Without them, records of one sample
-look the same. Show the proposed value for each and ask for one "yes to all", or which to change.
-Read `condition-labels.md` first.
+**Message 2: the environment convention, as one question** (kind `environment_convention`, experiment scope). It is asked
+when measurements were held at a potential their own files give and something shows they were electrochemical.
+
+- Its `text` names N measurements and two or three of them at their set-points; its hints and `context` carry the
+  set-point tokens and the checked quote (or answer) that shows they were electrochemical. Show those, then ask:
+  "These N measurements were taken in electrolyte while the cell was held at a potential. Is their measurement
+  environment operando or in situ, or does it differ by measurement?"
+- Never answer it from a reading: an inferred reading of the environment is shown only as "an earlier reading
+  suggested …". Say which word this beamtime uses is theirs to give.
+- Record: `<isaac> bundle decide <bundle> --question <Q> --decision set_environment_convention --value operando|in_situ|per_run --by "<name>"`.
+  `operando` or `in_situ` fills every such measurement (each run's own environment question it covered drops out);
+  `per_run` fills nothing, and each run's environment is asked again.
+- When more measurements qualify after the answer, `bundle status` says so and the question opens again, optional:
+  answer it again with the same word to cover them.
+
+**Message 3: values still proposed, not filled.** ISAAC proposes these from the files, but no rule fills them (an
+absorber, a set-point's scale, a condition label, a start time). Without them, records of one sample look the same.
+Show the proposed value for each and ask for one "yes to all", or which to change. Values a rule filled are not here:
+they wait for the end review. Read `condition-labels.md` first.
 
 | What | Where it comes from | Record |
 |---|---|---|
@@ -64,7 +87,7 @@ Read `condition-labels.md` first.
 - The absorber needs a clear yes to the pair. "Probably" is not a yes.
 - A history label: never say what its number means (mV or cycles). Offer the proposed wording; record theirs if they give one.
 
-**Message 3, only if they want it: the rest.** Optional questions; the template for facts that differ per run.
+**Message 4, only if they want it: the rest.** Optional questions; the template for facts that differ per run.
 
 - Conflicts with `affects_record: false` change no record. Give their count; do not ask them.
 - `informational` questions cannot reach a record. Mention their count once.
@@ -78,14 +101,15 @@ Show progress in every message ("7 of 9 blocking answers recorded; 84 of 91 reco
 - **Offer a suggestion when you can show its evidence.** "The scans have an emission-energy motor and a fluorescence
   signal: HERFD-XAS?" "These are the beamline's own acquisition files: domain `experimental`?"
   It is a suggestion. Record it only on their yes. Never offer one you cannot back with a line, a value or a plot.
-- **No suggestion for:** the instrument clock's time zone; a person's or group's name beyond a folder-name hint
-  ("Is this Dr. X's group?").
+- **No suggestion for:** the instrument clock's time zone; a person's or group's name beyond what the folder name
+  gives. When the group is asked (no second source agreed with the folder), ask once with the folder's name as the
+  suggestion ("The folder names Quillfeather: the Quillfeather group?").
 - **Show the evidence first** (next section), then the question.
 - Plain words. No field paths, no ids, no command syntax.
 - Take the answer in their words. Map it to exactly one allowed value and say it back ("in situ → `in_situ`, right?").
   Record on their yes. Never stretch a word: a metal foil is none of the sample forms.
 - A conflict: show each reading with where it came from. Never recommend a side.
-- "My reading of the files suggests …" for an AI reading. Never "the files say".
+- "My reading of the files suggests …" for an AI reading shown beside a question. Never "the files say".
 - An AI suggestion read for fewer runs than the question asks about says so (`read_for`: "read for 2 of 86 runs").
   Say that count; never offer it as a reading of the whole beamtime.
 
@@ -112,7 +136,8 @@ Present it before the question:
 - `quote`: quote the lines word for word, with the file and locator ("the logbook, line 59: '…'").
   Say where each came from: `origin: ai_reading` is my reading (an AI reading, never file evidence); `parser` is a line
   ISAAC read; `document` is a line of a document the extract tool read.
-- "Who is named in the files" (the group and organization questions): say who the lines name. Suggest no name.
+- "Who is named in the files" (the group and organization questions): say who the lines name. Suggest no name the
+  folder or the lines do not give.
 - `values`, `table_row`: a small table, a run per row, as the files write them. Say "N of M runs shown".
 - `plot`, `image`: open each with the Read tool and describe it. Say where it came from. An item with `not_shown` is
   not opened: say what it says.
@@ -188,5 +213,5 @@ A potential goes into a record only beside its scale. Without the scale, the rec
 
 ## Never
 
-Pick a side of a conflict, fill a required value with a plausible one, copy a beamtime fact onto a run for them, or
-confirm something the scientist has not seen.
+Pick a side of a conflict, fill a required value with a plausible one, copy a beamtime fact onto a run for them,
+confirm something the scientist has not seen, or ask again what a rule filled (the end review shows it).

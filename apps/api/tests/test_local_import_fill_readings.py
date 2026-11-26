@@ -194,7 +194,7 @@ def test_annotate_apply_stores_the_quote_check_and_a_deterministic_reading_pass_
     assert done["applied"] and done["interpretations"] == 1 and done["quote_check"]["failed"] == 0
     assert all("content_sha256" not in r and "lines" not in r for r in done["quote_check"]["results"])  # stored only
     b = M.load(bdir)
-    assert b["format_version"] == B.FORMAT_VERSION == "1.20.0" and b["fill_rule_set"] == B.FILL_RULE_SET == 3
+    assert b["format_version"] == B.FORMAT_VERSION == "1.21.0" and b["fill_rule_set"] == B.FILL_RULE_SET == 3
     assert B.validate_bundle(b) == []
     [i] = _readings_of(b, _value(b, ENV))
     qc = i["quote_check"]
@@ -1040,7 +1040,7 @@ def test_the_rules_and_their_texts():
     assert set(schema["$defs"]["fill"]["properties"]["rule_id"]["enum"]) == set(B.FILL_RULES)
     qc = schema["$defs"]["ai_interpretation"]["properties"]["quote_check"]
     assert qc["properties"]["checker"]["enum"] == [B.QUOTE_CHECKER_ID] and "reading_sha256" in qc["required"]
-    assert B.FILL_RULE_SET == 3 and B.FORMAT_VERSION == "1.20.0" and "1.19.0" in B.CHANGES_ADDED_IN
+    assert B.FILL_RULE_SET == 3 and B.FORMAT_VERSION == "1.21.0" and "1.19.0" in B.CHANGES_ADDED_IN
     assert "inferred" in B.FILL_READING_STATED_RULE and ". " not in B.FILL_READING_STATED_RULE
 
 

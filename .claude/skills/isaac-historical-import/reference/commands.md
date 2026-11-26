@@ -77,7 +77,7 @@ Decisions by target:
 - **A value, a missing value, a conflict:** `confirm` · `correct` · `reject` · `defer`. `confirm` and `correct` on a conflict or missing value need `--value`.
 - **A record group:** `confirm` · `split` (`--split-into`) · `merge` (`--merge-with`, `--same-conditions`) · `reject` · `defer` · `set_role` (`--value sample|reference|alignment`) · `set_absorber` (needs `--element` and `--edge`) · `set_scan_decision` (`--value keep|drop` with `--scans`) · `set_dose_reading` (`--value beam_damage|first_scan_settling|not_beam_damage`) · `approve_calibration` (needs `--element` and `--edge`; a shift above 2 eV also needs `--accept-shift <the shift shown>`, e.g. `--accept-shift -8.6`, else refused with nothing recorded).
 - **A merge candidate (`mc-…`):** `keep_apart`.
-- **The beamtime (`--target experiment`):** `set_counter_positions` (`--positions`) · `set_not_counter_positions` (`--positions`) · `defer` ("I don't know" to the counter question; no `--value`) · `set_clock_time_zone` (`--value` an IANA name such as Area/Location, or `UTC`) · `set_dose_reading`.
+- **The beamtime (`--target experiment`):** `set_counter_positions` (`--positions`) · `set_not_counter_positions` (`--positions`) · `defer` ("I don't know" to the counter question; no `--value`) · `set_clock_time_zone` (`--value` an IANA name such as Area/Location, or `UTC`) · `set_dose_reading` · `set_environment_convention` (`--value operando|in_situ|per_run`; usually `--question <its Q>`). The end review is never a `decide`: `bundle review --accept` records it.
 - **A processing result:** `approve` (always with `--qc-status valid|compromised|failed|pending`) · `reject` · `needs_changes` · `defer`.
 
 ## Build, validate, export (Steps 8–9)
@@ -85,11 +85,13 @@ Decisions by target:
 | Purpose | Command |
 |---|---|
 | Compose drafts | `<isaac> bundle build-records <bundle> [--full]` |
+| The end review (Step 10) | `<isaac> bundle review <bundle> [--field <path> ...] [--limit N] [--json]` (reads only) · `<isaac> bundle review <bundle> [--field <path> ...] --accept --by "<name>" --listing <digest> [--orcid <id>] [--note "<their words>"] [--version <bundle_version>] [--apply]` (preview unless `--apply`) |
 | Every check, per draft | `<isaac> bundle validate <bundle> [--full]` |
 | Write the passing records | `<isaac> bundle export <bundle> --out <records> [--full] [--allow-indistinguishable --by "<name>"]` |
 | What would be uploaded | `<isaac> bundle upload <records> --dry-run [--portal-url <url>] [--full]` |
 
 - `build-records`: counts and the first 3 drafts; `--full` prints every row. Never `--test-marker`: it is for self-tests only.
+- `review`: refused before `build-records`, and for a `--field` no built record has (exit 2, naming the fields that can be reviewed). `--field` repeats, in either form (`context.electrochemistry.reaction` or the record's `context.reaction.name`). `--json` carries the ids, `bundle_version` and `listing`; the plain text names no id, and gives the accept command with its `--listing` in `Next:`. `--accept --apply` needs that `--listing` and the same `--field`s: it binds exactly what the listing showed (so never with `--limit`), and is refused (exit 1) when the values changed since, or the records changed since `build-records`; `--version` also refuses a bundle changed since.
 - `validate`: `by_reason`, `missing_required_by_field`, `not_exportable_first`, `pending_vocabulary`, then `verdicts`. `warnings` shows the first 5, exportable groups' first (`group_exportable`), with `warnings_total` and `warnings_full_list`: `validate --full` lists all.
 - `export`: safe to repeat. An unchanged record keeps its id. A changed one gets a new id; the old one moves to `<records>/isaac-export/superseded/`. One whose group is no longer exportable moves to `<records>/isaac-export/withdrawn/`. `exported[].warnings` lists a record's warnings that still apply; `records_written_with_warnings` counts records written now, `records_ready_with_warnings` every ready one.
 - `upload` without `--dry-run` is refused (exit 2). Nothing is ever sent.

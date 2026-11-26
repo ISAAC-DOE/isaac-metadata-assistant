@@ -797,7 +797,8 @@ def consolidate(bundle: Mapping, *, compositions_out: dict | None = None, includ
     # scientist deferred under it stays asked, and the composer does not carry the fill onto its run
     # (bundle.runs_a_fill_cannot_reach; a decision, a defer included, always beats a fill)
     beamtime_answered = {o.get("target_field_path") for o in [*bundle["candidates"], *bundle["missing_values"]]
-                         if o.get("run_id") is None and o.get("value_state") == B.STATE_SCIENTIST_CONFIRMED}
+                         if o.get("run_id") is None and o.get("value_state") == B.STATE_SCIENTIST_CONFIRMED
+                         and not B.is_reviewed_fill(o)}  # 1.21.0: a reviewed fill is still a fill here, as composed
 
     def dead_slot(m: Mapping) -> bool:
         if m["target_field_path"] not in beamtime_answered or not B.is_answer_slot(m):
@@ -824,7 +825,7 @@ def consolidate(bundle: Mapping, *, compositions_out: dict | None = None, includ
             # card can still record a correction, and the correction wins
             if again is None and not (include_answered and m.get("extracted_state", B.STATE_MISSING) in _UNANSWERED
                                       and (("missing_value", m["value_id"]) in decisions
-                                           or m["value_state"] == B.STATE_FILLED)):
+                                           or m["value_state"] == B.STATE_FILLED or B.is_reviewed_fill(m))):
                 if include_answered or m["value_state"] != B.STATE_FILLED or B.is_answer_slot(m):
                     continue
                 left_filled = True
@@ -885,7 +886,7 @@ def consolidate(bundle: Mapping, *, compositions_out: dict | None = None, includ
         state = c["value_state"]
         left_filled = False  # 1.19.0: not asked because a rule filled it; its question says so
         held_fill = c["candidate_id"] in unusable_fills
-        if held_fill and state == B.STATE_FILLED:
+        if held_fill and (state == B.STATE_FILLED or B.is_reviewed_fill(c)):
             state = c.get("extracted_state")  # asked as it was read, never as answered
         if state not in (B.STATE_NEEDS_REVIEW, B.STATE_CANDIDATE_EXTRACTED):
             again = not_eligible_answer(c, "candidate")
@@ -894,7 +895,7 @@ def consolidate(bundle: Mapping, *, compositions_out: dict | None = None, includ
                 state = c.get("extracted_state")
                 # 1.18.0: ...and a FILLED candidate likewise (not asked, still addressable, see above)
                 if not (include_answered and state in (B.STATE_NEEDS_REVIEW, B.STATE_CANDIDATE_EXTRACTED)
-                        and (c["value_state"] == B.STATE_FILLED
+                        and (c["value_state"] == B.STATE_FILLED or B.is_reviewed_fill(c)
                              or B.candidate_decision(bundle, c, decisions) is not None)):
                     if include_answered or c["value_state"] != B.STATE_FILLED:
                         continue
@@ -935,7 +936,7 @@ def consolidate(bundle: Mapping, *, compositions_out: dict | None = None, includ
             conflict_ids_of = B.conflict_ids_by_candidate(bundle)
             for kind, objs in (("candidate", bundle["candidates"]), ("missing_value", bundle["missing_values"])):
                 for o in objs:
-                    if (o.get("value_state") == B.STATE_FILLED and o.get("target_field_path")
+                    if ((o.get("value_state") == B.STATE_FILLED or B.is_reviewed_fill(o)) and o.get("target_field_path")
                             and not (o.get("run_id") is None and o["target_field_path"] in RUN_ONLY_PATHS)):
                         # 1.18.0: a FILL is held like an answer (the composer pools it the same way); its "decision"
                         # names the rule, never a person
@@ -4652,13 +4653,14 @@ def group_unusable_fills(bundle: Mapping, group_of: Mapping[str, str], context: 
             if o.get("run_id") is None and path in RUN_ONLY_PATHS:
                 continue
             tid = o.get("candidate_id") or o.get("value_id")
-            if state == B.STATE_FILLED:
+            by_fill = state == B.STATE_FILLED or B.is_reviewed_fill(o)  # 1.21.0: a reviewed fill composes as a fill
+            if by_fill:
                 value = B.fill_value(o)
             else:
                 d = (B.candidate_decision(bundle, o, decision_of) if kind == "candidate"
                      else decision_of.get(("missing_value", tid)))
                 value = B.final_value(o.get("value") if kind == "candidate" else None, d, o.get("readings"))
-            by_path.setdefault(FIELD_REMAP.get(path, path), []).append((o.get("run_id"), state == B.STATE_FILLED, value, tid))
+            by_path.setdefault(FIELD_REMAP.get(path, path), []).append((o.get("run_id"), by_fill, value, tid))
     # INDEXED ONCE (linear, not groups x values): per field, its beamtime rows and its rows per run, kept in bundle
     # order; only the fields some fill reaches are looked at
     indexed: dict[str, tuple[list, dict[str, list]]] = {}

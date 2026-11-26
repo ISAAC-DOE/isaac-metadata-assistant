@@ -161,7 +161,7 @@ def _ai(target_id: str, value, n: int = 1) -> dict:
 
 
 def test_the_four_rules_are_registered_in_one_sentence_each_at_format_1_20_0_rule_set_3():
-    assert B.FORMAT_VERSION == "1.20.0" == B._VERSION_ORDER[-1] and B.FILL_RULE_SET == 3
+    assert B.FORMAT_VERSION == "1.21.0" == B._VERSION_ORDER[-1] and B.FILL_RULE_SET == 3  # 1.21.0: the end review, no rule changed
     assert B.FOLDER_FILL_RULES == {B.FILL_ENVIRONMENT_RULE_ID, B.FILL_FACILITY_RULE_ID, B.FILL_ORGANIZATION_RULE_ID,
                                    B.FILL_GROUP_RULE_ID} and B.FOLDER_FILL_RULES <= set(B.FILL_RULES)
     assert set(B.bundle_schema()["$defs"]["fill"]["properties"]["rule_id"]["enum"]) == set(B.FILL_RULES)
@@ -840,7 +840,7 @@ def test_a_rule_set_2_bundle_is_stale_and_its_next_write_re_derives_it(bdir, mon
     assert cli.main(["bundle", "check", str(bdir)]) == 1 and capsys.readouterr().out.startswith("STALE:")
     M.record_consent(bdir, by="SYN Scientist")
     saved = json.loads((bdir / "bundle.json").read_text())
-    assert saved["fill_rule_set"] == 3 and saved["format_version"] == "1.20.0" and B.validate_bundle(saved) == []
+    assert saved["fill_rule_set"] == 3 and saved["format_version"] == "1.21.0" and B.validate_bundle(saved) == []
     assert _rule(_miss(saved, FACILITY, "run-001")) == B.FILL_FACILITY_RULE_ID
     assert _miss(saved, FACILITY, "run-001")["value_id"] in {r["id"] for r in saved["eligibility_rederived"]}
     [u] = [u for u in saved["format_upgrades"] if u["from_format_version"] == "1.19.0"]

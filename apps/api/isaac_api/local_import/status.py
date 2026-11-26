@@ -125,12 +125,16 @@ def status(bundle_dir: Path, *, shown_as: str | None = None) -> dict:
         by_status[g.get("status") or "?"] = by_status.get(g.get("status") or "?", 0) + 1
 
     counts = None
+    to_review: set[str] = set()  # 1.21.0: the fills the records of confirmed groups carry, not yet reviewed
     cannot: dict[str, str] = {}
     pending_curve = unprocessed = 0
     try:
         reports: dict = {}
         payload = Q.consolidate(bundle, compositions_out=reports)
         counts = dict(payload["counts"])
+        confirmed = {g["group_id"] for g in live if g.get("status") == B.STATE_SCIENTIST_CONFIRMED}
+        to_review = {i for gid, rep in reports.items() if gid in confirmed
+                     for e in (rep or {}).get("filled_by_rule") or () for i in e.get("from") or ()}
         if groups:
             not_measured = Q.not_a_measurement_groups(bundle, reports=reports or None)
             cannot = {gid: why for gid, why in Q.cannot_export_reasons(bundle, not_measured).items() if gid in live_ids}
@@ -174,6 +178,16 @@ def status(bundle_dir: Path, *, shown_as: str | None = None) -> dict:
         "environment_convention": _environment_convention(bundle),
         "values_filled": sum(1 for o in [*(bundle.get("candidates") or ()), *(bundle.get("missing_values") or ())]
                              if o.get("value_state") == B.STATE_FILLED) - len(Q.fills_asked(bundle)),
+        # 1.21.0 (DEC-99): the end review: fills the scientist confirmed by reviewing the built records, the reviewed
+        # ones whose value, rule or evidence changed since (filled again), and whether records have been built
+        "values_to_review": len(to_review),
+        "values_reviewed": sum(1 for o in [*(bundle.get("candidates") or ()), *(bundle.get("missing_values") or ())]
+                               if B.is_reviewed_fill(o)),
+        "reviewed_changed_since": len(changed := B.review_changed_since(bundle)),
+        "reviewed_changed": {"total": len(changed),
+                             "filled_again": sum(1 for c in changed if c.get("now") == B.STATE_FILLED),
+                             "now_asked": sum(1 for c in changed if c.get("now") != B.STATE_FILLED)},
+        "records_built": _records_built(bundle_dir),
         # 1.18.0: where the naming (counter) question stands: a file-name number read by its position is filled only
         # once it is settled (bundle.naming_check: not_grouped / counter_question_open / grouped_no_counter_question /
         # decided)
@@ -211,8 +225,51 @@ def _next_step(f: Mapping, shown_as: str) -> str:
         return (f"Review the curves awaiting a decision: `isaac bundle list {d} processing-results --state needs_review`.")
     if g["by_status"].get("proposed"):
         return f"Confirm the proposed record groups the scientist agrees with: `isaac bundle list {d} groups`."
-    return (f"Compose and check the records: `isaac bundle build-records {d}`, then `isaac bundle validate {d}`, then "
-            f"`isaac bundle export {d} --out <folder>`.")
+    if f.get("records_built") and f.get("values_to_review"):
+        # 1.21.0 (DEC-99): the records are built and values a rule filled in them are not yet reviewed: the end review
+        return (f"Review the {f['values_to_review']} value(s) filled from the evidence in the records with the scientist: "
+                f"`isaac bundle review {d}`, then `--accept` on their yes (or their corrections with `decide`, and "
+                "`build-records` again).")
+    return (f"Compose and check the records: `isaac bundle build-records {d}`"
+            + (f", review the values filled from the evidence (`isaac bundle review {d}`)"
+               if f.get("values_filled") and not f.get("records_built") else "")
+            + f", then `isaac bundle validate {d}`, then `isaac bundle export {d} --out <folder>`.")
+
+
+def _fill_lines(f: Mapping) -> list[str]:
+    """1.21.0 (review 3, 4): ONE coherent account of the values a rule filled: how many wait for the end review in the
+    built records, how many the review cannot reach yet (in no built record: their groups are not confirmed, or the
+    records are not built), how many were reviewed, and what became of reviewed values that changed since."""
+    out: list[str] = []
+    filled, waiting, reviewed = f.get("values_filled") or 0, f.get("values_to_review") or 0, f.get("values_reviewed") or 0
+    outside = max(filled - waiting, 0) if f.get("records_built") else filled
+    head = []
+    if f.get("records_built") and waiting:
+        head.append(f"{waiting} in the built records wait for the end review (`bundle review`)")
+    elif f.get("records_built") and reviewed:
+        head.append("every one in the built records is reviewed")
+    if outside:
+        head.append(f"{outside} are in no built record yet (not in a confirmed record group"
+                    + (")" if f.get("records_built") else ", or the records are not built)")
+                    + ", so the review cannot reach them yet")
+    if filled or reviewed:
+        lines = (f"Values a rule filled from the evidence (not asked; they go into the records as inferred, naming the "
+                 f"rule): {filled} not yet reviewed" + (f", {reviewed} confirmed in the end review" if reviewed else ""))
+        out.append(lines + (": " + "; ".join(head) if head else "") + ".")
+    ch = f.get("reviewed_changed") or {}
+    if ch.get("total"):
+        parts = [f"{ch['filled_again']} filled again, waiting for the next review" if ch.get("filled_again") else "",
+                 f"{ch['now_asked']} now asked, since no rule fills them any more" if ch.get("now_asked") else ""]
+        out.append(f"{ch['total']} reviewed value(s) changed since the review (their value, rule or evidence): "
+                   + "; ".join(p for p in parts if p) + ".")
+    return out
+
+
+def _records_built(bundle_dir: Path) -> bool:
+    """Whether ``build-records`` has written its drafts index (``drafts/index.json``)."""
+    from . import records as R
+
+    return R.contained_file(bundle_dir, f"{R.DRAFTS_DIR}/index.json") is not None
 
 
 def _environment_convention(bundle: Mapping) -> dict | None:
@@ -263,9 +320,7 @@ def _lines(f: Mapping) -> list[str]:
                      f"{q.get('optional', 0)} optional.")
     else:
         lines.append(f"Open questions: not counted ({(q or {}).get('unavailable')}); `isaac bundle check` says why.")
-    if f.get("values_filled"):
-        lines.append(f"Filled from the evidence by a rule, not asked: {f['values_filled']} value(s); they go into the "
-                     "records as inferred, naming the rule, for the scientist to review at the end.")
+    lines.extend(_fill_lines(f))
     ec = f.get("environment_convention")
     if ec:
         lines.append(f"Environment of the measurements held at a potential: {ec['value']} ({ec['decision_id']}"

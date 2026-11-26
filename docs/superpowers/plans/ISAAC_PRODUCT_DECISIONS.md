@@ -644,6 +644,55 @@ repository.)*
   potential set-point today, so such a run is asked; and whether a file name's `acid` / `base` alone should count as
   corroboration (it does not: the reader gives it no value).
 
+### DEC-99
+*(2026-11-26; slice 4 of `DEC-96`, under the same owner decision; design `docs/fill-first-design-2026-11-25.md`, "The
+end review" and review findings 9–11. The project owner's direction of 2026-11-25: "at the end, when the user has the
+final version of the record output, we can just have them review that".)*
+
+**The end review; local bundle format 1.21.0, fill rule set 3 (unchanged).** Extends `DEC-96`, `DEC-97` and `DEC-98`;
+every supersession they list stands. Contract: §9 "What 1.21.0 added".
+
+- **`isaac bundle review <dir>`**, after `build-records`, reads only and lists every value a rule filled that the built
+  records carry, by field: the value, how many records carry it, the rule in plain words, the shortest witness that
+  shows why, and for the environment convention the scientist's answer and how many measurements it reached; and,
+  separately, the processing rule's scan keep / drop decisions with their reasons, as the processing results store
+  them. Plain wording, no ids; `--json` carries them.
+- **The scientist's yes is ONE decision.** `bundle review --accept --by "<name>"` previews, `--apply` records an
+  experiment decision `review` that binds each listed fill by its target, value, rule and an evidence hash (the
+  clock-zone binding pattern). A bound fill derives `scientist_confirmed`, basis `reviewed_final_records`, and composes
+  as a confirmed value (`verified`, its rule still named in the evidence). `decide` cannot record a review.
+  **Only what was shown is accepted:** `--apply` needs the listing digest `bundle review` printed (over exactly the
+  values it listed and its field filter) and is refused when the listing has changed since; several `--field`s are one
+  listing and one decision (found by an independent review and a real-data run: an accept bound nine values after a
+  listing of one).
+- **A review never outlives what it reviewed.** Any later change to a bound item's value, rule or evidence returns
+  exactly that item to `filled`; `bundle status` says how many reviewed values changed since, and the next review lists
+  them again. The validator re-derives the review block and refuses a review naming a target that does not exist.
+- **Precedence unchanged:** a decision on the target (a defer included) beats a fill and so beats the review. Export
+  never waits for the review: an unreviewed fill exports as `inferred`.
+- **Answer memory never learns a review** (`DEC-96` finding 9): it is no answer to any one value.
+- **The skill** (SKILL.md, rewritten): fill what a registered rule supports (the code does it; Claude never writes a
+  value); ask only what is missing, conflicting or a judgment call (the potential scale when nothing states it, the
+  environment convention, the dose question, an absorber with two possible edges, anything deferred); a reading is
+  evidence (a stated reading whose quote checks can fill; an inferred one never does); who produced the data may be
+  filled from the folder when a second source agrees, else asked once with the suggestion; and every import ends with
+  the review. Step 4 is a field-by-field checklist of what a logbook usually answers; Step 7 asks only what remains
+  (the blocking list, then the environment convention as one question); Step 10 is the review.
+- **Supersedes, explicitly:**
+  - **`DEC-84`** — for a fill the scientist reviewed: it is `scientist_confirmed` by the scientist's review decision,
+    which `DEC-84`'s surviving half ("only a scientist decision yields `scientist_confirmed`") allows; a local
+    decision's identity stays `local_unverified`.
+  - **`DEC-87`** — its "only a scientist decision is `scientist_confirmed`" now includes the end review over filled
+    values; its reading pass, citations and quote checks stand.
+  - **SKILL.md rules 2, 4, 5, 8 and 9** (as `DEC-96` and `DEC-98` announced): "run `decide` only with an answer given in
+    this conversation" stands inside the new rule 2; "no guessing", "your reading is a suggestion", "beamtime-wide facts
+    are context" and "a name in the folder name is a hint, never an answer" are replaced as above (`DEC-69` itself is
+    unchanged and the code still enforces it).
+- **The truth plane is unchanged.** `schema/` and `src/isaac_records/*` are not edited; a reviewed field carries its
+  witnesses, its derivation entry and a `user_confirmation`, shapes `draft_validator` already accepts.
+- **Not decided here:** moving record groups into the end review (design finding 7, still one bulk question), and a
+  per-value accept.
+
 ### What `DEC-76`…`DEC-84` do NOT change
 - **The website's truth plane.** `schema/` and the `src/isaac_records` validators and export are unedited. *(True for `DEC-76`…`DEC-84`; `DEC-95` later re-vendored `schema/` and edited the truth plane, disclosed there.)* The only change in `src/isaac_records/cli.py` is the additive `import` / `bundle` dispatch.
 - **One hosted read changes, and it is a bug fix.** When an archive has acquisition files with the

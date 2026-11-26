@@ -95,8 +95,13 @@ Write every finding to ONE JSON file (`isaac.reading_findings`) in a working fol
    "reasoning": "<why the quote supports the value; the one inference step, if any>"}]}
 ```
 
-- `stated`: the file says it. `inferred`: ONE written step from what it says. Nothing from
-  what a lab "usually" does. A name in a file or folder name is evidence; say it is a name.
+- `stated`: the quote states the value word for word (the number with its unit, the list member, every word of
+  the name). `inferred`: ONE written step from what it says ("100 mV" for `0.1` V is one step). Nothing from what a
+  lab "usually" does. A name in a file or folder name is evidence; say it is a name.
+- A checked `stated` finding can FILL its field (the code decides, by its rule); an `inferred` one never does: it is
+  shown beside the question. So never mark a finding `stated` to get it filled.
+- The environment: write what the logbook STATES (a line that says "operando" or "in situ"). Never infer one from a
+  potential or a cell: the beamtime's convention question settles those runs.
 - **The quote is checked when the file is loaded.** Copy at least 3 words (or 12 characters), or a
   whole short line ("Ar sat") cited by its own `line N`, exactly from the file (spacing, quote marks and dashes may differ; letters and case may not). Cite the file
   itself, by its path inside the imported folder, never the extractor's output in `<bundle>-notes/`.
@@ -188,8 +193,9 @@ is not on its field's list (`refused_by_reason`); there is no way to skip the ch
 load it again until nothing is refused. The preview also lists, per finding, how many targets it
 reaches and every finding it could NOT place (no such field in this bundle): fix those or tell the
 scientist.
-Each reading is a suggestion with its citation. Step 7 shows it beside the question; the scientist's answer is what
-counts. Loading the same file again adds nothing. Never present your reading as confirmed.
+A checked, stated reading whose quote states the value fills its field (rule `isaac.fill.reading_stated.v1`) and
+goes to the end review; every other reading is a suggestion with its citation, shown beside its question, and the
+scientist's answer is what counts. Loading the same file again adds nothing. Never present a reading as confirmed.
 
 ## Before you leave this step
 

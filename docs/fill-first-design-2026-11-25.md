@@ -1,6 +1,6 @@
 # Fill first, review at the end (design, 2026-11-25)
 
-Status: **decided by the project owner (Krish), 2026-11-25.** This document says how it is built.
+Status: **decided by the project owner (Krish), 2026-11-25.** This document says how it is built. Slices 1–4 are built (formats 1.18.0–1.21.0).
 
 ## Why
 
@@ -216,5 +216,11 @@ The review read the code, not just this design. Every change below is adopted:
    folder that names X wastes the scientist's time), but only beside a second source that agrees. This supersedes
    SKILL.md's "never name the group from the folder name"; SKILL.md itself is rewritten in slice 4.*
 4. **The end review** (item 10), `bundle status`, SKILL.md and the question site.
+   *Built as bundle format 1.21.0, fill rule set 3 unchanged (`DEC-99`; contract §9 "What 1.21.0 added"):
+   `isaac bundle review` lists the filled values the built records carry and the scan decisions; `--accept --by
+   --apply` records ONE `review` decision binding each value by target, value, rule and evidence hash, so it is
+   `scientist_confirmed` (basis `reviewed_final_records`) until any of them changes; `bundle status` says what waits for
+   the review and points to it; SKILL.md is rewritten (rules 2, 4, 5, 8, 9; the Step 4 checklist; Step 7 asks only what
+   remains; Step 10 is the review); the question site already showed only what remains and adds nothing.*
 5. **The replay harness**, run after every slice. Its script lives in the repo; real paths are given as
    arguments.
