@@ -155,7 +155,17 @@ FORMAT_ID = "isaac.local-import-bundle"
 #: rule id, hence the version. :data:`FILL_RULE_SET` 2: a 1.18.0 bundle (rule set 1) is STALE where
 #: a value moves, and its next write re-derives it; a reading without the block never fills, so an older bundle's
 #: readings fill only once loaded again with the check (the checked reading is recorded beside the older one).
-FORMAT_VERSION = "1.19.0"
+#: 1.20.0 (slice 3 of DEC-96, DEC-98): four rules over the folder, the people and the held potential
+#: (:data:`FOLDER_FILL_RULES`): a sample measured in electrolyte under a potential its own files give takes the
+#: environment convention the scientist gives ONCE for the beamtime (:data:`ENVIRONMENT_CONVENTION_DECISION`, the new
+#: experiment decision; :data:`FILL_ENVIRONMENT_RULE_ID`); the facility and beamline
+#: the folder name and the SPEC fingerprint agree on (:data:`FILL_FACILITY_RULE_ID`); the producing organization is that
+#: facility (:data:`FILL_ORGANIZATION_RULE_ID`, the scientist's answer); the producing group is the PI the folder names
+#: (:data:`FILL_GROUP_RULE_ID`). The import keeps the shared readme's header lines (``experiment.beamtime_header_lines``)
+#: so the group rule can check them; a bundle imported before holds none, and the group rule fills it only once it is
+#: imported again. A 1.19.0 validator refuses the new rule ids, the new decision and the new field, hence the version.
+#: :data:`FILL_RULE_SET` 3: a rule set 2 bundle is STALE where a value moves.
+FORMAT_VERSION = "1.20.0"
 #: The electrochemical control mode. Its allowed values are the official schema's enum (read at
 #: runtime by :func:`value_problem`); the schema's conditional rules key the set-point a record
 #: requires on it (:func:`required_record_paths`). Never defaulted, never derived.
@@ -181,7 +191,7 @@ VALUE_IDS_APPEND_FROM = "1.5.0"
 IMPORT_RULES_ADDED_IN: Mapping[str, tuple] = {
     "1.4.0": (("generic:ssrl_xdc_v1", "ssrl_xdc_scan_start_v1"),),
 }
-_VERSION_ORDER = ("1.0.0", "1.1.0", "1.2.0", "1.3.0", "1.4.0", "1.5.0", "1.6.0", "1.7.0", "1.8.0", "1.9.0", "1.10.0", "1.11.0", "1.12.0", "1.13.0", "1.14.0", "1.15.0", "1.16.0", "1.17.0", "1.18.0", "1.19.0")
+_VERSION_ORDER = ("1.0.0", "1.1.0", "1.2.0", "1.3.0", "1.4.0", "1.5.0", "1.6.0", "1.7.0", "1.8.0", "1.9.0", "1.10.0", "1.11.0", "1.12.0", "1.13.0", "1.14.0", "1.15.0", "1.16.0", "1.17.0", "1.18.0", "1.19.0", "1.20.0")
 #: A change a format version made that moves no eligibility and adds no import rule, but that the
 #: first save by a newer build still DISCLOSES in its ``format_upgrades`` entry (never silently).
 CHANGES_ADDED_IN: Mapping[str, str] = {
@@ -228,6 +238,13 @@ CHANGES_ADDED_IN: Mapping[str, str] = {
                "quote itself states the value fills it (isaac.fill.reading_stated.v1), never an inferred one, a sample's "
                "own label as its material, or a beamtime reading on a run-level or sample field; an older reading fills "
                "only once its findings are loaded again"),
+    "1.20.0": ("1.20.0 asks once for the beamtime whether its measurements held at a potential were operando or in "
+               "situ (set_environment_convention) and fills each such run with the answer "
+               "(isaac.fill.environment_from_held_potential.v1, DEC-98); the facility and "
+               "beamline the folder name and the SPEC fingerprint agree on (isaac.fill.facility_from_folder.v1); the "
+               "producing organization as that facility (isaac.fill.organization_from_facility.v1); and the producing "
+               "group from the PI the folder names (isaac.fill.group_from_folder_pi.v1), which needs the readme's "
+               "header lines the import now keeps, so a bundle imported before takes it only once imported again"),
 }
 #: A field composed into a draft only beside another of the SAME run (interim decision for the
 #: set-point, pending domain-owner review; ``records.compose_group`` applies it). The CURRENT
@@ -496,12 +513,70 @@ READING_FILL_RULES = frozenset({FILL_READING_STATED_RULE_ID})
 QUOTE_CHECKER_ID = "isaac.reading_check.v1"
 #: The most readings a ``fill`` block lists as its witnesses (by interpretation id, sorted).
 MAX_FILL_READINGS = 50
+#: 1.20.0 (slice 3 of DEC-96, DEC-98): ``context.environment`` for a sample measurement held at a potential its own
+#: files give, with the convention the scientist gave ONCE for the beamtime (:data:`ENVIRONMENT_CONVENTION_DECISION`;
+#: see :data:`FILL_ENVIRONMENT_RULE`). WHY A QUESTION AND NOT A FIXED VALUE: the beamline scientist answered operando for
+#: every potential-held run of one real beamtime, set-points below the reaction onset included, while another real
+#: beamtime's own metadata sheet calls the same class of runs in situ. Which word a beamtime uses is the scientist's
+#: convention, asked once; the rule then saves asking it per run. The potential scale plays no part in it.
+FILL_ENVIRONMENT_RULE_ID = "isaac.fill.environment_from_held_potential.v1"
+FILL_ENVIRONMENT_RULE = (
+    f"{FILL_ENVIRONMENT_RULE_ID}: a sample measurement whose own files give one potential set-point (a deterministic "
+    "file-name or header reading with a value, its sources agreeing, no conflict and no contradicting witness) and that "
+    "another reading shows to be electrochemical (a stated electrolyte, pH, cell type, reaction or control mode of the "
+    "run or the beamtime, a scientist's answer to one, a checked stated reading of one, or a quote-checked reading of "
+    "any strength whose quote names chronoamperometry, chronopotentiometry or a potentiostat) takes the environment the "
+    "scientist gave once for the "
+    "beamtime's potential-held measurements (operando or in situ, DEC-98), none when they said it differs by "
+    "measurement; never a reference, standard or alignment run, a run no record is built from, a run whose name holds "
+    "an environment word or says open "
+    "circuit, dry, as-is or no electrolyte, one that anything says had no electrolyte, one with a file value, answer or "
+    "stated reading of its environment that differs, or one whose set-point is disputed, and the potential scale plays "
+    "no part in it."
+)
+#: 1.20.0: ``system.facility.facility_name`` / ``.beamline`` where the folder name and the SPEC fingerprint agree
+#: (DEC-96 superseded DEC-88's "facility hints stay hints"; DEC-88's set-point gate is kept).
+FILL_FACILITY_RULE_ID = "isaac.fill.facility_from_folder.v1"
+FILL_FACILITY_RULE = (
+    f"{FILL_FACILITY_RULE_ID}: the facility and the beamline the imported folder's name writes (the facility word right "
+    "before its BL token) are filled for every run when the SPEC headers' own fingerprint names that same facility and "
+    "beamline, as the fingerprint spells them; never when the two disagree, only one of them is there, the fingerprint "
+    "matches several beamlines or facilities, the folder states no branch the fingerprint states, or a reading or "
+    "answer names another facility or beamline."
+)
+#: 1.20.0: ``attribution.produced_by.organization`` = the facility :data:`FILL_FACILITY_RULE_ID` identified.
+FILL_ORGANIZATION_RULE_ID = "isaac.fill.organization_from_facility.v1"
+FILL_ORGANIZATION_RULE = (
+    f"{FILL_ORGANIZATION_RULE_ID}: the organization that produced the data is the facility the folder name and the SPEC "
+    "fingerprint agree on (the beamline scientist's answer of 2026-11-25: the producing organisation is the facility "
+    "named in the beamtime folder), filled once for the beamtime; never when no facility is identified so, the facility "
+    "is disputed, or a reading or answer names another organization."
+)
+#: 1.20.0: ``attribution.produced_by.group`` from the PI a ``<FACILITY>_<BEAMLINE>_<YYYY-MM>_<Surname>_<project>``
+#: folder names (the owner's direction: asking "is this the X group?" of a folder that names X wastes the scientist's
+#: time). Supersedes, in docs, the skill's "never name the group from the folder name".
+FILL_GROUP_RULE_ID = "isaac.fill.group_from_folder_pi.v1"
+FILL_GROUP_RULE = (
+    f"{FILL_GROUP_RULE_ID}: a beamtime folder named <FACILITY>_<BEAMLINE>_<YYYY-MM>_<Surname>_<project> names its PI, so "
+    "the producing group is '<full name> group' when exactly one full name ending in that surname is in the files (a "
+    "header line, the readme, a contributor or a checked stated reading), else '<Surname> group' as the folder writes "
+    "it; only in a bundle whose import kept the readme's header lines, and never when the token is no surname, the "
+    "readme's header or a SPEC data path names another surname in that place, or a reading or answer names another "
+    "group."
+)
+#: The four rules of slice 3 (1.20.0).
+FOLDER_FILL_RULES = frozenset({FILL_ENVIRONMENT_RULE_ID, FILL_FACILITY_RULE_ID, FILL_ORGANIZATION_RULE_ID,
+                               FILL_GROUP_RULE_ID})
 #: THE REGISTERED FILL RULES, ``rule id -> rule text``. A stored ``fill.rule_id`` outside it is refused by the schema.
 FILL_RULES: Mapping[str, str] = {
     FILL_PARSER_EXACT_RULE_ID: FILL_PARSER_EXACT_RULE,
     FILL_STORED_CONVENTION_RULE_ID: FILL_STORED_CONVENTION_RULE,
     FILL_DOMAIN_RULE_ID: FILL_DOMAIN_RULE,
     FILL_READING_STATED_RULE_ID: FILL_READING_STATED_RULE,
+    FILL_ENVIRONMENT_RULE_ID: FILL_ENVIRONMENT_RULE,
+    FILL_FACILITY_RULE_ID: FILL_FACILITY_RULE,
+    FILL_ORGANIZATION_RULE_ID: FILL_ORGANIZATION_RULE,
+    FILL_GROUP_RULE_ID: FILL_GROUP_RULE,
 }
 #: THE FILL RULE SET a bundle was derived under, stored as ``fill_rule_set`` by every writer of a bundle this build
 #: fills. Raised whenever a rule is added or any rule's exclusions change, so a bundle an earlier rule set wrote (same
@@ -510,7 +585,9 @@ FILL_RULES: Mapping[str, str] = {
 #: 2: slice 2 (DEC-97, format 1.19.0): the reading rule, a sample's own label never filled as its material (any rule),
 #: an electrolyte name carrying a concentration or a pH never filled (any rule), and a run's own AI reading that differs now stops a
 #: beamtime-wide fill reaching that run (:func:`fill_run_blocks`), as a run's own differing file reading already did.
-FILL_RULE_SET = 2
+#: 3: slice 3 (DEC-98, format 1.20.0): the held-potential environment, the folder's facility and beamline, the
+#: organization from the facility and the group from the folder's PI (:data:`FOLDER_FILL_RULES`).
+FILL_RULE_SET = 3
 #: The format a bundle STORES fills at. A 1.2.0-1.17.0 bundle (one the next save raises to this build's version) is
 #: derived with fills too, so its stored states disagree with this build's: STALE, not INVALID (:func:`stale_eligibility`).
 FILLS_FROM_FORMAT = "1.18.0"
@@ -1070,6 +1147,48 @@ def _spec_file_title(root: Path | None, row: Mapping | None) -> tuple[int, str] 
     return None
 
 
+#: 1.20.0: how many of the shared readme's first lines the import looks at, and keeps at most, for
+#: ``experiment.beamtime_header_lines`` (:func:`_readme_header_lines`)
+README_HEADER_SCAN_LINES = 20
+README_HEADER_MAX_LINES = 8
+#: a readme line kept: a comment line (``# 2031-01_Surname``, the real readmes' first line, which the readme reader
+#: assigns no concept), or a line that labels the PI, the group or the users
+_README_HEADER_LINE = re.compile(r"^\s*#|^\s*(?:pi|principal investigator|group|users?|proposal)"
+                                 r"(?:\s*[:=]|\s+[-\u2013\u2014]\s|(?-i:[-\u2013\u2014](?=[A-Z])))"
+                                 r"|^\s*\d{4}-\d{2}_[^\s/\\]+\s*$", re.IGNORECASE)
+
+
+def _readme_header_lines(root: Path | None, manifest: Sequence[Mapping], sid_of: Mapping) -> list[dict] | None:
+    """1.20.0 (:data:`FILL_GROUP_RULE_ID`): ``experiment.beamtime_header_lines`` — the header lines of the archive's
+    shared readme (``shared_readme``) among its first :data:`README_HEADER_SCAN_LINES` lines, each with its source,
+    path and line, at most :data:`README_HEADER_MAX_LINES`. The readme reader assigns them no concept (a date and a
+    name read out of ``# 2025-04_SYNPI`` would be a guess about which is which), so they are kept as literals only, for
+    the group rule to check the folder's PI against. ``None`` without ``root`` (nothing was read)."""
+    if root is None:
+        return None
+    from ..bl15 import archive
+    from ..bl15.inventory import ArchiveInventory, SourceRecord
+
+    out: list[dict] = []
+    for row in manifest:
+        if row.get("source_type") != "shared_readme":
+            continue
+        try:
+            record = SourceRecord(archive_path=row["archive_path"], basename=row.get("basename") or "",
+                                  extension=row.get("extension") or "", size_bytes=int(row.get("size_bytes") or 0),
+                                  content_sha256=str(row.get("content_sha256") or ""),
+                                  parent_dir=row.get("parent_dir") or "", depth=int(row.get("depth") or 0))
+            text, _refusal = archive.read_source_text(ArchiveInventory(root_label="", entries=(record,)),
+                                                      record.archive_path, source_root=root)
+        except Exception:  # never let one unreadable file stop the import
+            continue
+        for number, line in enumerate((text or "").lstrip("\ufeff").splitlines()[:README_HEADER_SCAN_LINES], start=1):
+            if line.strip() and _README_HEADER_LINE.match(line) and len(out) < README_HEADER_MAX_LINES:
+                out.append({"source_id": sid_of.get(row["archive_path"]), "relative_path": _safe_relative(row["archive_path"]),
+                            "locator": f"line {number}", "literal": line.strip()[:500]})
+    return out
+
+
 def _titled_processed_output(row: Mapping, sid_of: Mapping, title: tuple[int, str]) -> tuple[dict, dict]:
     """The processed output (and its one ``scan_title`` statement) of a SPEC-format file the engine classified as a
     processed spectrum by its scan title (:func:`_spec_file_title`)."""
@@ -1561,7 +1680,7 @@ DECISIONS_BY_KIND: Mapping[str, frozenset[str]] = {
     "processing_result": frozenset({"approve", "reject", "needs_changes", "defer", "select_athena_version"}),
     # `defer` (1.9.x polish): "I don't know" to the counter question — recorded, changes no grouping
     "experiment": frozenset({"set_counter_positions", "set_clock_time_zone", "set_not_counter_positions", "defer",
-                             "set_dose_reading"}),
+                             "set_dose_reading", "set_environment_convention"}),
     # 1.6.0: a merge candidate is decided only to say its groups are DISTINCT; merging stays a
     # record-group decision (``merge --merge-with``)
     "merge_candidate": frozenset({"keep_apart"}),
@@ -1578,6 +1697,56 @@ SCAN_DECISION = "set_scan_decision"
 #: for one record group or (target ``experiment``) the whole beamtime; a group's own reading wins
 DOSE_READING_DECISION = "set_dose_reading"
 DOSE_READINGS = ("beam_damage", "not_beam_damage", "first_scan_settling")
+#: 1.20.0 (DEC-98): the scientist's answer, ONCE for the beamtime (target ``experiment``), to "the measurements taken in
+#: electrolyte while the cell was held at a potential: operando or in situ?". ``operando`` / ``in_situ``: every such
+#: run (:func:`environment_basis`) is filled with it under :data:`FILL_ENVIRONMENT_RULE_ID`; ``per_run``: it differs by
+#: measurement, nothing is filled and each run's environment is asked. Latest wins. Never a per-run answer: answer
+#: memory never learns it (it reads value decisions only).
+ENVIRONMENT_CONVENTION_DECISION = "set_environment_convention"
+ENVIRONMENT_CONVENTION_PER_RUN = "per_run"
+ENVIRONMENT_CONVENTIONS = ("operando", "in_situ", ENVIRONMENT_CONVENTION_PER_RUN)
+#: the conventions that fill (each a member of ``context.environment``'s own list)
+ENVIRONMENT_CONVENTION_FILLS = ("operando", "in_situ")
+
+
+def environment_convention_problem(value: Any) -> str | None:
+    """Why a set_environment_convention value is not one of :data:`ENVIRONMENT_CONVENTIONS` (None when it is)."""
+    if value not in ENVIRONMENT_CONVENTIONS:
+        return "set_environment_convention needs --value operando, in_situ or per_run"
+    return None
+
+
+#: 1.20.0 (round 3, I-1): the key a ``set_environment_convention`` decision keeps the runs it was asked about under
+#: (their environment value ids, sorted), so a later reading or regroup that brings more runs under it is SAID
+#: (:func:`environment_convention_extension`), never silent
+ENVIRONMENT_CONVENTION_COVERS_KEY = "environment_convention_covers"
+
+
+def environment_convention_covers_now(bundle: Mapping) -> list[str]:
+    """The environment value ids the convention question reaches now (filled by it included), sorted: what a
+    ``set_environment_convention`` decision records it was given for."""
+    return sorted(t["value_id"] for t in environment_convention_targets(bundle, include_filled=True))
+
+
+def environment_convention_extension(bundle: Mapping, ctx: Mapping | None = None) -> list[str]:
+    """Round 3, I-1: the runs' environment value ids the scientist's operando / in situ answer now reaches that it was
+    NOT given for (more runs qualified after it: a later reading, a regroup), sorted; ``[]`` when there is no such
+    answer. Extending within the beamtime is allowed (one answer for the beamtime, every fill reviewed at the end), but
+    it is said: ``bundle status`` counts them and the question re-opens, optional, under its own id."""
+    conv = environment_convention_decision(bundle)
+    if conv is None or conv.get("value") not in ENVIRONMENT_CONVENTION_FILLS:
+        return []
+    covered = set(conv.get(ENVIRONMENT_CONVENTION_COVERS_KEY) or ())
+    now = environment_convention_targets(bundle, ctx, include_filled=True)
+    return sorted(t["value_id"] for t in now if t["value_id"] not in covered)
+
+
+def environment_convention_decision(bundle: Mapping) -> Mapping | None:
+    """The scientist's latest ``set_environment_convention`` for the beamtime (target ``experiment``), or ``None``."""
+    return next((d for d in reversed(bundle.get("scientist_decisions") or ())
+                 if isinstance(d, Mapping) and d.get("decision") == ENVIRONMENT_CONVENTION_DECISION
+                 and (d.get("target") or {}).get("kind") == "experiment"
+                 and environment_convention_problem(d.get("value")) is None), None)
 
 
 #: 1.13.0: the scientist's word on what a record group IS — a sample, a reference (a standard or foil) or an alignment
@@ -2250,6 +2419,13 @@ def fill_context(bundle: Mapping, decision_of: Mapping | None = None) -> dict:
     }
     # D6: a beamtime finding one of whose targets dissents fills none of them
     ctx["dissented_findings"] = _dissented_findings(bundle, ctx, decision_of) if apply and ctx["checked"] else set()
+    # 1.20.0 (DEC-98): the held potential per run, the facility the folder and the fingerprint agree on, the folder's PI
+    ctx["decision_of"] = decision_of
+    ctx["env_convention"] = environment_convention_decision(bundle) if apply else None
+    ctx["held_potential"] = _held_potential_facts(bundle, ctx, decision_of) if apply else {}
+    ctx["facility"] = facility_identified(bundle, ctx) if apply else None
+    ctx["fingerprint_by_run"] = _fingerprint_witness_index(bundle, ctx["facility"])
+    ctx["group"] = group_from_folder(bundle, ctx) if apply else None
     return ctx
 
 
@@ -2916,13 +3092,1124 @@ def _with_readings(rule_id: str, value: Any, readings: Sequence[Mapping]) -> tup
     return rule_id, value, ids, passes
 
 
+# --- folder and people, and the held potential (1.20.0, slice 3 of DEC-96, DEC-98) ----------------------------------
+#
+# Four rules over what the import already holds: the run's own set-point beside corroboration that it was
+# electrochemical, with the beamtime's environment convention the scientist gave once (the environment); the folder
+# name beside the SPEC headers' fingerprint (the facility and beamline, and the producing organization); and the PI
+# the folder names, beside a second source (the producing group). Each is a MISSING value's rule: a field a reader or a
+# reading already gives keeps its own rule, and any candidate of the field for the run leaves the missing value to it
+# (never two fills). Every rule refuses where anything dissents, and a decision always wins.
+
+ENVIRONMENT_PATH = "context.environment"
+POTENTIAL_SETPOINT_PATH = "context.electrochemistry.potential_setpoint_V"
+FACILITY_NAME_FILL_PATH = "system.facility.facility_name"
+BEAMLINE_FILL_PATH = "system.facility.beamline"
+ORGANIZATION_FILL_PATH = "attribution.produced_by.organization"
+GROUP_FILL_PATH = "attribution.produced_by.group"
+#: the fields whose dispute (another value, or a scientist's reject) stops the facility and organization rules
+FACILITY_DISPUTE_PATHS = (FACILITY_NAME_FILL_PATH, BEAMLINE_FILL_PATH, ORGANIZATION_FILL_PATH)
+#: :data:`FILL_ENVIRONMENT_RULE_ID`'s corroboration: a field whose stated value says the run was electrochemical.
+ECHEM_CORROBORATION_PATHS = frozenset({
+    "context.electrochemistry.electrolyte.name", "context.electrochemistry.electrolyte.concentration_M",
+    "context.electrochemistry.pH", "context.electrochemistry.cell_type", "context.electrochemistry.reaction",
+    "context.reaction.name", CONTROL_MODE_PATH})
+#: the electrolyte fields a "no electrolyte" value of blocks the rule (and never corroborates)
+_ELECTROLYTE_PATHS = frozenset({"context.electrochemistry.electrolyte.name",
+                                "context.electrochemistry.electrolyte.concentration_M"})
+#: values that state nothing, so they corroborate nothing (they block nothing either)
+_STATES_NOTHING = frozenset({"not_reported", "not reported", "unknown", "not_applicable", "not applicable", "n/a"})
+#: the control mode that means no potential was held (a name's OCV / OCP, ``suggestions.OPEN_CIRCUIT_RULE_ID``)
+OPEN_CIRCUIT_MODE = "open_circuit"
+_ECHEM_CONTROL_WORD = re.compile(r"(?i)chrono-?amperometr|chrono-?potentiometr|potentiostat")
+#: run classifications that are never a sample measurement (``grouping.run_role`` reads the same two)
+NOT_A_SAMPLE_SOURCE_TYPES = frozenset({"standard_or_reference", "alignment"})
+#: A run's own NAME token (split on ``_``, ``-``, spaces and dots) that names an environment, or says no potential
+#: was held, or no electrolyte was there: the run is then never filled, and its environment is asked. Conservative: any
+#: environment word (``insitu``, ``exsitu``, ``operando``, ``postmortem``, ``air``, ``ambient``, ``pristine``,
+#: ``vacuum``), open circuit (``OCV``, ``OCP``, ``atOCV``, ``OCV1``), the dry convention's tokens (DEC-70: ``dry``,
+#: ``dried``, ``NoElectrolyte``) and as-is. Never ``after`` (a potential-held run is named ``after500Cycling_100mV``).
+_ENVIRONMENT_NAME_TOKEN = re.compile(
+    r"(?i)^(?:(?:at)?oc[vp]|dry|dried|noelectrolyte\w*|noelec\w*|asis|asreceived|insitu|exsitu|operando|"
+    r"inoperando|postmortem|air|ambient|pristine|vacuum|uhv|opencircuit\w*)\d*$")  # round 3: digits after any word
+#: two name tokens that together are one such word
+_ENVIRONMENT_NAME_PAIRS = frozenset({("as", "is"), ("as", "received"), ("open", "circuit"), ("in", "situ"),
+                                     ("ex", "situ"), ("post", "mortem"), ("in", "operando")})
+
+
+def _name_says_environment(run: Mapping) -> str | None:
+    """The token (or the two tokens) of the run's own name (its stem and label) that names an environment, open
+    circuit, dry, no electrolyte or as-is (:data:`_ENVIRONMENT_NAME_TOKEN`), else ``None``."""
+    for text in (run.get("stem"), run.get("label")):
+        toks = [t for t in re.split(r"[_\s·.,;()\-]+", str(text or "")) if t]
+        for i, tok in enumerate(toks):
+            if _ENVIRONMENT_NAME_TOKEN.match(tok):
+                return tok
+            nxt = toks[i + 1].casefold() if i + 1 < len(toks) else ""
+            if (tok.casefold(), nxt) in _ENVIRONMENT_NAME_PAIRS:
+                return f"{tok} {toks[i + 1]}"
+    return None
+
+
+def says_no_electrolyte(value: Any) -> bool:
+    """Whether a value of an electrolyte field says there was NO electrolyte: ``none``, ``None (dry)``, ``dry``,
+    ``dried``, ``no electrolyte``, ``without`` (``without electrolyte``), ``not used``, ``n/a``, ``NoElectrolyte``, or a
+    concentration of zero. Conservative: a word that may say so blocks (the run is then asked)."""
+    if isinstance(value, (int, float)) and not isinstance(value, bool):
+        return value == 0
+    if not isinstance(value, str):
+        return False
+    words = re.findall(r"[a-z]+", value.casefold())
+    text = " ".join(words)
+    if text in ("n a", "na"):  # n/a, N/A
+        return True
+    return bool(set(words) & {"none", "dry", "dried", "nil", "noelectrolyte", "without"}) or any(
+        p in text for p in ("no electrolyte", "no liquid", "not used"))
+
+
+def _says_no_held_potential(c: Mapping, value: Any) -> str | None:
+    """What a candidate of a run (its governing ``value``) states that means no potential was held, or there was no
+    electrolyte: the dry state, the medium ``none`` (NoElectrolyte), the as-is state, the control mode open circuit, an
+    electrolyte value of none or dry, else ``None``."""
+    sk = c.get("statement_key")
+    tos = {str(n.get("to")).casefold() for e in c.get("evidence") or () if e.get("method") != "ai_interpretation"
+           for n in e.get("normalization") or () if isinstance(n, Mapping) and n.get("to") is not None}
+    literals = {str(x).casefold() for x in c.get("observed_literals") or ()}
+    if sk == "dry_state":
+        return "the run's name says it was dry"
+    if sk == "electrolyte_or_medium" and (c.get("value") == "none" or "none" in tos
+                                          or any(lit.startswith("noelectrolyte") for lit in literals)):
+        return "the run's name says there was no electrolyte"
+    if sk == "before_after_state" and (c.get("value") == "as_is" or "as_is" in tos):
+        return "the run's name says it was measured as-is"
+    if c.get("target_field_path") == CONTROL_MODE_PATH and OPEN_CIRCUIT_MODE in (value, c.get("value")):
+        return "the run's control mode is open circuit"
+    if c.get("target_field_path") in _ELECTROLYTE_PATHS and (says_no_electrolyte(value) or says_no_electrolyte(c.get("value"))):
+        return "the run's electrolyte is none"
+    return None
+
+
+def _no_held_potential_value(path: Any, value: Any) -> str | None:
+    """What an ANSWER or a READING at ``path`` says that means no potential was held or no electrolyte was there."""
+    if path == CONTROL_MODE_PATH and value == OPEN_CIRCUIT_MODE:
+        return "open circuit"
+    if path in _ELECTROLYTE_PATHS and says_no_electrolyte(value):
+        return "no electrolyte"
+    return None
+
+
+def _corroborates(path: Any, value: Any) -> bool:
+    """A value at ``path`` that says the run was electrochemical (never one that states nothing, or no electrolyte)."""
+    if path not in ECHEM_CORROBORATION_PATHS or value is None or _no_held_potential_value(path, value):
+        return False
+    return not (isinstance(value, str) and value.strip().casefold() in _STATES_NOTHING)
+
+
+#: round 4: words of a sentence that make it no statement of what WAS done (a plan, an intent, a condition)
+_INTENT_WORDS = frozenset({"planned", "plan", "plans", "planning", "will", "would", "should", "intended",
+                           "intend", "intends", "could", "unable", "future", "might", "may", "hope", "hoped",
+                           "proposed", "propose", "want", "wanted"})
+#: round 5: "next" says a plan only with what comes next ("next beamtime"; "the next scan ran under …" is no plan)
+_NEXT_PLANS = frozenset({"beamtime", "time", "week", "visit"})
+#: round 4: words (or word pairs) of a quote that say some measurement it speaks of was NOT under potential control in
+#: electrolyte. Round 5: dry, ex situ and no electrolyte block anywhere in the quote (``dry`` right before a purge gas
+#: or a box is a purge, not a dry sample); open circuit (OCV, OCP) and as-is block too, except an open-circuit step tied
+#: to the chronoamperometry that FOLLOWS it in the same sentence ("OCV for 5 min, then chronoamperometry").
+_NOT_HELD_WORDS = frozenset({"dry", "dried", "exsitu", "noelectrolyte"})
+_NOT_HELD_PAIRS = frozenset({("ex", "situ"), ("no", "electrolyte"), ("without", "electrolyte")})
+_DRY_PURGE = frozenset({"n2", "nitrogen", "ar", "argon", "gas", "air", "box", "he", "helium"})
+_OPEN_CIRCUIT_WORDS = frozenset({"ocv", "ocp", "opencircuit"})
+_AS_IS_WORDS = frozenset({"asis", "asreceived"})
+#: an open-circuit step tied to the control step after it: "<OCV> … then / followed by / before … <control>", or
+#: "<control> … after … <OCV>"
+_OCV_THEN_CONTROL = re.compile(r"(?i)\b(?:ocv|ocp|open[ -]?circuit)\b.*?\b(?:then|followed by|before)\b.*?"
+                               r"(?:chrono-?amperometr|chrono-?potentiometr|potentiostat)")
+_CONTROL_AFTER_OCV = re.compile(r"(?i)(?:chrono-?amperometr|chrono-?potentiometr|potentiostat)\w*\s+(?:\S+\s+){0,3}?"
+                                r"after\s+(?:\S+\s+){0,3}?(?:ocv|ocp|open[ -]?circuit)\b")
+#: a sample a quote names: "sample ZZ9", "samples ZZ1": the code CASE-SENSITIVE (round 5: a code has a digit, or is two
+#: or more capitals; "samples were measured" names none)
+_QUOTE_SAMPLE = re.compile(r"\b(?i:samples?)\s*(?:#\s*)?([A-Za-z]*\d[\w\-]*|[A-Z]{2,}[\w\-]*)")
+_MONTH_NAMES = frozenset({"jan", "january", "feb", "february", "mar", "march", "apr", "april", "may", "jun", "june",
+                          "jul", "july", "aug", "august", "sep", "sept", "september", "oct", "october", "nov",
+                          "november", "dec", "december"})
+
+
+def _quote_sentences(quote: Any) -> list[str]:
+    from .reading_tie import _plain
+
+    text = re.sub(r"n['’]t\b", " not", _plain(quote), flags=re.IGNORECASE)
+    return re.split(r";|\.(?!\d)|\n\s*\n", text)
+
+
+def _intent_in(words: Sequence[str]) -> bool:
+    """A word of a plan or intent among ``words`` (round 5: "May" with a day or a year beside it is a date; "next" only
+    with beamtime / time / week / visit)."""
+    for n, w in enumerate(words):
+        if w == "may":
+            before = words[n - 1] if n else ""
+            after = words[n + 1] if n + 1 < len(words) else ""
+            if re.fullmatch(r"\d{1,2}|\d{4}", after) or re.fullmatch(r"\d{1,2}", before):
+                continue  # a date: "3 May 2031", "May 3"
+            return True
+        if w in _INTENT_WORDS:
+            return True
+        if w == "next" and n + 1 < len(words) and words[n + 1] in _NEXT_PLANS:
+            return True
+    return False
+
+
+def _control_clause_conditional(sentence: str) -> bool:
+    """Round 5: whether the clause that names the control is itself conditional ("chronoamperometry only if the cell
+    held", "if it held, chronoamperometry"). The sentence is cut into clauses at a comma and at "then"; the clause with
+    the control word must not hold "if" or "unless". An "if" governing another clause ("if it drifted it was reset, then
+    chronoamperometry continued") does not stop it. A sentence that STARTS with "if" and has no "then" is one condition
+    over all of it."""
+    low = sentence.casefold()
+    clauses = re.split(r",|\bthen\b", low)
+    # round 6: a leading "<word>:" or date prefix ("Note:", "3 May:", "SYNTHETIC:") is set aside before the leading-if test
+    opening = re.sub(r"^\s*(?:[^\s:]+(?:\s+[^\s:]+){0,2})\s*:\s*", "", low, count=1)
+    if re.match(r"\s*(?:if|unless)\b", opening) and not re.search(r"\bthen\b", low):
+        return True
+    for clause in clauses:
+        if _ECHEM_CONTROL_WORD.search(clause) and re.search(r"\b(?:if|unless)\b", clause):
+            return True
+    return False
+
+
+def _control_sentence(quote: Any) -> str | None:
+    """The first sentence of ``quote`` that names chronoamperometry, chronopotentiometry or a potentiostat, with no
+    negation in it (``reading_tie``'s negations), no word of a plan or an intent (round 4: "planned for the next
+    beamtime", "could not"; round 5: never a date's "May", and "next" only for a later visit), and the control's own
+    clause not conditional (:func:`_control_clause_conditional`); else ``None``."""
+    from .reading_tie import NEGATIONS
+
+    for sentence in _quote_sentences(quote):
+        words = re.findall(r"[0-9a-z]+", sentence.casefold())
+        if (_ECHEM_CONTROL_WORD.search(sentence) and not any(w in NEGATIONS for w in words)
+                and not _intent_in(words) and not _control_clause_conditional(sentence)):
+            return sentence
+    return None
+
+
+def _quote_names_echem_control(quote: Any) -> bool:
+    """:func:`_control_sentence` finds one."""
+    return _control_sentence(quote) is not None
+
+
+def _control_clause(sentence: str) -> str:
+    """Round 6: the clause of ``sentence`` (cut at ``,``, ``;`` and "then") that names the control."""
+    return next((c for c in re.split(r"[,;]|\bthen\b", sentence, flags=re.IGNORECASE) if _ECHEM_CONTROL_WORD.search(c)),
+                sentence)
+
+
+def _samples_named(text: str, known: set[str]) -> set[str]:
+    """The sample labels ``text`` names: ``sample <code>`` (a case-sensitive code), a ``Sample <n> <code>`` heading, or
+    a known label written as a word, as ``reading_tie.label_key`` keys (each with a letter)."""
+    from .reading_tie import heading_codes, label_key
+
+    named = {label_key(m.group(1)) for m in _QUOTE_SAMPLE.finditer(text)} | heading_codes(text)
+    named |= {k for tok in re.findall(r"[A-Za-z0-9][A-Za-z0-9\-_]*", text) if (k := label_key(tok)) in known}
+    return {n for n in named if n and any(ch.isalpha() for ch in n)}
+
+
+def _quote_says_not_held(quote: Any) -> bool:
+    """Round 4: the quote holds a word saying some measurement was dry, ex situ, without electrolyte, as-is or at open
+    circuit (``ZZ1 was measured dry after the hold``). Round 5: ``dry`` right before a purge gas or a box (``dry N2``)
+    is no dry sample; an open-circuit step tied to the control that follows it in the same sentence ("OCV for 5 min,
+    then chronoamperometry at 1.4 V", "chronoamperometry after OCV") is no open-circuit measurement. Anywhere else in
+    the quote, an open-circuit or as-is word still stops it (conservative: never only in the matched sentence)."""
+    from .reading_tie import words
+
+    ws = words(quote)
+    pairs = list(zip(ws, ws[1:]))
+    for n, w in enumerate(ws):
+        if w in _NOT_HELD_WORDS and not (w == "dry" and n + 1 < len(ws) and ws[n + 1] in _DRY_PURGE):
+            return True
+    if any(p in _NOT_HELD_PAIRS for p in pairs):
+        return True
+    if set(ws) & _AS_IS_WORDS or any(p in (("as", "is"), ("as", "received")) for p in pairs):
+        return True
+    for sentence in _quote_sentences(quote):
+        sw = words(sentence)
+        says_ocv = bool(set(sw) & _OPEN_CIRCUIT_WORDS) or ("open", "circuit") in set(zip(sw, sw[1:]))
+        if says_ocv and not (_OCV_THEN_CONTROL.search(sentence) or _CONTROL_AFTER_OCV.search(sentence)):
+            return True
+    return False
+
+
+def _value_says_not_held(path: Any, value: Any) -> bool:
+    """A value a reading carries that says dry, ex situ, no electrolyte or open circuit (at any field)."""
+    if value is None:
+        return False
+    if isinstance(value, str) and value.strip().casefold() in ("ex_situ", "ex situ", "exsitu", OPEN_CIRCUIT_MODE):
+        return True
+    return says_no_electrolyte(value) if isinstance(value, str) or path in _ELECTROLYTE_PATHS else False
+
+
+def _quote_corroboration(i: Mapping, path: Any, ctx: Mapping) -> tuple[bool, set[str] | None]:
+    """Round 4: ``(corroborates, runs)`` for a quote-checked reading's QUOTE (whatever its strength). It corroborates
+    only when ALL hold: a sentence names the instrument's control with no negation and no intent word
+    (:func:`_quote_names_echem_control`); the whole quote says nothing dry, ex situ, without electrolyte, as-is or at
+    open circuit (:func:`_quote_says_not_held`); the reading's own value says none of those either. ``runs``: ``None``
+    when the quote names no sample (it corroborates the reading's own scope); else only the runs carrying a sample label
+    it names (``sample ZZ9``, or a run's own label such as ``ZZ1``; slice 2's ``sample_labels``) — none when no run
+    carries it ("protocol for sample ZZ9 only" corroborates no ZZ1 run)."""
+    quote = i.get("quote")
+    sentence = _control_sentence(quote) if isinstance(quote, str) else None
+    if sentence is None:
+        return False, None
+    if _quote_says_not_held(quote) or _value_says_not_held(path, i.get("proposed_value")):
+        return False, None
+    labels_of = ctx.get("sample_labels") or {}
+    known = {lab for labs in labels_of.values() for lab in labs if len(lab) >= 2 and any(ch.isalpha() for ch in lab)}
+    # round 6: the samples are read from the CONTROL'S OWN CLAUSE; a sample named anywhere else in the quote ("ZZ1 held
+    # at OCV, then chronoamperometry on ZZ2") means the quote speaks of several samples in several states, so it
+    # corroborates nothing. A "sample <code>" with a code (a digit, or two or more capitals: case-sensitive) names a
+    # sample, known or not: an unknown code names ANOTHER sample, so it corroborates no run here ("for sample ZZ9 only")
+    clause = _control_clause(sentence)
+    start = quote.find(clause) if clause in quote else -1
+    outside = (quote[:start] + " " + quote[start + len(clause):]) if start >= 0 else quote.replace(sentence, " ")
+    if _samples_named(outside, known):
+        return False, None
+    named = _samples_named(clause, known)
+    if not named:
+        return True, None
+    return True, {rid for rid, labs in labels_of.items() if labs & named}
+
+
+def _checked_reading(i: Mapping, ctx: Mapping) -> bool:
+    return (isinstance(i, Mapping) and i.get("strength") == "stated"
+            and reading_quote_problem(i, ctx["source_of"]) is None)
+
+
+def _setpoint_reading_ok(c: Mapping, ctx: Mapping) -> bool:
+    """:data:`FILL_ENVIRONMENT_RULE_ID`'s first condition, for ONE candidate: the run's OWN set-point, read by a
+    deterministic reader from the run's files (a file-name token or a header line), with a finite value, its sources
+    agreeing, not conflicting, not held, no conflict naming it, no contradicting witness, no other reading of the
+    set-point for the run open or differing, and no AI reading of it disagreeing. A scientist's confirm or correct
+    leaves it a set-point; a reject was never passed here. The scale is not looked at (DEC-88's gate is the
+    composer's, for the set-point itself)."""
+    value = c.get("value")
+    rid = c.get("run_id")
+    if c.get("kind") != "field" or rid is None or c.get("target_field_path") != POTENTIAL_SETPOINT_PATH:
+        return False
+    if isinstance(value, bool) or not isinstance(value, (int, float)) or not math.isfinite(value):
+        return False
+    sb = c.get("state_basis") or {}
+    if c.get("extracted_state") == STATE_CONFLICTING or sb.get("agreement") != "sources_agree":
+        return False
+    if sb.get("determinism") != "deterministic" or sb.get("unresolved_reason") is not None:
+        return False
+    if sb.get("not_proposable_reason") in HELD_REASONS or sb.get("review_status") == "resolved" or c.get(
+            "standing_resolution") or sb.get("resolved_by_rule") is not None:
+        return False
+    witnesses = [e for e in c.get("evidence") or () if e.get("method") != "ai_interpretation"]
+    if not witnesses or any(e.get("relation") == "contradicts" or e.get("method") != "deterministic_parser"
+                            for e in witnesses):
+        return False
+    if not any(e.get("relation") == "supports" for e in witnesses):
+        return False
+    if ctx["conflict_ids_of"].get(c.get("candidate_id")):
+        return False
+    disputed = ctx["disputed"]
+    if (rid, POTENTIAL_SETPOINT_PATH) in disputed or (None, POTENTIAL_SETPOINT_PATH) in disputed:
+        return False
+    if _field_dissents(rid, POTENTIAL_SETPOINT_PATH, c.get("candidate_id"), value, ctx):
+        return False
+    if not ctx["naming_settled"] and any(_position_dependent(e) for e in witnesses if e.get("relation") == "supports"):
+        return False
+    return not _ai_disagrees(ctx, ("candidate", str(c.get("candidate_id"))), POTENTIAL_SETPOINT_PATH, value)
+
+
+def _held_potential_facts(bundle: Mapping, ctx: Mapping, decision_of: Mapping) -> dict:
+    """:data:`FILL_ENVIRONMENT_RULE_ID`'s evidence, read once: ``{"runs": {run_id: {setpoints, corroboration, blocked,
+    env_readings}}, "beamtime": {corroboration, blocked, env_readings}}``. ``setpoints``: the run's own set-point
+    candidates (:func:`_setpoint_reading_ok`); ``corroboration``: ``(kind, id)`` of what shows the run (or the beamtime)
+    was electrochemical — a candidate no scientist rejected, a scientist's answer, or a checked stated reading, with a
+    value at :data:`ECHEM_CORROBORATION_PATHS` (:func:`_corroborates`), or a checked stated reading whose quote names
+    the instrument's control (:func:`_quote_names_echem_control`); ``blocked``: why the rule never reaches that run (not
+    a sample measurement; an environment word in its name; anything — its name, a file value, an answer or a reading of
+    the run or of the beamtime — saying open circuit, dry, as-is or no electrolyte); ``env_readings``: ``(target,
+    value, strength)`` of every AI reading of the run's (or the beamtime's) environment."""
+    from .grouping import run_role
+
+    source_of = ctx["source_of"]
+    conflict_ids_of = ctx["conflict_ids_of"]
+    runs = {r.get("run_id"): r for r in bundle.get("runs") or () if isinstance(r, Mapping)}
+    facts = {rid: {"setpoints": [], "corroboration": [], "blocked": None, "env_readings": []} for rid in runs}
+    beamtime = {"corroboration": [], "blocked": None, "env_readings": []}
+
+    def at(rid):
+        return beamtime if rid is None else facts.get(rid)
+
+    def block(rid, why):
+        f = at(rid)
+        if f is not None and f["blocked"] is None:
+            f["blocked"] = why
+
+    def corroborate(rid, ref):
+        f = at(rid)
+        if f is not None:
+            f["corroboration"].append(ref)
+
+    context = context_run_ids(bundle)
+    for rid, r in runs.items():
+        if r.get("source_type") in NOT_A_SAMPLE_SOURCE_TYPES or run_role(r, source_of)[0] != "sample":
+            block(rid, "a reference, standard or alignment run, not a sample measurement")
+        if not r.get("run_candidate") or rid in context:
+            block(rid, "not a measurement run a record is built from (or kept only as context)")  # round 3, I-2
+        said = _name_says_environment(r)
+        if said:
+            block(rid, f"the run's own name says {said!r}")
+    key_to_run = {r.get("run_key"): rid for rid, r in runs.items()}
+    for g in bundle.get("record_groups") or ():
+        if g.get("status") in LIVE_GROUP_STATUSES and g.get("role") not in (None, "sample"):
+            for k in g.get("member_run_keys") or ():
+                if key_to_run.get(k) is not None:
+                    block(key_to_run[k], f"its record group's role is {g.get('role')}")
+    for c in bundle.get("candidates") or ():
+        rid, path = c.get("run_id"), c.get("target_field_path")
+        d = candidate_decision(bundle, c, decision_of, conflict_ids_of)
+        rejected = d is not None and d.get("decision") == "reject"
+        value = None if rejected else final_value(c.get("value"), d, c.get("readings"))
+        said = _says_no_held_potential(c, value) if not rejected else None
+        if said:
+            block(rid, said)
+            continue
+        if rejected:
+            continue
+        if path == POTENTIAL_SETPOINT_PATH and rid in facts and _setpoint_reading_ok(c, ctx):
+            facts[rid]["setpoints"].append(str(c.get("candidate_id")))
+        if _corroborates(path, value):
+            corroborate(rid, ("candidate", str(c.get("candidate_id"))))
+    for m in bundle.get("missing_values") or ():
+        path, rid = m.get("target_field_path"), m.get("run_id")
+        if path not in ECHEM_CORROBORATION_PATHS:
+            continue
+        d = decision_of.get(("missing_value", str(m.get("value_id"))))
+        if d is None or d.get("decision") not in CONFIRMING_DECISIONS:
+            continue
+        value = final_value(None, d)
+        said = _no_held_potential_value(path, value)
+        if said:
+            block(rid, f"a scientist answered {said}")
+        elif _corroborates(path, value):
+            corroborate(rid, ("decision", str(d.get("decision_id"))))
+    for i in bundle.get("ai_interpretations") or ():
+        t = i.get("target") if isinstance(i, Mapping) else None
+        if not isinstance(t, Mapping):
+            continue
+        key = (str(t.get("kind")), str(t.get("id")))
+        obj = ctx["target_of"].get(key)
+        if obj is None:
+            continue
+        rid, path, v = obj.get("run_id"), obj.get("target_field_path"), i.get("proposed_value")
+        where = None if i.get("scope") == "experiment" else rid
+        # round 3, I-3: a reading whose QUOTE passed the check corroborates through its quote's own words, whatever its
+        # strength (an inferred VALUE does not make the checked words untrue: they say the data were taken under the
+        # instrument's control); its value corroborates only when the reading is stated
+        quote_checked = isinstance(i, Mapping) and reading_quote_problem(i, ctx["source_of"]) is None
+        by_quote, quote_runs = _quote_corroboration(i, path, ctx) if quote_checked else (False, None)
+        ref = ("reading", str(i.get("interpretation_id")))
+
+        def by_the_quote():
+            if quote_runs is None:
+                corroborate(where, ref)
+            else:  # the quote names samples: only their runs (and only the reading's own run, for a runs-scoped one)
+                for r in sorted(quote_runs):
+                    if where is None or r == where:
+                        corroborate(r, ref)
+
+        if path == ENVIRONMENT_PATH:
+            f = at(rid)
+            if f is not None:
+                f["env_readings"].append((key, v, i.get("strength")))
+            if by_quote:
+                by_the_quote()
+            continue
+        said = _no_held_potential_value(path, v)
+        if said:
+            block(where, f"a reading says {said}")  # any strength: conservative
+            continue
+        if _checked_reading(i, ctx) and _corroborates(path, v):
+            corroborate(where, ref)
+        elif by_quote:
+            by_the_quote()
+    return {"runs": facts, "beamtime": beamtime}
+
+
+def environment_basis(m: Mapping, ctx: Mapping) -> dict | None:
+    """Whether ONE missing ``context.environment`` of a run QUALIFIES for :data:`FILL_ENVIRONMENT_RULE_ID` (asked once
+    by the environment-convention question, and filled by its answer): ``{"setpoints", "corroboration",
+    "env_readings"}``, else ``None``. Neither the run nor the beamtime blocked, the run's own set-point, corroboration,
+    no candidate of the environment for the run or the beamtime (a file or sheet value, the dry convention's
+    ``ex_situ`` included: it decides), and the sources not disagreeing about it. Its value is the convention's
+    (:func:`environment_fill_basis`)."""
+    rid = m.get("run_id")
+    if m.get("target_field_path") != ENVIRONMENT_PATH or rid is None or is_answer_slot(m):
+        return None
+    if m.get("extracted_state", STATE_MISSING) != STATE_MISSING or ENVIRONMENT_PATH not in ctx["writable"]:
+        return None
+    held = ctx.get("held_potential") or {}
+    facts = (held.get("runs") or {}).get(rid)
+    beamtime = held.get("beamtime") or {}
+    if not facts or facts["blocked"] or beamtime.get("blocked") or not facts["setpoints"]:
+        return None
+    corroboration = list(dict.fromkeys([*facts["corroboration"], *(beamtime.get("corroboration") or ())]))
+    if not corroboration:
+        return None
+    if ctx["readings_of"].get((rid, ENVIRONMENT_PATH)) or ctx["readings_of"].get((None, ENVIRONMENT_PATH)):
+        return None
+    disputed = ctx["disputed"]
+    if (rid, ENVIRONMENT_PATH) in disputed or (None, ENVIRONMENT_PATH) in disputed:
+        return None
+    env_readings = [*facts["env_readings"], *(beamtime.get("env_readings") or ())]
+    if any(strength == "stated" and v is not None for _, v, strength in env_readings):
+        return None  # round 3: a STATED reading of this run's environment: asked on its own, never covered by the convention
+    return {"setpoints": list(facts["setpoints"]), "corroboration": corroboration, "env_readings": env_readings}
+
+
+def environment_fill_basis(m: Mapping, ctx: Mapping) -> dict | None:
+    """:data:`FILL_ENVIRONMENT_RULE_ID` for ONE undecided missing environment: its basis (:func:`environment_basis`)
+    with the ``value`` and the ``convention`` decision, when the scientist gave the beamtime's convention as operando or
+    in situ and no STATED reading of the run's (or the beamtime's) environment gives another value, else ``None``. An
+    INFERRED reading that differs no longer stops it: the scientist settled the convention."""
+    conv = ctx.get("env_convention")
+    value = (conv or {}).get("value")
+    if value not in ENVIRONMENT_CONVENTION_FILLS or value_problem(ENVIRONMENT_PATH, value) is not None:
+        return None
+    basis = environment_basis(m, ctx)
+    if basis is None:
+        return None
+    if any(strength == "stated" and not (v is not None and _same_fill_value(ENVIRONMENT_PATH, v, value))
+           for _, v, strength in basis["env_readings"]):
+        return None
+    return {**basis, "value": value, "convention": conv}
+
+
+def environment_convention_targets(bundle: Mapping, ctx: Mapping | None = None, *,
+                                   include_filled: bool = False) -> list[dict]:
+    """The runs the environment-convention question asks about: ``[{value_id, run_id, setpoints, corroboration,
+    env_readings}]`` for each run's missing environment that qualifies (:func:`environment_basis`), no scientist decided,
+    no other rule filled, of a measurement run (``run_candidate``) not kept as context; ``include_filled``: also those
+    the convention filled already."""
+    if ctx is None:
+        ctx = fill_context(bundle)
+    if not ctx.get("apply"):
+        return []
+    decision_of = ctx["decision_of"]
+    runs = {r.get("run_id"): r for r in bundle.get("runs") or ()}
+    context = context_run_ids(bundle)
+    out = []
+    for m in bundle.get("missing_values") or ():
+        if m.get("target_field_path") != ENVIRONMENT_PATH or m.get("run_id") is None:
+            continue
+        if decision_of.get(("missing_value", str(m.get("value_id")))) is not None:
+            continue
+        run = runs.get(m["run_id"]) or {}
+        if not run.get("run_candidate") or m["run_id"] in context:
+            continue
+        rule = (m.get("fill") or {}).get("rule_id") if m.get("value_state") == STATE_FILLED else None
+        if rule is not None and not (include_filled and rule == FILL_ENVIRONMENT_RULE_ID):
+            continue
+        basis = environment_basis(m, ctx)
+        if basis is not None:
+            out.append({"value_id": m["value_id"], "run_id": m["run_id"], **basis})
+    return out
+
+
+# the folder: <FACILITY>_<BEAMLINE>_... (the facility word right before the BL token, as the facility hints read it)
+
+
+def _folder_tokens(label: str) -> list[str]:
+    from .template import _DASHES, join_split_beamline
+
+    return [t for t in re.split(r"[_\s/,;()]+", join_split_beamline(_DASHES.sub("-", label))) if t]
+
+
+def folder_facility(bundle: Mapping) -> dict | None:
+    """:data:`FILL_FACILITY_RULE_ID`'s evidence: ``{facility, beamline, folder_label, folder_facility,
+    folder_beamline, matches}`` when the imported folder's name writes a facility word right before a BL token and the
+    SPEC headers' fingerprint (``experiment.acquisition_system.fingerprint``) names that facility and that beamline in
+    every match it has; ``beamline`` is ``None`` (only the facility is identified) when the folder writes no branch the
+    fingerprint states. ``None`` when either source is missing or they disagree."""
+    from .template import _BEAMLINE_TOKEN, _FACILITY_TOKEN, beamline_form, same_beamline
+
+    label = str((bundle.get("source_root") or {}).get("label") or "")
+    fp = ((bundle.get("experiment") or {}).get("acquisition_system") or {}).get("fingerprint") or {}
+    matches = [m for m in fp.get("matches") or () if isinstance(m, Mapping) and m.get("facility") and m.get("beamline")]
+    if not label or not matches or fp.get("disagrees_with_folder_name"):
+        return None
+    tokens = _folder_tokens(label)
+    at = next((n for n, tok in enumerate(tokens) if _BEAMLINE_TOKEN.fullmatch(tok)), None)
+    if not at or not _FACILITY_TOKEN.fullmatch(tokens[at - 1]):
+        return None
+    facility_word, beamline_word = tokens[at - 1], tokens[at]
+    if {str(m["facility"]).casefold() for m in matches} != {facility_word.casefold()}:
+        return None
+    if not all(_beamline_agrees(m, beamline_word) for m in matches):
+        return None
+    beamline = None
+    if len({beamline_form(m["beamline"]) for m in matches}) == 1 and all(
+            same_beamline(m["beamline"], beamline_word) for m in matches):
+        beamline = str(matches[0]["beamline"])
+    return {"facility": str(matches[0]["facility"]), "beamline": beamline, "folder_label": label,
+            "folder_facility": facility_word, "folder_beamline": beamline_word, "matches": matches}
+
+
+def _same_text(a: Any, b: Any) -> bool:
+    return isinstance(a, str) and isinstance(b, str) and " ".join(a.split()).casefold() == " ".join(b.split()).casefold()
+
+
+def _path_disputed(bundle: Mapping, ctx: Mapping, path: str, agrees, *, reject_disputes: bool = False) -> bool:
+    """Whether anything in the bundle names ANOTHER value at ``path`` (any run, or the beamtime): a valued candidate no
+    scientist rejected, a scientist's answer (a defer is no statement), or an AI reading, whose value ``agrees``
+    refuses. ``reject_disputes``: a scientist's reject of any target at ``path`` disputes it too (the facility: a
+    rejected fill says the identity is wrong somewhere, so it is wrong everywhere)."""
+    decision_of = ctx["decision_of"]
+    for c in bundle.get("candidates") or ():
+        if c.get("target_field_path") != path:
+            continue
+        d = candidate_decision(bundle, c, decision_of, ctx["conflict_ids_of"])
+        if d is not None and d.get("decision") == "reject":
+            if reject_disputes:
+                return True
+            continue
+        v = final_value(c.get("value"), d, c.get("readings"))
+        if v is not None and not agrees(v):
+            return True
+    for m in bundle.get("missing_values") or ():
+        if m.get("target_field_path") != path:
+            continue
+        d = decision_of.get(("missing_value", str(m.get("value_id"))))
+        if d is None or d.get("decision") in NEUTRAL_DECISIONS:
+            continue
+        if d.get("decision") == "reject":
+            if reject_disputes:
+                return True
+            continue
+        v = final_value(None, d)
+        if v is not None and not agrees(v):
+            return True
+    return any(v is not None and not agrees(v) for (_, p), pool in ctx["ai_field"].items() if p == path for _, v in pool)
+
+
+def facility_identified(bundle: Mapping, ctx: Mapping) -> dict | None:
+    """The facility (and beamline) :func:`folder_facility` identifies, unless anything disputes it: another facility
+    name or beamline in a candidate, an answer or a reading (:func:`_path_disputed`), a scientist's REJECT of any
+    facility name, beamline or producing-organization target (review I2: a rejected fill disputes the facility for the
+    whole beamtime), or the sources disagreeing about either field. Read once per derivation (``ctx["facility"]``)."""
+    from .template import same_beamline, without_branch
+
+    found = folder_facility(bundle)
+    if found is None:
+        return None
+    if _path_disputed(bundle, ctx, FACILITY_NAME_FILL_PATH, lambda v: _same_text(v, found["facility"]),
+                      reject_disputes=True):
+        return None
+
+    def beamline_agrees(v):
+        return any(same_beamline(m["beamline"], v) or (not m.get("branch_stated")
+                                                         and same_beamline(m["beamline"], without_branch(v)))
+                   for m in found["matches"])
+
+    if _path_disputed(bundle, ctx, BEAMLINE_FILL_PATH, beamline_agrees, reject_disputes=True):
+        return None
+    if _path_disputed(bundle, ctx, ORGANIZATION_FILL_PATH, lambda v: True, reject_disputes=True):
+        return None  # a rejected organization fill (another organization stops only the organization rule)
+    if any(p in FACILITY_DISPUTE_PATHS[:2] for _, p in ctx["disputed"]):
+        return None
+    return found
+
+
+def _fingerprint_witness_index(bundle: Mapping, found: Mapping | None, n: int = 3) -> dict[str, list[dict]]:
+    """``{run_id: [up to n witnesses]}``: each run's own header statements the fingerprint matched (a detector column or
+    the SPEC account), read ONCE per derivation (review I4: never one scan of every candidate per filled value)."""
+    if not found:
+        return {}
+    channels = {ch for m in found["matches"] for ch in m.get("channels_seen") or ()}
+    accounts = {a.casefold() for m in found["matches"] for a in m.get("accounts_seen") or ()}
+    out: dict[str, list[dict]] = {}
+    for c in bundle.get("candidates") or ():
+        rid = c.get("run_id")
+        if rid is None or c.get("statement_key") not in ("detector_column", "spec_user_string"):
+            continue
+        have = out.setdefault(rid, [])
+        if len(have) >= n:
+            continue
+        for e in c.get("evidence") or ():
+            lit = e.get("literal_value")
+            if e.get("method") == "ai_interpretation" or not isinstance(lit, str):
+                continue
+            account = spec_account(lit)
+            if lit in channels or (account is not None and account.casefold() in accounts):
+                have.append(_source_witness(e.get("relative_path"), e.get("locator"), lit,
+                                            ACQUISITION_FINGERPRINT_RULE_ID))
+                break
+    return {rid: ws for rid, ws in out.items() if ws}
+
+
+# the PI: <FACILITY>_<BEAMLINE>_<YYYY-MM>_<Surname>_<project>
+
+_PI_FOLDER = re.compile(r"^(?P<facility>[A-Z][A-Za-z]{1,9}(?:-[A-Z0-9]{1,4})?)_(?P<beamline>BL[-.]?\d+(?:[-.]\d+)?[a-z]?)_"
+                        r"(?P<month>\d{4}-(?:0[1-9]|1[0-2]))_(?P<pi>[^_\s]+)_(?P<project>\S.*)$", re.IGNORECASE)
+#: a surname as a folder writes one: letters (any script), an inner hyphen or apostrophe, a capital first
+_SURNAME = re.compile(r"^[^\W\d_]+(?:['’\-][^\W\d_]+)*$")
+#: words that sit where a PI would and are not one: technique, project and housekeeping words, months, and a group's
+#: own words (``Mehta-Lab`` names a lab, not a surname)
+NOT_A_SURNAME = frozenset({
+    "beamtime", "beamtimes", "data", "test", "tests", "testing", "project", "projects", "sample", "samples", "run",
+    "runs", "scan", "scans", "merge", "merged", "raw", "processed", "synthetic", "operando", "insitu", "exsitu",
+    "echem", "electrochem", "electrochemistry", "catalysis", "catalyst", "catalysts", "battery", "batteries", "spectra",
+    "spectrum", "commissioning", "calibration", "calib", "standard", "standards", "reference", "references", "ref",
+    "user", "users", "staff", "general", "proposal", "group", "groups", "lab", "labs", "laboratory", "team", "teams",
+    "center", "centre", "misc", "backup", "archive", "final", "old", "new", "copy", "trial", "practice", "setup",
+    "alignment", "align", "foil", "foils", "pellet", "pellets",
+    "january", "february", "march", "april", "may", "june", "july", "august", "september", "october", "november",
+    "december", "jan", "feb", "mar", "apr", "jun", "jul", "aug", "sep", "sept", "oct", "nov", "dec", "part", "day",
+    "night", "shift", "week", "remote", "mailin", "mail", "other", "unknown", "none", "tbd", "pi"})
+#: the element symbols, for :func:`reads_as_chemistry` (``Pt``, ``IrOx``, ``TiON``, ``Cu-Zn`` are no surnames)
+ELEMENT_SYMBOLS = frozenset("""H He Li Be B C N O F Ne Na Mg Al Si P S Cl Ar K Ca Sc Ti V Cr Mn Fe Co Ni Cu Zn Ga Ge As
+Se Br Kr Rb Sr Y Zr Nb Mo Tc Ru Rh Pd Ag Cd In Sn Sb Te I Xe Cs Ba La Ce Pr Nd Pm Sm Eu Gd Tb Dy Ho Er Tm Yb Lu Hf Ta
+W Re Os Ir Pt Au Hg Tl Pb Bi Po At Rn Fr Ra Ac Th Pa U Np Pu Am Cm Bk Cf Es Fm Md No Lr""".split())
+def _formula_symbols(part: str) -> list[str] | None:
+    """The element symbols ``part`` is made of, each optionally followed by digits or x / y / z (``IrOx`` -> Ir, O;
+    ``NiFe2O4`` -> Ni, Fe, O), else ``None``: every symbol starts with a capital, so ``Brown`` is not one."""
+    pos, out = 0, []
+    while pos < len(part):
+        if not part[pos].isupper():
+            return None
+        two = part[pos:pos + 2]
+        sym = two if len(two) == 2 and two[1].islower() and two in ELEMENT_SYMBOLS else part[pos]
+        if sym not in ELEMENT_SYMBOLS:
+            return None
+        pos += len(sym)
+        pos += len(re.match(r"[0-9.]*[xyzδ]?[0-9.]*", part[pos:]).group(0))
+        out.append(sym)
+    return out or None
+
+
+def reads_as_chemistry(token: str) -> bool:
+    """Review C1: whether ``token`` reads as an element symbol or a formula — each hyphen part a run of element
+    symbols, each optionally followed by digits or x / y / z (``Pt``, ``Co``, ``IrOx``, ``TiON``, ``Cu-Zn``)."""
+    parts = [p for p in re.split(r"['’\-]", token) if p]
+    return bool(parts) and all(_formula_symbols(p) for p in parts)
+
+
+def surname_like(token: Any) -> bool:
+    """A folder token that looks like a surname: letters with an inner hyphen or apostrophe at most, a capital first
+    and a lower-case letter somewhere (an acronym such as ``SSRL`` or ``XAS`` is not one), not an element symbol or a
+    formula (:func:`reads_as_chemistry`), and no part of it a technique, project, housekeeping or group word
+    (:data:`NOT_A_SURNAME`, ``suggestions.names_a_technique``)."""
+    from .suggestions import names_a_technique
+
+    if not isinstance(token, str) or len(token) < 2 or not _SURNAME.match(token) or not token[0].isupper():
+        return False
+    if not any(ch.islower() for ch in token) or reads_as_chemistry(token):
+        return False
+    parts = [p.casefold() for p in re.split(r"['’\-]", token) if p]
+    if token.casefold() in NOT_A_SURNAME or any(p in NOT_A_SURNAME for p in parts):
+        return False
+    return not names_a_technique(token)
+
+
+def _another_pi(token: str, surname: str) -> bool:
+    """A token right after the beamtime's month in a readme header or a data path that may name ANOTHER PI: letters
+    (an inner hyphen or apostrophe at most), whatever their case (``# 2031-01_OTHERPERSON`` names one too), not the
+    folder's surname, and not a technique, project or housekeeping word."""
+    from .suggestions import names_a_technique
+
+    if token.casefold() == surname.casefold() or len(token) < 2 or not _SURNAME.match(token):
+        return False
+    return token.casefold() not in NOT_A_SURNAME and not names_a_technique(token)
+
+
+def folder_pi(bundle: Mapping) -> dict | None:
+    """``{surname, folder_label, month}`` when the imported folder's name is
+    ``<FACILITY>_<BEAMLINE>_<YYYY-MM>_<Surname>_<project>`` and its fourth token looks like a surname
+    (:func:`surname_like`), else ``None``."""
+    from .template import _DASHES, join_split_beamline
+
+    label = str((bundle.get("source_root") or {}).get("label") or "")
+    m = _PI_FOLDER.match(join_split_beamline(_DASHES.sub("-", label.strip())))
+    if not m or not surname_like(m.group("pi")):
+        return None
+    return {"surname": m.group("pi"), "folder_label": label, "month": m.group("month"),
+            "project": m.group("project").strip()}
+
+
+#: a readme header (``# 2031-01_Surname``) or a SPEC data path (``/data/fifteen/2031-01_Surname/...``): the token
+#: right after the beamtime's month, which is where the folder writes its PI
+_MONTH_THEN_TOKEN = re.compile(r"(?:^|[/\\#\s])(\d{4}-\d{2})[_\s]+([^_\s/\\]+)")
+#: round 4: a readme line that is the month token ALONE, with or without a leading ``#`` (``2031-01_Quillfeather ``)
+_README_MONTH_LINE = re.compile(r"^\s*#?\s*\d{4}-\d{2}_[^_\s/\\]+\s*$")
+#: round 5: the month token and the folder's own project: ``# 2031-01_Quillfeather_ZzTestCat``
+_README_MONTH_PROJECT_LINE = re.compile(r"^\s*#?\s*\d{4}-\d{2}_[^_\s/\\]+_(?P<project>[^\s/\\]+)\s*$")
+#: a LABELLED position that names people: ``PI:``, ``Principal investigator:``, ``Users:``, ``User:``, ``Group:``,
+#: ``Proposal:`` (a line of the readme, possibly behind ``#``), or "group of <name>" in any text
+_LABELS = r"pi|principal investigator|users?|group|proposal"
+#: a label's separator: ``:`` or ``=``, or a dash with spaces round it (``# PI - Bob Smith``, ``PI – Bob Smith``)
+_LABEL_SEP = r"(?:\s*[:=]\s*|\s+[-\u2013\u2014]\s+|(?-i:[-\u2013\u2014](?=[A-Z])))"  # round 5: ``PI-Bob Smith``
+_PEOPLE_LABEL = re.compile(rf"(?i)(?:^|[#;,.(]\s*|\s)(?P<label>{_LABELS}){_LABEL_SEP}"
+                           rf"(?P<who>[^\n]*?)(?=[;,]\s*(?:{_LABELS}){_LABEL_SEP}|$)", re.MULTILINE)
+_GROUP_OF = re.compile(r"(?i)\bgroup of\s+(?P<who>[^\n.;,()]+)")
+#: round 5: a trailing comma segment of a labelled line that names an institution, not a person
+_INSTITUTION = re.compile(r"(?i)\b(?:university|universit[äé]t|institute|institut|lab|laboratory|laboratories|center|"
+                          r"centre|inc|college|national|school|department|dept)\b")
+#: the labels whose people NAME the PI: they take precedence (round 3, C-1); a users or group line only backs one up
+PI_LABELS = frozenset({"pi", "principal investigator"})
+#: a person's name as a labelled position writes it: capitalised words or initials, one to four
+_PERSON = re.compile(r"^(?:[A-ZÀ-ÖØ-Þ][\w'’\-]*\.?\s+){0,3}[A-ZÀ-ÖØ-Þ][\w'’\-]*$")
+#: words a byline never begins with: titles and roles
+_NOT_A_GIVEN_NAME = frozenset({"dr", "prof", "professor", "mr", "mrs", "ms", "miss", "sir", "the", "pi", "operator",
+                               "operators", "sample", "group", "lab", "beamline", "user", "users", "by", "and", "of",
+                               "for", "with", "from", "to", "in", "at", "on", "contact", "scientist", "student"})
+
+
+def _people_in(segment: str, *, any_case: bool = False) -> list[str]:
+    """The people a labelled segment names (``Bob Smith, Cy Jones``; ``Ada Quillfeather (synthetic)``): split at
+    ``,`` ``;`` ``&`` ``/`` and ``and``, a parenthesis and what follows it dropped, a title left off; each a capitalised
+    name of one to four words. ``any_case`` (a PI line): ``bob smith`` names a person too."""
+    out = []
+    for part in re.split(r"[,;&/]|\band\b", segment):
+        part = part.split("(", 1)[0].strip().rstrip(".:")
+        words = part.split()
+        while words and words[0].rstrip(".").casefold() in _NOT_A_GIVEN_NAME:
+            words = words[1:]
+        run = []
+        for w in words:  # the name is the leading run of capitalised words ("Bo Quillfeather prepared it")
+            if not (w[:1].isupper() or (any_case and w[:1].isalpha())):
+                break
+            run.append(w)
+        words = run[:4]
+        name = " ".join(words)
+        shaped = _PERSON.match(name) if not any_case else re.fullmatch(r"(?:[^\W\d_][\w'’\-]*\.?\s+){0,3}[^\W\d_][\w'’\-]*", name)
+        if name and shaped and not any(w.rstrip(".").casefold() in _NOT_A_GIVEN_NAME for w in words):
+            out.append(name)
+    return out
+
+
+def _labelled_people(texts: Sequence[Mapping]) -> list[tuple[str, Mapping, str]]:
+    """``[(person, the text it is in, label)]`` for every person a LABELLED position of ``texts`` names (review I5: a
+    full name is read only from ``PI:``, ``Users:``, ``Group:``, "group of …", never from any capitalised words);
+    ``label`` is ``pi`` for a PI or principal-investigator line (any case: ``# PI: bob smith`` names one), else
+    ``users`` / ``group``."""
+    out = []
+    for t in texts:
+        lit = str(t.get("literal") or "")
+        for m in _PEOPLE_LABEL.finditer(lit):
+            label = m.group("label").casefold()
+            kind = "pi" if label in PI_LABELS else ("group" if label == "group" else "users")
+            segments = m.group("who").split(",")
+            while len(segments) > 1 and _INSTITUTION.search(segments[-1]):
+                segments.pop()  # round 5: "PI: Ada Quillfeather, University of …" names one person, and a place
+            people = _people_in(",".join(segments), any_case=kind == "pi")
+            if kind == "pi" and len(people) > 1:
+                kind = "pi_several"  # round 4: several people on one PI line: the field holds one group, so it is asked
+            out += [(p, t, kind) for p in people]
+        for m in _GROUP_OF.finditer(lit):
+            out += [(p, t, "group") for p in _people_in(m.group("who"))]
+    return out
+
+
+def _ends_in(name: str, surname: str) -> bool:
+    words = name.split()
+    return bool(words) and words[-1].casefold() == surname.casefold()
+
+
+def _beamtime_name_texts(bundle: Mapping) -> list[dict]:
+    """Every literal the import holds that may name the beamtime and its PI, with where it is: the readme's header lines
+    (``experiment.beamtime_header_lines``) and each SPEC ``#F`` declaration (a data path)."""
+    out = [dict(h, kind="readme_header") for h in (bundle.get("experiment") or {}).get("beamtime_header_lines") or ()
+           if isinstance(h, Mapping) and isinstance(h.get("literal"), str)]
+    src = {s.get("source_id"): s for s in bundle.get("sources") or ()}
+    seen: set = set()
+    for e in bundle.get("extended_context") or ():
+        if e.get("concept") == "spec_file_declaration" and isinstance(e.get("raw_literal"), str):
+            k = (e.get("source_id"), e.get("locator"), e["raw_literal"])
+            if k not in seen:
+                seen.add(k)
+                out.append({"kind": "data_path", "source_id": e.get("source_id"), "locator": e.get("locator"),
+                            "relative_path": e.get("relative_path") or (src.get(e.get("source_id")) or {}).get(
+                                "relative_path"), "literal": e["raw_literal"]})
+    return out
+
+
+def _people_texts(bundle: Mapping, ctx: Mapping) -> list[dict]:
+    """Every text a labelled position may be read from, with where it is: the readme's header lines and every checked
+    stated reading's quote. Never a SPEC header statement: ``#C spec  User = <account>`` names an account, not a
+    person."""
+    out = [dict(h, kind="readme_header") for h in (bundle.get("experiment") or {}).get("beamtime_header_lines") or ()
+           if isinstance(h, Mapping) and isinstance(h.get("literal"), str)]
+    for i in bundle.get("ai_interpretations") or ():
+        if _checked_reading(i, ctx) and isinstance(i.get("quote"), str):
+            out.append({"kind": "reading", "interpretation_id": i.get("interpretation_id"), "literal": i["quote"]})
+    return out
+
+
+def _contributor_texts(bundle: Mapping) -> list[dict]:
+    src = {s.get("source_id"): s for s in bundle.get("sources") or ()}
+    out = []
+    for p in bundle.get("contributors") or ():
+        ev = next(iter(p.get("evidence") or ()), {}) if isinstance(p, Mapping) else {}
+        if isinstance(p, Mapping) and isinstance(p.get("name"), str):
+            out.append({"kind": "contributor", "source_id": ev.get("source_id"), "locator": ev.get("locator"),
+                        "relative_path": (src.get(ev.get("source_id")) or {}).get("relative_path"),
+                        "literal": p["name"], "name": p["name"].split("(", 1)[0].strip()})
+    return out
+
+
+def group_from_folder(bundle: Mapping, ctx: Mapping) -> dict | None:
+    """:data:`FILL_GROUP_RULE_ID`'s evidence: ``{value, surname, folder_label, full_name, name_witnesses,
+    agreeing}``, else ``None``. Only in a bundle whose import kept the readme's header lines, and only beside a SECOND
+    source that agrees with the folder's surname (review C1): the readme's month header (``# 2031-01_Surname``), a SPEC
+    ``#F`` data path with ``<YYYY-MM>_<Surname>``, a contributor whose name ends in it, or a full name ending in it at a
+    labelled position (``PI:``, ``Users:``, ``Group:``, "group of …"; review I5: never any capitalised words). The value
+    is "<full name> group" when exactly one such full name is found, else "<Surname> group". Never when the readme's
+    header or a data path names another surname-like token right after the beamtime's month (two candidate PIs), when a
+    labelled position names people and none ends in the folder's surname (review C2) — a PI or principal-investigator
+    line takes precedence (round 3, C-1: any case; when one names people, one must end in the folder's surname, and a
+    users or group line only backs it up, never overrides it) — or when a candidate, an answer or a reading names
+    another group."""
+    if "beamtime_header_lines" not in (bundle.get("experiment") or {}):
+        return None  # imported before 1.20.0: the readme's header was not kept, so it cannot be checked
+    pi = folder_pi(bundle)
+    if pi is None:
+        return None
+    surname = pi["surname"]
+    agreeing = []
+    for t in _beamtime_name_texts(bundle):
+        for _month, token in _MONTH_THEN_TOKEN.findall(t["literal"]):
+            if token.casefold() == surname.casefold():
+                # a readme line agrees only as the month token ALONE (``# 2031-01_Surname`` or ``2031-01_Surname``,
+                # round 4); a data path agrees wherever it writes it
+                if t.get("kind") != "readme_header" or _README_MONTH_LINE.match(t["literal"]) or (
+                        (mp := _README_MONTH_PROJECT_LINE.match(t["literal"]))
+                        and mp.group("project").casefold() == pi["project"].casefold()):
+                    agreeing.append(t)  # round 5: also ``2031-01_Surname_<the folder's project>``
+            elif _another_pi(token, surname):
+                return None  # another PI in the same place: two candidate PIs, asked
+    labelled = _labelled_people(_people_texts(bundle, ctx))
+    if any(kind == "pi_several" for _, _, kind in labelled):
+        return None  # round 4: a PI line names several people (the field holds one group): asked
+    pi_people = [(p, t) for p, t, kind in labelled if kind == "pi"]
+    backing = [(p, t) for p, t, kind in labelled if kind != "pi"]
+    if pi_people and not any(_ends_in(p, surname) for p, _ in pi_people):
+        return None  # round 3, C-1: a PI line names people, none of them the folder's PI: asked (a users line never overrides it)
+    if not pi_people and backing and not any(_ends_in(p, surname) for p, _ in backing):
+        return None  # a users / group line names people, none of them the folder's PI: asked
+
+    def full_names(pairs):
+        found: dict[str, list[dict]] = {}
+        for p, t in pairs:
+            words = p.split()
+            if (_ends_in(p, surname) and len(words) > 1 and _PERSON.match(p)
+                    and any(len(w.rstrip(".")) > 1 for w in words[:-1])):
+                found.setdefault(p, []).append(t)
+        return found
+
+    contributors = [t for t in _contributor_texts(bundle) if _ends_in(t["name"], surname)]
+    names = full_names(pi_people)
+    if not names:  # a users or group line, or a contributor, may name the PI in full only when no PI line does
+        names = full_names(backing)
+        for t in contributors:
+            if _PERSON.match(t["name"]) and len(t["name"].split()) > 1:
+                names.setdefault(t["name"], []).append(t)
+    if not (agreeing or contributors or names or any(_ends_in(p, surname) for p, _ in pi_people)):
+        return None  # the folder's token alone: asked (the folder name stays a hint on the question)
+    full = next(iter(names)) if len(names) == 1 else None
+    value = f"{full or surname} group"
+    if value_problem(GROUP_FILL_PATH, value) is not None:
+        return None
+    if _path_disputed(bundle, ctx, GROUP_FILL_PATH, lambda v: _same_text(v, value)):
+        return None
+    if any(p == GROUP_FILL_PATH for _, p in ctx["disputed"]):
+        return None
+    return {"value": value, "surname": surname, "folder_label": pi["folder_label"], "full_name": full,
+            "name_witnesses": names.get(full, []) if full else [], "agreeing": agreeing + contributors[:2]}
+
+
+def _beamtime_target_dissents(obj: Mapping, path: str, value: Any, ctx: Mapping) -> bool:
+    """For a folder rule's missing value: a candidate of the field for its run (or the beamtime) carries it (never two
+    fills), or one is open or differs, or an AI reading of it or of another target of the field disagrees, or the
+    sources disagree about the field."""
+    rid = obj.get("run_id")
+    pools = [(rid, path)] + ([(None, path)] if rid is not None else [])
+    if any(ctx["readings_of"].get(p) for p in pools):
+        return True
+    key = ("missing_value", str(obj.get("value_id")))
+    if _ai_disagrees(ctx, key, path, value):
+        return True
+    if any(t != key and not _same_fill_value(path, v, value) for p in pools for t, v in ctx["ai_field"].get(p, ())):
+        return True
+    disputed = ctx["disputed"]
+    return (rid, path) in disputed or (None, path) in disputed
+
+
+def folder_fill_for(bundle: Mapping, obj: Mapping, ctx: Mapping) -> tuple[str, Any] | None:
+    """``(rule id, value)`` of the slice 3 rule (:data:`FOLDER_FILL_RULES`) that supports ONE undecided missing value,
+    else ``None``."""
+    path = obj.get("target_field_path")
+    if not path or path not in ctx["writable"] or obj.get("extracted_state", STATE_MISSING) != STATE_MISSING:
+        return None
+    if is_answer_slot(obj):
+        return None
+    if path == ENVIRONMENT_PATH:
+        basis = environment_fill_basis(obj, ctx)
+        return (FILL_ENVIRONMENT_RULE_ID, basis["value"]) if basis else None
+    if path in (FACILITY_NAME_FILL_PATH, BEAMLINE_FILL_PATH, ORGANIZATION_FILL_PATH):
+        found = ctx.get("facility")
+        if not found:
+            return None
+        witnessed = ctx.get("fingerprint_by_run") or {}
+        rid = obj.get("run_id")
+        if not (witnessed.get(rid) if rid is not None else witnessed):
+            return None  # review I3: the run's own files carry no statement the fingerprint matched
+        value = found["beamline"] if path == BEAMLINE_FILL_PATH else found["facility"]
+        rule = FILL_ORGANIZATION_RULE_ID if path == ORGANIZATION_FILL_PATH else FILL_FACILITY_RULE_ID
+        if value is None or value_problem(path, value) is not None or _beamtime_target_dissents(obj, path, value, ctx):
+            return None
+        if path == ORGANIZATION_FILL_PATH and _path_disputed(bundle, ctx, path, lambda v: _same_text(v, value)):
+            return None
+        return rule, value
+    if path == GROUP_FILL_PATH:
+        found = ctx.get("group")
+        if not found or _beamtime_target_dissents(obj, path, found["value"], ctx):
+            return None
+        return FILL_GROUP_RULE_ID, found["value"]
+    return None
+
+
+def _source_witness(rel: Any, locator: Any, quote: Any, method_id: Any, relation: str = "supports") -> dict:
+    return {"source_type": "document", "source_file": str(rel or "(unlocated)"), "locator": locator,
+            "quote": str(quote), "method": "deterministic_parser", "method_id": method_id, "relation": relation}
+
+
+def _candidate_witnesses(c: Mapping, n: int = 3) -> list[dict]:
+    """Up to ``n`` of a candidate's supporting FILE witnesses, as draft evidence (the file, locator, literal, reader)."""
+    return [_source_witness(e.get("relative_path"), e.get("locator"), e.get("literal_value"), e.get("method_id"))
+            for e in c.get("evidence") or () if e.get("method") != "ai_interpretation"
+            and e.get("relation") == "supports" and e.get("literal_value") is not None][:n]
+
+
+def _reading_witness(i: Mapping) -> dict:
+    qc = i.get("quote_check") or {}
+    f = next(iter(qc.get("files") or ()), {})
+    return {"source_type": "document", "source_file": f.get("path") or i.get("source_path") or "(unlocated)",
+            "locator": i.get("excerpt_locator"), "quote": i.get("quote"), "method": "ai_interpretation",
+            "method_id": (i.get("model") or {}).get("model_id"), "relation": "supports",
+            "interpretation_id": i.get("interpretation_id"), "strength": i.get("strength"),
+            "reading_pass_id": qc.get("reading_pass_id"),
+            "quote_check": {"result": qc.get("result"), "checker": qc.get("checker"),
+                            "content_sha256": f.get("content_sha256"), "at": f.get("at")}}
+
+
+def _decision_witness(d: Mapping, question: str) -> dict:
+    return {"source_type": "user_confirmation", "question": question,
+            "answer": d.get("value") if isinstance(d.get("value"), str) else json.dumps(d.get("value")),
+            "timestamp": d.get("decided_utc"), "decision_id": d.get("decision_id"),
+            "decided_by": (d.get("decided_by") or {}).get("name"),
+            "identity": (d.get("decided_by") or {}).get("identity", "local_unverified")}
+
+
+def _folder_witness(label: str) -> dict:
+    return {"source_type": "file_listing", "source_file": label, "locator": "the imported folder's name",
+            "quote": label, "method": "deterministic_parser", "method_id": "folder_name", "relation": "supports"}
+
+
+def _witness_index(bundle: Mapping, ctx: Mapping) -> dict:
+    """The id indexes :func:`folder_fill_witnesses` reads, built ONCE per fill context and kept on it (review I4: a
+    whole-bundle scan per filled value made 3,600 runs take minutes)."""
+    idx = ctx.get("_witness_index")
+    if idx is None:
+        idx = ctx["_witness_index"] = {
+            "cands": {str(c.get("candidate_id")): c for c in bundle.get("candidates") or ()},
+            "readings": {str(i.get("interpretation_id")): i for i in bundle.get("ai_interpretations") or ()},
+            "decisions": {str(d.get("decision_id")): d for d in bundle.get("scientist_decisions") or ()},
+        }
+    return idx
+
+
+#: the environment-convention question as a draft's confirmation names it
+ENVIRONMENT_CONVENTION_ASK = ("The measurements taken in electrolyte while the cell was held at a potential: is their "
+                              "measurement environment operando or in situ?")
+
+
+def folder_fill_witnesses(bundle: Mapping, obj: Mapping, ctx: Mapping, run_ids: Iterable[str]) -> tuple[list[dict], str]:
+    """``(witnesses, note)`` of a value a slice 3 rule filled (:data:`FOLDER_FILL_RULES`), as the composer cites it:
+    the set-point's file witnesses, the corroboration and the scientist's convention answer (the environment); the
+    folder's name and the run's own SPEC header lines the fingerprint matched (the facility, beamline and
+    organization); the folder's name, the readme, data path or contributor that agrees and where the full name was
+    read (the group)."""
+    rule = (obj.get("fill") or {}).get("rule_id")
+    idx = _witness_index(bundle, ctx)
+    cands, readings, decisions = idx["cands"], idx["readings"], idx["decisions"]
+    out: list[dict] = []
+    if rule == FILL_ENVIRONMENT_RULE_ID:
+        basis = environment_fill_basis(obj, ctx) or {"setpoints": [], "corroboration": [], "convention": None}
+        for cid in basis["setpoints"]:
+            out += _candidate_witnesses(cands.get(cid) or {})
+        for kind, ref in basis["corroboration"][:5]:
+            if kind == "candidate" and ref in cands:
+                out += _candidate_witnesses(cands[ref], 1)
+            elif kind == "reading" and ref in readings:
+                out.append(_reading_witness(readings[ref]))
+            elif kind == "decision" and ref in decisions:
+                d = decisions[ref]
+                out.append(_decision_witness(d, f"What is {(d.get('target') or {}).get('id')}?"))
+        if basis.get("convention"):
+            out.append(_decision_witness(basis["convention"], ENVIRONMENT_CONVENTION_ASK))
+        conv = basis.get("convention") or {}
+        given_for = conv.get(ENVIRONMENT_CONVENTION_COVERS_KEY)
+        note = (f"the run's own files give the potential set-point (candidate {', '.join(basis['setpoints'])}) and "
+                f"{len(basis['corroboration'])} reading(s) or answer(s) show it was electrochemical "
+                f"({', '.join(r for _, r in basis['corroboration'][:5])}); the scientist gave the beamtime's convention "
+                f"for such measurements as {basis.get('value')} ({conv.get('decision_id')}"
+                + (f", given for {len(given_for)} measurement(s)" if isinstance(given_for, list) else "")
+                + ("; this one qualified only after that answer" if isinstance(given_for, list)
+                   and obj.get("value_id") not in given_for else "")
+                + "); the potential scale plays no part")
+        return out, note
+    if rule in (FILL_FACILITY_RULE_ID, FILL_ORGANIZATION_RULE_ID):
+        found = ctx.get("facility") or {}
+        by_run = ctx.get("fingerprint_by_run") or {}
+        if found:
+            out.append(_folder_witness(found["folder_label"]))
+            rids = [obj["run_id"]] if obj.get("run_id") else sorted(r for r in run_ids if r in by_run)
+            for rid in rids[:3]:
+                out += by_run.get(rid, [])[:1 if len(rids) > 1 else 3]
+        note = (f"the folder's name writes {found.get('folder_facility')} {found.get('folder_beamline')} and the SPEC "
+                f"headers' fingerprint names {found.get('facility')} {found.get('beamline') or ''}".rstrip()
+                + ("; the producing organization is the facility named in the beamtime folder (the beamline "
+                   "scientist's answer, 2026-11-25)" if rule == FILL_ORGANIZATION_RULE_ID else ""))
+        return out, note
+    if rule == FILL_GROUP_RULE_ID:
+        found = ctx.get("group") or {}
+        if found:
+            out.append(_folder_witness(found["folder_label"]))
+            for t in found["agreeing"][:3]:
+                out.append(_source_witness(t.get("relative_path"), t.get("locator"), t["literal"], t.get("kind")))
+            for t in found["name_witnesses"][:3]:
+                if t.get("kind") == "reading" and str(t.get("interpretation_id")) in readings:
+                    out.append(_reading_witness(readings[str(t["interpretation_id"])]))
+                else:
+                    out.append(_source_witness(t.get("relative_path"), t.get("locator"), t["literal"], t.get("kind")))
+        note = (f"the folder's name writes the PI {found.get('surname')!r} in its <FACILITY>_<BEAMLINE>_<YYYY-MM>_"
+                "<Surname>_<project> place, and another source agrees" + (
+                    f"; the full name {found.get('full_name')!r} is read from a labelled position in the files"
+                    if found.get("full_name") else "; no single full name is in the files"))
+        return out, note
+    return [], ""
+
+
 def fill_rule_for(bundle: Mapping, kind: str, obj: Mapping, decision: Mapping | None,
                   ctx: Mapping) -> tuple | None:
     """``(rule id, value, reading ids, reading-pass ids)`` of the registered fill rule that supports ``obj`` (a
     candidate or a missing value), or ``None``. Never for a value a scientist decided (any decision, a defer included:
     a decision always wins), and never for a bundle this build does not fill (:func:`fills_apply`). A FILE rule comes
     first; a checked reading that agrees with it is listed as its witness (one fill, under the file rule), and one that
-    disagrees blocks it (``_ai_disagrees``); a reading rule (1.19.0) fills only where no file rule does."""
+    disagrees blocks it (``_ai_disagrees``); a reading rule (1.19.0) fills only where no file rule does. 1.20.0: the
+    slice 3 rules (:func:`folder_fill_for`) are file rules of missing values, tried before the reading rule."""
     if not ctx["apply"] or decision is not None:
         return None
     path = obj.get("target_field_path")
@@ -2945,6 +4232,9 @@ def fill_rule_for(bundle: Mapping, kind: str, obj: Mapping, decision: Mapping | 
         return _with_readings(FILL_DOMAIN_RULE_ID, DOMAIN_FILL_VALUE,
                               _agreeing_readings(kind, obj, DOMAIN_FILL_VALUE, ctx))
     if kind == "missing_value":
+        got = folder_fill_for(bundle, obj, ctx)  # 1.20.0 (DEC-98): the folder, the people and the held potential
+        if got:
+            return _with_readings(got[0], got[1], _agreeing_readings(kind, obj, got[1], ctx))
         got = reading_fill_for(bundle, kind, obj, ctx)
         return _with_readings(*got) if got else None
     return None
@@ -4101,6 +5391,38 @@ def apply_derivations(bundle: dict) -> dict:
     zone_d = clock_zone_decision(bundle)
     eligible = 0
     conflict_ids_of = conflict_ids_by_candidate(bundle)  # r6h H4: read once, not once per candidate
+    # 1.20.0: each record group's status and role BEFORE the fills, which read them (the held-potential rule leaves a
+    # reference or alignment group's runs alone, and only a live group's role counts): derived from the decisions and
+    # the groups only, so the order changes no status
+    status_of = _decisions_by_target(
+        [d for d in bundle.get("scientist_decisions") or () if d.get("decision") in GROUP_STATUS_DECISIONS]
+    )
+    merge_decided: list[tuple[Mapping, dict]] = []
+    for g in bundle.get("record_groups") or ():
+        # only a STATUS decision moves a group's status (a calibration approval does not)
+        d = status_of.get(("record_group", g["group_id"]))
+        kind = d.get("decision") if d is not None else None
+        g["status"] = GROUP_STATUS_BY_DECISION.get(None if kind == "defer" else kind, "proposed")
+        if kind == "merge":
+            merge_decided.append((d, g))
+    if merge_decided:
+        # A MERGE IS `merged` ONLY ONCE IT WAS APPLIED (polish c3): while no other live group holds any of
+        # its runs (no regroup combined them yet, or the regroup could not), the group is exactly what it
+        # was — proposed, under its own id — and the merge decision is pending (`isaac bundle group
+        # --regroup` applies it, or says in merge_decisions_not_combined why not). Before, the decision
+        # alone made it `merged`, so a merge the regroup could not combine still retired the group and the
+        # regroup re-proposed its runs under a new id. Latest merge first: a combined group merged on
+        # again, but not yet combined, is pending and still holds the runs of the group it was made from.
+        pending = {id(g) for _, g in merge_decided}
+        held = {k for g in bundle["record_groups"] if g.get("status") in LIVE_GROUP_STATUSES and id(g) not in pending
+                for k in g.get("member_run_keys") or ()}
+        made = {id(d): i for i, d in enumerate(bundle.get("scientist_decisions") or ())}
+        for d, g in sorted(merge_decided, key=lambda dg: -made.get(id(dg[0]), -1)):
+            runs = set(g.get("member_run_keys") or ())
+            if not held & runs:
+                g["status"] = "proposed"
+                held |= runs
+    _derive_roles(bundle)
     fill_ctx = fill_context(bundle, decision_of)  # 1.18.0: which registered fill rule supports each undecided value
     for c in bundle["candidates"]:
         key = ("candidate", c["candidate_id"])
@@ -4147,35 +5469,6 @@ def apply_derivations(bundle: dict) -> dict:
         d = decision_of.get(("conflict", conflict["conflict_id"]))
         base = STATE_NEEDS_REVIEW if conflict.get("resolution") else STATE_CONFLICTING
         conflict["value_state"] = derive_value_state(base, decision=d, interpreted=False)
-    status_of = _decisions_by_target(
-        [d for d in bundle.get("scientist_decisions") or () if d.get("decision") in GROUP_STATUS_DECISIONS]
-    )
-    _derive_roles(bundle)
-    merge_decided: list[tuple[Mapping, dict]] = []
-    for g in bundle.get("record_groups") or ():
-        # only a STATUS decision moves a group's status (a calibration approval does not)
-        d = status_of.get(("record_group", g["group_id"]))
-        kind = d.get("decision") if d is not None else None
-        g["status"] = GROUP_STATUS_BY_DECISION.get(None if kind == "defer" else kind, "proposed")
-        if kind == "merge":
-            merge_decided.append((d, g))
-    if merge_decided:
-        # A MERGE IS `merged` ONLY ONCE IT WAS APPLIED (polish c3): while no other live group holds any of
-        # its runs (no regroup combined them yet, or the regroup could not), the group is exactly what it
-        # was — proposed, under its own id — and the merge decision is pending (`isaac bundle group
-        # --regroup` applies it, or says in merge_decisions_not_combined why not). Before, the decision
-        # alone made it `merged`, so a merge the regroup could not combine still retired the group and the
-        # regroup re-proposed its runs under a new id. Latest merge first: a combined group merged on
-        # again, but not yet combined, is pending and still holds the runs of the group it was made from.
-        pending = {id(g) for _, g in merge_decided}
-        held = {k for g in bundle["record_groups"] if g.get("status") in LIVE_GROUP_STATUSES and id(g) not in pending
-                for k in g.get("member_run_keys") or ()}
-        made = {id(d): i for i, d in enumerate(bundle.get("scientist_decisions") or ())}
-        for d, g in sorted(merge_decided, key=lambda dg: -made.get(id(dg[0]), -1)):
-            runs = set(g.get("member_run_keys") or ())
-            if not held & runs:
-                g["status"] = "proposed"
-                held |= runs
     state_of = processing_state_decisions(bundle)
     for r in bundle.get("processing_results") or ():
         d = state_of.get(("processing_result", processing_id(r)))
@@ -5450,8 +6743,16 @@ def _fingerprint_section(fp: dict, system: Mapping, folder_label: str | None) ->
     if fp["contradicts_build_default"]:
         statement += (" This build still reads every import with its default BL15-2 acquisition system and naming "
                       "convention, which these headers do not match.")
-    fp["statement"] = statement + (" Both are hints, never answers: the scientist says which beamline it was "
-                                   "(the beamline question).")
+    if fp.get("disagrees_with_folder_name") or len(names) > 1:
+        fp["statement"] = statement + (" Both are hints, never answers: the scientist says which beamline it was "
+                                       "(the beamline question).")
+    else:
+        # 1.20.0 (DEC-98): where the folder's name names the same facility and beamline, the two together are the
+        # evidence of isaac.fill.facility_from_folder.v1; alone, the headers are a hint
+        fp["statement"] = statement + (" Where the folder's name names the same facility and beamline, "
+                                       f"{FILL_FACILITY_RULE_ID} fills them, for the scientist to review at the end; "
+                                       "otherwise this is a hint, never an answer, and the scientist says which "
+                                       "beamline it was (the beamline question).")
     return fp
 
 
@@ -6608,6 +7909,7 @@ def build_bundle(
         {"candidates": out_candidates, "runs": runs}, dict(reading.acquisition_system)
     )
     acquisition_system = _acquisition_system_section(reading.acquisition_system, acq_runs, acq_columns)
+    header_lines = _readme_header_lines(spec_root, manifest, sid_of)  # 1.20.0
     fingerprint = acquisition_fingerprint(evidence_by_source)
     if fingerprint is not None:  # r5d H2: the SPEC headers' own beamline hint, beside the folder's name
         acquisition_system["fingerprint"] = _fingerprint_section(fingerprint, acquisition_system, reading.root_label)
@@ -6733,6 +8035,8 @@ def build_bundle(
             "beamtime_contributor_ids": [
                 p["contributor_id"] for p in contributors.values() if p["scope"] == "beamtime"
             ],
+            # 1.20.0: the readme's header lines, for the group rule (FILL_GROUP_RULE_ID)
+            **({"beamtime_header_lines": header_lines} if header_lines is not None else {}),
             "statement": (
                 "Experiment-level context the sources state for the whole beamtime. "
                 "Context, not run values: nothing here is copied onto a run."
@@ -7865,6 +9169,10 @@ def validate_bundle(bundle: Any, *, max_errors: int = 50, encoded: bytes | None 
             problem = role_problem(d.get("value"))
             if problem is not None or (d.get("target") or {}).get("kind") != "record_group":
                 errors.append(f"decision: {d['decision_id']} {problem or 'set_role is for a record group'}")
+        if d.get("decision") == ENVIRONMENT_CONVENTION_DECISION:
+            problem = environment_convention_problem(d.get("value"))
+            if problem is not None or (d.get("target") or {}).get("kind") != "experiment":
+                errors.append(f"decision: {d['decision_id']} {problem or 'set_environment_convention is for the experiment'}")
         if d.get("decision") == DOSE_READING_DECISION:
             problem = dose_reading_problem(d.get("value"))
             if problem is not None or (d.get("target") or {}).get("kind") not in ("record_group", "experiment"):

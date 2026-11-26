@@ -194,7 +194,7 @@ def test_annotate_apply_stores_the_quote_check_and_a_deterministic_reading_pass_
     assert done["applied"] and done["interpretations"] == 1 and done["quote_check"]["failed"] == 0
     assert all("content_sha256" not in r and "lines" not in r for r in done["quote_check"]["results"])  # stored only
     b = M.load(bdir)
-    assert b["format_version"] == B.FORMAT_VERSION == "1.19.0" and b["fill_rule_set"] == B.FILL_RULE_SET == 2
+    assert b["format_version"] == B.FORMAT_VERSION == "1.20.0" and b["fill_rule_set"] == B.FILL_RULE_SET == 3
     assert B.validate_bundle(b) == []
     [i] = _readings_of(b, _value(b, ENV))
     qc = i["quote_check"]
@@ -1040,7 +1040,7 @@ def test_the_rules_and_their_texts():
     assert set(schema["$defs"]["fill"]["properties"]["rule_id"]["enum"]) == set(B.FILL_RULES)
     qc = schema["$defs"]["ai_interpretation"]["properties"]["quote_check"]
     assert qc["properties"]["checker"]["enum"] == [B.QUOTE_CHECKER_ID] and "reading_sha256" in qc["required"]
-    assert B.FILL_RULE_SET == 2 and B.FORMAT_VERSION == "1.19.0" and "1.19.0" in B.CHANGES_ADDED_IN
+    assert B.FILL_RULE_SET == 3 and B.FORMAT_VERSION == "1.20.0" and "1.19.0" in B.CHANGES_ADDED_IN
     assert "inferred" in B.FILL_READING_STATED_RULE and ". " not in B.FILL_READING_STATED_RULE
 
 
@@ -1062,12 +1062,12 @@ def test_a_rule_set_1_bundle_is_stale_and_its_next_write_re_derives_it(bdir, src
     assert cli.main(["bundle", "check", str(bdir)]) == 1 and capsys.readouterr().out.startswith("STALE:")
     M.record_consent(bdir, by="SYN Scientist")
     saved = json.loads((bdir / "bundle.json").read_text())
-    assert saved["fill_rule_set"] == 2 and B.validate_bundle(saved) == []
+    assert saved["fill_rule_set"] == B.FILL_RULE_SET and B.validate_bundle(saved) == []
     assert [r["id"] for r in saved["eligibility_rederived"]] == [vid]
     assert _value(saved, ENV)["value_state"] == B.STATE_FILLED
 
 
-def test_a_1_18_0_bundle_is_raised_to_1_19_0_by_its_next_write(bdir):
+def test_a_1_18_0_bundle_is_raised_to_this_builds_format_by_its_next_write(bdir):
     b = json.loads((bdir / "bundle.json").read_text())
     b["format_version"], b["fill_rule_set"] = "1.18.0", 1
     (bdir / "bundle.json").write_text(json.dumps(b))
@@ -1075,7 +1075,8 @@ def test_a_1_18_0_bundle_is_raised_to_1_19_0_by_its_next_write(bdir):
     assert errors == [] and stale == []  # nothing a reading fills, nothing moves
     M.record_consent(bdir, by="SYN Scientist")
     saved = json.loads((bdir / "bundle.json").read_text())
-    assert saved["format_version"] == "1.19.0" and saved["fill_rule_set"] == 2 and B.validate_bundle(saved) == []
+    assert saved["format_version"] == B.FORMAT_VERSION and saved["fill_rule_set"] == B.FILL_RULE_SET
+    assert B.validate_bundle(saved) == []
     [u] = [u for u in saved["format_upgrades"] if u["from_format_version"] == "1.18.0"]
     assert B.CHANGES_ADDED_IN["1.19.0"] in u["statement"]
 

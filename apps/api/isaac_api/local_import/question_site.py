@@ -111,6 +111,13 @@ DOSE_LABELS = {
     "first_scan_settling": "No, the first scan was still settling: leave the first scan out",
     "not_beam_damage": "Not beam damage: every scan is judged by the other rules",
 }
+#: 1.20.0 (DEC-98): the environment-convention card's target, and the words its three answers are offered in
+ENV_CONVENTION_TARGET_ID = "experiment:set_environment_convention"
+ENV_CONVENTION_LABELS = {
+    "operando": "Operando: measured while the reaction ran at that potential",
+    "in_situ": "In situ: what this beamtime calls a measurement in the cell, in electrolyte, under potential",
+    "per_run": "It differs by measurement: ask me about each one",
+}
 PROBE_BY = "site export check (dry run, nothing recorded)"
 PROBE_TEXT = "site export check"
 _HASH_NAME = re.compile(r"^[0-9a-f]{64}\.(png|jpg|jpeg)$")
@@ -265,6 +272,8 @@ def _why_not(q: Mapping, include: Sequence[str]) -> str | None:
         return "for information only: nothing is asked"
     if q.get("answered_at_once_by"):
         return "answered at once by a beamtime-wide question the site does not ask yet"
+    if q.get("covered_by") and str(q["covered_by"]).startswith("Q-") and q.get("covered_by") == _env_convention_qid():
+        return "asked once for the beamtime by the environment card (the measurements held at a potential)"
     if kind in VALUE_KINDS and not isinstance(path, str):
         return "about something no record field holds"
     if kind in VALUE_KINDS and "[]" in path:
@@ -359,6 +368,10 @@ def _units(view: _View, rows: Sequence[Mapping], include: Sequence[str]) -> tupl
     itself gives stays whole: "yes" confirms each file's own value."""
     left: Counter = Counter()
     wanted = {}
+    from . import questions as Q
+
+    # 1.20.0: the environment-convention question has its own card (_environment_convention_card)
+    rows = [q for q in rows if q.get("kind") != Q.ENV_CONVENTION_KIND]
     for q in rows:
         why = _why_not(q, include)
         if why:
@@ -870,6 +883,82 @@ def _label_card(view: _View, unit: Mapping) -> dict:
     }
 
 
+def _env_convention_qid() -> str:
+    from . import questions as Q
+
+    return Q.ENV_CONVENTION_QUESTION_ID
+
+
+# --- the environment card: the beamtime's potential-held measurements, operando or in situ (1.20.0, DEC-98) -----------
+
+def _environment_convention_card(view: _View) -> dict | None:
+    """ONE beamtime card for the open environment-convention question (``questions.ENV_CONVENTION_KIND``): its three
+    answers, the measurements it covers with their set-points, and what says they were electrochemical. It records
+    ``set_environment_convention`` on the experiment, as ``decide`` does."""
+    from . import questions as Q
+
+    q = next((q for q in view.payload["questions"] if q.get("kind") == Q.ENV_CONVENTION_KIND and q.get("blocking")), None)
+    if q is None:
+        return None
+    bundle = view.bundle
+    covered = set(q.get("covers_value_ids") or ())
+    run_of = {m["value_id"]: m.get("run_id") for m in bundle.get("missing_values") or () if m["value_id"] in covered}
+    runs = {r["run_id"]: r for r in bundle.get("runs") or ()}
+    setpoint = {}
+    for c in bundle.get("candidates") or ():
+        if c.get("target_field_path") == B.POTENTIAL_SETPOINT_PATH and c.get("run_id") in set(run_of.values()):
+            if isinstance(c.get("value"), (int, float)) and not isinstance(c.get("value"), bool):
+                setpoint.setdefault(c["run_id"], f"{c['value']:g} V")
+    names = [str((runs.get(r) or {}).get("stem") or r) for r in run_of.values()]
+    rows = [[str((runs.get(r) or {}).get("stem") or r), setpoint.get(r, "-")] for r in list(run_of.values())[:8]]
+    quotes = [{"kind": "quotes", "label": "What says these measurements were electrochemical", "source": None,
+               "items": [{"quote": str(h.get("literal"))[:300], "file": h.get("relative_path"),
+                          "locator": h.get("locator")}
+                         for h in q.get("hints") or () if h.get("kind") in ("reading", "answer") and h.get("literal")][:3]}]
+    earlier = [h for h in q.get("hints") or () if h.get("kind") == "earlier_reading"]
+    n = len(names)
+    options = [{"value": v, "label": ENV_CONVENTION_LABELS[v]} for v in q.get("allowed_values") or ()
+               if v in ENV_CONVENTION_LABELS]
+    cover = {"question_id": None, "same_reading": False, "only_scopes": None, "field": None, "on_accept": None,
+             "on_value": {"decision": B.ENVIRONMENT_CONVENTION_DECISION}, "on_dont_know": None,
+             "target": {"target": "experiment", "decision": B.ENVIRONMENT_CONVENTION_DECISION},
+             "questions": [q["question_id"]]}
+    context = [{"kind": "values", "label": f"The measurements held at a potential ({n})",
+                "columns": ["Measurement", "Potential held"], "rows": rows, **({"more": n - 8} if n > 8 else {})}]
+    if quotes[0]["items"]:
+        context += quotes
+    shown = ", ".join(f"'{x}'" for x in names[:3]) + (f" and {n - 3} more" if n > 3 else "")
+    detail = (f"One answer covers all of them ({shown}). A measurement whose own files say another environment "
+              "is still asked on its own.")
+    # round 3: the runs an earlier INFERRED reading suggested another environment for, so the scientist sees what the
+    # answer reaches over it
+    inferred_runs = q.get("earlier_reading_runs") or []
+    if inferred_runs:
+        context.append({"kind": "values", "label": "An earlier reading suggested an environment for these (a hint, "
+                                                   "not the answer)",
+                        "columns": ["Measurement", "Earlier reading"],
+                        "rows": [[str((runs.get(r) or {}).get("stem") or r), str(v)] for r, v in inferred_runs[:8]],
+                        **({"more": len(inferred_runs) - 8} if len(inferred_runs) > 8 else {})})
+    if earlier:
+        detail += f" An earlier reading suggested '{earlier[0]['literal']}' for some of them: a hint, not the answer."
+    return {
+        "card_id": card_id(B.ENVIRONMENT_PATH, [ENV_CONVENTION_TARGET_ID]), "section": "beamtime", "blocking": True,
+        "audience": "scientist",
+        "title": (f"{n} measurement{'s were' if n != 1 else ' was'} taken in electrolyte while the cell was held at a "
+                  "potential: was that operando or in situ?"),
+        "detail": detail,
+        "field": None,
+        "applies_to": {"count": n, "summary": f"{n} measurement{'s' if n != 1 else ''} held at a potential",
+                       "items": names[:MAX_ITEMS], **({"more": n - MAX_ITEMS} if n > MAX_ITEMS else {})},
+        "unblocks": 0,
+        "answer": {"kind": "choice", "options": options, "allow_text": False, "unit": None, "placeholder": None},
+        "suggestion": None,
+        "context": context,
+        "covers": [cover], "_questions": [q], "_groups": [], "_no_context": True,
+        "_target_id": ENV_CONVENTION_TARGET_ID,
+    }
+
+
 # --- the processing card: beam damage, or a first scan still settling ---------------------------------------------------
 
 def _dose_card(view: _View) -> dict | None:
@@ -1343,6 +1432,9 @@ def export_site(bundle_dir: Path, out: Path, *, suggestions: Path | None = None,
     dose = _dose_card(view)
     if dose is not None:
         cards.append(dose)
+    convention = _environment_convention_card(view)  # 1.20.0 (DEC-98)
+    if convention is not None:
+        cards.append(convention)
     if INCLUDE_APPROVALS in include:
         more, held = _approval_cards(view)
         cards += more

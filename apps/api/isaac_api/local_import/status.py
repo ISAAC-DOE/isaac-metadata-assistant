@@ -169,6 +169,9 @@ def status(bundle_dir: Path, *, shown_as: str | None = None) -> dict:
         # 1.18.0 (DEC-96): values a registered rule filled (not asked; the scientist reviews them at the end)
         # ...only those NOT asked anyway: a fill its record group cannot take is asked (questions.fills_asked), as the
         # questions list shows
+        # 1.20.0 (round 3, I-1): the beamtime's environment convention, and the runs it now reaches beyond those it was
+        # given for (never silent)
+        "environment_convention": _environment_convention(bundle),
         "values_filled": sum(1 for o in [*(bundle.get("candidates") or ()), *(bundle.get("missing_values") or ())]
                              if o.get("value_state") == B.STATE_FILLED) - len(Q.fills_asked(bundle)),
         # 1.18.0: where the naming (counter) question stands: a file-name number read by its position is filled only
@@ -212,6 +215,20 @@ def _next_step(f: Mapping, shown_as: str) -> str:
             f"`isaac bundle export {d} --out <folder>`.")
 
 
+def _environment_convention(bundle: Mapping) -> dict | None:
+    from . import bundle as B
+
+    d = B.environment_convention_decision(bundle)
+    if d is None:
+        return None
+    given_for = d.get(B.ENVIRONMENT_CONVENTION_COVERS_KEY)
+    more = B.environment_convention_extension(bundle)
+    from . import questions as Q
+
+    return {"value": d.get("value"), "decision_id": d.get("decision_id"), "question_id": Q.ENV_CONVENTION_QUESTION_ID,
+            "given_for": len(given_for) if isinstance(given_for, list) else None, "more_since_the_answer": len(more)}
+
+
 def _lines(f: Mapping) -> list[str]:
     fmt = f["format"]
     lines = [f"Beamtime: {f['folder']} (bundle format {fmt['stored']}"
@@ -249,6 +266,15 @@ def _lines(f: Mapping) -> list[str]:
     if f.get("values_filled"):
         lines.append(f"Filled from the evidence by a rule, not asked: {f['values_filled']} value(s); they go into the "
                      "records as inferred, naming the rule, for the scientist to review at the end.")
+    ec = f.get("environment_convention")
+    if ec:
+        lines.append(f"Environment of the measurements held at a potential: {ec['value']} ({ec['decision_id']}"
+                     + (f", given for {ec['given_for']} measurement(s)" if ec.get("given_for") is not None else "") + ")"
+                     + (f"; {ec['more_since_the_answer']} more measurement(s) now take it, which qualified after the "
+                        "answer: the convention question is open again (optional; the question site has no card for "
+                        f"it) — confirm it for them with `isaac bundle decide <bundle_dir> --question {ec['question_id']} "
+                        f"--decision set_environment_convention --value {ec['value']} --by \"<your name>\"`, or "
+                        "--value per_run" if ec.get("more_since_the_answer") else "") + ".")
     p = f["processing"]
     if p["live_results_by_state"] or p["last_utc"]:
         states = ", ".join(f"{n} {s.replace('_', ' ')}" for s, n in p["live_results_by_state"].items())
