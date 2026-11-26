@@ -71,8 +71,8 @@ value is asked.
 | Rule id | Fills | Evidence it needs | Does not apply when |
 |---|---|---|---|
 | `isaac.fill.parser_exact.v1` | any writable field whose value is `candidate_extracted` | a deterministic reader read it from the files, or a stored convention rule did (today's `candidate_extracted`) | the value is `conflicting`; the reader marked it a suggestion only; or it was read from a file-name token while a naming question for that beamtime is open (counter positions, an unknown token), because a misread naming convention would fill every run wrongly |
-| `isaac.fill.reading_stated.v1` | the field a reading pass names | an `ai_interpretations` entry of strength `stated` whose every quote passed `check-readings`, and whose value its field accepts | another reading or a file value disagrees for any target |
-| `isaac.fill.reading_inferred.v1` | the same | strength `inferred`, quotes verified, plus at least two independent witnesses (two quotes, or a quote and a file value) that agree | the same as above, or only one witness |
+| `isaac.fill.reading_stated.v1` | the field a reading pass names | an `ai_interpretations` entry of strength `stated` whose every quote passed `check-readings`, whose quote itself states the value (DEC-97: the number in the field's own unit, the list member, every significant word), and whose value its field accepts | another reading or a file value disagrees for any target; a sample's own label as its material; a beamtime reading on a run-level or sample field |
+| ~~`isaac.fill.reading_inferred.v1`~~ **removed (DEC-97)** | — | — | never built: a replay on a real beamtime showed an inference from indirect quotes filling 13 wrong environments (two quotes that state no environment); an inference is a judgment, so the scientist is asked and the reading stays a suggestion |
 | `isaac.fill.domain_from_acquisition.v1` | `system.domain = experimental` | every run is a beamline acquisition file (SPEC/XDI/XDC reader) | any file is a calculation output |
 | `isaac.fill.facility_from_folder.v1` | `system.facility.*` that a facility hint already suggests | the folder-name facility token and the SPEC fingerprint agree | they disagree |
 | `isaac.fill.organization_from_facility.v1` | `attribution.produced_by.organization` | the facility the import identified (the scientist's answer, 2026-11-25: the producing organisation is the facility named in the beamtime folder) | no facility is identified |
@@ -201,6 +201,9 @@ The review read the code, not just this design. Every change below is adopted:
    - Questions skip filled values; contract and decision-log entries.
 2. **Reading fills.** Item 6, plus `reading_stated` and `reading_inferred` with item 3's scope guard.
    These are the rules that answer material, form and environment from the logbook.
+   *Built as bundle format 1.19.0, fill rule set 2 (`DEC-97`; contract §9 "What 1.19.0 added"). Revised after a
+   real-beamtime replay: `reading_inferred` is NOT built (an inference is a judgment, so it is asked), a stated
+   reading fills only when its quote states the value, and a sample's own label is never its material.*
 3. **Folder and people.**
    - Facility from the folder and fingerprint when they agree.
    - Organization = the identified facility (the scientist's answer).

@@ -475,7 +475,9 @@ def check_one(finding: Any, root: Path, *, fid: str, sources_by_path: Mapping[st
     if canonical not in cache:
         want = (src or {}).get("content_sha256")
         try:
-            if want and _sha256(path) != want:
+            digest = _sha256(path)
+            cache[("sha", canonical)] = digest
+            if want and digest != want:
                 entry: Any = "the file's bytes changed since the import: the quote is checked against the file the import read"
             else:
                 entry = _text_of(path, canonical)
@@ -485,6 +487,10 @@ def check_one(finding: Any, root: Path, *, fid: str, sources_by_path: Mapping[st
     entry = cache[canonical]
     if isinstance(entry, str):
         return fail(entry)
+    if cache.get(("sha", canonical)):
+        # 1.19.0: the bytes the quote was checked against, stored by `annotate --from-readings --apply` on the reading
+        # (its quote_check block) so a later reader can tell the check was made against the file the import read
+        row["content_sha256"] = cache[("sha", canonical)]
     span = line_locator(locator)
     # a short quote is checked only against a few lines a locator names: `line N` (at most SHORT_QUOTE_MAX_LINES),
     # or a SPEC header key (`scan 2 #C`): that scan's lines of that key
@@ -583,12 +589,55 @@ def holds_an_imported_source(root: Path, sources: Iterable[Mapping]) -> bool:
     return False
 
 
+_AT_LINE = re.compile(r"^line (?P<n>\d+) ")
+
+
+def quote_lines(result: Mapping, finding: Any, cache: dict) -> list[int] | None:
+    """1.19.0: ``[first, last]``, the lines of the cited plain-text file a PASSED quote occupies (where it starts, as the
+    check found it, and the line it ends on in the file's normalised text), else ``None`` (a document, a PDF, or a quote
+    the whole file's text does not hold at that line: a header quote matched across header lines only). Stored in the
+    reading's quote check and covered by its ``reading_sha256`` (``bundle.reading_sha256``), so the place a quote was
+    found is part of what was checked."""
+    if result.get("result") != PASS:
+        return None
+    m = _AT_LINE.match(str(result.get("at") or "") + " ")
+    entry = cache.get(result.get("canonical_path"))
+    if m is None or not isinstance(entry, _Text) or entry.via != "text" or entry.lines is None:
+        return None
+    start = int(m.group("n"))
+    quote = normalise((finding if isinstance(finding, Mapping) else {}).get("quote") or "")
+    if not quote:
+        return None
+    idx = cache.get(("index", result.get("canonical_path")))
+    if idx is None:
+        idx = cache[("index", result.get("canonical_path"))] = _Index(entry.lines)
+    pos = idx.text.find(quote)
+    while pos >= 0:
+        k = bisect.bisect_right(idx.starts, pos) - 1
+        if k >= 0 and idx.numbers[k] == start:
+            end = bisect.bisect_right(idx.starts, pos + max(len(quote) - 1, 0)) - 1
+            return [start, idx.numbers[end] if end >= 0 else start]
+        pos = idx.text.find(quote, pos + 1)
+    return None
+
+
 def check_findings(findings: Iterable[Any], root: Path, *, sources: Iterable[Mapping] = ()) -> list[dict]:
-    """Every finding's result, in file order, ids as ``annotate --from-readings`` numbers them (``finding-001``)."""
+    """Every finding's result, in file order, ids as ``annotate --from-readings`` numbers them (``finding-001``). A
+    passed plain-text quote also carries ``lines`` (:func:`quote_lines`), and every result whose file could be read its
+    ``content_sha256`` (1.19.0, the reading's stored quote check)."""
     by_path = {s.get("relative_path"): s for s in sources if isinstance(s, Mapping)}
     cache: dict = {}
-    return [check_one(f, Path(root), fid=f"finding-{i + 1:03d}", sources_by_path=by_path, cache=cache)
-            for i, f in enumerate(findings)]
+    out = []
+    for i, f in enumerate(findings):
+        r = check_one(f, Path(root), fid=f"finding-{i + 1:03d}", sources_by_path=by_path, cache=cache)
+        if r.get("result") == PASS:
+            r["lines"] = quote_lines(r, f, cache)
+        out.append(r)
+    return out
+
+
+#: Keys of a result kept for the stored quote check, never printed in the report.
+_STORED_ONLY = ("content_sha256", "lines")
 
 
 def report(results: list[dict], *, root_label: str | None) -> dict:
@@ -598,7 +647,7 @@ def report(results: list[dict], *, root_label: str | None) -> dict:
 
     def short(r: Mapping) -> dict:
         if r["result"] != PASS:
-            return dict(r)
+            return {k: v for k, v in r.items() if k not in _STORED_ONLY}
         out = {"finding": r["finding"], "result": PASS, "at": r["at"]}
         if r.get("canonical_path") and r["canonical_path"] != r.get("path"):
             out["canonical_path"] = r["canonical_path"]

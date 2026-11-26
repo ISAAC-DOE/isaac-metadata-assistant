@@ -57,8 +57,9 @@ A COMMAND THAT ONLY READS NEVER WRITES ``bundle.json`` (1.17.0): the parser valu
     draft per term in the website's portal-payload format. Sent nowhere; each draft needs
     a description written by a person. Records an exposure for every parser value shown.
 
-LOCAL-2 (``docs/local-import-bundle-contract.md`` §9-§12): ``annotate`` (AI reading,
-never above needs_review; ``--blind`` honoured only before exposure), ``decide``
+LOCAL-2 (``docs/local-import-bundle-contract.md`` §9-§12): ``annotate`` (AI reading; ``--target``
+never above needs_review, ``--from-readings`` kept with its quote check, which can fill under a reading rule, 1.19.0;
+``--blind`` honoured only before exposure), ``decide``
 (identity ``local_unverified``; ``--orcid`` is a claimed credit value), ``crosscheck-plan``,
 ``excerpt``, ``reveal`` (records an exposure), ``build-records``, ``validate``,
 ``export`` and ``upload --dry-run``. Every mutation re-derives, re-validates and writes
@@ -3092,7 +3093,8 @@ def build_parser(prog: str = "isaac") -> argparse.ArgumentParser:
     q.add_argument("--note", help="optional: what they said, in a few words (e.g. a limit on what may be read)")
     q.set_defaults(func=cmd_bundle_consent)
 
-    q = bsub.add_parser("annotate", help="record an AI interpretation (never above needs_review)")
+    q = bsub.add_parser("annotate", help="record an AI interpretation (--target: never above needs_review; "
+                                         "--from-readings: quotes checked and kept, a checked reading can fill)")
     q.add_argument("bundle_dir")
     q.add_argument("--target", help="one target id (or use --from-readings)")
     q.add_argument("--from-readings", help="a Claude reading pass's findings file (isaac.reading_findings): one interpretation per target it names")

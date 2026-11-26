@@ -119,8 +119,10 @@ def test_filled_is_a_value_state_and_never_a_parser_state():
     assert "filled" in schema["$defs"]["value_state"]["enum"]
     assert "filled" not in schema["$defs"]["extracted_state"]["enum"]
     assert set(schema["$defs"]["fill"]["properties"]["rule_id"]["enum"]) == set(B.FILL_RULES)
-    assert set(B.FILL_RULES) == {B.FILL_PARSER_EXACT_RULE_ID, B.FILL_STORED_CONVENTION_RULE_ID, B.FILL_DOMAIN_RULE_ID}
-    assert B.FORMAT_VERSION == "1.18.0" == B._VERSION_ORDER[-1]
+    # 1.19.0 (slice 2, DEC-97) adds the one reading rule (an inferred reading never fills)
+    assert set(B.FILL_RULES) == {B.FILL_PARSER_EXACT_RULE_ID, B.FILL_STORED_CONVENTION_RULE_ID, B.FILL_DOMAIN_RULE_ID,
+                                 B.FILL_READING_STATED_RULE_ID}
+    assert B.FORMAT_VERSION == "1.19.0" == B._VERSION_ORDER[-1]
     for rule_id, text in B.FILL_RULES.items():
         assert text.startswith(rule_id + ": ") and text.count(". ") == 0, rule_id  # one sentence, named by its id
     with pytest.raises(ValueError):
@@ -134,7 +136,7 @@ def test_an_epoch_start_beside_an_open_local_start_is_not_filled_until_the_local
     stated, and asked). One open reading of the same field for the same run means no fill: before, the #E was filled
     and a scientist's answer to the #D question then disagreed with it, and the start time dropped out of the record."""
     b = M.load(bdir)
-    assert B.validate_bundle(b) == [] and b["format_version"] == "1.18.0" and b["fill_rule_set"] == B.FILL_RULE_SET
+    assert B.validate_bundle(b) == [] and b["format_version"] == B.FORMAT_VERSION and b["fill_rule_set"] == B.FILL_RULE_SET
     for run in b["runs"]:
         e, d = _start(b, run["run_id"]), _local_start(b, run["run_id"])
         assert e["value_state"] != B.STATE_FILLED and "fill" not in e, run["run_id"]
@@ -550,11 +552,11 @@ def test_a_1_17_0_bundle_is_stale_not_invalid_and_its_next_write_logs_each_fille
     # the next write (any: here the consent) re-derives it, raises it to 1.18.0 and logs every moved value
     M.record_consent(bdir, by="SYN Scientist")
     saved = json.loads((bdir / "bundle.json").read_text())
-    assert saved["format_version"] == "1.18.0" and saved["fill_rule_set"] == B.FILL_RULE_SET
+    assert saved["format_version"] == B.FORMAT_VERSION and saved["fill_rule_set"] == B.FILL_RULE_SET
     assert B.validate_bundle(saved) == []
     logged = {(r["kind"], r["id"]) for r in saved["eligibility_rederived"] if r["value_state"] == B.STATE_FILLED}
     assert logged == moved
-    assert all(r["from_format_version"] == "1.17.0" and r["to_format_version"] == "1.18.0"
+    assert all(r["from_format_version"] == "1.17.0" and r["to_format_version"] == B.FORMAT_VERSION
                for r in saved["eligibility_rederived"] if r["value_state"] == B.STATE_FILLED)
     [u] = [u for u in saved["format_upgrades"] if u["from_format_version"] == "1.17.0"]
     assert B.CHANGES_ADDED_IN["1.18.0"] in u["statement"]
