@@ -483,7 +483,11 @@ def test_every_id_the_build_before_gave_stands_and_new_ones_only_follow(name, tm
     assert set(pin["questions"]) <= set(now["questions"]) | now["filled_out"]  # 1.18.0: as above
     assert set(pin["groups"]) <= {g[0] for g in now["groups"]}
     if name in ("a_only", "parents"):  # nothing new to find: everything is as it was (the filled question kept aside)
-        assert base_pin({**now, "questions": sorted(set(now["questions"]) | now["filled_out"])}) == pin
+        # 1.20.0 (DEC-98): a_only's SYNSAMP_001 is held at -0.3 V with its electrolyte in the same file, so the
+        # beamtime's environment convention is ADDED (one id, fixed by scope, kind and field); every pinned id stands
+        added = {Q.ENV_CONVENTION_QUESTION_ID} if name == "a_only" else set()
+        assert added <= set(now["questions"])
+        assert base_pin({**now, "questions": sorted((set(now["questions"]) | now["filled_out"]) - added)}) == pin
     if name == "mixed_version":  # the 2.0 scans in 4.0 series change nothing; the 2.0-only run only follows
         assert [r[1] for r in now["runs"]][pin["runs"][0]:] == ["ssrl_xdc_v1:a/SYNOLD"]
         values = {(c[1], c[2]): c[3] for c in now["candidates"]}
