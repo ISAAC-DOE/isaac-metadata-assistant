@@ -40,7 +40,10 @@ targets) leaves every other open question's id unchanged. What an answer can sti
 question that was withheld until it existed — the documented unlocks: a stated clock zone
 unlocks the start-time confirmations it gives; a stated control mode makes its set-point
 required (that missing value moves from the optional question to a blocking one); a later zone
-change re-asks the confirmations it undid. None of these renames an existing question.
+change re-asks the confirmations it undid; and (1.20.0, DEC-98) an answer to an electrochemical field is
+corroboration, so runs held at a potential then qualify and the beamtime's environment-convention question
+(:data:`ENV_CONVENTION_QUESTION_ID`, fixed by scope, kind and field) is ADDED. None of these renames an existing
+question.
 
 An ANSWERED question keeps its id too: ``consolidate(include_answered=True)`` puts its answered targets back,
 so ``decide --question`` re-answers it (a later decision replaces an earlier one) and ``bundle show question``
