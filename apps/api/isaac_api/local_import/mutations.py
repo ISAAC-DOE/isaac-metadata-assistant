@@ -3267,6 +3267,11 @@ def _decide_arguments(*, target_ids, decision, by, orcid, qc_status, element, ed
         raise MutationRefused("--orcid must look like 0000-0000-0000-0000 (last character may be X).")
     if not target_ids:
         raise MutationRefused("No target given.")
+    if decision == B.REVIEW_DECISION:
+        # 1.21.0 (DEC-99): the end review binds every value it lists; only `bundle review --accept --apply` records it
+        raise MutationRefused("The end review is recorded by `isaac bundle review <bundle_dir> --accept --by \"<your "
+                              "name>\" --apply`, which binds each filled value it lists; `decide` cannot record it. "
+                              "Nothing was recorded.")
     if (decision == "defer" and value is not None and "experiment" in target_ids
             and not (clock_zone_defer and value == CLOCK_ZONE_DEFER_VALUE)):
         raise MutationRefused(EXPERIMENT_DEFER_VALUE_REFUSAL)

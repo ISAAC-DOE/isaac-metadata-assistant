@@ -75,7 +75,8 @@ count, and ask the question it names. Its command is a template: run it only wit
   scientist settles it. A scale missing on one side may be one potential on two scales: ask which applies.
 - **`macro_setpoint_unanswered`**: a macro and a file name state different set-points. Ask the question it names.
 - **`in_situ_conditions_not_in_record`**: an in-situ or operando electrochemical record carries no electrolyte, cell
-  type or control mode. It quotes what the file names state (`10MNaOH`). Ask each field; nothing is filled from a name.
+  type or control mode. It quotes what the file names state (`10MNaOH`). Ask each field it names: a name that gives
+  no value fills nothing.
 - **A name stating open circuit** (`OCV`) warns until the control mode is confirmed.
 - **Start time left out**: see `start-times-and-clock.md`.
 - **Portal warnings** (`portal_warnings`: a deprecated cell type, no data owner) never change a verdict, but are said.
@@ -85,6 +86,51 @@ count, and ask the question it names. Its command is a template: run it only wit
 - An unknown temperature is written as "not reported". Never press for one and never default one.
 
 Re-importing to fix anything starts with no answers: decisions and filled sheets do not carry over. Do not suggest it.
+
+## The end review (Step 10)
+
+Read this at Step 10. The owner's direction: the scientist reviews the final records, not each value as it is found.
+
+`<isaac> bundle review <bundle> --json` (after `build-records`; it reads only):
+
+- `fields[]`: every value a rule filled that the built records carry and nobody has reviewed, by field. Per value:
+  `value_words` (with its unit, and a potential with its scale: "0.06 V vs RHE"), `values` (how many runs' values) and
+  `records` (how many records carry it) — say both words; `rule` (why, in plain words); `witness` (what shows it: the
+  beamtime folder's name for the facility, organization and group, a header line only when it names them; "read from
+  N of the beamline's own acquisition files" for the domain; a header number said as what its motor is; otherwise the
+  shortest quote, `by` saying whether the files or a Claude reading); and for the environment `convention` (their
+  answer, how many measurements it was given for, how many it reached).
+- `scan_decisions[]`: per record, the scans the processing rule kept and dropped, each drop with its reasons, and the
+  curve's plot file. Read from the stored results; open a plot with Read if they ask.
+- `reviewed_earlier`, `reviewed_changed_since`: values reviewed before, and reviewed values whose value, rule or
+  evidence changed since: `listed_again` (filled again, in the listing), `filled_outside_records` (filled again, in no
+  built record yet) and `now_asked` (no rule fills them any more: they are back among the questions). An old review
+  never confirms a changed value.
+- `records_built_since_last_change: false`: the records changed since `build-records`. Build again first.
+- `listing`: the digest of exactly what is listed. The accept command in `next` carries it.
+- No record built yet (no group confirmed): `next` says to confirm groups and run `build-records` first.
+
+Show it in ONE message, by field, as a short list: "Environment: operando, in 12 records (you said such measurements
+are operando; it reached 40 measurements)". Quote each witness. Say the scan drops with why. No ids, no rule ids.
+Then ask: "Does all of this look right, or what should change?"
+
+- **Yes:** run the command `next` gives: `<isaac> bundle review <bundle> --accept --by "<name>" --listing <digest>`
+  shows what it would record; run it again with `--apply`. It records ONE review decision binding each listed value
+  (its target, value, rule and a hash of its evidence), and only if the listing is still the one you showed: when the
+  values changed since, it is refused ("the values changed since you were shown them"): run `bundle review` again and
+  show the scientist the new listing. Each value is then confirmed by the scientist (basis `reviewed_final_records`).
+  If any of them changes later it is filled again (or asked, when no rule fills it any more); `bundle status` says which.
+- **Yes for some fields only:** `bundle review <bundle> --field <path> --field <path>` lists just those (one listing,
+  one digest), and its `next` accepts just those: one decision. After an `--apply` the records changed, so run
+  `build-records` again, then `bundle review` for what is left; never accept a second field from the first listing.
+- **A change:** `decide --target <the value's id from the --json> --decision correct --value <their value>`, then
+  `build-records` and `bundle review` again. A decision always wins over a fill and over a review. **A scan to keep or
+  drop** instead of the rule's choice: Step 6.3 (`set_scan_decision`), re-process the group, show the new curve and
+  approve it only on their yes; then `build-records` and review again.
+- After the review: `build-records`, `validate` and `export` again, so the records carry the confirmation (an exported
+  record that changed gets a new id; the old one moves to `isaac-export/superseded/`).
+- Export never waits for the review: a value not yet reviewed goes out as inferred, naming its rule. Say so if they
+  stop before reviewing.
 
 ## Record shape
 

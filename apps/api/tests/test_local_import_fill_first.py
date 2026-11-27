@@ -123,7 +123,7 @@ def test_filled_is_a_value_state_and_never_a_parser_state():
     # the folder, people and held-potential rules
     assert set(B.FILL_RULES) == {B.FILL_PARSER_EXACT_RULE_ID, B.FILL_STORED_CONVENTION_RULE_ID, B.FILL_DOMAIN_RULE_ID,
                                  B.FILL_READING_STATED_RULE_ID} | B.FOLDER_FILL_RULES
-    assert B.FORMAT_VERSION == "1.20.0" == B._VERSION_ORDER[-1]
+    assert B.FORMAT_VERSION == "1.21.0" == B._VERSION_ORDER[-1]  # 1.21.0: the end review (DEC-99), no new rule
     for rule_id, text in B.FILL_RULES.items():
         assert text.startswith(rule_id + ": ") and text.count(". ") == 0, rule_id  # one sentence, named by its id
     with pytest.raises(ValueError):
@@ -858,7 +858,8 @@ def test_status_and_check_count_filled_values(bdir, capsys):
 
     facts = ST.status(bdir)
     assert facts["facts"]["values_filled"] == json.loads((bdir / "bundle.json").read_text())["counts"]["filled"] > 0
-    assert any(line.startswith("Filled from the evidence by a rule") for line in facts["lines"])
+    assert any(line.startswith("Values a rule filled from the evidence") and "not yet reviewed" in line
+               for line in facts["lines"])  # 1.21.0 wording
     capsys.readouterr()
     assert cli.main(["bundle", "check", str(bdir)]) == 0
     assert "filled by a rule (candidates and missing values, not asked): 1" in capsys.readouterr().out

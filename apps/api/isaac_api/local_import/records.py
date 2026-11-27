@@ -555,6 +555,22 @@ def _candidate_confirmation(candidate: Mapping, decision: Mapping, value: Any, p
     return entry
 
 
+#: 1.21.0 (DEC-99): the question the end review's confirmation of a filled value answers in a draft
+REVIEW_QUESTION = ("The end review of the final records: is this value, filled from the evidence by the rule named "
+                   "beside it, right?")
+
+
+def _review_confirmation(obj: Mapping, value: Any, index: Mapping) -> dict:
+    """The scientist's END REVIEW of a filled value (1.21.0, DEC-99) as a draft's ``user_confirmation``: the review
+    decision that binds it, who gave it and when, and the basis ``reviewed_final_records``."""
+    did = (obj.get("review") or {}).get("decision_id")
+    d = index["review_decisions"].get(did) or {"decision_id": did}
+    entry = _confirmation({**d, "value": value}, REVIEW_QUESTION)
+    entry["basis"] = B.REVIEW_BASIS
+    entry["rule"] = (obj.get("fill") or {}).get("rule_id")
+    return entry
+
+
 def _confirmation(decision: Mapping, question: str) -> dict:
     by = decision.get("decided_by") or {}
     entry = {
@@ -683,6 +699,8 @@ def composition_index(bundle: Mapping, decision_of: Mapping[tuple[str, str], Map
         # 1.19.0: the AI readings a fill names (fill.readings), by id: each becomes a quoted witness of the value
         "reading_of": {i.get("interpretation_id"): i for i in bundle.get("ai_interpretations") or ()
                        if isinstance(i, Mapping) and i.get("quote_check") is not None},
+        # 1.21.0: the end review decisions by id: each reviewed fill cites its review as a confirmation
+        "review_decisions": {d.get("decision_id"): d for d in B.review_decisions(bundle)},
         # read when first needed, then kept: B.required_record_paths(control_mode=...) per mode (it reads the
         # schema file each call), and B.clock_zone_decision (only a confirmed local-clock start time asks for it)
         "required_by_mode": {},
@@ -868,6 +886,7 @@ def compose_group(bundle: Mapping, group: Mapping, bundle_dir: Path, index: dict
     }
     proposals: dict[str, list[tuple[Any, list, str]]] = {}
     filled_ids: set[str] = set()  # 1.18.0: the contributing values a registered rule filled (no decision)
+    reviewed_ids: set[str] = set()  # 1.21.0: ...of which the end review confirmed these (composed as confirmed)
 
     def _confirmed_but_unfit(obj: Mapping, id_key: str) -> None:
         # A scientist's answer the official field cannot hold (e.g. "-0.8 V" for a number) is
@@ -899,13 +918,18 @@ def compose_group(bundle: Mapping, group: Mapping, bundle_dir: Path, index: dict
         if "[]" in path:
             report["not_composed"].append({"candidate_id": c["candidate_id"], "path": path, "reason": "an array path; composed only from structured blocks"})
             continue
-        if c["value_state"] == B.STATE_FILLED:
+        if c["value_state"] == B.STATE_FILLED or B.is_reviewed_fill(c):
             # 1.18.0 (DEC-96): a value a registered rule FILLED (no decision): the file's witnesses, then the
-            # derivation naming the rule, so the draft carries it as `inferred` and the sidecar names the rule
+            # derivation naming the rule, so the draft carries it as `inferred` and the sidecar names the rule.
+            # 1.21.0 (DEC-99): a fill the END REVIEW confirmed keeps the same witnesses and derivation, plus the
+            # scientist's review as its confirmation, and composes as a confirmed value does (`verified`)
             value = B.fill_value(c)
             witnesses = _witnesses(c, value, None, zone_confirmed) + reading_witnesses(c, index)
-            proposals.setdefault(FIELD_REMAP.get(path, path), []).append(
-                (value, witnesses + [fill_derivation(c, "candidate_id")], c["candidate_id"]))
+            entries = witnesses + [fill_derivation(c, "candidate_id")]
+            if B.is_reviewed_fill(c):
+                entries.append(_review_confirmation(c, value, index))
+                reviewed_ids.add(c["candidate_id"])
+            proposals.setdefault(FIELD_REMAP.get(path, path), []).append((value, entries, c["candidate_id"]))
             filled_ids.add(c["candidate_id"])
             continue
         d = B.candidate_decision(bundle, c, decisions, index["conflict_ids_of"])
@@ -938,15 +962,19 @@ def compose_group(bundle: Mapping, group: Mapping, bundle_dir: Path, index: dict
             continue
         if not (m["run_id"] in measured_ids or m["run_id"] is None):
             continue
-        if m["value_state"] == B.STATE_FILLED:
+        if m["value_state"] == B.STATE_FILLED or B.is_reviewed_fill(m):
             # 1.18.0: a missing value a registered rule filled (system.domain from the acquisition files)
             memo = index["memo"]
             if "fill_witness_index" not in memo:  # once per composition index, never per group
                 memo["fill_witness_index"] = _fill_witness_index(bundle)
             witnesses, note = _fill_witnesses(bundle, m, measured_ids, memo["fill_witness_index"])
             witnesses += reading_witnesses(m, index)
+            entries = witnesses + [fill_derivation(m, "value_id", note)]
+            if B.is_reviewed_fill(m):  # 1.21.0: the end review confirmed it
+                entries.append(_review_confirmation(m, B.fill_value(m), index))
+                reviewed_ids.add(m["value_id"])
             proposals.setdefault(FIELD_REMAP.get(m["target_field_path"], m["target_field_path"]), []).append(
-                (B.fill_value(m), witnesses + [fill_derivation(m, "value_id", note)], m["value_id"]))
+                (B.fill_value(m), entries, m["value_id"]))
             filled_ids.add(m["value_id"])
             continue
         d = decisions[("missing_value", m["value_id"])]
@@ -1018,13 +1046,20 @@ def compose_group(bundle: Mapping, group: Mapping, bundle_dir: Path, index: dict
                 for i in from_ids:
                     report["not_composed"].append({_id_key(i): i, "path": path, "reason": reason})
                 continue
-        # "inferred" whenever ANY contributing value was filled by a rule; "verified" only if every one is confirmed
-        fields[path] = {"value": value, "status": "inferred" if by_rule else "verified", "evidence": evidence}
+        # "inferred" whenever ANY contributing value was filled by a rule and not reviewed; "verified" only if every one
+        # is confirmed (1.21.0: a fill the end review confirmed counts as confirmed)
+        unreviewed = [i for i in by_rule if i not in reviewed_ids]
+        fields[path] = {"value": value, "status": "inferred" if unreviewed else "verified", "evidence": evidence}
         report["filled"].append({"path": path, "from": from_ids})
-        if by_rule:
+        if unreviewed:
             report.setdefault("filled_by_rule", []).append({
-                "path": path, "from": by_rule,
-                "rules": sorted({(index["obj_of"][i][1].get("fill") or {}).get("rule_id") for i in by_rule})})
+                "path": path, "from": unreviewed,
+                "rules": sorted({(index["obj_of"][i][1].get("fill") or {}).get("rule_id") for i in unreviewed})})
+        if len(unreviewed) < len(by_rule):
+            done = [i for i in by_rule if i in reviewed_ids]
+            report.setdefault("reviewed_by_rule", []).append({
+                "path": path, "from": done,
+                "rules": sorted({(index["obj_of"][i][1].get("fill") or {}).get("rule_id") for i in done})})
     # AN ANSWER SLOT BELONGS TO ITS RUN (c7-r MED-3): a slot holds one run's answer to a field the import asks once for
     # the whole beamtime. A group (a merged one, say) fills the field from slots only when EVERY member run is covered
     # — by a slot or an answer of its own (the same value, or the check above already said they differ), or by the
@@ -1075,6 +1110,13 @@ def compose_group(bundle: Mapping, group: Mapping, bundle_dir: Path, index: dict
             for i in from_ids:
                 report["not_composed"].append({_id_key(i): i, "path": path,
                                                "reason": SETPOINT_NEEDS_SCALE if i in lacking else SETPOINT_GROUP_NEEDS_SCALE})
+    # 1.21.0 (DEC-99): the fills the record CARRIES: a field the slot rule or the set-point's scale gate took out above
+    # is not in the record, so it is no fill of it either (the end review lists only what the record carries)
+    for key in ("filled_by_rule", "reviewed_by_rule"):
+        if key in report:
+            report[key] = [e for e in report[key] if e["path"] in fields]
+            if not report[key]:
+                del report[key]
     # NEVER SILENT: a composed value on a path the build that first stored this bundle could not
     # write, whose GOVERNING decision was made before this build upgraded the bundle (under the old
     # wording, "this build cannot write it yet"). A decision made after the upgrade, under the

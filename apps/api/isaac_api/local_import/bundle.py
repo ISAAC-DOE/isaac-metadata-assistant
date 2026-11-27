@@ -165,7 +165,13 @@ FORMAT_ID = "isaac.local-import-bundle"
 #: so the group rule can check them; a bundle imported before holds none, and the group rule fills it only once it is
 #: imported again. A 1.19.0 validator refuses the new rule ids, the new decision and the new field, hence the version.
 #: :data:`FILL_RULE_SET` 3: a rule set 2 bundle is STALE where a value moves.
-FORMAT_VERSION = "1.20.0"
+#: 1.21.0 (slice 4 of DEC-96, DEC-99): the END REVIEW. ``isaac bundle review`` lists the values a rule filled that the
+#: built records carry; on the scientist's yes ONE experiment decision ``review`` (:data:`REVIEW_DECISION`) binds each
+#: listed fill by its target, value, rule and an evidence hash (``reviewed_fills``, :func:`fill_evidence_sha256`, the
+#: clock-zone binding pattern), and each bound fill derives ``scientist_confirmed`` with the ``review`` block (basis
+#: :data:`REVIEW_BASIS`). Any change to a bound item returns it to ``filled``. A 1.20.0 validator refuses the new
+#: decision, its field and the block, hence the version; no rule changed, so :data:`FILL_RULE_SET` stays 3.
+FORMAT_VERSION = "1.21.0"
 #: The electrochemical control mode. Its allowed values are the official schema's enum (read at
 #: runtime by :func:`value_problem`); the schema's conditional rules key the set-point a record
 #: requires on it (:func:`required_record_paths`). Never defaulted, never derived.
@@ -191,7 +197,7 @@ VALUE_IDS_APPEND_FROM = "1.5.0"
 IMPORT_RULES_ADDED_IN: Mapping[str, tuple] = {
     "1.4.0": (("generic:ssrl_xdc_v1", "ssrl_xdc_scan_start_v1"),),
 }
-_VERSION_ORDER = ("1.0.0", "1.1.0", "1.2.0", "1.3.0", "1.4.0", "1.5.0", "1.6.0", "1.7.0", "1.8.0", "1.9.0", "1.10.0", "1.11.0", "1.12.0", "1.13.0", "1.14.0", "1.15.0", "1.16.0", "1.17.0", "1.18.0", "1.19.0", "1.20.0")
+_VERSION_ORDER = ("1.0.0", "1.1.0", "1.2.0", "1.3.0", "1.4.0", "1.5.0", "1.6.0", "1.7.0", "1.8.0", "1.9.0", "1.10.0", "1.11.0", "1.12.0", "1.13.0", "1.14.0", "1.15.0", "1.16.0", "1.17.0", "1.18.0", "1.19.0", "1.20.0", "1.21.0")
 #: A change a format version made that moves no eligibility and adds no import rule, but that the
 #: first save by a newer build still DISCLOSES in its ``format_upgrades`` entry (never silently).
 CHANGES_ADDED_IN: Mapping[str, str] = {
@@ -245,6 +251,10 @@ CHANGES_ADDED_IN: Mapping[str, str] = {
                "producing organization as that facility (isaac.fill.organization_from_facility.v1); and the producing "
                "group from the PI the folder names (isaac.fill.group_from_folder_pi.v1), which needs the readme's "
                "header lines the import now keeps, so a bundle imported before takes it only once imported again"),
+    "1.21.0": ("1.21.0 adds the end review (`bundle review`): the scientist's yes over the values a rule filled in the "
+               "built records is ONE review decision binding each value, its rule and its evidence; a bound value is "
+               "scientist_confirmed (basis reviewed_final_records) until any of them changes, when it is filled again "
+               "(DEC-99)"),
 }
 #: A field composed into a draft only beside another of the SAME run (interim decision for the
 #: set-point, pending domain-owner review; ``records.compose_group`` applies it). The CURRENT
@@ -1680,7 +1690,7 @@ DECISIONS_BY_KIND: Mapping[str, frozenset[str]] = {
     "processing_result": frozenset({"approve", "reject", "needs_changes", "defer", "select_athena_version"}),
     # `defer` (1.9.x polish): "I don't know" to the counter question — recorded, changes no grouping
     "experiment": frozenset({"set_counter_positions", "set_clock_time_zone", "set_not_counter_positions", "defer",
-                             "set_dose_reading", "set_environment_convention"}),
+                             "set_dose_reading", "set_environment_convention", "review"}),
     # 1.6.0: a merge candidate is decided only to say its groups are DISTINCT; merging stays a
     # record-group decision (``merge --merge-with``)
     "merge_candidate": frozenset({"keep_apart"}),
@@ -2133,6 +2143,7 @@ def derive_value_state(
     decision: Mapping | None,
     interpreted: bool,
     fill_rule: str | None = None,
+    reviewed: bool = False,
 ) -> str:
     """The state a value is in, from what the parser found plus what was recorded. IN THIS ORDER:
 
@@ -2145,6 +2156,8 @@ def derive_value_state(
        ``filled`` — never a conflict. The rule itself already refuses a value an AI reading
        DISAGREES with, so an AGREEING reading never stops a fill and a disagreeing one always does.
        Since 1.19.0 (DEC-97) one rule rests on a CHECKED, stated AI reading itself (:data:`READING_FILL_RULES`);
+       1.21.0 (DEC-99): a fill the scientist's END REVIEW still binds (``reviewed``: :func:`review_binding_holds`,
+       the same rule, value and evidence hash) is ``scientist_confirmed`` instead; any change returns it to ``filled``;
     3. otherwise an AI interpretation lifts ``missing``/``unmapped``/
        ``candidate_extracted`` to ``needs_review`` — never higher, and never a conflict;
     4. otherwise the parser's own state stands.
@@ -2166,7 +2179,7 @@ def derive_value_state(
         if kind in CONFIRMING_DECISIONS:
             return STATE_SCIENTIST_CONFIRMED
     if fill_rule is not None and decision is None and extracted_state in _FILLABLE:
-        return STATE_FILLED
+        return STATE_SCIENTIST_CONFIRMED if reviewed else STATE_FILLED
     if interpreted and extracted_state in _AI_LIFTABLE:
         return STATE_NEEDS_REVIEW
     return extracted_state
@@ -3609,7 +3622,8 @@ def environment_convention_targets(bundle: Mapping, ctx: Mapping | None = None, 
         run = runs.get(m["run_id"]) or {}
         if not run.get("run_candidate") or m["run_id"] in context:
             continue
-        rule = (m.get("fill") or {}).get("rule_id") if m.get("value_state") == STATE_FILLED else None
+        rule = ((m.get("fill") or {}).get("rule_id")
+                if m.get("value_state") == STATE_FILLED or is_reviewed_fill(m) else None)  # 1.21.0: reviewed too
         if rule is not None and not (include_filled and rule == FILL_ENVIRONMENT_RULE_ID):
             continue
         basis = environment_basis(m, ctx)
@@ -4244,6 +4258,271 @@ def fill_value(obj: Mapping) -> Any:
     """The value a ``filled`` candidate or missing value carries (its ``fill`` block), else ``None``."""
     f = obj.get("fill")
     return f.get("value") if isinstance(f, Mapping) else None
+
+
+# --- the end review (1.21.0, slice 4 of DEC-96, DEC-99) ----------------------------------------------------------
+#
+# THE OWNER'S DIRECTION (2026-11-25): "at the end, when the user has the final version of the record output, we can just
+# have them review that". `isaac bundle review` lists every value a rule filled that the built records carry; the
+# scientist's yes is ONE experiment decision, `review`, that BINDS each listed fill (the clock-zone binding pattern:
+# a confirmation records what it was made under, and stops counting the moment any part of it changes). A bound fill
+# derives `scientist_confirmed`, with the `review` block naming the decision and the basis `reviewed_final_records`.
+# A scientist's own decision on the target always beats the review (no fill is derived beside a decision, so nothing
+# is bound). Answer memory never learns it: it reads value decisions only, and a review is none.
+
+#: The experiment decision the end review records (``bundle review --accept --apply``; never ``decide``).
+REVIEW_DECISION = "review"
+#: What a bound, reviewed fill's ``review.basis`` says: the scientist confirmed it by reviewing the final records.
+REVIEW_BASIS = "reviewed_final_records"
+#: The key a review decision keeps its bound items under: ``[{target: {kind, id}, value, rule_id, evidence_sha256}]``.
+REVIEW_ITEMS_KEY = "reviewed_fills"
+#: The key a review decision keeps the bundle version (``mutations.bundle_version``) the scientist reviewed under.
+REVIEW_VERSION_KEY = "reviewed_bundle_version"
+#: The most items one review decision binds (the schema's bound on ``reviewed_fills``).
+MAX_REVIEW_ITEMS = 50_000
+_SHA256_HEX = re.compile(r"^[0-9a-f]{64}$")
+#: the evidence fields a candidate's file witness is bound by (never a derived field such as a local-clock step)
+_REVIEW_EVIDENCE_KEYS = ("source_id", "relative_path", "locator", "literal_value", "relation", "method_id", "method")
+
+
+def _canonical_sha256(payload: Any) -> str:
+    return hashlib.sha256(json.dumps(payload, sort_keys=True, ensure_ascii=False, default=str).encode("utf-8")).hexdigest()
+
+
+def fill_evidence_sha256(bundle: Mapping, kind: str, obj: Mapping, ctx: Mapping) -> str:
+    """THE EVIDENCE HASH a review binds a fill by: the sha256, in canonical JSON, of what the fill rests on — its
+    ``fill`` block (rule, value, the readings it names), each named reading's own ``reading_sha256``, and per kind: a
+    candidate's file witnesses (source, path, locator, literal, relation, reader); for a missing value, what its rule
+    read (the environment's set-points, corroboration and convention answer; the facility the folder and the
+    fingerprint agree on and the run's matched header lines; the group's surname, full name and agreeing lines; the
+    readers of every run for the domain). Re-derived on every derivation, never stored on the value: a change to any
+    of it returns a reviewed fill to ``filled``."""
+    fill = dict(obj.get("fill") or {})
+    readings: Mapping = {}
+    if fill.get("readings"):
+        readings = ctx.get("_readings_by_id")  # built once per fill context, never per bound item
+        if readings is None:
+            readings = {str(i.get("interpretation_id")): i for i in bundle.get("ai_interpretations") or ()
+                        if isinstance(i, Mapping)}
+            if isinstance(ctx, dict):
+                ctx["_readings_by_id"] = readings
+    payload: dict[str, Any] = {
+        "kind": kind,
+        "target_field_path": obj.get("target_field_path"),
+        "run_id": obj.get("run_id"),
+        "fill": fill,
+        "readings": [reading_sha256(readings[r]) if r in readings else None for r in fill.get("readings") or ()],
+    }
+    rule = fill.get("rule_id")
+    if kind == "candidate":
+        payload["value"] = obj.get("value")
+        payload["evidence"] = [{k: e.get(k) for k in _REVIEW_EVIDENCE_KEYS} for e in obj.get("evidence") or ()
+                               if isinstance(e, Mapping)]
+    elif rule == FILL_ENVIRONMENT_RULE_ID:
+        basis = environment_fill_basis(obj, ctx) or {}
+        conv = basis.get("convention") or {}
+        idx = _witness_index(bundle, ctx)
+
+        def cand_said(cid: Any) -> list:
+            c = idx["cands"].get(str(cid)) or {}
+            return [cid, c.get("value"), [[e.get("relative_path"), e.get("locator"), e.get("literal_value")]
+                                          for e in c.get("evidence") or () if e.get("relation") == "supports"]]
+
+        def corroboration_said(kind: Any, ref: Any) -> list:
+            if kind == "candidate":
+                return [kind, *cand_said(ref)]
+            if kind == "reading":
+                i = idx["readings"].get(str(ref)) or {}
+                return [kind, ref, i.get("proposed_value"), i.get("quote"), (i.get("quote_check") or {}).get("result")]
+            d = idx["decisions"].get(str(ref)) or {}
+            return [kind, ref, d.get("decision"), d.get("value")]
+
+        # the VALUES of the set-points and of the corroboration, not only their ids (review 8): a set-point read again
+        # as another number, or a corroborating quote edited, is a change to what the scientist reviewed
+        payload["basis"] = {"setpoints": [cand_said(c) for c in basis.get("setpoints") or ()],
+                            "corroboration": [corroboration_said(k, r) for k, r in basis.get("corroboration") or ()],
+                            "convention": [conv.get("decision_id"), conv.get("value")]}
+    elif rule in (FILL_FACILITY_RULE_ID, FILL_ORGANIZATION_RULE_ID):
+        found = ctx.get("facility") or {}
+        payload["basis"] = {k: found.get(k) for k in ("folder_label", "folder_facility", "folder_beamline", "facility",
+                                                      "beamline")}
+        rid = obj.get("run_id")
+        if rid is not None:
+            payload["fingerprint_lines"] = (ctx.get("fingerprint_by_run") or {}).get(rid, [])
+    elif rule == FILL_GROUP_RULE_ID:
+        found = ctx.get("group") or {}
+        payload["basis"] = {k: found.get(k) for k in ("value", "surname", "folder_label", "full_name", "agreeing",
+                                                      "name_witnesses")}
+    elif rule == FILL_DOMAIN_RULE_ID:
+        source_of = ctx.get("source_of") or {}
+        payload["basis"] = sorted({str(run_reader_id(bundle, r, source_of)) for r in bundle.get("runs") or ()})
+    return _canonical_sha256(payload)
+
+
+def review_item(bundle: Mapping, kind: str, obj: Mapping, ctx: Mapping) -> dict:
+    """The ``reviewed_fills`` entry a review records for ONE filled value: its target, value, rule and evidence hash."""
+    fill = obj.get("fill") or {}
+    tid = obj.get("candidate_id") if kind == "candidate" else obj.get("value_id")
+    return {"target": {"kind": kind, "id": str(tid)}, "value": fill.get("value"), "rule_id": fill.get("rule_id"),
+            "evidence_sha256": fill_evidence_sha256(bundle, kind, obj, ctx)}
+
+
+def review_decisions(bundle: Mapping) -> list[Mapping]:
+    """Every ``review`` decision of the beamtime, in the order recorded."""
+    return [d for d in bundle.get("scientist_decisions") or ()
+            if isinstance(d, Mapping) and d.get("decision") == REVIEW_DECISION
+            and (d.get("target") or {}).get("kind") == "experiment"]
+
+
+def review_bindings(bundle: Mapping) -> dict[tuple[str, str], tuple[Mapping, Mapping]]:
+    """``{(kind, id): (item, review decision)}``: each target's LATEST binding (a later review of the same target
+    replaces an earlier one; a review that does not name a target leaves its earlier binding in force)."""
+    out: dict[tuple[str, str], tuple[Mapping, Mapping]] = {}
+    for d in review_decisions(bundle):
+        for item in d.get(REVIEW_ITEMS_KEY) or ():
+            t = item.get("target") if isinstance(item, Mapping) else None
+            if isinstance(t, Mapping):
+                out[(str(t.get("kind")), str(t.get("id")))] = (item, d)
+    return out
+
+
+def review_binding_holds(bundle: Mapping, kind: str, obj: Mapping, fill: Sequence | None, item: Mapping | None,
+                         ctx: Mapping) -> bool:
+    """Whether the bound review ``item`` still describes the fill a value has NOW: the same rule, the same value and the
+    same evidence hash. ``False`` when there is no fill (a decision on the target, a rule that no longer applies) or no
+    item: the value is then whatever its own derivation gives."""
+    if not fill or not isinstance(item, Mapping):
+        return False
+    if item.get("rule_id") != fill[0] or json.dumps(item.get("value"), sort_keys=True) != json.dumps(fill[1], sort_keys=True):
+        return False
+    probe = dict(obj)
+    _set_fill(probe, fill)
+    return item.get("evidence_sha256") == fill_evidence_sha256(bundle, kind, probe, ctx)
+
+
+def is_reviewed_fill(obj: Mapping) -> bool:
+    """A value a rule filled that the scientist confirmed in the end review (``review`` block, state confirmed)."""
+    return obj.get("value_state") == STATE_SCIENTIST_CONFIRMED and isinstance(obj.get("review"), Mapping)
+
+
+def review_changed_since(bundle: Mapping) -> list[dict]:
+    """The items a review bound that no longer count, read from ``bundle`` as derived: ``[{kind, id, decision_id,
+    now}]``, ``now`` the value's state today (``filled``: its value, rule or evidence changed since; another state: its
+    rule no longer fills it). An item whose target a scientist has since decided is not listed: their decision is the
+    answer now."""
+    bound = review_bindings(bundle)
+    if not bound:
+        return []
+    decision_of = _decisions_by_target(bundle.get("scientist_decisions") or ())
+    out = []
+    for kind, section, key in (("candidate", "candidates", "candidate_id"), ("missing_value", "missing_values", "value_id")):
+        for obj in bundle.get(section) or ():
+            hit = bound.get((kind, str(obj.get(key))))
+            if hit is None or is_reviewed_fill(obj) and (obj.get("review") or {}).get("decision_id") == hit[1].get("decision_id"):
+                continue
+            if kind == "candidate":
+                if candidate_decision(bundle, obj, decision_of) is not None:
+                    continue
+            elif decision_of.get((kind, str(obj.get(key)))) is not None:
+                continue
+            out.append({"kind": kind, "id": obj.get(key), "decision_id": hit[1].get("decision_id"),
+                        "now": obj.get("value_state")})
+    return out
+
+
+#: Which rules can fill which kind of target (a candidate's value, or a missing value), and, for the rules of one field,
+#: that field: a review item naming any other pairing reviewed something no rule could have filled (review 5)
+REVIEW_RULES_BY_KIND: Mapping[str, frozenset] = {
+    "candidate": frozenset({FILL_PARSER_EXACT_RULE_ID, FILL_STORED_CONVENTION_RULE_ID, FILL_READING_STATED_RULE_ID}),
+    "missing_value": frozenset({FILL_DOMAIN_RULE_ID, FILL_READING_STATED_RULE_ID} | FOLDER_FILL_RULES),
+}
+REVIEW_RULE_PATHS: Mapping[str, frozenset] = {
+    FILL_DOMAIN_RULE_ID: frozenset({DOMAIN_PATH}),
+    FILL_ENVIRONMENT_RULE_ID: frozenset({ENVIRONMENT_PATH}),
+    FILL_FACILITY_RULE_ID: frozenset({FACILITY_NAME_FILL_PATH, BEAMLINE_FILL_PATH}),
+    FILL_ORGANIZATION_RULE_ID: frozenset({ORGANIZATION_FILL_PATH}),
+    FILL_GROUP_RULE_ID: frozenset({GROUP_FILL_PATH}),
+}
+
+
+def _review_item_fillable(bundle: Mapping, kind: str, obj: Mapping, rule: str, value: Any,
+                          readings_of_target: Mapping[tuple[str, str], Sequence[Mapping]]) -> bool:
+    """Whether ``rule`` could ever have filled ``obj`` (round 2, minor 1), from TIMELESS facts only (round 4): a review
+    decision is append-only history no command can repair, so nothing a later build may change — the vocabulary
+    (``value_problem``), the never-fills lists, a candidate's stored value (a newer hold rule may clear it) — may make
+    it an error. Such an item simply no longer binds (it derives ``filled`` or ``missing`` and is said as changed
+    since). What stays: the rule fills that kind of target (:data:`REVIEW_RULES_BY_KIND`) and, for a rule of one field,
+    that field (:data:`REVIEW_RULE_PATHS`); and the reading rule needs a STATED reading of this very target carrying
+    its quote check (readings and their checks are only ever added). ``value`` is not judged here."""
+    path = obj.get("target_field_path")
+    if rule not in REVIEW_RULES_BY_KIND.get(kind, frozenset()):
+        return False
+    if rule in REVIEW_RULE_PATHS and path not in REVIEW_RULE_PATHS[rule]:
+        return False
+    if rule == FILL_READING_STATED_RULE_ID:
+        key = (kind, str(obj.get("candidate_id") if kind == "candidate" else obj.get("value_id")))
+        return any(i.get("strength") == "stated" and isinstance(i.get("quote_check"), Mapping)
+                   for i in readings_of_target.get(key, ()))
+    return True
+
+
+def review_decision_errors(bundle: Mapping, d: Mapping) -> list[str]:
+    """Why the decision ``d`` breaks the review contract (validator): a review is for the experiment, has no ``value``,
+    binds at least one item, each naming a candidate or missing value of this bundle, a registered rule that can fill
+    that kind of target and that field, and a 64-hex evidence hash, and none of them a target a scientist had already
+    decided when the review was recorded (no fill was there to bind: a decision beats a fill); no other decision carries
+    ``reviewed_fills``."""
+    did = d.get("decision_id")
+    items = d.get(REVIEW_ITEMS_KEY)
+    if d.get("decision") != REVIEW_DECISION:
+        return [f"decision: {did} carries {REVIEW_ITEMS_KEY}, which only {REVIEW_DECISION} does"] if items is not None else []
+    out = []
+    if (d.get("target") or {}).get("kind") != "experiment":
+        out.append(f"decision: {did} {REVIEW_DECISION} is for the experiment")
+    if d.get("value") is not None:
+        out.append(f"decision: {did} {REVIEW_DECISION} carries a value; a review binds its items ({REVIEW_ITEMS_KEY}) "
+                   "and has none")
+    if not isinstance(items, list) or not items:
+        return out + [f"decision: {did} {REVIEW_DECISION} binds no item ({REVIEW_ITEMS_KEY})"]
+    objs = {"candidate": {str(c.get("candidate_id")): c for c in bundle.get("candidates") or ()},
+            "missing_value": {str(m.get("value_id")): m for m in bundle.get("missing_values") or ()}}
+    # the targets a scientist had decided BEFORE this review (a conflict's decision reaches its candidate)
+    decided_before: set[tuple[str, str]] = set()
+    cand_of_conflict = {str(c.get("conflict_id")): str(c.get("candidate_id")) for c in bundle.get("conflicts") or ()}
+    for e in bundle.get("scientist_decisions") or ():
+        if e is d:
+            break
+        t = e.get("target") if isinstance(e, Mapping) else None
+        if not isinstance(t, Mapping) or e.get("decision") == REVIEW_DECISION:
+            continue
+        kind, tid = str(t.get("kind")), str(t.get("id"))
+        decided_before.add((kind, tid))
+        if kind == "conflict" and tid in cand_of_conflict:
+            decided_before.add(("candidate", cand_of_conflict[tid]))
+    readings_of_target: dict[tuple[str, str], list[Mapping]] = {}
+    for i in bundle.get("ai_interpretations") or ():
+        t = i.get("target") if isinstance(i, Mapping) else None
+        if isinstance(t, Mapping):
+            readings_of_target.setdefault((str(t.get("kind")), str(t.get("id"))), []).append(i)
+    for item in items:
+        t = item.get("target") if isinstance(item, Mapping) else None
+        kind, tid = str((t or {}).get("kind")), str((t or {}).get("id"))
+        obj = objs.get(kind, {}).get(tid) if isinstance(t, Mapping) else None
+        if obj is None:
+            out.append(f"decision: {did} reviews {kind} {tid}, which does not exist in this bundle")
+            continue
+        rule = item.get("rule_id")
+        if rule not in FILL_RULES:
+            out.append(f"decision: {did} reviews {tid} under {rule!r}, not a registered fill rule")
+        elif not _review_item_fillable(bundle, kind, obj, rule, item.get("value"), readings_of_target):
+            out.append(f"decision: {did} reviews {tid} ({obj.get('target_field_path')}) under {rule}, which never fills "
+                       "it: no such fill was there to review")
+        if (kind, tid) in decided_before:
+            out.append(f"decision: {did} reviews {tid}, which a scientist had already decided: no fill was there to "
+                       "review (a decision beats a fill)")
+        if not _SHA256_HEX.fullmatch(str(item.get("evidence_sha256") or "")):
+            out.append(f"decision: {did} reviews {tid} with no evidence hash (evidence_sha256)")
+    return out
 
 
 def unusable_answer_reason(obj: Mapping, writable: frozenset[str] | None = None) -> str | None:
@@ -5424,18 +5703,37 @@ def apply_derivations(bundle: dict) -> dict:
                 held |= runs
     _derive_roles(bundle)
     fill_ctx = fill_context(bundle, decision_of)  # 1.18.0: which registered fill rule supports each undecided value
+    # 1.21.0 (DEC-99): the end review's bindings, each target's latest; a bound fill whose rule, value and evidence
+    # still match is scientist_confirmed (basis reviewed_final_records), any change returns it to filled
+    bound = review_bindings(bundle) if fill_ctx["apply"] else {}
+
+    def _reviewed(kind: str, obj: Mapping, fill: Sequence | None) -> Mapping | None:
+        hit = bound.get((kind, str(obj.get("candidate_id") if kind == "candidate" else obj.get("value_id"))))
+        if hit is None or not review_binding_holds(bundle, kind, obj, fill, hit[0], fill_ctx):
+            return None
+        return hit[1]
+
+    def _set_review(obj: dict, review_d: Mapping | None) -> None:
+        if review_d is None:
+            obj.pop("review", None)
+        else:
+            obj["review"] = {"decision_id": review_d.get("decision_id"), "basis": REVIEW_BASIS}
+
     for c in bundle["candidates"]:
         key = ("candidate", c["candidate_id"])
         d = candidate_decision(bundle, c, decision_of, conflict_ids_of)
         fill = fill_rule_for(bundle, "candidate", c, d, fill_ctx)
+        review_d = _reviewed("candidate", c, fill) if fill and d is None else None
         state = derive_value_state(c["extracted_state"], decision=d, interpreted=key in interpreted,
-                                   fill_rule=fill[0] if fill else None)
+                                   fill_rule=fill[0] if fill else None, reviewed=review_d is not None)
         c["value_state"] = state
-        _set_fill(c, fill if state == STATE_FILLED else None)
+        by_fill = state == STATE_FILLED or (review_d is not None and state == STATE_SCIENTIST_CONFIRMED)
+        _set_fill(c, fill if by_fill else None)
+        _set_review(c, review_d if by_fill and state == STATE_SCIENTIST_CONFIRMED else None)
         c["eligibility_for_official_record"] = eligibility_for_official_record(
             state,
             target_field_path=c["target_field_path"],
-            value=fill[1] if state == STATE_FILLED else final_value(c["value"], d, c.get("readings")),
+            value=fill[1] if by_fill else final_value(c["value"], d, c.get("readings")),
             writable_paths=writable,
         )
         if state == STATE_SCIENTIST_CONFIRMED and is_local_clock_start(c):
@@ -5450,10 +5748,13 @@ def apply_derivations(bundle: dict) -> dict:
         key = ("missing_value", m["value_id"])
         d = decision_of.get(key)
         fill = None if is_label_slot(m) else fill_rule_for(bundle, "missing_value", m, d, fill_ctx)
+        review_d = _reviewed("missing_value", m, fill) if fill and d is None else None
         state = derive_value_state(STATE_MISSING, decision=d, interpreted=key in interpreted,
-                                   fill_rule=fill[0] if fill else None)
+                                   fill_rule=fill[0] if fill else None, reviewed=review_d is not None)
         m["value_state"] = state
-        _set_fill(m, fill if state == STATE_FILLED else None)
+        by_fill = state == STATE_FILLED or (review_d is not None and state == STATE_SCIENTIST_CONFIRMED)
+        _set_fill(m, fill if by_fill else None)
+        _set_review(m, review_d if by_fill and state == STATE_SCIENTIST_CONFIRMED else None)
         if is_label_slot(m):
             # a condition label's slot (labels.py): its own write route and value check, never the writable set
             m["eligibility_for_official_record"] = slot_eligibility(state, m, final_value(None, d))
@@ -5461,7 +5762,7 @@ def apply_derivations(bundle: dict) -> dict:
             m["eligibility_for_official_record"] = eligibility_for_official_record(
                 state,
                 target_field_path=m["target_field_path"],
-                value=fill[1] if state == STATE_FILLED else final_value(None, d),
+                value=fill[1] if by_fill else final_value(None, d),
                 writable_paths=writable,
             )
         eligible += m["eligibility_for_official_record"]["eligible"]
@@ -9173,6 +9474,8 @@ def validate_bundle(bundle: Any, *, max_errors: int = 50, encoded: bytes | None 
             problem = environment_convention_problem(d.get("value"))
             if problem is not None or (d.get("target") or {}).get("kind") != "experiment":
                 errors.append(f"decision: {d['decision_id']} {problem or 'set_environment_convention is for the experiment'}")
+        # 1.21.0 (DEC-99): the end review binds items that exist, under a registered rule, with an evidence hash
+        errors.extend(review_decision_errors(bundle, d))
         if d.get("decision") == DOSE_READING_DECISION:
             problem = dose_reading_problem(d.get("value"))
             if problem is not None or (d.get("target") or {}).get("kind") not in ("record_group", "experiment"):
@@ -9403,6 +9706,10 @@ def validate_bundle(bundle: Any, *, max_errors: int = 50, encoded: bytes | None 
             # 1.18.0: a fill is re-derived, never trusted (a hand-written fill no rule gives is refused)
             errors.append(f"state: {c['candidate_id']} fill {c.get('fill')!r} is not what the registered fill rules give "
                           f"({e.get('fill')!r})")
+        if json.dumps(c.get("review"), sort_keys=True) != json.dumps(e.get("review"), sort_keys=True):
+            # 1.21.0: a review block is re-derived from the review's binding, never trusted
+            errors.append(f"state: {c['candidate_id']} review {c.get('review')!r} is not what the end review's binding "
+                          f"gives ({e.get('review')!r})")
         if is_local_clock_start(c):
             # THE CONVERSION IS RE-RUN, NEVER TRUSTED: value, steps, reasons and block are what the
             # witness and the latest zone decision give.
@@ -9417,6 +9724,9 @@ def validate_bundle(bundle: Any, *, max_errors: int = 50, encoded: bytes | None 
         if json.dumps(m.get("fill"), sort_keys=True) != json.dumps(e.get("fill"), sort_keys=True):
             errors.append(f"state: {m['value_id']} fill {m.get('fill')!r} is not what the registered fill rules give "
                           f"({e.get('fill')!r})")
+        if json.dumps(m.get("review"), sort_keys=True) != json.dumps(e.get("review"), sort_keys=True):
+            errors.append(f"state: {m['value_id']} review {m.get('review')!r} is not what the end review's binding "
+                          f"gives ({e.get('review')!r})")
     for c, e in zip(bundle["conflicts"], expected["conflicts"]):
         if c["value_state"] != e["value_state"]:
             errors.append(f"state: {c['conflict_id']} is {c['value_state']} but only {e['value_state']} is supported")

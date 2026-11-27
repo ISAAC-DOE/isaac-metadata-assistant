@@ -1,6 +1,6 @@
-# Condition labels (Step 7, the "values to confirm" message)
+# Condition labels (Step 7, the "values still proposed" message)
 
-Read this before you send the "values to confirm" message.
+Read this before you send the "values still proposed" message.
 
 Grouping keeps records apart by electrode, filter and cycling history. Without these labels such records can export
 with the same body. ISAAC proposes each label from the readings the grouping used. Each is a `condition_label`
