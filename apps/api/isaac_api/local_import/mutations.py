@@ -3272,6 +3272,11 @@ def _decide_arguments(*, target_ids, decision, by, orcid, qc_status, element, ed
         raise MutationRefused("The end review is recorded by `isaac bundle review <bundle_dir> --accept --by \"<your "
                               "name>\" --apply`, which binds each filled value it lists; `decide` cannot record it. "
                               "Nothing was recorded.")
+    if decision == B.SUBMIT_WITH_GUESSES_DECISION:
+        # 1.22.0 (DEC-100): the final check's yes is recorded by the upload step, over the list it showed
+        raise MutationRefused("The yes to sending guesses is recorded by `isaac bundle upload <records_dir> --dry-run "
+                              "--bundle <bundle_dir> --guesses-ok <digest> --by \"<your name>\"`, over the list of guesses "
+                              "it showed; `decide` cannot record it. Nothing was recorded.")
     if (decision == "defer" and value is not None and "experiment" in target_ids
             and not (clock_zone_defer and value == CLOCK_ZONE_DEFER_VALUE)):
         raise MutationRefused(EXPERIMENT_DEFER_VALUE_REFUSAL)

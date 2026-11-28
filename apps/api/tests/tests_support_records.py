@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import contextlib
 import json
 import sys
 from pathlib import Path
@@ -31,6 +32,31 @@ def upstream_like_schema() -> dict:
     ctx["properties"]["temperature_K"] = {"type": ["number", "null"]}
     ctx["properties"]["temperature_basis"] = {"type": "string", "enum": ["stated", "room_temperature", "not_reported"]}
     return schema
+
+
+@contextlib.contextmanager
+def without_name_deductions():
+    """1.22.0 (DEC-100 fix round): the two yellow DEDUCTIONS from a run's own file name — its one potential token as its
+    set-point (``isaac.fill.setpoint_from_file_name.v1``) and the control mode that set-point implies
+    (``isaac.fill.control_mode_from_setpoint.v1``) — switched OFF. For a module whose subject is not those rules and
+    whose synthetic runs (every one with a potential in its name) were written for set-points that are asked: it then
+    measures what it always measured, on set-points no rule fills. The rules themselves are pinned in
+    ``test_local_import_guesses.py`` and in the modules about the set-point and the control mode."""
+    from isaac_api.local_import import bundle as B
+
+    with pytest.MonkeyPatch.context() as mp:
+        mp.setattr(B, "setpoint_from_name_applies", lambda *a, **k: False)
+        mp.setattr(B, "control_mode_fill_for", lambda *a, **k: None)
+        mp.setattr(B, "open_circuit_mode_applies", lambda *a, **k: False)
+        yield
+
+
+@pytest.fixture(scope="module")
+def name_deductions_off():
+    """:func:`without_name_deductions` for a whole module (``pytestmark = pytest.mark.usefixtures(...)`` or an autouse
+    fixture that requests it)."""
+    with without_name_deductions():
+        yield
 
 
 @pytest.fixture()

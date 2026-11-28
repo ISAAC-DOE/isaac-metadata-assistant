@@ -31,6 +31,17 @@ from tests_support_records import SEMANTICS
 
 
 @pytest.fixture(scope="module", autouse=True)
+def _name_deductions_off():
+    """1.22.0 (DEC-100 fix round): this module's subject is not the set-point or control-mode deductions from a run's
+    file name, and its synthetic runs were written for set-points that are asked: the two deductions are switched off
+    here (``tests_support_records.without_name_deductions``; the rules are pinned in ``test_local_import_guesses``)."""
+    from tests_support_records import without_name_deductions
+
+    with without_name_deductions():
+        yield
+
+
+@pytest.fixture(scope="module", autouse=True)
 def _vendored_schema_basis(tmp_path_factory):
     """Pin the VENDORED schema basis (no portal validator installed, as in CI), so the question set is the one these
     tests expect whatever is installed on the machine. Module-scoped: in place before the module's bundles are built."""

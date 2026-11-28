@@ -10,8 +10,9 @@ What these pin:
 * ``OCV`` suggests the control mode ``open_circuit`` and no set-point; two levels marked ``Pos`` / ``Neg`` are a
   pulsed step and no set-point is offered;
 * a SPEC run's negative token is read by the engine's token reader (one candidate, not two);
-* nothing is confirmed, nothing is eligible, every bundle is schema-valid, and the candidates that existed keep
-  their ids.
+* nothing is confirmed; nothing is eligible but (1.22.0, DEC-100 fix round) a SPEC run's one signed name token, which
+  fills its set-point, and an open-circuit token, which fills the control mode, both yellow deductions; every bundle is
+  schema-valid, and the candidates that existed keep their ids.
 
 SYNTHETIC files only: every name, line and value below is invented.
 """
@@ -144,7 +145,12 @@ def test_open_circuit_suggests_the_control_mode_and_no_set_point(bl43):
     assert _of(data, stem, SETPOINT) == []
     [c] = _of(data, stem, MODE)
     assert c["value"] == "open_circuit" and c["statement_key"] == S.OPEN_CIRCUIT_KEY
-    assert c["value_state"] == B.STATE_NEEDS_REVIEW and c["rule"].startswith(S.OPEN_CIRCUIT_RULE_ID)
+    # inverted at 1.22.0 (DEC-100 fix round, R1a): the build's own open-circuit suggestion now FILLS the mode, as a
+    # yellow deduction (isaac.fill.control_mode_from_setpoint.v1), never green
+    assert c["rule"].startswith(S.OPEN_CIRCUIT_RULE_ID)
+    assert c["value_state"] == B.STATE_FILLED and c["fill"] == {"rule_id": B.FILL_CONTROL_MODE_RULE_ID,
+                                                                 "value": "open_circuit"}
+    assert B.value_colour(c["value_state"], c["fill"]["rule_id"]) == B.COLOUR_YELLOW
     assert c["evidence"][0]["literal_value"] == "OCV" and "no set-point applies" in c["state_basis"]["not_proposable_reason"]
     assert B.value_problem(MODE, c["value"]) is None  # one of the schema's own control modes
     # open circuit followed by a held potential: the potential is the condition, not open circuit
@@ -213,7 +219,9 @@ def test_a_spec_run_at_a_negative_potential_has_one_candidate_with_its_sign(spec
         [c] = _of(spec, stem, SETPOINT)
         assert c["value"] == volts and c["statement_key"] == "potential_magnitude"
         assert B._rule_id(c["rule"]) != S.NAME_POTENTIAL_RULE_ID  # the engine's own candidate, not a second one
-        assert c["value_state"] == B.STATE_NEEDS_REVIEW
+        # inverted at 1.22.0 (DEC-100 fix round, R2): the one signed token of the run's own name FILLS the set-point, a
+        # yellow deduction (isaac.fill.setpoint_from_file_name.v1), its sign kept
+        assert c["value_state"] == B.STATE_FILLED and c["fill"] == {"rule_id": B.FILL_SETPOINT_NAME_RULE_ID, "value": volts}
 
 
 def test_a_spec_run_at_open_circuit_or_pulsed_says_so(spec):

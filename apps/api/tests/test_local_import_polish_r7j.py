@@ -42,6 +42,17 @@ DISAGREE = ("02_01_ZZ1_acid_after500Cycling_filter10_200mV", "06_03_ZZ3_alk_fres
 RESTARTED = "07_03_ZZ3_alk_fresh_f30_1000mV"
 
 
+@pytest.fixture(scope="module", autouse=True)
+def _name_deductions_off():
+    """1.22.0 (DEC-100 fix round): this module's subject is not the set-point or control-mode deductions from a run's
+    file name, and its synthetic runs were written for set-points that are asked: the two deductions are switched off
+    here (``tests_support_records.without_name_deductions``; the rules are pinned in ``test_local_import_guesses``)."""
+    from tests_support_records import without_name_deductions
+
+    with without_name_deductions():
+        yield
+
+
 def _corpus(tmp: Path) -> Path:
     src = tmp / "corpus"
     shutil.copytree(SEMANTICS, src)

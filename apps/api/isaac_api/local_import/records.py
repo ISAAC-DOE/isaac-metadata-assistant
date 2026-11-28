@@ -71,6 +71,10 @@ HELD_NEEDS_COMPANION = ("the record requires {path}, whose confirmed value ({val
                         "confirmed {companion} for every run it comes from (the number alone does not say what it is "
                         "relative to); answer {companion} and the confirmed value goes in: answering {path} again "
                         "changes nothing")
+#: 1.22.0 (DEC-100): why the potential scale is required for a record whose potential set-point it holds back.
+POTENTIALS_NEED_SCALE = ("this record's measurements were held at a potential ({value}), and the potential goes into the "
+                         "record only beside the reference scale it is quoted against, which no file here states; a "
+                         "wrong scale is a scientific error, so the scale is asked before the record can be exported")
 #: Why a value an ANSWER SLOT holds (``bundle.is_answer_slot``: one run's answer to a field asked once for the
 #: whole beamtime) is not filled for a group some of whose runs have no answer for it (e.g. after a merge).
 SLOT_NOT_EVERY_RUN = ("this answer was given for {answered} of this record group's {total} runs only (a per-run answer "
@@ -423,11 +427,32 @@ FILL_NOT_EVERY_RUN = ("filled by a rule for {covered} of this record group's {to
                       "run has the same value; answer it for the group, and the answer goes in")
 
 
-def fill_derivation(obj: Mapping, id_key: str, note: str | None = None) -> dict:
+#: 1.22.0 (DEC-100): what a GUESS's derivation entry says it rests on (``basis``).
+GUESS_BASIS = ("guessed from a Claude reading of the files that infers the value (the quote does not state it word for "
+               "word); the quote was checked against the file the import read; no scientist decided it. It is a guess: "
+               "the scientist checks it in the end review or says to send it as it is in the final check, and any "
+               "decision replaces it")
+
+
+def field_colours(report: Mapping) -> dict[str, str]:
+    """1.22.0 (DEC-100): ``{path: colour}`` for ONE record as composed: the colours ``compose_group`` read from each
+    field's evidence (``report["field_colours"]``, ``bundle.record_field_colours``), the same function the final check
+    applies to the evidence sidecar."""
+    return dict(report.get("field_colours") or {})
+
+
+def colour_counts(reports: Iterable[Mapping]) -> dict[str, int]:
+    """1.22.0: ``{green, yellow, red}`` over ``reports`` (``bundle.count_colours``, the one aggregation)."""
+    return B.count_colours(field_colours(rep or {}) for rep in reports)
+
+
+def fill_derivation(obj: Mapping, id_key: str, note: str | None = None, index: Mapping | None = None) -> dict:
     """THE DERIVATION ENTRY of a value a registered rule filled (1.18.0, DEC-96), in the one shape
     ``draft_validator`` accepts for ``status: "inferred"`` (the ``context.temperature_basis`` precedent, DEC-76):
     ``{"source_type": "derivation", "rule": <rule id>, ...}``. The sidecar keeps only ``evidence``, so this entry is
-    the mark that the field was inferred, and by which rule."""
+    the mark that the field was inferred, and by which rule. 1.22.0 (DEC-100): a GUESS (:data:`bundle.GUESS_RULES`,
+    state ``guessed``) is marked ``guess: true`` and carries the quote, the file and the line of the reading it rests on
+    (from ``index["reading_of"]``), so the draft and the evidence sidecar keep it distinguishable from a fill."""
     fill = obj.get("fill") or {}
     rule_id = fill.get("rule_id")
     entry = {
@@ -450,6 +475,19 @@ def fill_derivation(obj: Mapping, id_key: str, note: str | None = None) -> dict:
             entry["basis"] = ("filled from a Claude reading of the files whose quote was checked against the file the "
                               "import read; no scientist decided it. The scientist reviews it at the end, and any "
                               "decision replaces it")
+    if rule_id in B.GUESS_RULES:
+        entry["guess"] = True
+        entry["basis"] = GUESS_BASIS
+        first = next((i for iid in fill.get("readings") or ()
+                      if (i := ((index or {}).get("reading_of") or {}).get(iid)) is not None), None)
+        if first is not None:
+            f = next(iter((first.get("quote_check") or {}).get("files") or ()), {})
+            entry["quote"] = first.get("quote")
+            entry["source_file"] = f.get("path") or first.get("source_path")
+            entry["locator"] = first.get("excerpt_locator")
+            lines = f.get("lines")
+            if isinstance(lines, list) and lines:
+                entry["lines"] = lines[:5]
     if note:
         entry["note"] = note
     return entry
@@ -568,6 +606,8 @@ def _review_confirmation(obj: Mapping, value: Any, index: Mapping) -> dict:
     entry = _confirmation({**d, "value": value}, REVIEW_QUESTION)
     entry["basis"] = B.REVIEW_BASIS
     entry["rule"] = (obj.get("fill") or {}).get("rule_id")
+    # 1.22.0: the value it confirms, so a merged field's colour (bundle.evidence_colour) turns green only for it
+    entry["target_id"] = obj.get("candidate_id") or obj.get("value_id")
     return entry
 
 
@@ -918,14 +958,14 @@ def compose_group(bundle: Mapping, group: Mapping, bundle_dir: Path, index: dict
         if "[]" in path:
             report["not_composed"].append({"candidate_id": c["candidate_id"], "path": path, "reason": "an array path; composed only from structured blocks"})
             continue
-        if c["value_state"] == B.STATE_FILLED or B.is_reviewed_fill(c):
+        if c["value_state"] in B.FILL_STATES or B.is_reviewed_fill(c):
             # 1.18.0 (DEC-96): a value a registered rule FILLED (no decision): the file's witnesses, then the
             # derivation naming the rule, so the draft carries it as `inferred` and the sidecar names the rule.
             # 1.21.0 (DEC-99): a fill the END REVIEW confirmed keeps the same witnesses and derivation, plus the
             # scientist's review as its confirmation, and composes as a confirmed value does (`verified`)
             value = B.fill_value(c)
             witnesses = _witnesses(c, value, None, zone_confirmed) + reading_witnesses(c, index)
-            entries = witnesses + [fill_derivation(c, "candidate_id")]
+            entries = witnesses + [fill_derivation(c, "candidate_id", index=index)]
             if B.is_reviewed_fill(c):
                 entries.append(_review_confirmation(c, value, index))
                 reviewed_ids.add(c["candidate_id"])
@@ -935,7 +975,9 @@ def compose_group(bundle: Mapping, group: Mapping, bundle_dir: Path, index: dict
         d = B.candidate_decision(bundle, c, decisions, index["conflict_ids_of"])
         value = B.final_value(c["value"], d, c.get("readings"))
         witnesses = _witnesses(c, value, d, zone_confirmed)
-        evidence = witnesses + [_candidate_confirmation(c, d, value, path, witnesses)]
+        # 1.22.0 (review C1): every answer names the value it answers (``target_id``), so a field pooling an answer and an
+        # unconfirmed fill never reads green from the answer (bundle.evidence_colour)
+        evidence = witnesses + [{**_candidate_confirmation(c, d, value, path, witnesses), "target_id": c["candidate_id"]}]
         if B.is_local_clock_start(c) and d.get("decision") == "confirm":
             # The value is the file's local clock time converted under the zone a scientist stated
             # for the INSTRUMENT CLOCK: that statement is part of the value's evidence. (A `correct`
@@ -951,7 +993,7 @@ def compose_group(bundle: Mapping, group: Mapping, bundle_dir: Path, index: dict
             if (zone_d is not None and produced is not None and value == produced
                     and binding.get("value") == produced and binding.get("zone") == zone_d.get("value")):
                 evidence.append(_confirmation(zone_d, B.CLOCK_ZONE_QUESTION)
-                                | {"rule_id": B.CLOCK_ZONE_RULE_ID, "local_time": (c.get("local_clock") or {}).get("local_time")})
+                                | {"target_id": c["candidate_id"], "rule_id": B.CLOCK_ZONE_RULE_ID, "local_time": (c.get("local_clock") or {}).get("local_time")})
         # DEC-76: the reaction's home in the portal's schema is context.reaction.name;
         # context.electrochemistry.reaction is deprecated there.
         proposals.setdefault(FIELD_REMAP.get(path, path), []).append((value, evidence, c["candidate_id"]))
@@ -962,14 +1004,14 @@ def compose_group(bundle: Mapping, group: Mapping, bundle_dir: Path, index: dict
             continue
         if not (m["run_id"] in measured_ids or m["run_id"] is None):
             continue
-        if m["value_state"] == B.STATE_FILLED or B.is_reviewed_fill(m):
+        if m["value_state"] in B.FILL_STATES or B.is_reviewed_fill(m):
             # 1.18.0: a missing value a registered rule filled (system.domain from the acquisition files)
             memo = index["memo"]
             if "fill_witness_index" not in memo:  # once per composition index, never per group
                 memo["fill_witness_index"] = _fill_witness_index(bundle)
             witnesses, note = _fill_witnesses(bundle, m, measured_ids, memo["fill_witness_index"])
             witnesses += reading_witnesses(m, index)
-            entries = witnesses + [fill_derivation(m, "value_id", note)]
+            entries = witnesses + [fill_derivation(m, "value_id", note, index=index)]
             if B.is_reviewed_fill(m):  # 1.21.0: the end review confirmed it
                 entries.append(_review_confirmation(m, B.fill_value(m), index))
                 reviewed_ids.add(m["value_id"])
@@ -981,7 +1023,7 @@ def compose_group(bundle: Mapping, group: Mapping, bundle_dir: Path, index: dict
         value = B.final_value(None, d)
         asked = L.slot_question_text(m) if L.is_label_slot(m) else f"What is {m['target_field_path']}?"
         proposals.setdefault(FIELD_REMAP.get(m["target_field_path"], m["target_field_path"]), []).append(
-            (value, [_confirmation(d, asked)], m["value_id"])
+            (value, [{**_confirmation(d, asked), "target_id": m["value_id"]}], m["value_id"])
         )
 
     run_of = index["run_of"]
@@ -1491,6 +1533,11 @@ def compose_group(bundle: Mapping, group: Mapping, bundle_dir: Path, index: dict
                         "temperature_basis is not_reported. Nothing is defaulted."
                     ),
                     "missing_value_ids": nobody,
+                    # 1.22.0 (DEC-100, review M3): this derivation records an ABSENCE (no source and no answer states
+                    # a temperature), never a value: it asserts nothing about the sample a review could confirm, and
+                    # any answer replaces it. bundle.evidence_colour reads it green BECAUSE of this mark; every other
+                    # derivation that names no registered fill rule is yellow, never green
+                    B.ABSENCE_DERIVATION_KEY: True,
                 }
             ],
         }
@@ -1528,6 +1575,18 @@ def compose_group(bundle: Mapping, group: Mapping, bundle_dir: Path, index: dict
             fields[field] = {"value": None, "status": "missing", "evidence": []}
             report["missing_required"].append({"path": field, "from": "a scientist's answer",
                                                **({"reason": held_by_slots[field]} if field in held_by_slots else {})})
+    # 1.22.0 (DEC-100, goal 6 of the 28 Nov design): A RECORD THAT CARRIES APPLIED POTENTIALS NEEDS THEIR SCALE. A
+    # set-point the scale gate held above (nothing states the scale) used to leave the record "complete" without its
+    # potential, so the scale question stayed optional while the potentials were silently held out. Potentials are a
+    # goal of these records and a wrong scale is a scientific error, so the scale is now required for such a record:
+    # its potential-scale question blocks it (same question id), and answering it puts the potentials in.
+    if SETPOINT_PATH in held_by_companion and not any(m["path"] == SCALE_PATH for m in report["missing_required"]):
+        if _present(fields, SCALE_PATH) is None:
+            fields[SCALE_PATH] = {"value": None, "status": "missing", "evidence": []}
+        report["missing_required"].append({
+            "path": SCALE_PATH, "from": FROM_AN_ANSWER,
+            "required_because": POTENTIALS_NEED_SCALE.format(
+                value=_said(held_by_companion[SETPOINT_PATH][1], SETPOINT_PATH))})
     # WHAT AN OBJECT THE RECORD CARRIES REQUIRES (the schema's own rule, known before validation): an electrolyte
     # name makes concentration_M required. Listed like any other required value, so build-records, the questions
     # and the minimum say it, never only `validate`'s official-schema error.
@@ -1570,6 +1629,9 @@ def compose_group(bundle: Mapping, group: Mapping, bundle_dir: Path, index: dict
                                    **chose_other, "command": f'isaac bundle decide <bundle_dir> --target '
                                    f'{chose_other["approved_result_id"]} --decision reject --by "<your name>"',
                                    "text": athena_choice_text(chose_other, group["group_id"])})
+    # 1.22.0 (DEC-100, review C1): each field's colour, read from its EVIDENCE by the one function the final check also
+    # uses on the sidecar (bundle.evidence_colour), so status and the final check can never disagree about a field
+    report["field_colours"] = B.record_field_colours(draft.get("fields") or {}, report)
     return draft, report
 
 
@@ -3986,6 +4048,11 @@ def export_records(bundle_dir: Path, out: Path, *, run_portal=None, allow_indist
                  # what export says this record is written without (every "Written without ..." line), kept so the
                  # upload dry run says exactly the same notes
                  **({"written_without": written_notes, "written_without_codes": written_codes} if written_notes else {}),
+                 # 1.22.0 (DEC-100, review I4): the fields this record holds a YELLOW value in (a guess or a deduction
+                 # nobody confirmed), flagged here (never in the official record) so the records folder itself says it
+                 **({"unconfirmed_values": {"count": len(yel), "paths": yel}}
+                    if (yel := sorted(p for p, c in (composition.get("field_colours") or {}).items()
+                                      if c == B.COLOUR_YELLOW)) else {}),
                  # r5f L3: what the portal validator warned about this record, kept so the dry run can say it once
                  **({"portal_warnings": [{"code": w["code"], "path": w["path"], "message": w["message"]} for w in pw]}
                     if (pw := portal_warnings_of(report)) else {})}

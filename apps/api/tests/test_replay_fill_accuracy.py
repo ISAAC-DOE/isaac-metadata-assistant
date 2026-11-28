@@ -60,10 +60,15 @@ def test_classes_matching_by_run_name_and_mismatch_report():
     ])
     res = R.classify(answers, replay)
     assert res["answer_key_size"] == 6
-    assert res["counts"] == {"filled_correct": 2, "filled_wrong": 1, "confirmed": 1, "still_asked": 1, "absent": 1}
-    assert res["per_path"][ENV] == {"filled_correct": 1, "filled_wrong": 1, "confirmed": 0, "still_asked": 1, "absent": 0}
+    assert res["counts"] == {"filled_correct": 2, "filled_wrong": 1, "guessed_correct": 0, "guessed_wrong": 0,
+                             "confirmed": 1, "still_asked": 1, "absent": 1}
+    assert res["per_path"][ENV] == {"filled_correct": 1, "filled_wrong": 1, "guessed_correct": 0, "guessed_wrong": 0,
+                                    "confirmed": 0, "still_asked": 1, "absent": 0}
+    # 1.22.0: each wrong row says its rule and colour (a hand-made fill naming no rule is never counted green)
     assert res["filled_wrong"] == [
-        {"run": "ZZ_fake_run_02", "path": ENV, "replay_value": "ex_situ", "answer_value": "in_situ"}]
+        {"run": "ZZ_fake_run_02", "path": ENV, "replay_value": "ex_situ", "answer_value": "in_situ", "rule": None,
+         "colour": "yellow"}]
+    assert res["guessed_wrong"] == [] and res["wrong_by_colour"] == {"yellow": 1}
     assert res["filled_unchecked"] == {"total": 2, "per_path": {"extra.path": 2}}
     text = R.render(res)
     assert "ZZ_fake_run_02" in text and "'ex_situ'" in text and "'in_situ'" in text
@@ -80,6 +85,29 @@ def test_a_filled_value_is_read_from_its_fill_block():
                                                           "value": "ex_situ"}}]
     res = R.classify(answers, replay)
     assert res["counts"]["filled_correct"] == 2 and res["counts"]["filled_wrong"] == 0, res
+
+
+def test_guesses_are_counted_apart_from_fills():
+    """1.22.0 (DEC-100): a GUESSED value (an inferred reading, yellow) is guessed_correct / guessed_wrong, never a fill;
+    green-wrong and yellow-wrong are reported apart."""
+    inferred = "isaac.fill.reading_inferred.v1"
+    answers = _bundle({"run-001": "ZZ_fake_run_01", "run-002": "ZZ_fake_run_02"}, [
+        ("run-001", "sample.material.name", "scientist_confirmed", "SYN-oxide"),
+        ("run-002", "sample.material.name", "scientist_confirmed", "SYN-oxide"),
+        (None, "system.domain", "scientist_confirmed", "experimental")])
+    replay = _bundle({"r-1": "ZZ_fake_run_01", "r-2": "ZZ_fake_run_02"}, [
+        ("r-1", "sample.material.name", "guessed", None), ("r-2", "sample.material.name", "guessed", None),
+        (None, "system.domain", "filled", None), ("r-1", "sample.sample_form", "guessed", None)])
+    for m, v, rule in zip(replay["missing_values"], ("SYN-oxide", "SYN-other", "experimental", "film"),
+                          (inferred, inferred, "isaac.fill.domain_from_acquisition.v1", inferred)):
+        m["fill"] = {"rule_id": rule, "value": v}
+    res = R.classify(answers, replay)
+    assert (res["counts"]["guessed_correct"], res["counts"]["guessed_wrong"], res["counts"]["filled_correct"],
+            res["counts"]["filled_wrong"]) == (1, 1, 1, 0)
+    assert [w["replay_value"] for w in res["guessed_wrong"]] == ["SYN-other"] and res["filled_wrong"] == []
+    assert res["wrong_by_colour"] == {"yellow": 1}  # green-wrong stays 0
+    assert res["guessed_unchecked"] == {"total": 1, "per_path": {"sample.sample_form": 1}}
+    assert "guessed_wrong (1)" in R.render(res)
 
 
 def test_value_equality_normalisation():

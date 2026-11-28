@@ -36,6 +36,17 @@ SETPOINT, SCALE = CP.SETPOINT_PATH, CP.SCALE_PATH
 # --- the catch-all: records that say the same thing (no processing extra needed) ---------------------------------
 
 
+@pytest.fixture(scope="module", autouse=True)
+def _name_deductions_off():
+    """1.22.0 (DEC-100 fix round): this module's subject is not the set-point or control-mode deductions from a run's
+    file name, and its synthetic runs were written for set-points that are asked: the two deductions are switched off
+    here (``tests_support_records.without_name_deductions``; the rules are pinned in ``test_local_import_guesses``)."""
+    from tests_support_records import without_name_deductions
+
+    with without_name_deductions():
+        yield
+
+
 def _draft(**fields):
     return {"fields": {k: {"value": v} for k, v in fields.items()}}
 
@@ -107,6 +118,8 @@ pytest.importorskip("scipy", reason="the xas-analysis engine needs scipy")
 pytest.importorskip("yaml", reason="the xas-analysis engine needs pyyaml")
 
 import test_local_import_engine_xas as T  # noqa: E402
+
+
 
 VALUES = {"attribution.produced_by.group": "Synthetic group", "attribution.produced_by.organization": "Synthetic University",
           "context.environment": "in_situ", "sample.sample_form": "powder", "system.domain": "experimental",
@@ -238,8 +251,11 @@ def test_the_scale_question_can_be_answered_for_some_groups_only(bdir):
                       value="Ag/AgCl", **BY)
     b = M.load(bdir)
     assert len([d for d in b["scientist_decisions"] if d["value"] == "Ag/AgCl"]) == 1
-    # one potential-stating group left: its own question is the one question
-    assert Q.question(Q.consolidate(b), Q.potential_scale_question_id()) is None
+    # inverted at 1.22.0 (DEC-100 fix round, DEC-91 id stability now that the scale can block): the beamtime question
+    # KEEPS its id while a group it reaches is open, and asks only that one now
+    g120 = _group_of(bdir, "02_")
+    q = Q.question(Q.consolidate(b), Q.potential_scale_question_id())
+    assert q is not None and set(q["per_scope_targets"]) == {f"group:{g120}"}
 
 
 def test_official_validation_is_untouched_and_the_local_gate_holds_the_records(bdir, tmp_path, fake_upstream_env):

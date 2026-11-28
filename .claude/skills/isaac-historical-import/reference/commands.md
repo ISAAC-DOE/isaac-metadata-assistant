@@ -88,7 +88,7 @@ Decisions by target:
 | The end review (Step 10) | `<isaac> bundle review <bundle> [--field <path> ...] [--limit N] [--json]` (reads only) · `<isaac> bundle review <bundle> [--field <path> ...] --accept --by "<name>" --listing <digest> [--orcid <id>] [--note "<their words>"] [--version <bundle_version>] [--apply]` (preview unless `--apply`) |
 | Every check, per draft | `<isaac> bundle validate <bundle> [--full]` |
 | Write the passing records | `<isaac> bundle export <bundle> --out <records> [--full] [--allow-indistinguishable --by "<name>"]` |
-| What would be uploaded | `<isaac> bundle upload <records> --dry-run [--portal-url <url>] [--full]` |
+| What would be uploaded, after the final check | `<isaac> bundle upload <records> --dry-run [--portal-url <url>] [--full] [--bundle <bundle>] [--guesses-ok <digest> --by "<name>" [--orcid ...]]` |
 
 - `build-records`: counts and the first 3 drafts; `--full` prints every row. Never `--test-marker`: it is for self-tests only.
 - `review`: refused before `build-records`, and for a `--field` no built record has (exit 2, naming the fields that can be reviewed). `--field` repeats, in either form (`context.electrochemistry.reaction` or the record's `context.reaction.name`). `--json` carries the ids, `bundle_version` and `listing`; the plain text names no id, and gives the accept command with its `--listing` in `Next:`. `--accept --apply` needs that `--listing` and the same `--field`s: it binds exactly what the listing showed (so never with `--limit`), and is refused (exit 1) when the values changed since, or the records changed since `build-records`; `--version` also refuses a bundle changed since.

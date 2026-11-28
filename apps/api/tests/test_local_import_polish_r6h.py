@@ -41,6 +41,17 @@ SCHEMAS = {"local_export_target": {"source": "synthetic", "gates": ["official sc
 # --- H1 -------------------------------------------------------------------------------------------------------
 
 
+@pytest.fixture(scope="module", autouse=True)
+def _name_deductions_off():
+    """1.22.0 (DEC-100 fix round): this module's subject is not the set-point or control-mode deductions from a run's
+    file name, and its synthetic runs were written for set-points that are asked: the two deductions are switched off
+    here (``tests_support_records.without_name_deductions``; the rules are pinned in ``test_local_import_guesses``)."""
+    from tests_support_records import without_name_deductions
+
+    with without_name_deductions():
+        yield
+
+
 def _row(i: int, **extra) -> dict:
     return {"group_id": f"g{i}", "record_id": f"01SYNTHETIC{i:014d}", "record": f"01SYNTHETIC{i:014d}.json",
             "sidecar": f"01SYNTHETIC{i:014d}.evidence.json", "artifacts": ["processing/x/merged.csv"],
@@ -127,7 +138,7 @@ def _records_dir(tmp_path: Path, n: int, *, replaced: int | None = None, own_not
         rid = f"01SYNTHETIC{i:014d}"
         (d / f"{rid}.json").write_text(json.dumps({"record_id": rid}))
         notes = [NOTE.format(q=f"Q-{i + 1:010x}")] + (["a SYNTHETIC note of its own"] if i == own_note else [])
-        (d / f"{rid}.evidence.json").write_text(json.dumps({"notes": notes}))
+        (d / f"{rid}.evidence.json").write_text(json.dumps({"notes": notes, "evidence": {}}))  # 1.22.0: an evidence file the final check can read
         index.append({"record_id": rid, "replaced_record_ids": ["01SYNTHETICOLD0000000000"] if i == replaced else []})
     (d / R.EXPORT_INDEX).write_text(json.dumps({"format": R.EXPORT_INDEX_FORMAT, "records": index}))
     return d

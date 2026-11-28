@@ -35,6 +35,17 @@ SPOT_A = (-27.25, 15.4, -6.7, -45.0)
 SPOT_B = (-26.75, 15.9, -6.7, -45.0)
 
 
+@pytest.fixture(scope="module", autouse=True)
+def _name_deductions_off():
+    """1.22.0 (DEC-100 fix round): this module's subject is not the set-point or control-mode deductions from a run's
+    file name, and its synthetic runs were written for set-points that are asked: the two deductions are switched off
+    here (``tests_support_records.without_name_deductions``; the rules are pinned in ``test_local_import_guesses``)."""
+    from tests_support_records import without_name_deductions
+
+    with without_name_deductions():
+        yield
+
+
 def _edge(e, e0, width=1.0):
     return 0.5 + np.arctan((e - e0) / width) / np.pi
 

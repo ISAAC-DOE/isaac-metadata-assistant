@@ -47,6 +47,17 @@ STEMS = ["Q4_01_SYNcat_5wp_pH2_400mV", "Q4_02_SYNcat_5wp_pH2_1400mV", "Q4_03_SYN
          "Q5_01_SYNcat_5wp_pH12_400mV", "Q5_02_SYNcat_5wp_pH12_0mV", "Q3_01_SYNcat_5wt_pH2_500mV"]
 
 
+@pytest.fixture(scope="module", autouse=True)
+def _name_deductions_off():
+    """1.22.0 (DEC-100 fix round): this module's subject is not the set-point or control-mode deductions from a run's
+    file name, and its synthetic runs were written for set-points that are asked: the two deductions are switched off
+    here (``tests_support_records.without_name_deductions``; the rules are pinned in ``test_local_import_guesses``)."""
+    from tests_support_records import without_name_deductions
+
+    with without_name_deductions():
+        yield
+
+
 @pytest.fixture(scope="module")
 def stems_pristine(tmp_path_factory):
     return _grouped_stems(tmp_path_factory.mktemp("r5e"), STEMS)

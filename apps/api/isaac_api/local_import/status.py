@@ -125,6 +125,7 @@ def status(bundle_dir: Path, *, shown_as: str | None = None) -> dict:
         by_status[g.get("status") or "?"] = by_status.get(g.get("status") or "?", 0) + 1
 
     counts = None
+    colours = None  # 1.22.0 (DEC-100): the record fields of each colour, as the records compose now
     to_review: set[str] = set()  # 1.21.0: the fills the records of confirmed groups carry, not yet reviewed
     cannot: dict[str, str] = {}
     pending_curve = unprocessed = 0
@@ -138,6 +139,10 @@ def status(bundle_dir: Path, *, shown_as: str | None = None) -> dict:
         if groups:
             not_measured = Q.not_a_measurement_groups(bundle, reports=reports or None)
             cannot = {gid: why for gid, why in Q.cannot_export_reasons(bundle, not_measured).items() if gid in live_ids}
+        from . import records as R
+
+        composed = [gid for gid in reports if gid in live_ids and gid not in cannot]
+        colours = {**R.colour_counts(reports[gid] for gid in composed), "records": len(composed)}
         processed = {r.get("group_id") for r in bundle.get("processing_results") or () if not B.processing_not_applicable(r)}
         for g in live:
             if g["group_id"] in cannot:
@@ -177,7 +182,12 @@ def status(bundle_dir: Path, *, shown_as: str | None = None) -> dict:
         # given for (never silent)
         "environment_convention": _environment_convention(bundle),
         "values_filled": sum(1 for o in [*(bundle.get("candidates") or ()), *(bundle.get("missing_values") or ())]
-                             if o.get("value_state") == B.STATE_FILLED) - len(Q.fills_asked(bundle)),
+                             if o.get("value_state") in B.FILL_STATES) - len(Q.fills_asked(bundle)),
+        # 1.22.0 (DEC-100): of those, the guesses (yellow): an inferred reading the skill filled
+        "values_guessed": sum(1 for o in [*(bundle.get("candidates") or ()), *(bundle.get("missing_values") or ())]
+                              if o.get("value_state") == B.STATE_GUESSED),
+        # 1.22.0: one count per colour over the fields of the records as they compose now (green / yellow / red)
+        "colours": colours,
         # 1.21.0 (DEC-99): the end review: fills the scientist confirmed by reviewing the built records, the reviewed
         # ones whose value, rule or evidence changed since (filled again), and whether records have been built
         "values_to_review": len(to_review),
@@ -185,8 +195,8 @@ def status(bundle_dir: Path, *, shown_as: str | None = None) -> dict:
                                if B.is_reviewed_fill(o)),
         "reviewed_changed_since": len(changed := B.review_changed_since(bundle)),
         "reviewed_changed": {"total": len(changed),
-                             "filled_again": sum(1 for c in changed if c.get("now") == B.STATE_FILLED),
-                             "now_asked": sum(1 for c in changed if c.get("now") != B.STATE_FILLED)},
+                             "filled_again": sum(1 for c in changed if c.get("now") in B.FILL_STATES),
+                             "now_asked": sum(1 for c in changed if c.get("now") not in B.FILL_STATES)},
         "records_built": _records_built(bundle_dir),
         # 1.18.0: where the naming (counter) question stands: a file-name number read by its position is filled only
         # once it is settled (bundle.naming_check: not_grouped / counter_question_open / grouped_no_counter_question /
@@ -233,7 +243,8 @@ def _next_step(f: Mapping, shown_as: str) -> str:
     return (f"Compose and check the records: `isaac bundle build-records {d}`"
             + (f", review the values filled from the evidence (`isaac bundle review {d}`)"
                if f.get("values_filled") and not f.get("records_built") else "")
-            + f", then `isaac bundle validate {d}`, then `isaac bundle export {d} --out <folder>`.")
+            + f", then `isaac bundle validate {d}`, then `isaac bundle export {d} --out <folder>`, then the final check "
+            f"before sending (`isaac bundle upload <folder> --dry-run --bundle {d}`, which lists any guesses first).")
 
 
 def _fill_lines(f: Mapping) -> list[str]:
@@ -253,8 +264,10 @@ def _fill_lines(f: Mapping) -> list[str]:
                     + (")" if f.get("records_built") else ", or the records are not built)")
                     + ", so the review cannot reach them yet")
     if filled or reviewed:
+        guessed = f.get("values_guessed") or 0
         lines = (f"Values a rule filled from the evidence (not asked; they go into the records as inferred, naming the "
-                 f"rule): {filled} not yet reviewed" + (f", {reviewed} confirmed in the end review" if reviewed else ""))
+                 f"rule): {filled} not yet reviewed" + (f" ({guessed} of them guesses)" if guessed else "")
+                 + (f", {reviewed} confirmed in the end review" if reviewed else ""))
         out.append(lines + (": " + "; ".join(head) if head else "") + ".")
     ch = f.get("reviewed_changed") or {}
     if ch.get("total"):
@@ -320,6 +333,12 @@ def _lines(f: Mapping) -> list[str]:
                      f"{q.get('optional', 0)} optional.")
     else:
         lines.append(f"Open questions: not counted ({(q or {}).get('unavailable')}); `isaac bundle check` says why.")
+    co = f.get("colours")
+    if co and co.get("records"):
+        # 1.22.0 (DEC-100): ONE line, one count per colour (bundle.value_colour)
+        lines.append(f"Values in the {co['records']} record(s) as they stand: {co['green']} green (read from the files or "
+                     f"confirmed by you), {co['yellow']} yellow (my guesses or deductions, not yet confirmed), "
+                     f"{co['red']} red (needed and not known yet).")
     lines.extend(_fill_lines(f))
     ec = f.get("environment_convention")
     if ec:

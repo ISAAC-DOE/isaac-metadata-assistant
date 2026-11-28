@@ -40,6 +40,18 @@ BY = "SYNTHETIC TEST"
 XDI_FIELDS = ("Column.1: energy eV", "Column.2: norm")
 
 
+@pytest.fixture(scope="module", autouse=True)
+def _name_deductions_off():
+    """1.22.0 (DEC-100 fix round): the rules this module pins are measured on set-points no rule fills: the file-name
+    deductions (the set-point from a run's one name token, and the control mode it implies) are switched off here
+    (``tests_support_records.without_name_deductions``); they are tested in ``test_local_import_guesses``."""
+    from tests_support_records import without_name_deductions
+
+    with without_name_deductions():
+        yield
+
+
+
 def _run(argv, capsys):
     code = cli.main(argv)
     out = capsys.readouterr().out
@@ -401,7 +413,12 @@ def test_a_potential_setpoint_without_its_scale_is_not_composed_and_says_why(gro
     b = _load(out)
     assert _missing(b, "SYN_cell", POT)["eligibility_for_official_record"]["eligible"] is True  # the number itself is fine
     draft, report = R.compose_group(b, _group_of(b, "SYN_cell"), out)
-    assert POT not in draft["fields"] and SCALE not in draft["fields"]
+    # inverted at 1.22.0 (DEC-100): the scale is no longer silently absent: the record needs it now (it is listed missing,
+    # so its question blocks this record), and the set-point is still held out until it is answered
+    assert POT not in draft["fields"] and draft["fields"][SCALE]["value"] is None
+    assert draft["fields"][SCALE]["status"] == "missing"
+    [need] = [x for x in report["missing_required"] if x["path"] == SCALE]
+    assert "scientific error" in need["required_because"]
     [nc] = [n for n in report["not_composed"] if n.get("value_id") == m["value_id"]]
     assert nc["path"] == POT and nc["reason"] == R.SETPOINT_NEEDS_SCALE
     assert not [f for f in report["filled"] if f["path"] == POT]

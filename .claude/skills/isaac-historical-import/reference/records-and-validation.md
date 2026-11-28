@@ -99,7 +99,10 @@ Read this at Step 10. The owner's direction: the scientist reviews the final rec
   beamtime folder's name for the facility, organization and group, a header line only when it names them; "read from
   N of the beamline's own acquisition files" for the domain; a header number said as what its motor is; otherwise the
   shortest quote, `by` saying whether the files or a Claude reading); and for the environment `convention` (their
-  answer, how many measurements it was given for, how many it reached).
+  answer, how many measurements it was given for, how many it reached). Each value also has its `colour` and `kind`:
+  `guess` (yellow: your inferred reading, its witness the quote it rests on), `deduction` (yellow: a rule worked it out
+  from other values, the group from the folder's PI or the organization from the facility, or the environment the
+  convention reaches) or `read` (green). `values_by_kind` counts them.
 - `scan_decisions[]`: per record, the scans the processing rule kept and dropped, each drop with its reasons, and the
   curve's plot file. Read from the stored results; open a plot with Read if they ask.
 - `reviewed_earlier`, `reviewed_changed_since`: values reviewed before, and reviewed values whose value, rule or
@@ -111,8 +114,10 @@ Read this at Step 10. The owner's direction: the scientist reviews the final rec
 - No record built yet (no group confirmed): `next` says to confirm groups and run `build-records` first.
 
 Show it in ONE message, by field, as a short list: "Environment: operando, in 12 records (you said such measurements
-are operando; it reached 40 measurements)". Quote each witness. Say the scan drops with why. No ids, no rule ids.
-Then ask: "Does all of this look right, or what should change?"
+are operando; it reached 40 measurements)". **The guesses first, under their own heading** ("Guesses: my best reading
+of your files, please check"), each with the quote it rests on; then the deductions; then what was read from the files.
+Quote each witness. Say the scan drops with why. No ids, no rule ids.
+Then ask: "Does all of this look right, or what should change?" A yes covers the guesses too: they turn green.
 
 - **Yes:** run the command `next` gives: `<isaac> bundle review <bundle> --accept --by "<name>" --listing <digest>`
   shows what it would record; run it again with `--apply`. It records ONE review decision binding each listed value
@@ -176,9 +181,29 @@ for exportable drafts only.
 - In the evidence file, a `#D` local clock time beside the UTC start has `relation: not_comparable` until the clock's
   zone is stated. It is never a contradiction.
 
-## The upload dry run
+## The upload dry run and the final check
 
-`<isaac> bundle upload <records> --dry-run`
+`<isaac> bundle upload <records> --dry-run --bundle <bundle>`
+
+**The final check comes first.** When any record carries a yellow value (a guess, or a value a rule worked out from
+others, such as the group from the folder's PI or the organization from the facility, that the scientist has not
+confirmed), the dry run lists them, by field and value, with how many records carry each and the quote or rule it rests
+on, and sends nothing (exit 1, `sent: false`). Ask ONE plain question, its `question`: "These N values are my guesses
+from your files or worked out by a rule (G guesses, D worked out by a rule). Send them as they are, or check them
+first?" A record with no readable evidence file is listed too ("I cannot tell"): what it holds cannot be told.
+
+- **Send:** the same command with `--guesses-ok <digest> --by "<name>"` (the digest it printed). It is refused if the
+  list changed since you showed it. It records one `submit_with_guesses` decision in the bundle (who, when, the list):
+  the values stay yellow there; the yes is the audit of what was sent unconfirmed.
+- **Check first:** `bundle review` (Step 10), then build, validate and export again. An answer changes this list only
+  after a new `build-records` and `export`; a yes to an older export is refused ("the records are older than your
+  answers").
+- The yes needs the bundle the records were exported from (`--bundle`): the export index must name it for every record
+  with a guess, else the yes is refused. The same yes to the same list is recorded once.
+- Say plainly: this only records their yes. **This build sends nothing**; they upload the records folder through the
+  ISAAC portal themselves, and the portal does not run this check. The export index flags each record holding yellow
+  values (`unconfirmed_values`). The portal copy will not show which values were guesses: the ISAAC record has no place
+  for that note.
 
 - Its `statement` leads with "N records, 2 requests each, to <portal>", then each note and portal warning once.
 - `records` lists in full every record that replaces an earlier one and every one with a note of its own; of the rest

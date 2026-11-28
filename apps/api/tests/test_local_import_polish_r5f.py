@@ -44,6 +44,17 @@ NOW = "2026-10-28T00:00:00Z"
 # --- M6 ---------------------------------------------------------------------------------------------
 
 
+@pytest.fixture(scope="module", autouse=True)
+def _name_deductions_off():
+    """1.22.0 (DEC-100 fix round): this module's subject is not the set-point or control-mode deductions from a run's
+    file name, and its synthetic runs were written for set-points that are asked: the two deductions are switched off
+    here (``tests_support_records.without_name_deductions``; the rules are pinned in ``test_local_import_guesses``)."""
+    from tests_support_records import without_name_deductions
+
+    with without_name_deductions():
+        yield
+
+
 def _w(group: str, code: str, n: int = 0) -> dict:
     return {"group_id": group, "code": code, "text": f"{code} {n}", "command": f"cmd {n}"}
 
@@ -421,7 +432,7 @@ def _records_dir(tmp_path: Path, n: int = 3) -> Path:
     for i in range(n):
         rid = f"01SYNTHETIC{i:014d}"
         (d / f"{rid}.json").write_text(json.dumps({"record_id": rid}))
-        (d / f"{rid}.evidence.json").write_text(json.dumps({"notes": [NOTE.format(q=f"Q-{i + 1:010x}")]}))
+        (d / f"{rid}.evidence.json").write_text(json.dumps({"notes": [NOTE.format(q=f"Q-{i + 1:010x}")], "evidence": {}}))
         index.append({"record_id": rid, "replaced_record_ids": [],
                       "portal_warnings": [{"code": "NO_DATA_OWNER", "path": "attribution/contributors", "message": "No data_owner."}]})
     (d / R.EXPORT_INDEX).write_text(json.dumps({"format": R.EXPORT_INDEX_FORMAT, "records": index}))

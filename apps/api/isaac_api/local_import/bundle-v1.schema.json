@@ -2,7 +2,7 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://isaac-doe.github.io/isaac-metadata-assistant/local-import-bundle/bundle-v1.schema.json",
   "title": "ISAAC Local Import Bundle v1",
-  "description": "What `isaac import` produced from one folder or ZIP on a scientist's own machine. NOT an official ISAAC record: it is extraction output and its evidence, which a scientist reviews before anything becomes a draft and then, through `isaac export`, an official record. Contract: docs/local-import-bundle-contract.md. Size and count ceilings are ALSO enforced by isaac_api.local_import.bundle.validate_bundle (string length and total bytes cannot be expressed here).",
+  "description": "What `isaac import` produced from one folder or ZIP on a scientist's own machine. NOT an official ISAAC record: it is extraction output and its evidence, which a scientist reviews before anything becomes a draft and then, through `isaac export`, an official record. Contract: docs/local-import-bundle-contract.md. Size and count ceilings are ALSO enforced by isaac_api.local_import.bundle.validate_bundle (string length and total bytes cannot be expressed here). 1.22.0 (DEC-100, slice 5a of the guesses-and-review-page design) adds the value state guessed (value_state only, never an extracted_state): a value an inferred Claude reading gives, whose quote check passed and whose scope reaches the target, filled as a GUESS under the new rule isaac.fill.reading_inferred.v1 (never a sample's own label as its material, never context.environment, never where two readings disagree); it is eligible and goes into a draft as inferred with a derivation entry marked guess, it is yellow (bundle.value_colour), the end review lists it apart, and the review's yes confirms it like a fill. It adds the experiment decision submit_with_guesses (bundle upload --guesses-ok, never decide) with guesses_digest, guesses_sent and guesses_records: who sent which yellow values unconfirmed, bound to the listing they saw. fill_rule_set 4: a rule set 3 bundle is STALE where a value moves. A 1.22.0 bundle also REQUIRES processed_outputs.",
   "type": "object",
   "additionalProperties": false,
   "required": [
@@ -63,7 +63,8 @@
         "1.18.0",
         "1.19.0",
         "1.20.0",
-        "1.21.0"
+        "1.21.0",
+        "1.22.0"
       ],
       "description": "1.1.0 adds record_groups, processing_results and exposures (all optional, so a 1.0.0 bundle still validates) and widens the decision, target and question enums. 1.2.0 adds processed_outputs (optional; absent means none were recorded) and extended_context_entry.processed_output_id. A 1.2.0 bundle REQUIRES processed_outputs (possibly empty); a bundle without it keeps its older version. 1.3.0 adds ai_interpretation.field_path and .run_ids and the optional eligibility_rederived and format_upgrades logs (all optional), and eligibility is derived under a larger writable set (context.electrochemistry.potential_setpoint_V). A 1.3.0 bundle also REQUIRES processed_outputs. 1.4.0 adds the set_clock_time_zone experiment decision (and its decision field clock_zone_binding on a confirm), the confirm_clock_time_zone question kind, the optional candidates[].local_clock block and the optional zone / zone_decision_id on a normalization step (all additive); nothing becomes newly writable. A 1.4.0 bundle also REQUIRES processed_outputs. 1.5.0 adds nothing to the bundle's shape; eligibility is derived under a larger writable set (context.electrochemistry.control_mode), as at 1.3.0. A 1.5.0 bundle also REQUIRES processed_outputs. 1.6.0 (DEC-91) adds three capture decisions — keep_apart on the new target kind merge_candidate, select_athena_version on a processing result (its value one of that result's athena_versions[].version_id; the derived athena_result_of_record / athena_result_of_record_basis), and set_not_counter_positions on the experiment (decision field not_counter_positions) — the optional superseded_merge_candidates section, the derived merge-candidate status kept_apart, and a merge decision's combined group (record_group.merged_by_decision); nothing becomes newly writable. A 1.6.0 bundle also REQUIRES processed_outputs. 1.7.0 (DEC-92) adds nothing to the bundle's shape; eligibility is derived under a larger writable set (context.electrochemistry.current_setpoint_mA_cm2), as at 1.3.0 and 1.5.0. A 1.7.0 bundle also REQUIRES processed_outputs. 1.8.0 adds nothing to the bundle's shape: the bounds on scientist_decisions and ai_interpretations are raised from 20000 to 200000 entries (both are append-only; at the old bound no further answer could be written). Nothing becomes newly writable. A 1.8.0 bundle also REQUIRES processed_outputs. 1.9.0 lets a set_counter_positions decision name -1 among its positions: the LAST filename token, whatever the name's length (`decide --positions last`), and adds a merge decision's optional same_conditions_tokens (`decide --same-conditions`); nothing else changes and nothing becomes newly writable. A 1.9.0 bundle also REQUIRES processed_outputs. 1.10.0 adds the optional vocabulary_requests section: an answer a scientist gave (decide, a template import cell, a template adopt cell of their own sheet) that its field refused only because it is not on the field's allowed list, kept as a request for the vocabulary (who, when, the field, the targets and runs, where it was said), never as a decision or a value; nothing becomes newly writable. A 1.10.0 bundle also REQUIRES processed_outputs. 1.11.0 adds a second processed-output origin rule, isaac.processed_output.origin.engine_classification.v0 (basis engine_classification: a file a generic reader read that the engine classifies processed_spectrum, the scientists' quick merges, is a processed output, never a run), and its link rule isaac.processed_output.link_by_legacy_number.v0 (match legacy_number; link notes spans_several_runs and run_has_no_scans); nothing else changes and nothing becomes newly writable. A 1.11.0 bundle also REQUIRES processed_outputs. 1.12.0 adds the optional scan_notes section: what a file says about a run's scans (exclude, start_from, keep_only, flag), as a Claude reading pass found it (`annotate --from-readings`, a `scan_note` finding whose quote the loader found in the cited file). An AI reading, never a decision: no record reads it and no scan is left out by it; the processing step may cite it in a scan-selection proposal. Nothing else changes and nothing becomes newly writable. A 1.12.0 bundle also REQUIRES processed_outputs. 1.13.0 adds a third processed-output origin rule, isaac.processed_output.origin.average_title.v0 (basis average_title: beside SPEC acquisition runs, a file a generic reader read whose own scan title states an average of N spectra, such as the scientists' PyMca .mca averages, is a processed output linked by legacy number, never a run; a folder named MERGE is never evidence: such a file stays a run, with an in_merge_folder note), and the set_role record-group decision (value sample, reference or alignment: the scientist's word on what the group is, over the role grouping proposed; it moves no status); nothing else changes and nothing becomes newly writable. A 1.13.0 bundle also REQUIRES processed_outputs. 1.14.0 adds nothing to the bundle's shape: four import rules a 1.13.0 build did not apply (a signed potential token in a file name, and no set-point from several different tokens, a pulsed pair or a trailing OCV; the technique suggested from the instrument configuration; a pellet-standard composition field asked only where a source mentions it; a comment line left over from an earlier run flagged as comment_possibly_stale). Only a re-import applies them, and it keeps every id the earlier build gave. Nothing becomes newly writable, and format_upgrades[].statement may be up to 3000 characters (1500 before). A 1.14.0 bundle also REQUIRES processed_outputs. 1.15.0 adds the export_despite_completeness record-group decision (value {body_sha256, held_by}: a record the local record-completeness gate holds is exported anyway, for that record body; `bundle export --allow-indistinguishable --by` records it); nothing else changes and nothing becomes newly writable. A 1.15.0 bundle also REQUIRES processed_outputs. 1.16.0 adds the processed-output link rule isaac.processed_output.link_by_title_scans.v0 (match title_scans: a quick merge or average whose scan title names the scans it was computed from is linked to the one run with those scans) and import rules a 1.15.0 build did not apply (see CHANGES_ADDED_IN in local_import/bundle.py and the contract's section 9). Only a re-import applies them. Nothing becomes newly writable. A 1.16.0 bundle also REQUIRES processed_outputs. 1.17.0 adds the optional consents section: the scientist's answer to whether Claude may read the files of this beamtime under the ISAAC usage agreement (given or withdrawn), with the name it was given under, when, and the folder it covers; append-only, the latest entry holds (`bundle consent --by`, `bundle status`). The parser values a command that only reads prints are recorded in exposures.pending.jsonl beside bundle.json (not in it) and folded into exposures by the next write, so a read never changes bundle.json; format_upgrades[].statement may be up to 4000 characters (3000 before); nothing else changes and nothing becomes newly writable. A 1.17.0 bundle also REQUIRES processed_outputs. 1.18.0 (the owner's decision of 2026-11-25, fill first and review at the end) adds the value state filled (value_state only, never an extracted_state) and the optional candidates[].fill / missing_values[].fill block {rule_id, value}: a value a registered fill rule supports (isaac.fill.parser_exact.v1, isaac.fill.stored_convention.v1, isaac.fill.domain_from_acquisition.v1) and no scientist decided, and the optional fill_rule_set (the rule set the fills were derived under; an earlier one is STALE, not INVALID). The validator re-derives it and refuses a stored filled no rule supports. A filled value is eligible, goes into a draft as inferred with a derivation entry naming its rule, and is not asked. A 1.2.0-1.17.0 bundle whose values this build fills is STALE until its next write, which logs each moved value in eligibility_rederived. A 1.18.0 bundle also REQUIRES processed_outputs. 1.19.0 (DEC-97, slice 2 of the fill-first design) adds the optional ai_interpretations[].quote_check block (the quote check `annotate --from-readings --apply` made: result, checker, reading_pass_id, findings_sha256, quote_sha256, reading_sha256, and for the file the quote was found in its path, source_id, content_sha256, lines and where), the optional ai_interpretations[].scope (experiment or runs, as the finding said), one fill rule (isaac.fill.reading_stated.v1: a stated reading whose quote itself states the value; an inferred reading never fills) and the optional fill.readings / fill.reading_pass_ids (the checked readings a fill rests on or agrees with). Only a reading whose stored check passed and names the bundle's own source bytes fills; a beamtime-scoped reading never fills a run-level field. fill_rule_set 2: a 1.18.0 bundle (rule set 1) is STALE where a value moves. A 1.19.0 bundle also REQUIRES processed_outputs. 1.20.0 (DEC-98, slice 3 of the fill-first design) adds four fill rules over the folder, the people and the held potential (isaac.fill.environment_from_held_potential.v1: a sample measurement held at a potential its own files give, with corroboration that it was electrochemical, takes the environment convention the scientist gives once for the beamtime with the new experiment decision set_environment_convention, operando or in situ, and none for per_run; isaac.fill.facility_from_folder.v1: the facility and beamline the folder name and the SPEC fingerprint agree on; isaac.fill.organization_from_facility.v1: the producing organization is that facility; isaac.fill.group_from_folder_pi.v1: the producing group from the PI the folder names) and the optional experiment.beamtime_header_lines (the shared readme's header lines, kept by the import as literals for the group rule; a bundle imported before holds none, and the group rule fills it only once imported again). fill_rule_set 3: a rule set 2 bundle is STALE where a value moves. A 1.20.0 bundle also REQUIRES processed_outputs. 1.21.0 (DEC-99, slice 4 of the fill-first design) adds the end review: the experiment decision review (bundle review --accept --apply, never decide) with its reviewed_fills (each filled value the scientist reviewed in the built records: target, value, rule_id, evidence_sha256) and reviewed_bundle_version, and the optional candidates[].review / missing_values[].review block {decision_id, basis: reviewed_final_records} on a fill the review still binds, which derives scientist_confirmed; any change to a bound item's value, rule or evidence returns it to filled. No fill rule changed (fill_rule_set stays 3). A 1.21.0 bundle also REQUIRES processed_outputs."
     },
@@ -918,6 +919,7 @@
         "needs_review",
         "conflicting",
         "filled",
+        "guessed",
         "scientist_confirmed",
         "rejected",
         "unmapped",
@@ -2865,9 +2867,10 @@
             "set_role",
             "export_despite_completeness",
             "set_environment_convention",
-            "review"
+            "review",
+            "submit_with_guesses"
           ],
-          "description": "1.20.0: set_environment_convention on the experiment (value operando, in_situ or per_run): the beamtime's environment for its measurements held at a potential (DEC-98). 1.21.0: review on the experiment (bundle review --accept --apply, never decide): the scientist's end review of the values a rule filled in the built records, binding each in reviewed_fills (DEC-99)."
+          "description": "1.20.0: set_environment_convention on the experiment (value operando, in_situ or per_run): the beamtime's environment for its measurements held at a potential (DEC-98). 1.21.0: review on the experiment (bundle review --accept --apply, never decide): the scientist's end review of the values a rule filled in the built records, binding each in reviewed_fills (DEC-99). 1.22.0: submit_with_guesses on the experiment (bundle upload --guesses-ok --by, never decide): the scientist's yes to sending the records with the yellow values listed in guesses_sent, bound by guesses_digest (DEC-100)."
         },
         "value": {},
         "chosen_reading_index": {
@@ -3161,6 +3164,86 @@
             "null"
           ],
           "description": "1.21.0, review only: the bundle version (sha256 of bundle.json) the review was shown at."
+        },
+        "guesses_digest": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{16}$",
+          "description": "1.22.0, submit_with_guesses only: the digest of the final check's listing of yellow values the scientist said yes to (bundle upload --guesses-ok)."
+        },
+        "guesses_sent": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 5000,
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "path",
+              "value",
+              "rule_id",
+              "values",
+              "records"
+            ],
+            "properties": {
+              "path": {
+                "type": "string",
+                "minLength": 1
+              },
+              "value": {},
+              "rule_id": {
+                "type": "string",
+                "minLength": 1
+              },
+              "guess": {
+                "type": "boolean"
+              },
+              "values": {
+                "type": "integer",
+                "minimum": 1
+              },
+              "records": {
+                "type": "integer",
+                "minimum": 1
+              },
+              "quote": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "file": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "locator": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "kind": {
+                "enum": [
+                  "guess",
+                  "deduction",
+                  "unknown"
+                ]
+              }
+            }
+          },
+          "description": "1.22.0, submit_with_guesses only: each yellow value the records carried when the scientist said to send them as they are: the field, the value, its rule, whether it is a guess, how many values and records, and the quote or file it rests on."
+        },
+        "guesses_records": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 100000,
+          "uniqueItems": true,
+          "items": {
+            "type": "string",
+            "minLength": 1
+          },
+          "description": "1.22.0, submit_with_guesses only: the record ids (file stems) the check covered."
         }
       }
     },
@@ -4444,7 +4527,7 @@
         "rule_id",
         "value"
       ],
-      "description": "1.18.0. The registered fill rule that supports this value (no scientist decided it) and the value it fills. Derived on every write and re-derived by the validator: a stored block no rule gives is refused. 1.19.0: readings and reading_pass_ids name the checked AI readings it rests on or agrees with. 1.20.0: four rules over the folder, the people and the held potential (DEC-98).",
+      "description": "1.18.0. The registered fill rule that supports this value (no scientist decided it) and the value it fills. Derived on every write and re-derived by the validator: a stored block no rule gives is refused. 1.19.0: readings and reading_pass_ids name the checked AI readings it rests on or agrees with. 1.20.0: four rules over the folder, the people and the held potential (DEC-98). 1.22.0: isaac.fill.reading_inferred.v1, a checked inferred reading, fills as a guess (value state guessed, DEC-100). Fix round of 1.22.0: isaac.fill.setpoint_from_file_name.v1 (one potential token of the run's own name) and isaac.fill.control_mode_from_setpoint.v1 (potentiostatic from a run's set-point, open_circuit from an OCV token), both yellow deductions.",
       "properties": {
         "rule_id": {
           "enum": [
@@ -4455,7 +4538,10 @@
             "isaac.fill.environment_from_held_potential.v1",
             "isaac.fill.facility_from_folder.v1",
             "isaac.fill.organization_from_facility.v1",
-            "isaac.fill.group_from_folder_pi.v1"
+            "isaac.fill.group_from_folder_pi.v1",
+            "isaac.fill.reading_inferred.v1",
+            "isaac.fill.setpoint_from_file_name.v1",
+            "isaac.fill.control_mode_from_setpoint.v1"
           ]
         },
         "value": {},
@@ -4831,6 +4917,23 @@
         "properties": {
           "format_version": {
             "const": "1.21.0"
+          }
+        },
+        "required": [
+          "format_version"
+        ]
+      },
+      "then": {
+        "required": [
+          "processed_outputs"
+        ]
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "format_version": {
+            "const": "1.22.0"
           }
         },
         "required": [
