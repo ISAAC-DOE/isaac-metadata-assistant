@@ -137,5 +137,5 @@ rules before using real data (`docs/local-first-data-flows.md`). The skill asks 
 ## If something goes wrong
 
 Claude explains each message in words. The usual fixes: `scripts/setup_isaac_local.sh` (not
-installed), a new empty output folder (output refused), `scripts/install_portal_validator.sh` (portal
-check missing). For anything else, send the exact message to the ISAAC team.
+installed), a new empty output folder (output refused), `scripts/setup_isaac_local.sh` again (portal
+check missing: it sets up the copy shipped in `vendor/isaac-portal-validator/`). For anything else, send the exact message to the ISAAC team.

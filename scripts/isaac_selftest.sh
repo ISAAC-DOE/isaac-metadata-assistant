@@ -324,9 +324,10 @@ PYEND
 else
   FULLPATH=1
 fi
-if [[ ! -d "$(ls -d "$HOME/.cache/isaac/portal-validator/"*/venv 2>/dev/null | head -1)" && -z "${ISAAC_PORTAL_VALIDATOR_DIR:-}" ]]; then
-  report SKIP "portal check installed" "not installed: records cannot be exportable (scripts/install_portal_validator.sh)"
-else report PASS "portal check installed" "offline validator found"; fi
+# found exactly as `isaac bundle validate` finds it (env vars, the cache, then the copy vendored in this repository)
+portal_found() { ( cd / && "$PY" -c 'from isaac_api.local_import import portal as P; w = P.locate(); print(w["source"] if w["available"] else ""); raise SystemExit(0 if w["available"] else 1)' 2>/dev/null ); }
+if PORTAL_SOURCE="$(portal_found)"; then report PASS "portal check installed" "offline validator found ($PORTAL_SOURCE copy)"
+else report SKIP "portal check installed" "not installed: records cannot be exportable (scripts/setup_isaac_local.sh)"; fi
 
 # 7b. a record that passed every gate: what must be true of it ---------------------------------------------
 if [[ "${FULLPATH:-0}" -eq 1 ]]; then
@@ -381,7 +382,7 @@ echo "SELF-TEST RESULT: $PASSED passed, $FAILED failed, $SKIPPED skipped (synthe
 if [[ $SKIPPED -gt 0 ]]; then echo "Skipped steps are not failures: they need a part this build or computer does not have yet, or a known blocker (see the notices above)."; fi
 MISSING=()
 [[ "${MISSING_PROCESSING:-0}" -eq 1 ]] && MISSING+=("processing (curves and quality checks): scripts/setup_isaac_local.sh --with-processing")
-compgen -G "$HOME/.cache/isaac/portal-validator/*/venv/bin/python" >/dev/null || MISSING+=("the offline portal check (no record can become exportable without it): scripts/install_portal_validator.sh")
+portal_found >/dev/null || MISSING+=("the offline portal check (no record can become exportable without it): scripts/setup_isaac_local.sh")
 if [[ ${#MISSING[@]} -gt 0 ]]; then
   echo "Missing on this computer:"; for m in "${MISSING[@]}"; do echo "  - $m"; done
 fi

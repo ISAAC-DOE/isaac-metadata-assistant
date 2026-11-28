@@ -1721,9 +1721,11 @@ that discipline.
   `Authorization: Bearer <from $ISAAC_PORTAL_TOKEN, not read>`, body size and sha256. No
   network call, and the token is never read. Without `--dry-run`: exit 2, "uploads are
   disabled in this build".
-- The portal check runs the pinned upstream `portal/validation.validate_record_full`
-  (`scripts/install_portal_validator.sh`, default commit `a1cb1c8`) in an isolated
-  interpreter (`python -I`, scrubbed env, timeout, bounded output) started by
+- The portal check runs the pinned upstream `portal/validation.validate_record_full`, from the copy
+  shipped in `vendor/isaac-portal-validator/a1cb1c8/` (sha256-checked, exact file set;
+  `vendor/isaac-portal-validator/PROVENANCE.md`; its packages installed by `scripts/setup_isaac_local.sh`)
+  or the checkout `ISAAC_PORTAL_VALIDATOR_DIR` names, in an isolated
+  interpreter (`python -I -B`, a throwaway pycache folder, scrubbed env, timeout, bounded output) started by
   `apps/api/isaac_portal_runner.py` — deliberately OUTSIDE the `isaac_api` package, whose
   no-subprocess guarantee (`test_attack_injection_and_containment.py`) stands unchanged; the
   server never imports the runner. Unavailable → `portal_check_unavailable`, never a pass.
@@ -1735,8 +1737,8 @@ Exit codes for the LOCAL-2 commands: `validate` and `export` exit 1 when any dra
 ## 13. DEC-76: the local export targets the portal's pinned schema
 
 - `validate` and `export` gate on ISAAC's OWN validators — `validate_official(record, root)`
-  and `check_exactness(record, root)` — with `root` = the pinned upstream clone (the one the
-  portal runner uses; `ISAAC_PORTAL_VALIDATOR_DIR` or `~/.cache/isaac/portal-validator/<sha>`),
+  and `check_exactness(record, root)` — with `root` = the pinned upstream copy the portal runner
+  uses (`vendor/isaac-portal-validator/<sha>/`, or `ISAAC_PORTAL_VALIDATOR_DIR`),
   plus the offline portal check. The vendored v1.05 schema the website uses is computed and
   reported as `website_schema` for information; it gates nothing, and no report calls a
   record valid for the website. Every validation report and every sidecar carries

@@ -284,7 +284,7 @@ def test_force_stages_every_file_before_touching_out(tmp_path, monkeypatch):
 
 def test_the_install_script_says_what_it_may_download():
     text = (REPO_ROOT / "scripts" / "install_local_cli.sh").read_text()
-    assert "DOWNLOADS a Python build" in text
+    assert "DOWNLOADS a Python 3.11 build" in text
     assert "download anything other than" not in text
 
 
@@ -330,7 +330,10 @@ def test_the_runner_starts_a_fixed_argv_list_with_no_shell():
     assert len(calls) == 1
     call = calls[0]
     assert isinstance(call.args[0], ast.List)
-    assert [ast.unparse(e) for e in call.args[0].elts] == ["exe", "'-I'", "'-c'", "RUNNER"]
+    # -B and a fresh pycache_prefix: no compiled file is read from or written to the validator's folder
+    assert [ast.unparse(e) for e in call.args[0].elts] == ["exe", "'-I'", "'-B'", "'-X'", "pycache_arg", "'-c'", "RUNNER"]
+    src = Path(runner.__file__).read_text(encoding="utf-8")
+    assert 'pycache_arg = f"pycache_prefix={pyc}"' in src and "tempfile.TemporaryDirectory() as pyc" in src
     kw = {k.arg: ast.unparse(k.value) for k in call.keywords}
     assert kw["shell"] == "False" and kw["timeout"] == "TIMEOUT_S" and kw["env"] == "env"
 

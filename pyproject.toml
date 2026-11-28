@@ -36,6 +36,11 @@ processing = ["numpy>=2", "xraylarch>=2026.3", "scipy>=1.10", "pyyaml>=6", "matp
 # local_import/reading_check.py). Pure Python, imported lazily; `scripts/setup_isaac_local.sh` installs it
 # by default. Without it a finding citing a PDF is refused, naming this extra.
 reading = ["pypdf>=4"]
+# The offline portal check (`isaac bundle validate`): the packages the upstream portal validator SHIPPED in
+# vendor/isaac-portal-validator/ imports (portal/validation.py: jsonschema, rfc3339-validator; portal/ontology.py:
+# PyYAML, GitPython, requests, all imported at module load). Run in a separate `python -I` process, never imported
+# by ISAAC itself; `scripts/setup_isaac_local.sh` installs it by default. Without it no record becomes exportable.
+portal = ["jsonschema>=4.20", "rfc3339-validator>=0.1.4", "pyyaml>=6", "GitPython>=3.1", "requests>=2.28"]
 
 [project.scripts]
 isaac = "isaac_records.cli:main"

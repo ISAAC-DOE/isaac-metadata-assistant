@@ -630,6 +630,7 @@ def test_the_upload_module_never_reads_the_token_variable():
 def test_a_missing_portal_validator_is_reported_as_unavailable(monkeypatch, tmp_path):
     monkeypatch.delenv(P.DIR_ENV, raising=False)
     monkeypatch.setattr(P, "CACHE_ROOT", tmp_path / "nothing")
+    monkeypatch.setattr(P, "VENDOR_ROOT", tmp_path / "no-vendored-copy")  # the copy shipped in vendor/ too
     check = P.run_portal_check({"x": 1})
     assert check["verdict"] == P.VERDICT_UNAVAILABLE and P.verdict_of(check) == P.VERDICT_UNAVAILABLE
 

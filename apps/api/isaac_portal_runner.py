@@ -11,8 +11,12 @@ the function that runs the check.
 
 THE SAME DISCIPLINE THE GUARD PROTECTS, ENFORCED HERE AND TESTED:
 
-* argv is a fixed LIST — ``[python, "-I", "-c", RUNNER]`` — never a shell, never a
-  string a caller composed; ``RUNNER`` is this module's literal;
+* argv is a fixed LIST — ``[python, "-I", "-B", "-X", "pycache_prefix=<fresh temp dir>", "-c", RUNNER]``
+  — never a shell, never a string a caller composed; ``RUNNER`` is this module's literal;
+* compiled files are never read from or written to the validator's folder: ``-B`` writes none, and
+  ``pycache_prefix`` points Python at a fresh, empty temporary folder, so a stale or planted
+  ``__pycache__/*.pyc`` beside the checked sources is never loaded (``-I`` ignores
+  ``PYTHONDONTWRITEBYTECODE``, so the environment variable alone did not stop the writes);
 * the record travels as DATA on stdin (JSON), so no record content is ever code;
 * the interpreter path must be absolute, an existing executable file, and (unless the
   operator named it explicitly) inside the pinned validator cache;
@@ -72,10 +76,11 @@ def run(python: str, portal_dir: str, record_json: str, *, must_be_within: Path 
     if not cwd.is_absolute() or not (cwd / "validation.py").is_file():
         raise RunnerRefused("the portal directory must be absolute and hold validation.py")
     env = {"PATH": "/usr/bin:/bin", "HOME": os.environ.get("HOME", "/tmp"), "PYTHONDONTWRITEBYTECODE": "1"}
-    with tempfile.TemporaryFile() as out, tempfile.TemporaryFile() as err:
+    with tempfile.TemporaryFile() as out, tempfile.TemporaryFile() as err, tempfile.TemporaryDirectory() as pyc:
+        pycache_arg = f"pycache_prefix={pyc}"
         try:
             done = subprocess.run(
-                [exe, "-I", "-c", RUNNER],
+                [exe, "-I", "-B", "-X", pycache_arg, "-c", RUNNER],
                 input=record_json.encode("utf-8"),
                 stdout=out,
                 stderr=err,

@@ -32,3 +32,6 @@ node_modules/
 # local design reference, not committed
 design-handoff/
 venv/
+
+# the skill's pointer to this folder, written by scripts/setup_isaac_local.sh (a local path)
+.claude/skills/isaac-historical-import/checkout-path.txt
