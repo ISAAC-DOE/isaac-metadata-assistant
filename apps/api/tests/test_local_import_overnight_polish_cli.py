@@ -311,7 +311,9 @@ def test_a_global_trend_is_never_a_dose_decision_or_question(tmp_path, monkeypat
     monkeypatch.setenv("ISAAC_PROCESSING_ENGINE", "v1")
     bdir, _ = EXT.imported(tmp_path, EXT._dose_run(lambda j, k: 3.0 - slope * k))
     r = EXT.by_run(EXT.v1_results(bdir), "02_SYN_ZZ2")
-    assert EXT._dose(r).get("outcome") is None, EXT._dose(r)
+    # isaac.xas.v1 1.1.0 (N6): a judged check that found nothing, or the sample's own trend, SAYS so; it decides nothing
+    assert EXT._dose(r).get("outcome") in (EX.DOSE_NO_CHANGE, EX.DOSE_EVOLUTION), EXT._dose(r)
+    assert EXT._dose(r)["statement"]                    # always one line, never silent
     assert EX.DOSE_QUESTION_FLAG not in r["review_flags"]
     codes = {y["code"] for x in r[EX.DECISIONS_KEY]["rows"] for y in x["reasons"]}
     assert not codes & {EX.DOSE_CODE, EX.SETTLING_CODE}
@@ -333,7 +335,7 @@ def _dose_of(tmp_path, monkeypatch, wl):
     ("trend_plus_damage", lambda j, k: 3.0 - 0.02 * k - 0.3 * j, {"question", "beam_damage"}),
     ("settling", lambda j, k: 2.5 if j == 0 else 3.0, {"first_scan_settling"}),
     ("rise", lambda j, k: 3.0 + 0.3 * j, {"question"}),
-    ("offset_only_spots", lambda j, k: 3.0 + 0.15 * (k // 3), {None}),
+    ("offset_only_spots", lambda j, k: 3.0 + 0.15 * (k // 3), {"no_change_at_judged_spots"}),   # 1.1.0: said
 ])
 def test_the_dose_rule_still_sees_every_within_spot_change(tmp_path, monkeypatch, case, wl, outcomes):
     d = _dose_of(tmp_path, monkeypatch, wl)
@@ -349,5 +351,7 @@ def test_a_very_slow_trend_within_each_spot_raises_no_dose_question(tmp_path, mo
     monkeypatch.setenv("ISAAC_PROCESSING_ENGINE", "v1")  # the engine the dose rule belongs to (as its own tests)
     bdir, _ = EXT.imported(tmp_path, EXT._dose_run(lambda j, k: 3.0 - 0.02 * k))
     r = EXT.by_run(EXT.v1_results(bdir), "02_SYN_ZZ2")
-    assert EXT._dose(r).get("outcome") is None, EXT._dose(r)
+    # isaac.xas.v1 1.1.0 (N6): a judged check that found nothing, or the sample's own trend, SAYS so; it decides nothing
+    assert EXT._dose(r).get("outcome") in (EX.DOSE_NO_CHANGE, EX.DOSE_EVOLUTION), EXT._dose(r)
+    assert EXT._dose(r)["statement"]                    # always one line, never silent
     assert EX.DOSE_QUESTION_FLAG not in r["review_flags"]

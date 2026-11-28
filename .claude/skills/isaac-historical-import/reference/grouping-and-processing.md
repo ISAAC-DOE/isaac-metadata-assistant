@@ -138,13 +138,19 @@ A SPEC run with no scan file in its `<stem>_dir` folder takes the energy scans i
 What it does to each group, in this order:
 
 1. **Aligns every scan on the reference measured in that same scan** (a foil in transmission, or the glitch in its
-   own I0), shifted once to the beamtime's one reference position. Never on the sample's own edge.
+   own I0), shifted once to the beamtime's one reference position: the anchor of the earliest scans on a fine grid,
+   nearest the staff's calibration of the mono. Never on the sample's own edge. The glitch is first checked against
+   the sample's own edge; when it does not follow it, no scan is aligned and every result says so
+   (`no_energy_reference`, "NO RELIABLE PER-SCAN ENERGY REFERENCE"). Say that sentence; never say the scans were
+   aligned.
 2. **Decides which scans to keep** (rule `isaac.xas.scan_decision.v1`). These are decisions with reasons, not
    questions. The scientist may override any of them.
 3. Averages the kept scans' raw signal (IF/I0). Normalised data are never merged.
 4. Normalises the average once.
 
 Spots of one sample at one condition are merged into one curve.
+A standard is reduced in the mode it was measured in (the engine's own test, `measurement_mode.standard_mode_test`),
+never in transmission only because it is a standard.
 Athena is never used: Athena project files are listed as files and nothing is read from them.
 
 ### Before you process
@@ -171,6 +177,10 @@ A scan is dropped only for one of these reasons. Say the reason in these words:
 | `coverage` | the scan stopped early |
 | `anchor`, `no_energy_reference`, `reference_fit_failed` | it could not be aligned (say the row's own words) |
 | `shape` | its shape differs from the other scans, beyond their noise |
+| `spot_differs_as_a_whole` | one scan at that spot was off-shape and the spot's other scans (two or more) differ the same way: the whole spot is left out |
+
+A note `spot_may_differ_as_a_whole` (flag `spots_disagree`) is a question, not a drop: the spot may differ, but one kept
+scan, or a spot that is also the first scans of the run, is too little to decide. Show the spots and ask.
 | beam damage / first scan settling at a spot | see "The dose question" below |
 | a dead channel with no edge | there is no spectrum in it |
 
@@ -201,7 +211,11 @@ lists the note exists.
 between the first and the later scans at the same spot, at two or more spots, and cannot tell why. (Spots under 150
 post-edge counts per point are left out and said; when fewer than two spots measured more than once are at or above
 it, the rule does not ask: it says it cannot judge, outcome `cannot_judge_low_counts`. A scientist's
-`set_dose_reading` on the group still applies there; a beamtime-wide one is shown as not applied.)
+`set_dose_reading` on the group still applies there; a beamtime-wide one is shown as not applied.) It also asks when
+the white line moves the same way at every spot but only some spots pass on their own, and all of them together do
+(`dose_damage.joint`; its statement gives the joint z; the spots that did not pass alone are `joint_only`). Such a
+result is always a question, never a drop. A judged check that found nothing says so in one line
+(outcome `no_change_at_judged_spots`): relay it only if asked; it is not a question.
 A bulk approval refuses every such result. Ask once for the whole beamtime.
 
 **How.**

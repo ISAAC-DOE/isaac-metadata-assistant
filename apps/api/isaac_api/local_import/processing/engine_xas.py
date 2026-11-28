@@ -4,7 +4,11 @@ validated package, PROVENANCE.md there) plus this ISAAC adapter.
 WHAT RUNS HERE. Groups whose data the engine's own scope covers (``xas_analysis/skill/scope.md``): SSRL hard-XAS
 fluorescence / HERFD read from SPEC files (BL15-2 and others) or SSRL EXAFS Data Collector files (BL4-3). Everything
 else, transmission samples (mu = ln(I0/I1)), other formats, alignment groups, stays on ``isaac.xas.v0``, and that
-result says why (:data:`ENGINE_KEY` ``{"protocol_id": "isaac.xas.v0", "reason": ...}``).
+result says why (:data:`ENGINE_KEY` ``{"protocol_id": "isaac.xas.v0", "reason": ...}``). A standard's mode is the
+engine's own measurement test, never its role's channel order (:data:`STANDARD_MODE_RULE_ID`).
+
+VERSION 1.1.0 (28 Nov 2026): N1-N7 and I2-I6 of that day's measurement on six real beamtimes; :data:`PROTOCOL_VERIFICATION`
+says what was checked against what. I1 (a time-smoothed drift, :data:`SMOOTH_DRIFT`) was measured and is OFF.
 
 THE ORDER (the engine's own, ``xas_analysis/skill/SKILL.md`` "Order of operations"): per scan, anchor -> shift
 (beamtime reference anchor - scan anchor) -> ONE interpolation onto the group's grid; then the scan decisions; then the
@@ -13,11 +17,13 @@ constrained background). Normalised data are never merged (Angel and Krish, 17 N
 
 ONCE PER BEAMTIME (:func:`prepare`): the engine's survey (``xas_analysis.survey.survey_files``) over every group's
 scans picks the energy reference (an in-scan foil in transmission when the sample scans carry one, else the I0
-glitch, else a foil timeline, else none), its anchor method and window, and reads the ``mono reset`` lines. The I0
-glitch is then located by a ROBUST CONSENSUS of every scan's own dips (:data:`CONSENSUS`): a minority of scans without
-it, or far shifted, never moves it, never makes the beamtime "no reference" and never degrades the other scans (the
-survey runs again without them). The reference is the EARLIEST group (closest in time to the staff's foil calibration
-of the mono at the start of the beamtime) with good anchors, the robust MEDIAN anchor of its validated scans. Every
+glitch, else a foil timeline of at least two foil scans, else none), its anchor method and window, and reads the
+``mono reset`` lines. The I0 glitch is then located by a ROBUST CONSENSUS of every scan's own dips (:data:`CONSENSUS`):
+a minority of scans without it, or far shifted, never moves it, never makes the beamtime "no reference" and never
+degrades the other scans (the survey runs again without them); its per-scan shifts are then CHECKED AGAINST THE
+SAMPLE's own edge (:data:`GLITCH_CHECK`): a glitch that does not track the monochromator is not used, said. The beamtime
+zero is the median of the validated anchors of the EARLIEST scans on a fine grid (:data:`ZERO`: closest in time to the
+staff's foil calibration of the mono at the start of the beamtime; a coarse-grid group never sets it). Every
 scan's anchor is validated against the consensus (:func:`_judge`); a scan that fails is not aligned, says why in plain
 words, and is not merged. Every other scan of every group is aligned to that ONE reference, never to its own
 sample's edge. No reference at all is a loud state (:data:`NO_REFERENCE_FLAG`) that a bulk approval refuses.
@@ -48,8 +54,42 @@ from . import core as C
 from .channels import MODE_FLUORESCENCE, MODE_TRANSMISSION
 
 PROTOCOL_ID = "isaac.xas.v1"
-PROTOCOL_VERSION = "1.0.0"
+PROTOCOL_VERSION = "1.1.0"
 PROTOCOL_STATUS = "draft_unreviewed"
+#: THE SCOPED VERIFICATION STATEMENT (28 Nov 2026; REPORT.md section 7 of that day's measurement, figures re-measured
+#: on this version): what was checked, against what, and what was not. It sits beside PROTOCOL_STATUS, which stays
+#: ``draft_unreviewed``: no scientist has reviewed the protocol. Every processed record carries it (engine.verification,
+#: params.json).
+PROTOCOL_VERIFICATION = {
+    "status": "checked_against_two_independent_reductions_not_reviewed",
+    "measured_utc": "2026-11-28",
+    "statement": (
+        "Checked against two independent reductions; not yet reviewed. On 28 Nov 2026 isaac.xas.v1 1.1.0 was run on six "
+        "SSRL beamtimes and compared with the package author's own reductions of five of them, made with his "
+        "hand-written recipes (296 groups), and with the beamline scientist's own merged spectra of the sixth (23 "
+        "distinct merges identified, 19 of them of the same scans as ours). Against the scientist's merges, which are on "
+        "the beamline's unaligned energy scale, the normalised curves differ by 1.3 % of the edge step as published "
+        "(median; at most 2.5 %) and by 0.2 % (at most 0.34 %, against her point noise of 2.3 %) once one energy "
+        "offset per merge is fitted; that offset is our per-scan alignment, 2.5-30 meV (median 20 meV), following the "
+        "monochromator's drift over the beamtime. Against the author's reductions the normalised curves agree to "
+        "0.01-0.8 % of the edge step (median per beamtime, after one scale factor) and edge steps to within 1.5 % "
+        "(median). Energies: per group, our shifts differ from the author's by 0.3-32 meV (median per beamtime 1.7-21 "
+        "meV; his reference is a group's mean anchor, ours the median of the earliest fine-grid anchors), and within a "
+        "group they agree to 3 meV on a foil timeline and 0-12 meV (median spread per beamtime) on an I0 glitch. In "
+        "one beamtime (S K, BL4-3) the I0 glitch does not track the sample's own edge, so no scan is aligned "
+        "there, where the author's reduction aligns on it. Scan selection matched in 243 of 296 groups and 19 of 23 "
+        "merges; every difference is listed with its reason (one group is asked of the scientist). Not "
+        "checked: absolute energy, the normalisation convention against literature, beam damage, self-absorption. "
+        "The processing reviewers (the package author and the beamline scientist) have not reviewed this protocol."),
+    "figures": {"author_groups": 296, "author_selection_matched": 243, "scientist_merges_distinct": 23,
+                "scientist_merges_same_scans": 19, "scientist_selection_matched": 19,
+                "rms_vs_scientist_as_published_median": 0.0130, "rms_vs_scientist_as_published_max": 0.0254,
+                "rms_vs_scientist_after_offset_median": 0.0020, "rms_vs_scientist_after_offset_max": 0.0034,
+                "scientist_point_noise_median": 0.023, "offset_vs_beamline_scale_meV": [2.5, 30.0],
+                "rms_vs_author_median_per_beamtime": [0.0001, 0.0078],
+                "shift_vs_author_group_median_meV": [0.3, 31.9],
+                "within_group_shift_spread_meV": {"foil_timeline": 2.8, "glitch_median": [0.0, 11.6]}},
+}
 ENGINE_NAME = "xas-analysis"
 ENGINE_SOURCE = "src/xas_analysis (vendored; PROVENANCE.md)"
 ADAPTER_RULE_ID = "isaac.xas.engine_adapter.v1"
@@ -152,7 +192,9 @@ DECISION_RULE = {
         "of the edge step; a within-scan step collapse is shape, a uniformly weaker scan is not), or a dead channel "
         "that shows no edge at all; or (d) a within-spot change at two or more spots (isaac.xas.dose_damage.v3; "
         "each scan normalised on its own, never fitted onto another; under 150 post-edge counts per point at most "
-        "spots the rule says it cannot judge and decides nothing): beam damage when it GROWS with dose (scan 3 further from scan 1 than scan 2), the way the edge expects (the white "
+        "spots the rule says it cannot judge and decides nothing; a change the same way at every spot that only some "
+        "spots pass alone is asked about, never dropped, when the spots together pass, a joint z of 5 sign-consistent "
+        "over the spots, not carried by one; a judged check that found nothing says so): beam damage when it GROWS with dose (scan 3 further from scan 1 than scan 2), the way the edge expects (the white "
         "line falls at Ir and Pt L3) and a fresh spot recovers: the later scans are dropped, the first kept; a first "
         "scan still settling when the later scans agree with each other: the first is dropped; otherwise (two scans per "
         "spot, mixed patterns, a logbook note on CV or equilibration) a question to the scientist, nothing decided "
@@ -162,7 +204,11 @@ DECISION_RULE = {
         "Scans that differ are judged by SPOT first (isaac.xas.spot_decision.v1): when they all sit at spots no kept "
         "scan shares, the spot is what differs, not the sample's evolution; the majority of consistent spots is kept, a "
         "differing spot whose shape differs is dropped with a spot reason, and an even split keeps every spot and flags "
-        "'spots disagree'. A scientist's set_scan_decision on a scan overrides all of this, and is shown as theirs."),
+        "'spots disagree'. A spot split by the shape screen (one scan off-shape, its spot-mates kept) is judged as a "
+        "whole (isaac.xas.spot_judged_as_a_whole.v1): when its kept scans also differ from the other spots in "
+        "normalised shape, the same way as the off-shape scan, the whole spot is dropped (with two or more kept scans "
+        "there that are not the run's first scans; otherwise it is asked). A scientist's "
+        "set_scan_decision on a scan overrides all of this, and is shown as theirs."),
     "sources": {"logbook": "a logbook scan note (bundle scan_notes)",
                 "stability": "isaac.xas.scan_selection_proposal.v0 (before the stable window)",
                 "screening": "xas-analysis screen_report (report-only) + this rule's intensity guard",
@@ -228,7 +274,7 @@ def scan_notes_for(bundle: Mapping, run_id: str) -> tuple[list[dict] | None, str
     try:
         return list(scan_notes_for_run(bundle, run_id) or ()), None
     except Exception as exc:  # noqa: BLE001 - notes that cannot be read are said, never a failure
-        return None, f"the logbook scan notes could not be read ({type(exc).__name__}: {exc})"[:300]
+        return None, C.plain_error(exc, "reading the logbook scan notes")[:300]
 
 
 #: The logbook block's ``state`` (the result's :data:`LOGBOOK_KEY`): which of these is true for the group's runs.
@@ -345,6 +391,15 @@ def read_group(g: Mapping, ctx) -> dict:
     if fallback is not None:
         choice = fallback
         attempts = R._bl15_2_missing(R._scan_attempts(tables, choice, np), ctx, params)
+    if role == "reference" and choice.mode == MODE_TRANSMISSION and not R._names_a_foil(stems):
+        # N1 (28 Nov 2026): the MEASUREMENT decides the mode, never the role's channel order. A standard's channel
+        # choice takes transmission first; the engine's own test (survey.measurement_mode, PROVENANCE.md M3) on its
+        # scans says whether it was measured in fluorescence, and a standard measured in fluorescence is reduced in
+        # fluorescence (STANDARD_MODE_RULE_ID).
+        tested = _standard_mode(choice, tables, attempts, role, sel, ctx, g, stems, np)
+        out["mode_test"] = tested["test"]
+        if tested.get("choice") is not None:
+            choice, attempts = tested["choice"], tested["attempts"]
     out["choice"] = choice
     standard_in_transmission = False
     if choice.mode != MODE_FLUORESCENCE:
@@ -393,6 +448,90 @@ def read_group(g: Mapping, ctx) -> dict:
         out["scope"] = "no usable energy scan (v0 says why)"
         return out
     return out
+
+
+#: A STANDARD'S MEASUREMENT MODE IS MEASURED (28 Nov 2026, N1 / I6). The channel choice orders transmission first for
+#: a standard (role ``reference``), so a dilute standard in a sucrose pellet measured in FLUORESCENCE was reduced as
+#: ln(I0/I1) (edge step 0.00-0.20 of the package author's, 7 Ti and 3 S standards). The engine's own mode test
+#: (``survey.measurement_mode``, PROVENANCE.md M3) is run on the standard's scans read in fluorescence (the next channel
+#: the choice offers), at the absorber's tabulated edge (the scientist's set_absorber, else the files' agreeing absorber
+#: evidence, else the edge the engine identifies from these scans). A standard whose ln(I0/I1) steps across the edge
+#: by at least ``survey.MODE_TRANS_STEP_ALONE`` stays on transmission, whatever the fluorescence channel shows or the name
+#: says (review of 28 Nov: the engine's test alone picks fluorescence whenever a fluorescence edge is there and the name
+#: lacks "transmission"). Only when ln(I0/I1) has no edge: ``fluorescence`` -> the standard is reduced in
+#: fluorescence like a sample, said; ``transmission`` -> on ln(I0/I1) (TRANSMISSION_RULE_ID), said with the test's
+#: numbers; ``unknown`` -> ln(I0/I1) as the channel choice says, and the test's numbers are said. A foil (named so)
+#: is never re-read: it is the energy reference, read on its reference channel.
+STANDARD_MODE_RULE_ID = "isaac.xas.standard_mode_by_test.v1"
+
+
+def _standard_mode(choice, tables, attempts, role: str, sel, ctx, g: Mapping, stems, np) -> dict:
+    """:data:`STANDARD_MODE_RULE_ID` for a standard whose channel choice is transmission: ``{"test": the mode test,
+    "choice": the fluorescence choice or None, "attempts": its scan attempts}``."""
+    from xas_analysis.survey import MODE_TRANS_STEP_ALONE, ScanInfo, identify_edge, measurement_mode
+
+    from . import run as R
+
+    params = ctx.params
+    rule = choice.basis.get("energy_rule") or {}
+    alt = None
+    for k, (_e, t) in enumerate(tables):
+        c = R.choose_channels(t, params=params, role=role, bl15_selection=sel, exclude_modes=(MODE_TRANSMISSION,),
+                              bl15_2=rule.get("bl15_2_basis"), bl15_2_hint=rule.get("beamline_unconfirmed"))
+        if R._formed(c) and c.mode == MODE_FLUORESCENCE:
+            alt = c
+            if k:
+                alt.basis["chosen_from_scan_position"] = k
+                alt.flags.append("channel_from_a_later_scan")
+            break
+    test: dict = {"rule_id": STANDARD_MODE_RULE_ID, "channel_choice": choice.signal_name}
+    if alt is None:
+        test.update(mode="unknown", basis="no fluorescence channel to test against", decided="transmission")
+        return {"test": test, "choice": None}
+    alt_attempts = R._bl15_2_missing(R._scan_attempts(tables, alt, np), ctx, params)
+    infos = []
+    for entry, table, sa, code in alt_attempts:
+        if code or C.unusable_reason(sa) or len(infos) >= 6:
+            continue
+        rec = _arrays(table, alt, np)
+        if rec is None:
+            continue
+        ch = {"I0": rec["I0"], "IF": rec["IF"]}
+        for k in ("I1", "I2"):
+            if rec.get(k) is not None:
+                ch[k] = rec[k]
+        infos.append(ScanInfo(str(entry.get("relative_path")), len(infos) + 1, None, rec["E"], ch))
+    if not infos:
+        test.update(mode="unknown", basis="no scan read in fluorescence", decided="transmission")
+        return {"test": test, "choice": None}
+    absorber = absorber_of(g, ctx, {"edge": identify_edge(infos) or {}})
+    E_edge = absorber.get("E_edge_eV")
+    if E_edge is None:
+        test.update(mode="unknown", basis="no tabulated edge for the test", decided="transmission")
+        return {"test": test, "choice": None}
+    mc = measurement_mode(infos, float(E_edge), " ".join(str(s) for s in stems if s) or str(g.get("group_id")))
+    test.update({k: mc.get(k) for k in ("mode", "basis", "fluorescence_contrast", "transmission_step",
+                                         "name_says_transmission", "scans", "thresholds")},
+                E_edge_eV=float(E_edge), absorber_basis=absorber.get("basis"), fluorescence_channel=alt.signal_name)
+    step = mc.get("transmission_step")
+    if step is not None and step >= MODE_TRANS_STEP_ALONE:
+        # a standard whose ln(I0/I1) itself steps across the edge WAS measured in transmission (a fluorescence edge
+        # can be there too, the detector seeing the pellet): it stays on transmission, whatever its name says
+        test.update(decided="transmission", why=(f"ln(I0/I1) steps by {step:.3f} across the edge (at least "
+                                                 f"{MODE_TRANS_STEP_ALONE:g}): measured in transmission"))
+        return {"test": test, "choice": None}
+    if mc.get("mode") != "fluorescence":
+        test["decided"] = "transmission"
+        return {"test": test, "choice": None}
+    test["decided"] = "fluorescence"
+    alt.basis["measurement_mode_test"] = {
+        "rule_id": STANDARD_MODE_RULE_ID, "replaces": choice.signal_name,
+        "statement": (f"A standard's channel choice takes transmission ({choice.signal_name}) first; the engine's mode "
+                      f"test on its scans says it was measured in fluorescence ({mc.get('basis')}; fluorescence "
+                      f"contrast {mc.get('fluorescence_contrast'):.3f}), so it is reduced in fluorescence on "
+                      f"{alt.signal_name} ({STANDARD_MODE_RULE_ID}).")}
+    alt.flags.append("standard_measured_in_fluorescence")
+    return {"test": test, "choice": alt, "attempts": alt_attempts}
 
 
 def _survey_recs(tables, role: str, sel, ctx, num_of: Mapping, stem_of: Mapping, *, choice=None) -> list[dict]:
@@ -647,7 +786,7 @@ def prepare(groups: Sequence[Mapping], ctx, *, stored: Mapping | None = None, wa
     try:
         return _prepare(groups, ctx, stored=stored, wanted=wanted)
     except Exception as exc:  # noqa: BLE001 - never a processing failure: the groups stay on v0, and say why
-        return {"error": f"{type(exc).__name__}: {exc}"[:400], "reads": {}}
+        return {"error": C.plain_error(exc, "the beamtime pass")[:400], "reads": {}}
 
 
 def _prepare(groups, ctx, *, stored, wanted) -> dict:
@@ -663,7 +802,7 @@ def _prepare(groups, ctx, *, stored, wanted) -> dict:
         try:
             reads[g["group_id"]] = read_group(g, ctx)
         except Exception as exc:  # noqa: BLE001 - one group's read failure keeps it on v0
-            reads[g["group_id"]] = {"group_id": g["group_id"], "scope": f"read failed: {type(exc).__name__}: {exc}"[:300],
+            reads[g["group_id"]] = {"group_id": g["group_id"], "scope": C.plain_error(exc, "reading this group")[:300],
                                     "recs": [], "inputs": [], "stems": []}
     if reuse:
         bt = {k: v for k, v in stored.items()}
@@ -680,6 +819,21 @@ def _prepare(groups, ctx, *, stored, wanted) -> dict:
         _apply_consensus(bt, cons, without, reads, groups, ctx)
     _reference(bt, reads, ctx)
     _anchor_all(bt, reads, ctx)
+    if (((bt.get("routes") or [{}])[0].get("route") or {}).get("mode")) == "glitch_I0":
+        edge_of = {}
+        for g in groups:
+            if (reads.get(g["group_id"]) or {}).get("scope") is None and g["group_id"] in reads:
+                try:
+                    edge_of[g["group_id"]] = absorber_of(g, ctx, bt).get("E_edge_eV")
+                except Exception:  # noqa: BLE001 - an absorber that cannot be read: judged at the beamtime's edge
+                    edge_of[g["group_id"]] = None
+        chk = glitch_check(bt, reads, ctx.np, edge_of=edge_of)
+        bt["glitch_check"] = chk
+        if chk.get("trusted") is False:
+            _untrusted_glitch(bt, chk)
+            _anchor_all(bt, reads, ctx)
+        elif SMOOTH_DRIFT["enabled"]:
+            bt["drift_smoothing"] = smooth_drift(bt, reads, ctx.np)
     _windows(bt, reads)
     return bt
 
@@ -872,6 +1026,21 @@ def _apply_consensus(bt: dict, cons: Mapping, without: frozenset, reads: Mapping
             bt["consensus"]["center_basis"] = "the survey's glitch (no per-scan majority)"
         return
     c = float(cons["E_eV"])
+    n_foil = None
+    if cal.get("mode") == "foil_timeline":
+        # the USABLE foil scans: those the timeline itself anchors (a found foil scan whose fit fails is no point)
+        try:
+            n_foil = len(_foil_timeline(cal, bt, reads).get("timeline") or ())
+        except Exception:  # noqa: BLE001 - a timeline that cannot be built has no usable point
+            n_foil = 0
+    if cal.get("mode") == "foil_timeline" and n_foil < 2:
+        # N2 (28 Nov 2026): a foil "timeline" of fewer than two foil scans cannot measure drift; it never beats a
+        # glitch most scans carry (the glitch is then checked against the sample, glitch_check)
+        said.append(f"The survey chose a foil timeline with {n_foil} usable foil scan(s): one point cannot measure the "
+                    f"monochromator's drift, and {cons['with_dip']} of {cons['scans']} scans carry the I0 glitch at "
+                    f"{c:.2f} eV, so the glitch is used instead (checked against the sample's own edge).")
+        bt["calibration_first_pass"] = dict(cal)
+        cal = bt["calibration"] = {"mode": "none"}
     if cal.get("mode") in ("none", "glitch_I0") and without:
         again = _survey(reads, groups, ctx, exclude=without)
         cal2 = again.get("calibration") or {}
@@ -1036,6 +1205,16 @@ def _reference(bt: dict, reads: Mapping, ctx) -> None:
             continue
         if mode == "foil_timeline":
             info.update(_foil_timeline(route, bt, reads))
+            tl = info.get("timeline") or []
+            if len(tl) < 2:
+                # N2: one foil scan cannot measure drift: no scan is aligned, and no record says one was
+                one = tl[0] if tl else None
+                info.update(route={"mode": "none", "basis": "foil_timeline_fewer_than_two_scans", "foil_route": route},
+                            anchor_eV=0.0, one_foil_scan=True, statement=(
+                                ("Only one usable foil scan in this beamtime (" + f"{one['scan']}, edge {one['anchor_eV']:.4f} eV"
+                                 + "): one point cannot measure the monochromator's drift, so no scan is aligned (every "
+                                 "shift is 0); energies are the beamline's as recorded.") if one else
+                                "No foil scan gave a usable anchor: no scan is aligned (every shift is 0)."))
             bt["routes"].append(info)
             continue
         if _is_glitch(route) and cons.get("center_eV") is not None:
@@ -1046,7 +1225,7 @@ def _reference(bt: dict, reads: Mapping, ctx) -> None:
         try:
             fn = _anchor_fns(route, template)
         except Exception as exc:  # noqa: BLE001
-            fn, info["error"] = None, f"{type(exc).__name__}: {exc}"[:200]
+            fn, info["error"] = None, C.plain_error(exc, "making the reference anchor")[:300]
         if fn is None:
             info.update(anchor_eV=None, scans=[], anchors=[], statement="the reference anchor could not be made")
             bt["routes"].append(info)
@@ -1076,6 +1255,30 @@ def _reference(bt: dict, reads: Mapping, ctx) -> None:
         info["anchors"] = [a for _, a in got]
         info["statistic"] = "median"
         info["anchor_eV"] = float(np.median(info["anchors"])) if got else None
+        zero = beamtime_zero(ordered, fits, judged, np)
+        if zero is not None:
+            zero["earliest_group_anchor_eV"] = info["anchor_eV"]
+            zero["earliest_group"] = info["reference_name"]
+            info["zero"] = zero
+            got = list(zip(zero["scans"], zero["anchors"]))
+            info["scans"], info["anchors"] = zero.pop("scans"), zero.pop("anchors")
+            info["statistic"] = "median of the earliest fine-grid anchors"
+            info["anchor_eV"] = zero["anchor_eV"]
+            if zero.get("coarse_groups_skipped"):
+                zg = next((gr for gr in ordered if (gr["stems"][0] if gr["stems"] else gr["group_id"]) == zero["groups"][0]), None)
+                if zg is not None:
+                    info["reference_moved"] = (f"the earliest group {info['reference_name']} is on a coarse grid at the "
+                                               f"anchor; the zero comes from {zero['groups'][0]} ({ZERO_RULE_ID})")
+                    info.update(reference_group_id=zg["group_id"], reference_name=zero["groups"][0])
+        elif got:
+            # E (review of 28 Nov): no fine-grid anchor near the calibration: the earliest group's median stays, SAID
+            info["zero"] = {
+                "rule_id": ZERO_RULE_ID, "rule": ZERO, "fallback": True, "anchor_eV": info["anchor_eV"],
+                "n": len(got), "groups": [info["reference_name"]], "coarse_groups_skipped": [],
+                "statement": (f"Too few validated fine-grid anchors within {ZERO['max_hours']:g} h of the first scan "
+                              f"to set the zero by {ZERO_RULE_ID}: the beamtime zero is the median of the earliest group's "
+                              f"{len(got)} validated anchors ({info['reference_name']}), which may sit on a coarse "
+                              "grid at the anchor; its grid phase can bias every shift by a constant.")}
         info["std_eV"] = float(statistics.stdev(info["anchors"])) if len(got) > 1 else None
         info["mad_eV"] = (1.4826 * float(np.median(np.abs(np.array(info["anchors"]) - info["anchor_eV"])))
                           if got else None)
@@ -1086,6 +1289,121 @@ def _reference(bt: dict, reads: Mapping, ctx) -> None:
         k = len(bt["routes"]) - 1
         bt.setdefault("_fns", {})[k] = fn
         bt.setdefault("_fits", {})[k] = fits
+
+
+#: THE BEAMTIME ZERO (28 Nov 2026, N3 / I3; audit of 22 Nov, point 2b). Every scan is shifted onto ONE anchor energy,
+#: the beamtime's zero: the anchor the reference feature had when the beamline staff calibrated the monochromator
+#: with a foil, at the start of the beamtime. It was the median anchor of the EARLIEST group; when that group was
+#: measured on a coarse grid at the anchor (on one Ir L3 beamtime: 0.21 eV steps against 0.10 elsewhere) the fit's grid
+#: phase biased it (+49 meV there), and every record of the beamtime carried that bias. The zero is now the median of
+#: the validated anchors (:func:`_judge`) of the EARLIEST scans ON A FINE GRID at the anchor (grid step at most
+#: ``fine_factor`` x the beamtime's modal step there): whole groups in time order until at least ``min_scans`` such
+#: anchors are taken. A coarse-grid group never sets it. When the earliest group is on a fine grid nothing changes.
+#: Not the median over the WHOLE beamtime: where the mono drifts a lot (a BL15-2 Pt L3 beamtime: +0.56 eV over two days; a BL6-2c one) that
+#: would move every record 0.1-0.3 eV away from the calibrated scale and from the package author's reductions
+#: (measured 28 Nov 2026). Disclosed in every record (energy_reference.routes[].zero).
+#: TIME LIMIT: only groups that START within ``max_hours`` of the beamtime's first in-scope scan may set the zero (the
+#: scans nearest the calibration); fewer than ``min_scans`` fine-grid anchors in that window are used as they are (said);
+#: none at all leaves the earliest group's median (said, ``zero`` absent).
+ZERO = {"fine_factor": 1.5, "window_eV": 1.0, "min_scans": 3, "max_hours": 6.0}
+ZERO_RULE_ID = "isaac.xas.beamtime_zero_earliest_fine.v1"
+
+
+def _step_at(r: Mapping, a: float, np) -> float | None:
+    E = np.asarray(r["E"], float)
+    m = np.abs(E - a) <= ZERO["window_eV"]
+    return float(np.median(np.diff(E[m]))) if m.sum() >= 3 else None
+
+
+def beamtime_zero(ordered: Sequence[Mapping], fits: Mapping, judged: Mapping, np) -> dict | None:
+    """:data:`ZERO_RULE_ID` over the in-scope groups in time order: ``{"anchor_eV", "scans", "anchors", ...}``. Whole
+    groups are taken in time order, skipping coarse-grid ones, until at least ``min_scans`` fine-grid anchors are
+    pooled (so the zero may pool the earliest fine groups when the first has fewer), but only from groups starting
+    within ``max_hours`` of the first in-scope scan. None when no fine-grid anchor is in that window (the earliest
+    group's median then stays, said by its absence) or when the beamtime has under ``min_scans`` validated anchors."""
+    rows = []
+    for gr in ordered:
+        for r in gr["recs"]:
+            if not judged[r["scan_id"]][0]:
+                continue
+            a = fits[r["scan_id"]][0]
+            st = _step_at(r, a, np) if a is not None else None
+            if st is not None and st > 0:
+                rows.append((r["scan_id"], float(a), st, gr["group_id"], gr["stems"][0] if gr["stems"] else gr["group_id"]))
+    if len(rows) < ZERO["min_scans"]:
+        return None
+    steps = np.round([x[2] for x in rows], 3)
+    vals, counts = np.unique(steps, return_counts=True)
+    modal = float(vals[int(np.argmax(counts))])
+    fine_ok = lambda x: x[2] <= ZERO["fine_factor"] * modal  # noqa: E731
+    times = [r["time"] for gr in ordered for r in gr["recs"] if r.get("time")]
+    t_first = min(times) if times else None
+
+    def t0(gr):
+        ts = [r["time"] for r in gr["recs"] if r.get("time")]
+        return min(ts) if ts else None
+
+    taken, skipped, groups = [], [], []
+    for gr in ordered:
+        mine = [x for x in rows if x[3] == gr["group_id"]]
+        if not mine:
+            continue
+        if t_first is not None and t0(gr) is not None and \
+                (t0(gr) - t_first).total_seconds() > 3600.0 * ZERO["max_hours"]:
+            break
+        fine = [x for x in mine if fine_ok(x)]
+        if not fine:
+            skipped.append({"group_id": gr["group_id"], "name": mine[0][4], "step_eV": float(np.median([x[2] for x in mine])),
+                            "anchor_eV": float(np.median([x[1] for x in mine]))})
+            continue
+        taken += fine
+        groups.append(mine[0][4])
+        if len(taken) >= ZERO["min_scans"]:
+            break
+    if not taken:
+        return None
+    anchors = [x[1] for x in taken]
+    z = float(np.median(anchors))
+    said_skip = "; ".join(f"{x['name']} (step {1000 * x['step_eV']:.0f} meV, anchor {x['anchor_eV']:.4f} eV)"
+                          for x in skipped[:5])
+    return {"rule_id": ZERO_RULE_ID, "rule": ZERO, "anchor_eV": z, "n": len(taken), "groups": groups,
+            "modal_step_eV": modal, "coarse_groups_skipped": skipped[:20],
+            "mad_eV": 1.4826 * float(np.median(np.abs(np.array(anchors) - z))),
+            "scans": [x[0] for x in taken], "anchors": anchors,
+            "statement": (f"The beamtime zero is the median of the {len(taken)} validated anchors of the earliest scans on a "
+                          f"fine grid at the anchor ({', '.join(groups)}; step at most {ZERO['fine_factor']:g} x the modal "
+                          f"{1000 * modal:.0f} meV), the scans nearest the beamline staff's calibration of the mono "
+                          f"({ZERO_RULE_ID})"
+                          + (f"; earlier group(s) on a coarser grid do not set it: {said_skip}" if skipped else "")
+                          + (f"; only {len(taken)} such anchor(s) within {ZERO['max_hours']:g} h of the first scan"
+                             if len(taken) < ZERO["min_scans"] else "")
+                          + ".")}
+
+
+def coarse_grid_note(bt: Mapping, recs: Sequence[Mapping], np) -> dict | None:
+    """A group whose aligned scans sit on a COARSE grid at the anchor (review of 28 Nov, 7): said on its own record,
+    with how far its anchors sit from the zero's, because the fit carries the grid's phase there."""
+    zero = ((bt.get("routes") or [{}])[0] or {}).get("zero") or {}
+    modal = zero.get("modal_step_eV")
+    if not modal:
+        return None
+    steps, anchors = [], []
+    for r in recs:
+        al = r.get("alignment") or {}
+        if al.get("ok") and al.get("anchor_eV") is not None and not al.get("unreferenced"):
+            st = _step_at(r, float(al["anchor_eV"]), np)
+            if st is not None:
+                steps.append(st)
+                anchors.append(float(al["anchor_eV"]))
+    if not steps or float(np.median(steps)) <= ZERO["fine_factor"] * modal:
+        return None
+    st = float(np.median(steps))
+    off = float(np.median(anchors)) - float(zero["anchor_eV"])
+    return {"step_eV": st, "modal_step_eV": modal, "anchor_offset_from_zero_eV": off,
+            "statement": (f"This group's scans sit on a coarse grid at the anchor ({1000 * st:.0f} meV steps against the "
+                          f"beamtime's {1000 * modal:.0f} meV): the anchor fit carries the grid's phase there, so its "
+                          f"anchors (median {1000 * off:+.0f} meV from the zero) and therefore its shifts are less "
+                          "certain than the fine-grid groups'; it does not set the beamtime zero.")}
 
 
 def _pick_template(ordered: Sequence[Mapping], info: Mapping, route: Mapping, np) -> dict | None:
@@ -1144,7 +1462,7 @@ def _foil_timeline(route: Mapping, bt: Mapping, reads: Mapping) -> dict:
                 try:
                     a, info = fn(_Sc(r))
                 except Exception as exc:  # noqa: BLE001 - a foil scan whose anchor cannot be found is said
-                    a, info = None, {"ok": False, "reason": f"{type(exc).__name__}: {exc}"[:200]}
+                    a, info = None, {"ok": False, "reason": C.plain_error(exc, "the foil anchor fit")[:300]}
                 a = _f(a)
                 if a is None or not info.get("ok") or not r.get("time"):
                     rejected.append({"scan": r["scan_id"], "foil": f.get("spec"),
@@ -1200,7 +1518,7 @@ def _anchor_one(fn, rec: Mapping, route: Mapping) -> tuple[float | None, bool, d
         try:
             a, info = fn(_Sc(rec))
         except Exception as exc:  # noqa: BLE001 - a scan whose anchor cannot be found: a failed anchor
-            return None, False, {"reason": f"{type(exc).__name__}: {exc}"[:200]}
+            return None, False, {"reason": C.plain_error(exc, "the anchor fit")[:300]}
     a = _f(a)
     info = {k: (_f(v) if isinstance(v, (int, float, np.floating)) and not isinstance(v, bool) else v)
             for k, v in (info or {}).items() if k in ("ok", "reason", "sigma_eV", "depth", "sep_eV", "shift_fit_rms")}
@@ -1289,6 +1607,234 @@ def _align_rec(r: Mapping, routes: Sequence[Mapping], fns: Mapping, fits: Mappin
             "code": code[0], "said": "; ".join(t["reason"] for t in tried) or code[1], "tried": tried}
 
 
+#: THE GLITCH IS CHECKED AGAINST THE SAMPLE (28 Nov 2026, N2 / I2). An I0 glitch is a feature of the beam, not of the
+#: sample; a per-scan shift taken from it is right only when it tracks the monochromator, and then it also moves the
+#: SAMPLE's own edge. In every hold of four or more aligned scans (a group), each scan's own features are measured on
+#: its raw energy axis (the half-height energy and the white-line peak of IF/I0 normalised on its own: pre-edge median
+#: ``E_edge - 40 .. -10`` eV, post-edge ``+30 .. +60`` eV), and the scans' deviations from their group's median are
+#: pooled. A shift that tracks the mono makes the feature deviation follow -shift (slope near 1). The glitch is NOT
+#: TRUSTED only on POSITIVE evidence that it does not track: its shifts are large enough to matter (their robust sd is
+#: at least ``min_shift_frac`` of the features' own raw scatter and at least ``min_shift_eV``), for BOTH features the
+#: data rule out even half-tracking (the slope's upper bound, slope + ``t_min`` standard errors, is under
+#: ``half_track``), AND aligning makes both features scatter more (aligned / raw sd > ``worse_ratio``). Then no scan is
+#: aligned on it (every shift 0), said plainly, and the result is flagged no_energy_reference: a record never claims
+#: an alignment that was not done. Shifts too small to matter are trusted as the engine's method (said so).
+GLITCH_CHECK = {"min_scans": 4, "min_groups": 2, "min_shift_frac": 0.5, "min_shift_eV": 0.005, "t_min": 2.0,
+                "half_track": 0.5,
+                "worse_ratio": 1.2, "pre_eV": (-40.0, -10.0), "post_eV": (30.0, 60.0), "wl_eV": (-5.0, 20.0)}
+GLITCH_CHECK_RULE_ID = "isaac.xas.glitch_tracks_sample.v1"
+
+
+def _sample_features(r: Mapping, E_edge: float, np) -> tuple[float, float]:
+    """``(half-height energy, white-line peak energy)`` of one scan's IF/I0 on its RAW axis (nan when not found)."""
+    E = np.asarray(r["E"], float)
+    with np.errstate(all="ignore"):
+        y = np.asarray(r["IF"], float) / np.asarray(r["I0"], float)
+    g = GLITCH_CHECK
+    pre = (E > E_edge + g["pre_eV"][0]) & (E < E_edge + g["pre_eV"][1]) & np.isfinite(y)
+    post = (E > E_edge + g["post_eV"][0]) & (E < E_edge + g["post_eV"][1]) & np.isfinite(y)
+    if pre.sum() < 2 or post.sum() < 2:
+        return float("nan"), float("nan")
+    a, b = float(np.median(y[pre])), float(np.median(y[post]))
+    if not b - a > 0:
+        return float("nan"), float("nan")
+    n = (y - a) / (b - a)
+    m = (E >= E_edge + g["wl_eV"][0]) & (E <= E_edge + g["wl_eV"][1]) & np.isfinite(n)
+    peak = half = float("nan")
+    if m.sum() >= 7:
+        Ew, nw = E[m], n[m]
+        j = int(np.argmax(nw))
+        j0, j1 = max(j - 3, 0), min(j + 4, Ew.size)
+        if j1 - j0 >= 3:
+            c = np.polyfit(Ew[j0:j1] - Ew[j], nw[j0:j1], 2)
+            if c[0] < 0:
+                p = float(Ew[j] - c[1] / (2 * c[0]))
+                if Ew[0] < p < Ew[-1]:
+                    peak = p
+    r_ = (E > E_edge - 8) & (E < E_edge + g["wl_eV"][1]) & np.isfinite(n)
+    Er, nr = E[r_], n[r_]
+    i = np.flatnonzero((nr[:-1] < 0.5) & (nr[1:] >= 0.5))
+    if i.size:
+        k = int(i[0])
+        half = float(np.interp(0.5, nr[k:k + 2], Er[k:k + 2]))
+    return half, peak
+
+
+def glitch_check(bt: Mapping, reads: Mapping, np, *, edge_of: Mapping | None = None) -> dict:
+    """:data:`GLITCH_CHECK_RULE_ID` on the beamtime's per-scan glitch shifts: ``{"trusted": True|False|None, ...}``
+    (None: not testable, too few holds; the glitch is then used as the engine's method, said)."""
+    g = GLITCH_CHECK
+    E_edge = (bt.get("edge") or {}).get("E_edge_eV")
+    out: dict = {"rule_id": GLITCH_CHECK_RULE_ID, "rule": g, "trusted": None}
+    if E_edge is None:
+        out["statement"] = "The glitch was not checked against the sample (no tabulated edge)."
+        return out
+    devs: dict[str, list] = {"half": [], "peak": []}
+    groups = 0
+    # only the groups AT the beamtime's edge are judged (a feature window at another edge measures nothing); a group
+    # at another edge keeps the routes whatever this says (review of 28 Nov, 11)
+    other = sorted(gid for gid, e in (edge_of or {}).items() if e is not None and abs(float(e) - float(E_edge)) > 1.0)
+    for gid, gr in reads.items():
+        if gr.get("scope") is not None or gid in other:
+            continue
+        rows = []
+        for r in gr.get("recs") or ():
+            al = r.get("alignment") or {}
+            if not al.get("ok") or al.get("shift_eV") is None or al.get("unreferenced") or r.get("IF") is None:
+                continue
+            h, p = _sample_features(r, float(E_edge), np)
+            rows.append((float(al["shift_eV"]), h, p))
+        if len(rows) < g["min_scans"]:
+            continue
+        groups += 1
+        for k, name in ((1, "half"), (2, "peak")):
+            ok = [x for x in rows if x[k] == x[k]]
+            if len(ok) < g["min_scans"]:
+                continue
+            ms = float(np.median([x[0] for x in ok]))
+            mf = float(np.median([x[k] for x in ok]))
+            devs[name] += [(x[0] - ms, x[k] - mf) for x in ok]
+    out["holds"] = groups
+    if groups < g["min_groups"]:
+        out["statement"] = (f"The glitch was not checked against the sample: {groups} hold(s) of {g['min_scans']} or "
+                            "more aligned scans (at least 2 needed).")
+        return out
+    feats = {}
+    for name, d in devs.items():
+        if len(d) < 2 * g["min_scans"]:
+            continue
+        s = np.array([x[0] for x in d])
+        f = np.array([x[1] for x in d])
+        # robust spreads (1.4826 MAD): one wild scan must not decide it either way
+        sd = lambda v: float(1.4826 * np.median(np.abs(v - np.median(v))))  # noqa: E731
+        raw, al, sh = sd(f), sd(f + s), sd(s)
+        x = -s
+        if float(np.var(x)) > 0:
+            b = float(np.sum((x - x.mean()) * (f - f.mean())) / np.sum((x - x.mean()) ** 2))
+            res = f - f.mean() - b * (x - x.mean())
+            se = float(np.sqrt(np.sum(res ** 2) / max(len(x) - 2, 1) / np.sum((x - x.mean()) ** 2)))
+            t = b / se if se > 0 else float("inf")
+        else:
+            b, t, se = 0.0, 0.0, 0.0
+        feats[name] = {"scans": len(d), "raw_sd_meV": 1000 * raw, "aligned_sd_meV": 1000 * al,
+                       "shift_sd_meV": 1000 * sh, "slope": b, "t": t, "slope_upper": b + g["t_min"] * se,
+                       "matters": sh >= max(g["min_shift_eV"], g["min_shift_frac"] * raw)}
+    out["features"] = feats
+    if not feats:
+        out["statement"] = "The glitch was not checked against the sample: too few scans with measurable features."
+        return out
+    matters = any(v["matters"] for v in feats.values())
+    excluded = all(v["slope_upper"] < g["half_track"] for v in feats.values())
+    worse = all(v["aligned_sd_meV"] > g["worse_ratio"] * v["raw_sd_meV"] for v in feats.values())
+    said = "; ".join(f"{'half-height' if k == 'half' else 'white-line peak'}: scatter {v['raw_sd_meV']:.0f} meV "
+                     f"raw, {v['aligned_sd_meV']:.0f} meV aligned, shifts {v['shift_sd_meV']:.0f} meV, slope "
+                     f"{v['slope']:.2f} (upper bound {v['slope_upper']:.2f})" for k, v in feats.items())
+    base = (f"The I0 glitch's per-scan shifts were checked against the sample's own edge ({GLITCH_CHECK_RULE_ID}) in "
+            f"{groups} holds of {g['min_scans']} or more scans: {said}.")
+    if not matters:
+        out.update(trusted=True, outcome="too_small_to_matter",
+                   statement=base + " The shifts are small next to the sample's own scatter: they cannot be tested "
+                                    "this way and change little; the glitch is used (the engine's method).")
+    elif not excluded or not worse:
+        out.update(trusted=True, outcome="tracks_sample",
+                   statement=base + " The data do not rule out that the sample's edge follows the glitch shifts (or "
+                                    "aligning does not make it scatter more): the glitch is used.")
+    elif other:
+        out.update(trusted=None, outcome="not_applied_mixed_edges", groups_at_other_edges=other[:50],
+                   statement=base + f" The sample's edge does not follow the glitch shifts here, but {len(other)} "
+                                    "group(s) of this beamtime are at another edge, whose alignment this check does not "
+                                    "judge: the glitch is kept for every group; look at the alignment of this edge's "
+                                    "groups.")
+    else:
+        out.update(trusted=False, outcome="does_not_track_sample",
+                   statement=base + " The sample's edge does NOT follow the glitch shifts (not even halfway), and "
+                                    "aligning on them makes it scatter more: the glitch does not track the "
+                                    "monochromator here, so no scan is aligned on it (every shift is 0); energies are "
+                                    "the beamline's as recorded.")
+    return out
+
+
+#: A TIME-SMOOTHED DRIFT (28 Nov 2026, I1; a trial). The mono drifts slowly; a per-scan glitch anchor carries its
+#: own fit noise on top. Each aligned scan's anchor is replaced by the running median of the beamtime's anchors within
+#: +- ``half_window_s`` of it, inside one SEGMENT (segments break at the files' mono reset lines and at time gaps over
+#: ``gap_s``), unless the scan's own anchor departs from that smooth curve by more than ``keep_sigma`` robust sigmas
+#: (a real step: its own anchor is kept). Only on an I0-glitch route (a foil timeline is already smooth in time).
+#: MEASURED AND LEFT OFF (28 Nov 2026, align_check.py, median within-group sd of the sample's half-height / white-line
+#: peak, meV, per-scan -> smoothed): a BL15-2 Pt L3 beamtime 35.9 -> 27.6 / 59.5 -> 57.7 (better); a 2021 BL15-2 Ir L3
+#: one 52.2 -> 50.4 / 79.3 -> 79.2 (better); a BL6-2c Pt L3 one 21.5 -> 23.1 / 31.4 -> 31.7 (WORSE); a 2025 BL15-2 Ir L3
+#: one 136.0 -> 136.2 / 265.7 -> 266.0 (worse, within noise); a Ti K foil-timeline one unchanged. The rule was to keep it only if no other beamtime got worse. Switching it
+#: on would also need the reused ``--group`` path to re-apply the stored smooth anchors (not built).
+SMOOTH_DRIFT = {"enabled": False, "half_window_s": 2700.0, "gap_s": 3600.0, "keep_sigma": 3.0, "min_neighbours": 3}
+SMOOTH_RULE_ID = "isaac.xas.time_smoothed_drift.v1"
+
+
+def smooth_drift(bt: dict, reads: Mapping, np) -> dict:
+    """:data:`SMOOTH_DRIFT` on the glitch route's per-scan anchors (each rec's alignment changed in place)."""
+    resets = []
+    for x in bt.get("logs") or ():
+        t = _scan_time([str(x.get("time") or "")])
+        if t is not None:
+            resets.append(t.timestamp())
+    items = []
+    for gr in reads.values():
+        recs = gr.get("v1_recs") if gr.get("transmission_v1") else (gr["recs"] if gr.get("scope") is None else ())
+        for r in recs or ():
+            al = r.get("alignment") or {}
+            if al.get("ok") and al.get("anchor_eV") is not None and str(al.get("route", "")).startswith("glitch_I0") \
+                    and r.get("time") is not None:
+                items.append((r["time"].timestamp(), float(al["anchor_eV"]), r))
+    items.sort(key=lambda x: x[0])
+    if len(items) < 2 * SMOOTH_DRIFT["min_neighbours"]:
+        return {"rule_id": SMOOTH_RULE_ID, "applied": False, "statement": "Too few aligned scans to smooth the drift."}
+    seg, k = [], 0
+    for i, (t, _a, _r) in enumerate(items):
+        if i and (t - items[i - 1][0] > SMOOTH_DRIFT["gap_s"] or any(items[i - 1][0] < z <= t for z in resets)):
+            k += 1
+        seg.append(k)
+    T = np.array([x[0] for x in items]); A = np.array([x[1] for x in items]); S = np.array(seg)
+    sm = np.full(A.size, np.nan)
+    for i in range(A.size):
+        m = (S == S[i]) & (np.abs(T - T[i]) <= SMOOTH_DRIFT["half_window_s"])
+        if m.sum() >= SMOOTH_DRIFT["min_neighbours"]:
+            sm[i] = float(np.median(A[m]))
+    ok = np.isfinite(sm)
+    res = A[ok] - sm[ok]
+    sig = 1.4826 * float(np.median(np.abs(res - np.median(res)))) if res.size else 0.0
+    used = kept_own = 0
+    for i, (_t, a, r) in enumerate(items):
+        al = r["alignment"]
+        if not ok[i]:
+            continue
+        if sig > 0 and abs(a - sm[i]) > SMOOTH_DRIFT["keep_sigma"] * sig:
+            al["smoothing"] = {"kept_own_anchor": True, "smooth_anchor_eV": float(sm[i])}
+            kept_own += 1
+            continue
+        ref = al["reference_anchor_eV"]
+        al["smoothing"] = {"per_scan_anchor_eV": a, "smooth_anchor_eV": float(sm[i]), "rule_id": SMOOTH_RULE_ID}
+        al["anchor_eV"], al["shift_eV"] = float(sm[i]), float(ref - sm[i])
+        used += 1
+    return {"rule_id": SMOOTH_RULE_ID, "rule": SMOOTH_DRIFT, "applied": True, "segments": int(S.max() + 1),
+            "scans_smoothed": used, "scans_kept_own_anchor": kept_own, "residual_sigma_eV": sig,
+            "statement": (f"Time-smoothed drift ({SMOOTH_RULE_ID}): {used} scans aligned on the running median of the "
+                          f"anchors within +-{SMOOTH_DRIFT['half_window_s'] / 60:.0f} min ({int(S.max() + 1)} segments, "
+                          f"broken at mono resets and gaps over {SMOOTH_DRIFT['gap_s'] / 60:.0f} min); {kept_own} kept "
+                          f"their own anchor (more than {SMOOTH_DRIFT['keep_sigma']:g} x {1000 * sig:.1f} meV off the "
+                          "smooth curve).")}
+
+
+def _untrusted_glitch(bt: dict, chk: Mapping) -> None:
+    """The glitch failed :data:`GLITCH_CHECK_RULE_ID`: the beamtime has no reliable per-scan reference (route none)."""
+    old = list(bt.get("routes") or ())
+    bt["glitch_route_not_used"] = [{k: v for k, v in x.items() if k not in ("scans", "anchors")} for x in old]
+    first = (old or [{}])[0]
+    bt["routes"] = [{"route": {"mode": "none", "basis": GLITCH_CHECK_RULE_ID},
+                     "reference_group_id": first.get("reference_group_id"), "reference_name": first.get("reference_name"),
+                     "anchor_eV": 0.0, "scans": [], "anchors": [], "std_eV": None, "untrusted_glitch": True,
+                     "statement": chk.get("statement")}]
+    bt["_fns"], bt["_fits"] = {}, {}
+    bt.setdefault("consensus_said", []).append(chk.get("statement"))
+
+
 def _windows(bt: dict, reads: Mapping) -> None:
     """The engine's default normalisation window (recipe_init.norm_range) on the beamtime's modal grid, one per
     edge: fixed for every compared series of that edge."""
@@ -1317,7 +1863,8 @@ def _windows(bt: dict, reads: Mapping) -> None:
 def beamtime_payload(bt: Mapping) -> dict:
     """The beamtime block written into processing_results.json (no arrays, no functions)."""
     keep = ("fingerprint", "reused", "calibration", "survey", "edge", "routes", "windows", "glitch", "file_groups",
-            "error", "statement", "consensus", "consensus_said")
+            "error", "statement", "consensus", "consensus_said", "glitch_check", "glitch_route_not_used", "zero",
+            "drift_smoothing")
     out = {k: bt.get(k) for k in keep if k in bt}
     out["protocol_id"], out["engine_version"] = PROTOCOL_ID, engine_version()
     out["in_scope_groups"] = sorted(k for k, v in (bt.get("reads") or {}).items() if v.get("scope") is None)
@@ -1348,8 +1895,14 @@ def covers(group: Mapping, ctx) -> tuple[bool, str | None]:
     absorber = absorber_of(group, ctx, bt)
     if transmission:
         gr["recs"] = gr["v1_recs"]          # its own v1 recs (the survey's recs carry no signal)
-        gr["mode_check"] = {"mode": "transmission", "basis": "the channel choice: a standard in transmission",
-                            "offset": gr.get("transmission_offset")}
+        mt = gr.get("mode_test") or {}
+        gr["mode_check"] = {**{k: mt.get(k) for k in ("fluorescence_contrast", "transmission_step",
+                                                       "name_says_transmission", "scans", "thresholds") if k in mt},
+                            "mode": "transmission", "offset": gr.get("transmission_offset"),
+                            "basis": (f"the engine's mode test ({STANDARD_MODE_RULE_ID}): {mt['basis']}"
+                                      if mt.get("mode") == "transmission" else
+                                      f"the channel choice (a standard: transmission first); the engine's mode test "
+                                      f"was not conclusive ({mt.get('basis') or 'not run'})")}
         return True, None
     tr = _transmission_check(gr, absorber.get("E_edge_eV"))
     gr["mode_check"] = tr
@@ -1400,11 +1953,18 @@ def process_group_v1(group: Mapping, ctx) -> list[dict]:
                        "statement": (f"Processed by {PROTOCOL_ID}: the vendored {ENGINE_NAME} {engine_version()} "
                                      "reduction engine (Oscar's validated package) and the ISAAC adapter. A draft "
                                      "until the ISAAC processing reviewers (Oscar and Angel) review the adapter.")}
+    res[ENGINE_KEY]["verification"] = PROTOCOL_VERIFICATION
     res["review_flags"] = ["protocol_draft_unreviewed"]
     E_edge0 = absorber.get("E_edge_eV")
     below = E_edge0 is not None and gr["recs"] and all(float(r["E"][-1]) < float(E_edge0) for r in gr["recs"])
     res["measurement_mode"] = measurement_mode_block(gr.get("mode_check"), below_edge=(
         (max(float(r["E"][-1]) for r in gr["recs"]), float(E_edge0), absorber, len(gr["recs"])) if below else None))
+    mt = gr.get("mode_test") or {}
+    if mt.get("decided") == "fluorescence":
+        said = (gr["choice"].basis.get("measurement_mode_test") or {}).get("statement")
+        res["measurement_mode"]["standard_mode_test"] = mt
+        if said:
+            res["measurement_mode"]["statement"] = (res["measurement_mode"].get("statement") or "") + " " + said
     if res["measurement_mode"]["mode"] == BELOW_EDGE:
         res["review_flags"].append(BELOW_EDGE_FLAG)
     elif res["measurement_mode"]["mode"] not in ("fluorescence", "transmission"):
@@ -1456,7 +2016,7 @@ def process_group_v1(group: Mapping, ctx) -> list[dict]:
     aligned = align_onto(recs, target)
     # --- screening (report-only: this rule decides)
     win = [E_edge + SCREEN_WINDOW_EV[0], E_edge + SCREEN_WINDOW_EV[1]] if E_edge else [-np.inf, np.inf]
-    screen_cfg = {**SCREENING, "window_eV": win, **ratio_screens(E_edge, target, bt)}
+    screen_cfg = {**SCREENING, "window_eV": win, **ratio_screens(E_edge, target, bt, absorber)}
     with warnings.catch_warnings(), np.errstate(all="ignore"):
         warnings.simplefilter("ignore")
         flags = screen_report(aligned, screen_cfg) if aligned else []
@@ -1484,7 +2044,7 @@ def process_group_v1(group: Mapping, ctx) -> list[dict]:
     spots = apply_spots(table, recs, stability, np)
     if spots:
         res["spots"] = spots
-        if spots["outcome"] == SPOTS_DISAGREE_FLAG:
+        if spots["outcome"] == SPOTS_DISAGREE_FLAG or spots.get("asked_as_a_whole"):
             res["review_flags"].append(SPOTS_DISAGREE_FLAG)      # the scientist looks: a bulk approval refuses it
     kept = [r for r in recs if table["by_id"][r["scan_id"]]["decision"] == "keep" and r.get("aligned") is not None]
     grid_said = None
@@ -1513,6 +2073,10 @@ def process_group_v1(group: Mapping, ctx) -> list[dict]:
     res[DECISIONS_KEY] = {k: v for k, v in table.items() if k != "by_id"}
     res[SHIFTS_KEY] = _shift_table(recs, bt)
     res[REFERENCE_KEY] = _reference_view(bt, recs)
+    coarse = coarse_grid_note(bt, recs, np)
+    if coarse:
+        res[REFERENCE_KEY]["coarse_grid"] = coarse
+        res[REFERENCE_KEY]["statement"] += " " + coarse["statement"]
     res[LOGBOOK_KEY] = notes_said
     cal_step = {"step": "calibration", "params": {"rule": "per-scan alignment to ONE beamtime reference (rule 4)",
                                                   "routes": [x.get("route") for x in bt.get("routes") or ()]},
@@ -1597,7 +2161,7 @@ def process_group_v1(group: Mapping, ctx) -> list[dict]:
     R._write(gdir / "qc.json", R._json_bytes({"group_id": group["group_id"], **res["qc"], "protocol_status": PROTOCOL_STATUS}))
     R._write(gdir / "params.json", R._json_bytes({
         "protocol_id": PROTOCOL_ID, "protocol_version": PROTOCOL_VERSION, "protocol_status": PROTOCOL_STATUS,
-        "engine": res[ENGINE_KEY], "screening": screen_cfg,
+        "verification": PROTOCOL_VERIFICATION, "engine": res[ENGINE_KEY], "screening": screen_cfg,
         "decision_rule": DECISION_RULE, "channel_choice": res["channel_choice"], "absorber": absorber,
         "normalization": res[NORMALIZATION_KEY], "beamtime_fingerprint": bt.get("fingerprint"),
         "energy_reference": res[REFERENCE_KEY]}))
@@ -2053,6 +2617,8 @@ SPOT_RULE_ID = "isaac.xas.spot_decision.v1"
 #: a spot whose edge step differs from the other spots' by at least this fraction, with the same shape, is said
 WEAK_SPOT_FRACTION = 0.25
 SPOTS_DISAGREE_FLAG = "spots_disagree"
+SPOT_WHOLE_RULE_ID = "isaac.xas.spot_judged_as_a_whole.v1"
+SPOT_WHOLE_MIN_KEPT = 2
 SPOT_RULE = (
     "Scans are grouped by spot (the stage motors Sx Sy Sz Sr their headers state). When the scans the rule finds "
     "DIFFERENT (before the stable window, or off-shape) all sit at spots where no kept scan sits, the difference is the "
@@ -2129,6 +2695,90 @@ def apply_spots(table: dict, recs: Sequence[Mapping], stability: Mapping, np) ->
     ref_ids = set(kept)
     evo = set((stability or {}).get("evolving_metrics") or ())
 
+    def metric_differences(ids, ref, coherent_with=None) -> list[str]:
+        said = []
+        for k in SHAPE_METRICS:
+            f = [v for v in (metric(x, k) for x in ids) if v is not None]
+            r = [v for v in (metric(x, k) for x in ref) if v is not None]
+            if not f or not r:
+                continue
+            d = float(np.median(f)) - float(np.median(r))
+            if coherent_with is not None:
+                # the spot is COHERENT in this metric: its off-shape scans sit on the same side of the other spots
+                # as its kept scans, and closer to them than the kept scans are to the other spots
+                o = [v for v in (metric(x, k) for x in coherent_with) if v is not None]
+                if not o:
+                    continue
+                ds = float(np.median(o)) - float(np.median(r))
+                if not (ds * d > 0 and abs(ds - d) < abs(d)):
+                    continue
+            sds = [v for v in (metric(x, C._sd_key(k)) for x in list(ids) + list(ref)) if v is not None]
+            noise = max(float(C.SEL_FLOOR.get(k, 0.0)), 3 * float(np.median(sds)) if sds else 0.0)
+            if abs(d) > noise:
+                said.append(f"white-line height {_pct(float(np.median(f)), float(np.median(r)))}" if k == "wl_h" else
+                            f"white-line energy {d:+.2f} eV" if k == "wl_e_eV" else f"edge position {d:+.2f} eV")
+        return said
+
+    # A SPOT SPLIT BY THE SHAPE SCREEN IS JUDGED AS A WHOLE (28 Nov 2026, N5 / I5; SPOT_WHOLE_RULE_ID): when a scan at
+    # a spot is dropped for its shape and the spot's other scans are kept, the spot's kept scans are compared with the
+    # kept scans of the other spots (at least two of them). When they differ in a normalised-shape metric beyond the
+    # noise (the stability metrics' floor and 3 x their sd) AND the spot is coherent in it (the off-shape scan is off
+    # the same way, and nearer its spot-mates than they are to the other spots: the difference is the SPOT's, not one
+    # scan's), the whole spot is left out, with that reason. In one measured group the beamline scientist dropped both
+    # scans of the spot. A spot whose off-shape scan is off on its own keeps its other scans (the package author's reductions
+    # keep them, two measured groups). The spot is DROPPED only with at least SPOT_WHOLE_MIN_KEPT kept scans there
+    # and when it is not the first scans of the run; otherwise the finding is ASKED (a note, flag spots_disagree, a bulk
+    # approval refused): two measured groups (one kept scan; one of them also the first scans of the run) are asked.
+    whole: list[str] = []
+    asked_whole: list[str] = []
+    for lab in labels:
+        xs = by_spot[lab]
+        shaped = [x for x in xs if any(y["code"] == "shape" and y.get("source") == "screening" for y in x["reasons"])]
+        here = [x for x in xs if x["rule_decision"] == "keep"]
+        other_spots = [o for o in labels if o != lab and any(x["rule_decision"] == "keep" for x in by_spot[o])]
+        if not shaped or not here or len(other_spots) < 2:
+            continue
+        ref = [x["scan_id"] for o in other_spots for x in by_spot[o] if x["rule_decision"] == "keep"]
+        # the spot's KEPT scans against the other spots' (the off-shape scan is already out; it must not pull the
+        # spot's median): the spot itself differs only when its remaining scans do
+        how = metric_differences([x["scan_id"] for x in here], ref, coherent_with=[x["scan_id"] for x in shaped])
+        if not how:
+            continue
+        other_rows = [x for o in other_spots for x in by_spot[o] if x["rule_decision"] == "keep"]
+        seen = (f"{names[lab]} ({_scan_list(xs)}): {_scan_list(shaped)} {'is' if len(shaped) == 1 else 'are'} off-shape, "
+                f"and the spot's other {'scan' if len(here) == 1 else 'scans'} ({_scan_list(here)}) also "
+                f"differ{'s' if len(here) == 1 else ''} from the other {len(other_spots)} spots "
+                f"({_scan_list(other_rows)}) in normalised shape: {', '.join(how)}")
+        early = _earliest([x["scan_id"] for x in xs], recs, rows)
+        if len(here) < SPOT_WHOLE_MIN_KEPT or early:
+            # ASKED, never dropped (review of 28 Nov): one kept scan is too few to say the spot differs, and a spot
+            # that is also the first scans of the run cannot tell a spot from the sample still changing
+            why = ("one kept scan is too few to say the whole spot differs" if len(here) < SPOT_WHOLE_MIN_KEPT else
+                   "these are also the first scans of the run, so the sample may still have been changing")
+            q = f"{seen}; {why}: the scientist decides (set_scan_decision); {NOT_A_DROP_REASON}"
+            for x in here:
+                x["notes"] = list(x["notes"]) + [{"source": "spots", "code": "spot_may_differ_as_a_whole",
+                                                  "rule": SPOT_WHOLE_RULE_ID, "decides": False, "said": q}]
+            asked_whole.append(q)
+            continue
+        what = f"{seen}; the whole spot is left out ({SPOT_WHOLE_RULE_ID})"
+        for x in shaped + here:
+            old = [y for y in x["reasons"] if y["code"] in DIFFERS_CODES]
+            x["reasons"] = [y for y in x["reasons"] if y["code"] not in DIFFERS_CODES] + [
+                {"source": "spots", "code": "spot_differs_as_a_whole", "rule": SPOT_WHOLE_RULE_ID, "said": what,
+                 "evidence": {"spot": spot[x["scan_id"]], "replaces": [y["code"] for y in old],
+                              "was_said": "; ".join(y["said"] for y in old)}}]
+            x["rule_decision"] = "drop"
+            if x["decided_by"] == "rule":
+                x["decision"], x["merged"] = "drop", False
+        whole.append(what)
+    if whole:
+        flagged = [sid for sid, row in rows.items() if sid in spot and any(y["code"] in DIFFERS_CODES for y in row["reasons"])]
+        kept = [sid for sid, row in rows.items() if sid in spot and row["rule_decision"] == "keep"]
+        sp_f = {spot[s]["label"] for s in flagged if spot.get(s)}
+        sp_k = {spot[s]["label"] for s in kept if spot.get(s)}
+        ref_ids = set(kept)
+
     def shape_evidence(ids) -> tuple[list[str], bool]:
         """What of the NORMALISED shape differs between ``ids`` and the kept scans, beyond the noise (white-line
         height, white-line energy, edge position: the stability metrics; their floors and 3 x their per-scan sd),
@@ -2157,7 +2807,7 @@ def apply_spots(table: dict, recs: Sequence[Mapping], stability: Mapping, np) ->
     ref_wl = float(np.median([v for v in ref_wl if v is not None])) if any(v is not None for v in ref_wl) else None
     ref_st = [metric(s, "edge_step") for s in ref_ids]
     ref_st = float(np.median([v for v in ref_st if v is not None])) if any(v is not None for v in ref_st) else None
-    outcome, statement = "consistent", None
+    outcome, statement = ("spot_differs_as_a_whole", "; ".join(whole)) if whole else ("consistent", None)
     confined = bool(flagged) and all(spot.get(s) for s in flagged) and not (sp_f & sp_k)
     if flagged and not confined:
         outcome = "evolution_within_a_spot" if sp_f & sp_k else "spot_not_read"
@@ -2258,7 +2908,15 @@ def apply_spots(table: dict, recs: Sequence[Mapping], stability: Mapping, np) ->
         summary.append({"spot": lab, "name": names[lab], "position": {m: first[lab].get(m) for m in motors},
                         "scans": [x["scan_id"] for x in xs], "kept": [x["scan_id"] for x in xs if x["decision"] == "keep"],
                         "white_line_height": med(lab, "wl_h"), "edge_step": med(lab, "edge_step")})
+    if whole and outcome != "spot_differs_as_a_whole":
+        statement = "; ".join(whole + ([statement] if statement else []))
+    if asked_whole:
+        statement = "; ".join(([statement] if statement else []) + asked_whole)
+        if outcome == "consistent":
+            outcome = "spot_may_differ_as_a_whole"
     block = {"rule_id": SPOT_RULE_ID, "rule": SPOT_RULE, "outcome": outcome, "spots": summary,
+             **({"judged_as_a_whole": whole, "whole_rule_id": SPOT_WHOLE_RULE_ID} if whole else {}),
+             **({"asked_as_a_whole": asked_whole, "whole_rule_id": SPOT_WHOLE_RULE_ID} if asked_whole else {}),
              "statement": statement or (f"{len(labels)} spots; the rule found no spot that differs from the others."
                                         if outcome == "consistent" else
                                         "The scans that differ share a spot with kept scans: a change within a spot "
@@ -2309,8 +2967,30 @@ def apply_spots(table: dict, recs: Sequence[Mapping], stability: Mapping, np) ->
 #: of CV, equilibration or discarding the first scans. A logbook exclude / start_from / keep_only note on the group
 #: always wins (this rule then decides nothing); an existing shape-screen drop is never cleared; a scientist's
 #: set_dose_reading (the group's, else the beamtime's) decides the reading; set_scan_decision still wins per scan.
+#: THE JOINT TEST (28 Nov 2026, N4 / I4). A change too small to pass 3 sigma at one spot can be beyond doubt over
+#: all of them: when the scan-1 -> scan-2 differences d_i (noise s_i) of the spots measured more than once share ONE
+#: sign at every spot, their mean is beyond the rule's ``floor`` (1 % of the edge step), and their joint
+#: z = sum(d_i) / sqrt(sum(s_i^2)) is at least ``joint_z`` (and still at least ``joint_loo_z`` with the strongest spot
+#: left out, so one spot never carries it alone), every such spot is taken as
+#: changed, in that direction (a spot that did not pass alone gets the kind ``joint_only``), and the result is a
+#: QUESTION, never a drop: a change seen only together decides nothing (review of 28 Nov). The test is on the
+#: differences after the global trend is taken out; one beyond the noise only BEFORE that is the sample's evolution
+#: (the 18 Nov rule), said in one line and never promoted. The noise s_i was CALIBRATED first by the audit's
+#: Poisson null simulation (two scans drawn from one true curve at each spot's own I0, 40 draws per spot, 322 spots of a
+#: 2021 and 223 of a 2025 BL15-2 Ir L3 HERFD beamtime): the null spread is 0.83-0.89 of s_i (median), the null bias 0.00 s_i, at
+#: every count level; s_i is used as it is (conservative by about 15 %), no bias is subtracted.
 DOSE = {"wl_half_eV": 4.0, "floor": 0.01, "noise_mult": 3.0, "pre_eV": -10.0, "post_eV": 30.0, "recovery_frac": 0.5,
-        "min_counts": 150.0, "resample_factor": 1.2}
+        "min_counts": 150.0, "resample_factor": 1.2, "joint_z": 5.0, "joint_loo_z": 2.0}
+DOSE_NULL_CALIBRATION = {"method": "Poisson null simulation (audit of 18 Nov 2026, t9.py / t10.py), 40 draws per spot",
+                         "spots": {"beamtime A (2021, BL15-2 Ir L3)": 322, "beamtime B (2025, BL15-2 Ir L3)": 223},
+                         "null_sd_over_noise_median": {"beamtime A (2021, BL15-2 Ir L3)": 0.89,
+                                                       "beamtime B (2025, BL15-2 Ir L3)": 0.83},
+                         "null_bias_over_null_sd_median": {"beamtime A (2021, BL15-2 Ir L3)": 0.00,
+                                                           "beamtime B (2025, BL15-2 Ir L3)": -0.01},
+                         "used": "the analytic noise as it is (conservative), no bias subtracted"}
+DOSE_EVOLUTION = "change_carries_on_across_spots"
+#: a spot that did not pass on its own and counts only through the joint test (its question shows it)
+DOSE_JOINT_ONLY = "joint_only"
 DOSE_RULE_ID = "isaac.xas.dose_damage.v3"
 DOSE_LOW_COUNTS = "cannot_judge_low_counts"
 DOSE_NO_CHANGE = "no_change_at_judged_spots"
@@ -2385,6 +3065,33 @@ def _post_counts(r: Mapping, E_edge: float, np) -> float | None:
     with np.errstate(all="ignore"):
         m = np.isfinite(a.IF) & (a.E > E_edge + DOSE["post_eV"])
         return float(np.median(a.IF[m])) if m.sum() >= 3 else None
+
+
+def joint_dose_test(per: Mapping, key: str = "d12") -> dict | None:
+    """:data:`DOSE` joint test over the spots' scan-1 -> scan-2 differences (``per``: the rule's per-spot rows;
+    ``key``: ``d12``, after the global trend is taken out, or ``d12_raw``, before)."""
+    import math
+
+    pairs = [(lab, float(x[key]), float(x["noise12"])) for lab, x in per.items()
+             if x.get(key) is not None and x.get("noise12")]
+    if len(pairs) < 2:
+        return None
+    S, V = sum(d for _, d, _ in pairs), sum(n * n for _, _, n in pairs)
+    if not V > 0:
+        return None
+    z = S / math.sqrt(V)
+    sign = 1 if S > 0 else -1
+    same = all((d > 0) == (S > 0) and d != 0 for _, d, _ in pairs)
+    strongest = max(pairs, key=lambda p: abs(p[1]) / p[2])
+    rest = [p for p in pairs if p is not strongest]
+    Vr = sum(n * n for _, _, n in rest)
+    loo = (sum(d for _, d, _ in rest) / math.sqrt(Vr)) if Vr > 0 else 0.0
+    # and the mean change is at least the rule's floor (1 % of the edge step): an effect too small to matter is not one
+    beyond = (same and abs(z) >= DOSE["joint_z"] and sign * loo >= DOSE["joint_loo_z"]
+              and abs(S / len(pairs)) > DOSE["floor"])
+    return {"of": key, "z": z, "spots": len(pairs), "same_sign": same, "direction": sign, "mean_d": S / len(pairs),
+            "z_without_strongest_spot": loo, "beyond": beyond, "threshold": DOSE["joint_z"],
+            "threshold_without_strongest": DOSE["joint_loo_z"]}
 
 
 def apply_dose_damage(table: dict, recs: Sequence[Mapping], stability: Mapping, np, E_edge: float | None = None, *,
@@ -2504,7 +3211,9 @@ def _dose_core(table: dict, recs: Sequence[Mapping], stability: Mapping, np, E_e
     per: dict[str, dict] = {}
     for lab, rs in repeat.items():
         d12 = diff(rs[0], rs[1])
-        x = {"scans": [r["scan_id"] for r in rs], "d12": d12 and d12[0], "noise12": d12 and d12[1]}
+        r12 = raw(rs[0], rs[1])
+        x = {"scans": [r["scan_id"] for r in rs], "d12": d12 and d12[0], "noise12": d12 and d12[1],
+             "d12_raw": r12 and r12[0]}
         if len(rs) == 2:
             x.update(kind="two_scans" if beyond(d12) else "none", direction=sgn(d12))
         else:
@@ -2521,9 +3230,42 @@ def _dose_core(table: dict, recs: Sequence[Mapping], stability: Mapping, np, E_e
                 x.update(kind="mixed", direction=s13 or s12)
         per[lab] = x
     changed = dict(per) if forced else {lab: x for lab, x in per.items() if x["kind"] != "none"}
+    joint = joint_dose_test(per)
+    joint_raw = joint_dose_test(per, key="d12_raw")
     block: dict = {"rule_id": DOSE_RULE_ID, "rule": DOSE, "window_eV": win, "per_spot": per,
                    "spots_measured_more_than_once": len(repeat), "post_edge_counts_per_point": counts,
+                   "noise_calibration": DOSE_NULL_CALIBRATION, "global_trend_per_scan": slope,
+                   **({"joint": joint} if joint else {}),
+                   **({"joint_before_trend": joint_raw} if joint_raw and slope else {}),
                    **({"spots_under_floor_not_judged": sorted(low)} if low else {})}
+    promoted: list[str] = []
+    if not forced and (len(changed) < 2 or 2 * len(changed) <= len(repeat)):
+        if joint and joint["beyond"]:
+            # N4: not enough spots pass on their own, but all of them together do, the same way: each is changed,
+            # and a change found only TOGETHER is always a question, never a drop (the spots that pass alone are
+            # not enough to decide anything); the spots that did not pass alone get their own kind, so a question
+            # shows every spot's evidence
+            sign = joint["direction"]
+            for lab, x in per.items():
+                if x.get("d12") is None:
+                    continue
+                if x["kind"] == "none":
+                    x["kind"] = DOSE_JOINT_ONLY
+                    promoted.append(lab)
+                x.update(direction=sign, by_joint_test=True)
+            changed = {lab: x for lab, x in per.items() if x.get("by_joint_test")}
+        elif slope and joint_raw and joint_raw["beyond"] and not changed:
+            # the change is beyond the noise only BEFORE the global trend is taken out, and no spot passes on its own
+            # after it: the trend explains it, the sample's evolution (the 18 Nov rule); said, nothing decided, never
+            # promoted to a dose change. (When some spot DOES pass alone after the trend, the trend does not explain
+            # it, and the no-change line below names those spots and their directions.)
+            after = (f"joint z {joint['z']:+.1f} after the trend is taken out" if joint else
+                     "not measurable after the trend is taken out")
+            block.update(outcome=DOSE_EVOLUTION, statement=(
+                f"The white line changes the same way at every spot (joint z {joint_raw['z']:+.1f} over "
+                f"{joint_raw['spots']} spots), but no more than its trend across the whole run explains ({after}): "
+                "the sample's evolution, not beam damage; this rule decides nothing."))
+            return block
     # a logbook exclude / start_from / keep_only note on the group ALWAYS wins
     applied = [n for n in (notes_said or {}).get("notes") or () if n.get("applied") and n.get("drops")]
     if applied:
@@ -2534,8 +3276,20 @@ def _dose_core(table: dict, recs: Sequence[Mapping], stability: Mapping, np, E_e
                 + "); the beam-damage rule decides nothing here."))
             return block
         return None
-    if not forced and (len(changed) < 2 or 2 * len(changed) <= len(repeat)):
-        return None
+    if not forced and not promoted and (len(changed) < 2 or 2 * len(changed) <= len(repeat)):
+        # N6: a judged check that found nothing consistent says so, in one plain line, naming any spot that passes on
+        # its own and which way (a joint result promoted above never reaches this line: it is a question)
+        alone = sorted(((lab, x) for lab, x in per.items() if x["kind"] not in ("none", DOSE_JOINT_ONLY)),
+                       key=lambda kv: int(kv[0].split()[-1]))
+        named = "; ".join(f"{lab} {'falls' if (x.get('d12') or 0) < 0 else 'rises'} {100 * (x.get('d12') or 0):+.1f} %"
+                          for lab, x in alone)
+        block.update(outcome=DOSE_NO_CHANGE, statement=(
+            f"Beam damage judged at {len(repeat)} spots measured more than once: no consistent within-spot change"
+            + (f" ({len(alone)} spot(s) change on their own: {named})" if alone else "")
+            + (f" (joint z {joint['z']:+.1f} over {joint['spots']} spots, threshold {DOSE['joint_z']:g}"
+               + ("" if joint["same_sign"] else ", the spots change in different directions") + ")" if joint else "")
+            + "."))
+        return block
     three = {lab: x for lab, x in changed.items() if len(x["scans"]) >= 3}
     directions = {x["direction"] for x in changed.values() if x["direction"]}
     el, ed = (absorber or {}).get("element"), (absorber or {}).get("edge")
@@ -2570,6 +3324,10 @@ def _dose_core(table: dict, recs: Sequence[Mapping], stability: Mapping, np, E_e
         return block
     if reading_of in ("beam_damage", "first_scan_settling"):
         outcome = reading_of
+    elif promoted:
+        why = (f"the white line moves the same way at every spot, but only {len(changed) - len(promoted)} of "
+               f"{len(repeat)} spots pass on their own: it is beyond the noise over the spots together, not at most "
+               "spots alone, which decides nothing")
     elif len(directions) > 1:
         why = "the spots change in opposite directions"
     elif grows and len(grows) >= 2 and 2 * len(grows) > n3:
@@ -2577,7 +3335,12 @@ def _dose_core(table: dict, recs: Sequence[Mapping], stability: Mapping, np, E_e
         mv = moves(sign)
         block["moves_between_spots"] = mv
         if mv and 2 * sum(m["continues"] for m in mv) > len(mv) and not any(m["recovers"] for m in mv):
-            return None                    # the change carries on across spots: the sample's evolution, not dose
+            # the change carries on across spots: the sample's evolution, not dose (said in one line, decides nothing)
+            block.update(outcome=DOSE_EVOLUTION, statement=(
+                f"The white line changes within the spots but carries on across them (no fresh spot recovers): the "
+                f"sample's evolution, not beam damage; this rule decides nothing ({len(changed)} of {len(repeat)} "
+                "spots)."))
+            return block
         if expected is not None and sign != expected:
             why = (f"the white line {'rises' if sign > 0 else 'falls'} with dose at {len(grows)} spots, the opposite of "
                    f"the reduction expected at {el} {ed}")
@@ -2600,8 +3363,11 @@ def _dose_core(table: dict, recs: Sequence[Mapping], stability: Mapping, np, E_e
                            + (f", scan 3 {100 * (x.get('d13') or 0):+.1f} %" if x.get("d13") is not None else "") + ")"
                            for lab, x in sorted(changed.items(), key=lambda kv: int(kv[0].split()[-1])))
     if outcome is None:
+        jt = (f" (beyond the noise over the spots together, all the same way: joint z {joint['z']:+.1f}, "
+              f"{joint['z_without_strongest_spot']:+.1f} without the strongest spot)"
+              if joint and promoted else "")
         what = (f"QUESTION: at {len(changed)} of {len(repeat)} spots measured more than once the white line {word} "
-                f"after the first scan ({spots_said}, normalised shape, edge-step units, window {win[0]:.1f}-"
+                f"after the first scan{jt} ({spots_said}, normalised shape, edge-step units, window {win[0]:.1f}-"
                 f"{win[1]:.1f} eV), and the rule cannot tell why: {why}. Either it is beam damage (keep the first scan "
                 "per spot) or the first scan is still settling (drop the first scan per spot). Nothing is decided: "
                 f"`isaac bundle decide <bundle_dir> --target <group id> --decision {DOSE_READING} --value "
@@ -3061,7 +3827,7 @@ def normalize_once(E, y, n, absorber: Mapping, bt: Mapping, np, *, exclude_extra
         try:
             r = mback_xrs(el, E, y, rng, ed, **opts)
         except Exception as exc:  # noqa: BLE001
-            out["error"] = f"{type(exc).__name__}: {exc}"[:300]
+            out["error"] = C.plain_error(exc, "normalisation")[:300]
             return out
         A = _f(r.info["A_edge"])
         out.update(A_edge=A, norm=np.asarray(r.norm_xas, float), mu=np.asarray(r.mu, float),
@@ -3228,6 +3994,13 @@ def _qc(res, recs, kept, table, nm, E, y, e0, absorber, bt, np):
     if (res.get("spots") or {}).get("outcome") == SPOTS_DISAGREE_FLAG:
         reasons_warn.append(SPOTS_DISAGREE_FLAG)
         st[SPOTS_DISAGREE_FLAG] = res["spots"]["statement"]
+    elif (res.get("spots") or {}).get("asked_as_a_whole"):
+        # a spot that may differ as a whole, asked (not spots split without a majority: every other spot agrees)
+        reasons_warn.append(SPOTS_DISAGREE_FLAG)
+        st[SPOTS_DISAGREE_FLAG] = ("A SPOT MAY DIFFER AS A WHOLE (the other spots agree; this is not an even split): "
+                                   + "; ".join(res["spots"]["asked_as_a_whole"])
+                                   + ". Nothing was dropped for it; look at the spot and decide (set_scan_decision); a "
+                                     "bulk approval refuses this result.")
     if table.get("overrides_not_applied"):
         reasons_warn.append("override_not_applied")
         st["override_not_applied"] = "; ".join(x["said"] for x in table["overrides_not_applied"])
@@ -3273,7 +4046,15 @@ def _qc(res, recs, kept, table, nm, E, y, e0, absorber, bt, np):
 R_FALLBACK = "channel_fallback_transmission_not_positive"     # run.FALLBACK_FLAG
 
 
-def ratio_screens(E_edge: float | None, target, bt: Mapping) -> dict:
+#: WHERE THE RATIO-SHAPE WINDOW STARTS, relative to the tabulated edge (28 Nov 2026, N5 / I5). The package author's
+#: BL6-2c recipe starts it at E_edge + 6 eV, a Pt L3 value; at Ir L3 that falls on the falling side of the white line
+#: (about +4 eV), so a white-line distortion was half outside it. It starts AT the tabulated edge (before any white
+#: line) for every edge but Pt L3, which keeps the author's validated +6 eV.
+RATIO_START_EV = {("Pt", "L3"): 6.0}
+RATIO_START_DEFAULT_EV = 0.0
+
+
+def ratio_screens(E_edge: float | None, target, bt: Mapping, absorber: Mapping | None = None) -> dict:
     """The engine's ratio_shape and post_drift screens (pipeline._screen), edge-relative (the package author's
     BL6-2c recipe, Pt L3: ratio window E_edge + 6 eV to the grid end, 5 %; post-edge levels E_edge + 60..95 eV vs the
     last 40 eV, 15 % of the step), the glitch windows kept out. Report-only, as every screen: a flag drops a scan only
@@ -3282,8 +4063,9 @@ def ratio_screens(E_edge: float | None, target, bt: Mapping) -> dict:
         return {}
     lo, hi = float(target[0]), float(target[-1])
     out: dict = {}
-    if hi - 5 > E_edge + 6 + 30:
-        out["ratio_shape"] = {"window_eV": [round(E_edge + 6, 1), round(hi - 5, 1)],
+    start = RATIO_START_EV.get(((absorber or {}).get("element"), (absorber or {}).get("edge")), RATIO_START_DEFAULT_EV)
+    if hi - 5 > E_edge + start + 30:
+        out["ratio_shape"] = {"window_eV": [round(E_edge + start, 1), round(hi - 5, 1)], "start_from_edge_eV": start,
                               "exclude_eV": glitch_exclusions(bt), "mad": 5, "min_frac": 0.05, "smooth_pts": 5}
     a1, b1, a2, b2 = E_edge + 60, E_edge + 95, hi - 45, hi - 5
     if a2 > b1 + 20 and lo < E_edge - 15:
@@ -3300,6 +4082,11 @@ def _shift_table(recs, bt) -> dict:
                      "route": al.get("route"), "method": al.get("method"), "anchor_eV": al.get("anchor_eV"),
                      "shift_eV": al.get("shift_eV"), "ok": al.get("ok"),
                      **({"fit": al["fit"]} if al.get("fit") else {}), **({"tried": al["tried"]} if al.get("tried") else {})})
+    if rows and all((r.get("alignment") or {}).get("unreferenced") for r in recs):
+        # a record never claims an alignment that was not done (28 Nov 2026, N2)
+        return {"rows": rows, "mean_eV": 0.0, "spread_eV": None, "aligned": False,
+                "statement": (f"No scan was aligned (no reliable energy reference for this beamtime): every one of the "
+                              f"{len(rows)} scans keeps its recorded energies (shift 0).")}
     ok = [x["shift_eV"] for x in rows if x["ok"] and x["shift_eV"] is not None]
     return {"rows": rows, "mean_eV": statistics.fmean(ok) if ok else None,
             "spread_eV": statistics.pstdev(ok) if len(ok) > 1 else None,
@@ -3321,7 +4108,10 @@ def _reference_view(bt, recs) -> dict:
                        "reference_statistic": info.get("statistic", "median"),
                        **({"consensus_eV": info["consensus_eV"], "fit_offset_eV": info.get("fit_offset_eV")}
                           if info.get("consensus_eV") is not None else {}),
-                       **({"reference_moved": info["reference_moved"]} if info.get("reference_moved") else {})})
+                       **({"reference_moved": info["reference_moved"]} if info.get("reference_moved") else {}),
+                       **({"untrusted_glitch": True, "statement": info.get("statement")} if info.get("untrusted_glitch") else {}),
+                       **({"one_foil_scan": True, "statement": info.get("statement")} if info.get("one_foil_scan") else {}),
+                       **({"zero": info["zero"]} if info.get("zero") else {})})
     sv = bt.get("survey") or {}
     why = list(((sv.get("recommendation") or {}).get("why")) or ())
     cons = bt.get("consensus") or {}
@@ -3334,7 +4124,14 @@ def _reference_view(bt, recs) -> dict:
     first = routes[0] if routes else {}
     stmt = (f"Energy reference: {plain}"
             + (f" ({first.get('method')} fit, window {first.get('window_eV')})" if first.get("window_eV") else "")
-            + (f", anchored on the earliest group {first.get('reference_name')} (median of {first.get('reference_scans')} "
+            + ((f", zero {first.get('reference_anchor_eV'):.4f} eV: {first['zero']['statement']}")
+               if first.get("zero", {}).get("fallback") and first.get("reference_anchor_eV") else
+               (f", zero {first.get('reference_anchor_eV'):.4f} eV: the median of the {first['zero']['n']} earliest "
+                f"fine-grid anchors ({', '.join(first['zero'].get('groups') or ())}; {ZERO_RULE_ID}"
+                + (f"; {len(first['zero']['coarse_groups_skipped'])} earlier coarse-grid group(s) skipped"
+                   if first["zero"].get("coarse_groups_skipped") else "")
+                + ")") if first.get("zero") and first.get("reference_anchor_eV") else
+               f", anchored on the earliest group {first.get('reference_name')} (median of {first.get('reference_scans')} "
                f"scans with a good anchor, {first.get('reference_anchor_eV'):.4f} eV)" if first.get("reference_anchor_eV") else "")
             + ". " + ({0: "The files hold no mono reset line (no calibration record). ",
                       1: "The mono was foil-calibrated by the beamline staff at the start of the beamtime (one mono "
@@ -3347,6 +4144,9 @@ def _reference_view(bt, recs) -> dict:
         stmt = ("NO ENERGY REFERENCE: no in-scan foil, no I0 glitch in most scans, no foil scans. No scan was aligned "
                 "(every shift is 0); energies are only as good as the beamline calibration. Look at each result and "
                 "approve it on its own (a bulk approval refuses it).")
+        if first.get("untrusted_glitch") or first.get("one_foil_scan"):
+            stmt = (f"NO RELIABLE PER-SCAN ENERGY REFERENCE: {first.get('statement')} Look at each result and approve "
+                    "it on its own (a bulk approval refuses it).")
     bad = [r["scan_id"] for r in recs if not (r.get("alignment") or {}).get("ok")]
     if bad:
         stmt += (f" {len(bad)} scan(s) of this group are not aligned (no energy reference found in the scan, or the "
@@ -3422,19 +4222,30 @@ def energy_story(res: Mapping) -> dict:
         "window_eV": route.get("window_eV"), "reference_group_id": route.get("reference_group_id"),
         "reference_name": route.get("reference_name"), "reference_anchor_eV": route.get("reference_anchor_eV"),
         "reference_scans": route.get("reference_scans"), "scans_aligned": len(aligned), "scans_listed": len(rows),
+        **({"zero": route["zero"]} if route.get("zero") else {}),
         "shift_range_eV": [min(in_merge), max(in_merge)] if in_merge else None,
         "shift_range_of": "the merged scans" if merged and any(x.get("scan_id") in merged for x in aligned) else "the aligned scans",
     }
     if mode == "none" or not route:
+        alignment["scans_aligned"] = 0
+        alignment["shift_range_eV"] = None
         alignment["statement"] = ("No per-scan alignment: the beamtime has no energy reference (no in-scan foil, no I0 "
                                   "glitch in most scans, no foil scans), so every shift is 0.")
+        if route.get("untrusted_glitch") or route.get("one_foil_scan"):
+            alignment["statement"] = ("No per-scan alignment (no reliable per-scan reference), so every shift is 0: "
+                                      + str(route.get("statement") or ""))
     else:
         anchor = route.get("reference_anchor_eV")
         alignment["statement"] = (
             f"Each scan was aligned to one beamtime energy reference, {_ROUTE_SAID.get(mode, str(mode))}"
             + (f" ({route.get('method')} fit, window {route['window_eV'][0]:g}-{route['window_eV'][1]:g} eV)"
                if isinstance(route.get("window_eV"), (list, tuple)) and len(route["window_eV"]) == 2 else "")
-            + (f", anchored on the earliest group {route.get('reference_name')} at {anchor:.4f} eV (median of "
+            + ((f", onto the beamtime zero {anchor:.4f} eV (the median of the earliest group's "
+                f"{route['zero'].get('n')} anchors, {', '.join(route['zero'].get('groups') or ())}: no fine-grid anchor "
+                "near the calibration)") if isinstance(anchor, (int, float)) and (route.get("zero") or {}).get("fallback") else
+               (f", onto the beamtime zero {anchor:.4f} eV (the median of the {route['zero'].get('n')} earliest "
+                f"fine-grid anchors, {', '.join(route['zero'].get('groups') or ())})") if isinstance(anchor, (int, float)) and route.get("zero") else
+               f", anchored on the earliest group {route.get('reference_name')} at {anchor:.4f} eV (median of "
                f"{route.get('reference_scans')} scans)" if isinstance(anchor, (int, float)) else "")
             + f": {len(aligned)} of {len(rows)} scans aligned"
             + (f", shifts {shown(min(in_merge))} to {shown(max(in_merge))} ({alignment['shift_range_of']})"
@@ -3561,7 +4372,8 @@ def show_blocks(r: Mapping, *, full: bool = False) -> dict:
     evidence, the shift table, the decision table and the normalisation convention."""
     out: dict = {}
     if SPOTS_DISAGREE_FLAG in (r.get("review_flags") or ()):
-        out["spots_warning"] = (r.get("spots") or {}).get("statement")
+        out["spots_warning"] = (((r.get("qc") or {}).get("statements") or {}).get(SPOTS_DISAGREE_FLAG)
+                                or (r.get("spots") or {}).get("statement"))
     if NO_REFERENCE_FLAG in (r.get("review_flags") or ()):
         out["warning"] = ("NO ENERGY REFERENCE for this beamtime: no scan was aligned (every shift is 0). Look at this "
                           "result and approve it on its own; a bulk approval refuses it.")
