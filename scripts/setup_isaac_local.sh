@@ -26,16 +26,19 @@
 # ISAAC_FETCH_TIMEOUT=<seconds> (a whole number; default 15) bounds the GitHub check.
 #
 # What it does (idempotent; safe to re-run; needs no sudo):
-#   1. a Python >= 3.11 virtual environment in <this checkout>/.venv (uv if present, else
-#      python3.11/3.12/3.13/python3) and the `isaac` command  -> scripts/install_local_cli.sh,
+#   1. a Python 3.11 virtual environment in <this checkout>/.venv (uv if present, else
+#      python3.11/python3) and the `isaac` command              -> scripts/install_local_cli.sh,
 #      with the small PDF-reading extra (pypdf, for the quote check) -> pip install -e ".[reading]"
 #   2. the processing extra (numpy, xraylarch)                 -> pip install -e ".[processing]"
-#   3. the offline portal validator, pinned                    -> scripts/install_portal_validator.sh
+#   3. the offline portal validator's packages (it ships in vendor/isaac-portal-validator/, pinned;
+#      nothing is cloned)                                         -> scripts/install_portal_validator.sh
 #   4. optionally, the skill, COPIED (not linked) into the skills folder, with a small
-#      checkout-path.txt so the skill can find this installation.
+#      checkout-path.txt so the skill can find this installation. Every run that changes anything also
+#      writes .claude/skills/isaac-historical-import/checkout-path.txt (this folder's path; gitignored),
+#      which the skill reads when Claude Code is started in this folder.
 #
-# What it downloads: packages from the Python package index (steps 1-3), the upstream ISAAC
-# repository at one pinned commit (step 3), and, if uv has to make a Python, a Python build;
+# What it downloads: packages from the Python package index (steps 1-3), and, if uv has to make a
+# Python, a Python build;
 # and, unless --offline, the latest ISAAC code record from this checkout's `origin` (a `git fetch`,
 # to say whether this folder is behind; it changes no file in your ISAAC folder (it updates git's
 # record of what's on GitHub) and sends no data).
@@ -67,7 +70,7 @@ while [[ $# -gt 0 ]]; do
     --check) CHECK_ONLY=1 ;;
     --update) UPDATE=1 ;;
     --offline) OFFLINE=1 ;;
-    -h|--help) sed -n '2,41p' "${BASH_SOURCE[0]}"; exit 0 ;;
+    -h|--help) sed -n '2,45p' "${BASH_SOURCE[0]}"; exit 0 ;;
     *) echo "unknown option: $1 (try --help)" >&2; exit 2 ;;
   esac
   shift
@@ -94,16 +97,69 @@ PROBLEMS=0
 note() { FINAL+=("$1"); }
 
 version_ok() { "$1" -c 'import sys; raise SystemExit(0 if sys.version_info >= (3, 11) else 1)' 2>/dev/null; }
+is_311()     { "$1" -c 'import sys; raise SystemExit(0 if sys.version_info[:2] == (3, 11) else 1)' 2>/dev/null; }
 
 if [[ ! -f "$CHECKOUT/schema/isaac_record_v1.json" || ! -d "$CHECKOUT/apps/api/isaac_api" ]]; then
   echo "error: $CHECKOUT does not look like an ISAAC folder (schema/ or apps/api/ missing)." >&2
   exit 2
 fi
 
-have_cli()        { ( cd / && "$VENV/bin/python" -c 'import isaac_api.local_import.cli, isaac_records.cli' ) >/dev/null 2>&1; }
-have_processing() { ( cd / && "$VENV/bin/python" -c 'import numpy, larch' ) >/dev/null 2>&1; }
-have_reading()    { ( cd / && "$VENV/bin/python" -c 'import pypdf' ) >/dev/null 2>&1; }
-have_portal()     { compgen -G "$HOME/.cache/isaac/portal-validator/*/venv/bin/python" >/dev/null 2>&1; }
+# The Python that runs the ISAAC tools: this folder's .venv. In a git WORKTREE that has none (a second
+# working folder of the same repository), the main checkout's .venv is used, with THIS folder's code put
+# first on its path (PYTHONPATH), so what is checked is this folder's code. Set once more after step 1.
+PYBIN="$VENV/bin/python"; PYPATH=""; VENV_NOTE=""
+main_checkout() {   # the main checkout of a git worktree, else nothing
+  local common
+  common="$(git -C "$CHECKOUT" rev-parse --path-format=absolute --git-common-dir 2>/dev/null)" || return 0
+  [[ "$(basename "$common")" == ".git" ]] || return 0
+  common="$(dirname "$common")"
+  [[ "$(cd "$common" 2>/dev/null && pwd -P)" != "$(cd "$CHECKOUT" && pwd -P)" ]] && printf '%s' "$common"
+}
+pick_python() {
+  PYBIN="$VENV/bin/python"; PYPATH=""; VENV_NOTE=""
+  [[ -x "$PYBIN" ]] && return 0
+  local main; main="$(main_checkout)"
+  if [[ -n "$main" && -x "$main/.venv/bin/python" ]]; then
+    PYBIN="$main/.venv/bin/python"; PYPATH="$CHECKOUT/src:$CHECKOUT/apps/api"
+    VENV_NOTE=" (this is a git worktree with no .venv of its own: using the main checkout's, $main/.venv, with this folder's code first; to give it its own, run scripts/setup_isaac_local.sh here)"
+  fi
+}
+pick_python
+py() { ( cd / && if [[ -n "$PYPATH" ]]; then PYTHONPATH="$PYPATH" "$PYBIN" "$@"; else "$PYBIN" "$@"; fi ); }
+
+have_cli()        { py -c 'import isaac_api.local_import.cli, isaac_records.cli' >/dev/null 2>&1; }
+have_processing() { py -c 'import numpy, larch' >/dev/null 2>&1; }
+have_reading()    { py -c 'import pypdf' >/dev/null 2>&1; }
+# the offline portal check, as `isaac bundle validate` itself finds it (env vars, the cache, then the copy
+# vendored in this repository): one line "ok <source> <commit> <python>" or "no <reason>"
+portal_state()    {
+  py -c '
+from isaac_api.local_import import portal as P
+w = P.locate()
+print("ok %s %s %s" % (w["source"], w["commit"][:7], w["python"]) if w["available"] else "no " + w["reason"])
+' 2>/dev/null || echo "no the ISAAC tools are not installed, so the portal check cannot be looked for"
+}
+have_portal()     { [[ "$(portal_state)" == ok\ * ]]; }
+# poppler's pdftoppm: lets Claude look at a PDF's pages as images (scanned logbooks). Optional.
+pdftoppm_path()   { command -v pdftoppm 2>/dev/null || { for d in /opt/homebrew/bin /usr/local/bin; do [[ -x "$d/pdftoppm" ]] && { echo "$d/pdftoppm"; return; }; done; }; }
+
+# The skill's Step 0 reads checkout-path.txt BESIDE its SKILL.md to find this folder. Claude Code started
+# in this folder runs this checkout's own copy, so the file is written there too (gitignored: a local path).
+OWN_SKILL="$CHECKOUT/.claude/skills/$SKILL_NAME"
+write_own_checkout_path() {
+  [[ -f "$OWN_SKILL/SKILL.md" ]] || return 0
+  [[ "$(head -n 1 "$OWN_SKILL/checkout-path.txt" 2>/dev/null)" == "$CHECKOUT" ]] && return 0
+  printf '%s\n' "$CHECKOUT" > "$OWN_SKILL/checkout-path.txt" 2>/dev/null \
+    || echo "warning: could not write $OWN_SKILL/checkout-path.txt; the skill will ask where this folder is." >&2
+}
+own_checkout_path_state() {
+  if [[ ! -f "$OWN_SKILL/SKILL.md" ]]; then echo "$SKIP skill path file  this checkout has no skill folder"
+  elif [[ "$(head -n 1 "$OWN_SKILL/checkout-path.txt" 2>/dev/null)" == "$CHECKOUT" ]]; then
+    echo "$OK skill path file     $OWN_SKILL/checkout-path.txt points here"
+  else
+    echo "$BAD skill path file     $OWN_SKILL/checkout-path.txt is missing or points elsewhere, so the skill will ask where this folder is. Write it (changes nothing else): scripts/setup_isaac_local.sh --refresh-skill --skill-dir \"$CHECKOUT/.claude/skills\""
+  fi
+}
 
 # The installed skill is a COPY. Scientists start `claude` outside this folder, so Claude Code runs
 # that copy, which can be older than this checkout's. Compare them (ignoring checkout-path.txt and
@@ -111,7 +167,13 @@ have_portal()     { compgen -G "$HOME/.cache/isaac/portal-validator/*/venv/bin/p
 skill_state() {
   local src="$CHECKOUT/.claude/skills/$SKILL_NAME" dest="$SKILL_DIR/$SKILL_NAME" recorded=""
   if [[ ! -f "$dest/SKILL.md" ]]; then
-    echo "$SKIP skill not installed at $dest (copy it: scripts/setup_isaac_local.sh --refresh-skill$SKILL_DIR_ARG)"; return
+    if [[ "$SKILL_DIR" == "$DEFAULT_SKILL_DIR" && -f "$src/SKILL.md" ]]; then
+      # the usual way: Claude Code started IN this folder uses this folder's own copy; no other copy to go stale
+      echo "$OK skill                this folder's own copy ($src) is used when Claude Code is started in this folder (to use it from any folder too: scripts/setup_isaac_local.sh --install-skill)"
+    else
+      echo "$SKIP skill not installed at $dest (copy it: scripts/setup_isaac_local.sh --refresh-skill$SKILL_DIR_ARG)"
+    fi
+    return
   fi
   if [[ ! -f "$src/SKILL.md" ]]; then
     echo "$OK skill installed at $dest (this checkout has no copy to compare with)"; return
@@ -337,26 +399,32 @@ if [[ $UPDATE -eq 1 ]]; then
 fi
 
 if [[ $CHECK_ONLY -eq 0 && $WITH_CLI -eq 1 ]]; then
-  # A Python >= 3.11 must exist, or uv must be able to fetch one. Explain, don't guess.
+  # A Python 3.11 must exist, or uv must be able to fetch one. Explain, don't guess.
   if [[ ! -x "$VENV/bin/python" ]] && ! command -v uv >/dev/null 2>&1; then
     found=""
-    for c in python3.11 python3.12 python3.13 python3; do
-      if command -v "$c" >/dev/null 2>&1 && version_ok "$(command -v "$c")"; then found="$c"; break; fi
+    for c in python3.11 python3; do
+      if command -v "$c" >/dev/null 2>&1 && is_311 "$(command -v "$c")"; then found="$c"; break; fi
     done
     if [[ -z "$found" ]]; then
       cat >&2 <<'MSG'
-error: this Mac has no Python 3.11 or newer, and no `uv` to fetch one. Nothing was changed.
+error: this Mac has no Python 3.11, and no `uv` to fetch one. Nothing was changed.
 Pick ONE of these, then run this script again:
   - install uv (a small installer, no admin rights):  curl -LsSf https://astral.sh/uv/install.sh | sh
-  - or install Python 3.11+ from https://www.python.org/downloads/ (or `brew install python@3.11`)
+  - or install Python 3.11 from https://www.python.org/downloads/ (or `brew install python@3.11`)
 MSG
       exit 2
     fi
   fi
+fi
+# from here on this run changes things (--check never does, and every refusal above changed nothing)
+[[ $CHECK_ONLY -eq 1 ]] || write_own_checkout_path
+
+if [[ $CHECK_ONLY -eq 0 && $WITH_CLI -eq 1 ]]; then
   echo "== 1/4 ISAAC command-line tools"
   if bash "$CHECKOUT/scripts/install_local_cli.sh"; then :; else
     echo "error: the command-line install failed; see the message above." >&2; PROBLEMS=$((PROBLEMS+1))
   fi
+  pick_python
   if [[ -x "$VENV/bin/python" ]] && ! have_reading; then
     "$VENV/bin/python" -m pip install --quiet -e "$CHECKOUT[reading]" \
       || { echo "warning: the PDF-reading extra (pypdf) did not install; quotes cited from a PDF cannot be checked." >&2; }
@@ -372,8 +440,11 @@ if [[ $CHECK_ONLY -eq 0 && $WITH_PROCESSING -eq 1 && $WITH_CLI -eq 1 && -x "$VEN
 fi
 
 if [[ $CHECK_ONLY -eq 0 && $WITH_PORTAL -eq 1 ]]; then
-  echo "== 3/4 Offline portal validator (pinned upstream commit)"
-  if have_portal; then echo "Already installed."; else
+  echo "== 3/4 Offline portal validator (shipped in vendor/, pinned upstream commit; its packages go into .venv)"
+  if [[ "$(portal_state)" == "ok vendored "* ]]; then echo "Already installed: $(portal_state | cut -d' ' -f2-)."
+  elif [[ ! -x "$VENV/bin/python" ]]; then
+    echo "warning: no $VENV yet (step 1 did not finish), so the portal validator's packages were not installed." >&2
+  else
     bash "$CHECKOUT/scripts/install_portal_validator.sh" \
       || { echo "warning: the portal validator did not install; records cannot become 'exportable' without it." >&2; }
   fi
@@ -428,13 +499,15 @@ UPDATE_STATE="$(update_state)"
 # --- final checklist (what is true now, measured, not assumed) -------------------------------
 echo
 echo "================ ISAAC local setup: checklist ================"
-if [[ -x "$VENV/bin/python" ]] && version_ok "$VENV/bin/python"; then
-  echo "$OK Python environment   $("$VENV/bin/python" -V) in $VENV"
+if [[ -x "$PYBIN" ]] && version_ok "$PYBIN"; then
+  PY_NOTE=""
+  is_311 "$PYBIN" || PY_NOTE=" (not 3.11, the version ISAAC is tested with; to rebuild on 3.11: move that .venv aside, then run scripts/setup_isaac_local.sh)"
+  echo "$OK Python environment   $("$PYBIN" -V) in $(dirname "$(dirname "$PYBIN")")$PY_NOTE$VENV_NOTE"
 else
   echo "$BAD Python environment   none yet. Run: scripts/setup_isaac_local.sh"; PROBLEMS=$((PROBLEMS+1))
 fi
 if have_cli; then
-  echo "$OK isaac command        $VENV/bin/isaac"
+  echo "$OK isaac command        $(dirname "$PYBIN")/isaac"
 else
   echo "$BAD isaac command        not working. Run: scripts/setup_isaac_local.sh"; PROBLEMS=$((PROBLEMS+1))
 fi
@@ -442,15 +515,27 @@ if have_processing; then echo "$OK processing           spectrum processing is a
 else echo "$BAD processing           not installed (curves and quality checks unavailable). Run: scripts/setup_isaac_local.sh --with-processing"; fi
 if have_reading; then echo "$OK pdf reading         PDF text for the quote check is available"
 else echo "$BAD pdf reading         not installed (quotes cited from a PDF cannot be checked). Run: scripts/setup_isaac_local.sh"; fi
-if have_portal; then echo "$OK portal check         offline portal validator found"
-else echo "$BAD portal check         not installed (records cannot become 'exportable'). Run: scripts/install_portal_validator.sh"; fi
+PORTAL_STATE="$(portal_state)"
+if [[ "$PORTAL_STATE" == ok\ * ]]; then
+  read -r _ p_source p_commit p_python <<<"$PORTAL_STATE"
+  case "$p_source" in
+    vendored) p_where="the copy shipped in vendor/isaac-portal-validator/" ;;
+    *) p_where="the folder ISAAC_PORTAL_VALIDATOR_DIR names" ;;
+  esac
+  echo "$OK portal check         offline portal validator at $p_commit: $p_where, run with $p_python"
+else
+  echo "$BAD portal check         not ready (records cannot become 'exportable'): ${PORTAL_STATE#no }. Run: scripts/setup_isaac_local.sh"
+fi
+if [[ -n "$(pdftoppm_path)" ]]; then echo "$OK pdf pages           $(pdftoppm_path) (Claude can look at PDF pages as images)"
+else echo "[optional] pdf pages    pdftoppm not found: Claude cannot look at scanned PDF pages as images (text PDFs still work). Install it with Homebrew: brew install poppler"; fi
+own_checkout_path_state
 echo "$SKILL_STATE"
 echo "$UPDATE_STATE"
 echo
 echo "Next steps:"
 echo "  1. Check everything works end to end on made-up data:  scripts/isaac_selftest.sh"
-echo "  2. In a terminal:  cd <your beamtime folder's parent>   then start Claude Code:  claude"
-echo "  3. Ask:  /isaac-historical-import   (install the skill first with --install-skill if you have not)"
+echo "  2. In this folder ($CHECKOUT) start Claude Code:  claude"
+echo "  3. Type  /isaac-historical-import  and tell it where your beamtime folder is (it uses this folder's own copy of the skill)"
 echo "Your data stays on this computer unless you let Claude read it; the skill asks you first."
 [[ $PROBLEMS -eq 0 ]] || { echo; echo "Some required parts are missing (see [missing] above)."; exit 1; }
 exit 0

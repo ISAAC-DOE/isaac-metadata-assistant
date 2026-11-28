@@ -1,0 +1,172 @@
+{
+  "title": "What an ISAAC record is",
+  "version": "2026-10-06.3",
+  "purpose": "The contract every person and agent follows to build ISAAC records. Served at GET /portal/api/contract and rendered on the Record-Granularity wiki page from this one file.",
+  "definition": "One record holds one result: one sample or one model, one measurement or one calculation, one set of conditions, the values that measurement or calculation produced, and the one work they come from. Several values from the same measurement stay together: three Faradaic efficiencies from one GC injection are one record, and a spectrum or a time series is a measurement.series inside one record.",
+  "kinds": [
+    {
+      "kind": "A catalytic activity, measured",
+      "record_domain": "performance",
+      "example": "Faradaic efficiencies of a Cu electrode at -1.0 V vs RHE in a flow cell; the NH3 formation rate of a Ru catalyst at 673 K and 1 MPa"
+    },
+    {
+      "kind": "A structure or state, measured",
+      "record_domain": "characterization",
+      "example": "The Cu K-edge XANES of the as-prepared catalyst; its XRD lattice parameter"
+    },
+    {
+      "kind": "A calculation",
+      "record_domain": "simulation",
+      "example": "The CO adsorption energy on Cu(100) with PBE; a simulated XANES spectrum"
+    }
+  ],
+  "procedure": [
+    "For each value you want to store, answer four questions: which work measured or computed it; on which sample or model; by which technique; under which conditions. For a computed value, the technique is the method this result's methods write-up names: the code, and the functional or other level of theory (a wavefunction method, a force field), with a dispersion or solvation correction when the write-up applies one to this result. Never take them from another calculation, a citation or a software default. For an experiment, the conditions include the temperature, pressure, feed or electrolyte, potential or current, and the cell or reactor that the source states.",
+    "The work that measured or computed a value is its source. If the text in front of you reports a value from other work (a review, a benchmark table, an introduction, or the answer of a search or question-answering tool), open that work and build the record from it. Cite the document you started from with relation 'reference'. A tool's answer is never a source, and a value you cannot read in the work itself is not recorded. An asset's sha256 is the SHA-256 of the bytes its URI returns. A paper cited by its DOI takes 'not_available_literature_source', even when you hold a PDF or a text extract of it. Any other resource you do not hold, or cannot hash, takes 'not_available'. Never zeros. A URI may need sign-in (a file server, object store or shared file system the record's readers can open); a path that exists only on the writing machine is no asset.",
+    "Values with the same four answers go in one record. A different answer to any of the four starts a new record. For a calculation, the model is the whole computed system: a different adsorbate, site or coverage is a different model and a new record (CO, H and O adsorbed on Pd(111) are three records).",
+    "A measured value and a computed value are two records, even when one source reports both. Link them only with a relation the source states (Links). When the source explicitly assigns one as the other's control, reference or baseline, the record that uses it carries intended_comparison_target to it. A value the source says was computed from the other result carries derived_from. A calculation made to test the measurement carries validates when the source reports agreement and invalidates when it reports disagreement. \"Consistent with\" is not agreement. A calculation that only explains a measurement takes no link.",
+    "A comparison between samples is one record per sample, each with its own absolute value. Samples shown side by side take no link. When the source explicitly assigns one sample as the control, reference or baseline of another, the record that uses it carries intended_comparison_target to it, with that passage in notes. A baseline this work measured is its own record, and the link to it stays. A baseline value this work quotes from other work is never this work's result: build that record from the work that measured it (step 2) and link to it; if you cannot build it, omit that link. Either way, the samples this work measured keep their records. A factor, a ratio against another sample, or a sentence is never the value.",
+    "A statement without a value of its own (a trend, a mechanism, a conclusion) is not an evidence record. Store the values it rests on.",
+    "State each condition as the source states it, and never fill one with a default. A temperature the source does not give is temperature_K null with temperature_basis 'not_reported'; 'room temperature' in the source is 298.15 K with temperature_basis 'room_temperature'. Other conditions the source does not give are not_reported where the vocabulary offers it. not_reported means this work never states the value: search the whole work (text, methods, tables, figure captions, footnotes and supporting information) before writing it. A calculation's temperature belongs to its method. Only an electronic energy with no thermal correction, or a 0 K enthalpy that adds only the zero-point energy, takes temperature_K 0, and only when the source states no other temperature. Molecular dynamics, Monte Carlo and microkinetic results, and free energies, take the temperature the source states; if it states none, temperature_K is null with temperature_basis 'not_reported', never an assumed 298.15 K. This rule is for calculations only.",
+    "Descriptor names, units and the keys of system.configuration are open: when the vocabulary has no entry, write the source's own term, and the validator accepts it with an information note. Every other controlled field takes one term from a fixed list (GET /portal/api/ontology lists them all). Never write a nearby term. When an optional field has no right term, leave it out and name the gap in the notes. When a required field has none, the record waits for the term: propose it with POST /portal/api/vocabulary/proposals (section, category, term, and what it means) or in the portal's Ontology Editor, and store the record once it is added; GET /portal/api/vocabulary/proposals shows the decision. Report each waiting result with the records you deliver: its value, the field and the term it waits for. Never drop it silently."
+  ],
+  "never_a_record_note": "Each of these has reached the repository, and each loses what a reader needs to use the number. An error rejects the upload. A hold warning keeps the record private until a corrected version passes without hold warnings. Any other warning is accepted: follow its text, which may tell you to keep a value as not_reported. Most of these checks read words and strings, so many of them only warn: a legitimate record can look like one of these patterns (a particle size range, a facet label, a paper cited with its SI).",
+  "never_a_record": [
+    {
+      "stored_as": "A whole paper in one record",
+      "why": "Several catalysts at several conditions in one record cannot be queried",
+      "isaac_form": "One record per sample, measurement and condition",
+      "codes": [
+        "DUPLICATE_DESCRIPTOR_NAME",
+        "QUALIFIER_NOT_A_PRODUCT"
+      ]
+    },
+    {
+      "stored_as": "A survey, review or benchmark across studies",
+      "why": "No sample, no condition and no single measurement stand behind the number",
+      "isaac_form": "One record per original result, built from the original paper",
+      "codes": [
+        "SAMPLE_NOT_ONE_MATERIAL",
+        "MULTIPLE_SOURCES"
+      ]
+    },
+    {
+      "stored_as": "A value the source quotes from another paper",
+      "why": "The measurement belongs to the other paper",
+      "isaac_form": "A record of the other paper, built from that paper",
+      "codes": [
+        "SAMPLE_NAME_CITES_A_PAPER"
+      ]
+    },
+    {
+      "stored_as": "A conclusion or a mechanism",
+      "why": "A claim interprets results",
+      "isaac_form": "No record; store the measurements it rests on",
+      "codes": [
+        "SENTENCE_AS_VALUE"
+      ]
+    },
+    {
+      "stored_as": "A series, a range or a factor written as text ('4.06, 8.03, 9.24'; 'sixfold')",
+      "why": "A string cannot be compared, filtered or plotted",
+      "isaac_form": "measurement.series, separate records, or each sample's own value",
+      "codes": [
+        "NUMBER_AS_TEXT"
+      ]
+    },
+    {
+      "stored_as": "A comparison with another sample stored as a value",
+      "why": "The number means nothing without the other sample's own value",
+      "isaac_form": "One record per sample, each with its own absolute value; a link only where the source explicitly assigns one sample as the other's control, reference or baseline",
+      "codes": []
+    },
+    {
+      "stored_as": "An activity, a characterization and a calculation in one record",
+      "why": "Three kinds of result share one set of fields",
+      "isaac_form": "Three records; a link only where the source states a relation between two of them",
+      "codes": []
+    },
+    {
+      "stored_as": "A reactor or cell test stored as ex_situ",
+      "why": "Performance is measured while the reaction runs",
+      "isaac_form": "context.environment in_situ or operando; a measurement outside the reaction is a characterization record",
+      "codes": [
+        "PERFORMANCE_EX_SITU"
+      ]
+    },
+    {
+      "stored_as": "A calculation filed as a measurement",
+      "why": "A computed number would be compared as if it were measured",
+      "isaac_form": "system.domain computational, a model sample, computation.method",
+      "codes": [
+        "DOMAIN_INCONSISTENT",
+        "COMPUTATION_ON_MEASUREMENT"
+      ]
+    },
+    {
+      "stored_as": "'The authors' or 'unknown' as the producer",
+      "why": "It names no one, and the independence of two results is judged by who produced them",
+      "isaac_form": "The group as printed in the source: the PI's name plus 'group'. Outside the literature, a producer that truly cannot be named (anonymized or industrial data) is not_reported",
+      "codes": [
+        "PRODUCED_BY_MISSING",
+        "PRODUCED_BY_UNNAMED"
+      ]
+    },
+    {
+      "stored_as": "A vocabulary term known to be wrong",
+      "why": "Every query on that field returns a false match",
+      "isaac_form": "Use the exact term. If none fits, leave an optional field out and name the gap in the notes; for a required field, propose the term and store the record once it exists",
+      "codes": [
+        "VOCABULARY_SUBSTITUTION"
+      ]
+    }
+  ],
+  "submission": [
+    "Validate every record with POST /portal/api/validate before submitting it. Its outcome says what a submission would do: publish, hold or reject.",
+    "Fix every error. Errors reject the upload (HTTP 400), and each one names its fix.",
+    "Fix every hold warning. A record that carries one is stored privately and not published (HTTP 409, reason held). It is not visible to anyone else, in search results, or to discovery agents. Send a corrected version without hold warnings with POST or PUT, and it is published. Stop a batch at the first held record, fix the cause in your pipeline, then continue.",
+    "Read every other warning. Records with other warnings are accepted; each warning flags a pattern on this page: fix the record, or keep it as it is only when you have checked that the warning does not apply.",
+    "Submit with POST /portal/api/records and read the whole response: 201 published, 409 held or held_backlog, 400 rejected.",
+    "Check GET /portal/api/records/held and GET /portal/api/records/attention from time to time. They list your held records, your stored records that no longer meet the current rules, and the warnings your stored records carry. Send a new version only when the source states a value the record lacks or contradicts; a warning that stays is an accepted outcome, and a usual value written to remove one is an error in the record."
+  ],
+  "examples": [
+    {
+      "case": "A laboratory measurement of catalytic activity",
+      "files": [
+        "examples/co2rr_performance_record.json"
+      ]
+    },
+    {
+      "case": "An ex situ spectrum of a material",
+      "files": [
+        "examples/ex_situ_xanes_cuo2_record.json"
+      ]
+    },
+    {
+      "case": "A calculation",
+      "files": [
+        "examples/dft_neb_evidence_record.json"
+      ]
+    },
+    {
+      "case": "A value first read in a review, recorded from the original paper that measured it",
+      "files": [
+        "examples/literature_original_paper_rate_record.json"
+      ]
+    },
+    {
+      "case": "One paper, two catalysts: one record each, and a link only because the source names one as the reference",
+      "files": [
+        "examples/literature_paper_catalyst_a_record.json",
+        "examples/literature_paper_catalyst_b_record.json"
+      ]
+    },
+    {
+      "case": "One paper, a measurement and a calculation: two records",
+      "files": [
+        "examples/literature_paper_catalyst_a_record.json",
+        "examples/literature_paper_calculation_record.json"
+      ]
+    }
+  ]
+}

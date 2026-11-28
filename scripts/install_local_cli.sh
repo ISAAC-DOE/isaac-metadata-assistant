@@ -2,15 +2,16 @@
 # Install the local-first `isaac import` / `isaac bundle` CLI into THIS checkout's .venv.
 #
 # What it does (idempotent; safe to re-run):
-#   1. ensures <checkout>/.venv exists with Python >= 3.11 — created with `uv venv` if
-#      uv is installed, else `python3.11 -m venv` (or `python3` if that is >= 3.11);
+#   1. ensures <checkout>/.venv exists. A NEW one is made with Python 3.11, the version ISAAC is
+#      tested with: `uv venv --python 3.11` if uv is installed, else `python3.11 -m venv` (or `python3`
+#      if that is 3.11). An existing .venv on Python >= 3.11 is kept and said;
 #   2. `pip install -e .` into that venv (the `isaac` command and the truth core);
 #   3. writes ONE .pth file into the venv's site-packages pointing at
 #      <checkout>/apps/api, so `isaac import` can import `isaac_api` from any directory.
 #
 # What it may download: `pip install -e .` resolves pyproject.toml's dependencies (and
 # setuptools for the editable build) from the package index; and when uv is used,
-# `uv venv --python ">=3.11"` DOWNLOADS a Python build if none >= 3.11 is installed.
+# `uv venv --python 3.11` DOWNLOADS a Python 3.11 build if none is installed.
 # What it never does: touch system Python, install anything outside .venv, or touch
 # Docker. It does not change pyproject.toml packaging: isaac_api is put on the venv's
 # path, not installed, so the server image keeps importing its own copied apps/api/.
@@ -25,8 +26,11 @@ if [[ ! -f "$CHECKOUT/schema/isaac_record_v1.json" || ! -d "$CHECKOUT/apps/api/i
   exit 2
 fi
 
-version_ok() {  # $1 = python executable; true if it is >= 3.11
+version_ok() {  # $1 = python executable; true if it is >= 3.11 (an existing .venv may be newer)
   "$1" -c 'import sys; raise SystemExit(0 if sys.version_info >= (3, 11) else 1)' 2>/dev/null
+}
+is_311() {  # $1 = python executable; true if it is 3.11 (what a NEW .venv is made with)
+  "$1" -c 'import sys; raise SystemExit(0 if sys.version_info[:2] == (3, 11) else 1)' 2>/dev/null
 }
 
 if [[ -x "$VENV/bin/python" ]]; then
@@ -36,21 +40,22 @@ if [[ -x "$VENV/bin/python" ]]; then
     exit 2
   fi
   echo "Using existing $VENV ($("$VENV/bin/python" -V))."
+  is_311 "$VENV/bin/python" || echo "note: ISAAC is tested with Python 3.11; to rebuild on it, move $VENV aside and re-run."
 else
   if command -v uv >/dev/null 2>&1; then
-    echo "Creating $VENV with uv (Python >= 3.11; uv may download a Python build if none is installed)..."
-    uv venv --python ">=3.11" "$VENV"
+    echo "Creating $VENV with uv (Python 3.11; uv may download a Python 3.11 build if none is installed)..."
+    uv venv --python 3.11 "$VENV"
   else
     PY=""
-    for candidate in python3.11 python3.12 python3.13 python3; do
-      if command -v "$candidate" >/dev/null 2>&1 && version_ok "$(command -v "$candidate")"; then
+    for candidate in python3.11 python3; do
+      if command -v "$candidate" >/dev/null 2>&1 && is_311 "$(command -v "$candidate")"; then
         PY="$(command -v "$candidate")"
         break
       fi
     done
     if [[ -z "$PY" ]]; then
-      echo "error: no Python >= 3.11 found (tried python3.11, python3.12, python3.13, python3)." >&2
-      echo "       Install one (or uv), then re-run. Nothing was changed." >&2
+      echo "error: no Python 3.11 found (tried python3.11, python3)." >&2
+      echo "       Install it (or uv, which fetches it), then re-run. Nothing was changed." >&2
       exit 2
     fi
     echo "Creating $VENV with $PY..."

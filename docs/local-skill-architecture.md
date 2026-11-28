@@ -1,6 +1,6 @@
 # Local-first import: architecture for developers
 
-Record-shape guidance comes from the upstream record contract (`data/record_contract.json` in the pinned clone under `~/.cache/isaac/portal-validator/<sha>/src/`, and the wiki "What an ISAAC record is").
+Record-shape guidance comes from the upstream record contract (`vendor/isaac-portal-validator/a1cb1c8/data/record_contract.json`, shipped with the repository at the pinned upstream commit, see that folder's `PROVENANCE.md`; and the wiki "What an ISAAC record is").
 
 Companion to `docs/local-import-bundle-contract.md` (the machine contract), `docs/local-first-data-flows.md`
 (which flows carry data where), and decisions `DEC-76`…`DEC-94` in
@@ -62,7 +62,8 @@ synthetic `multi_operator_corpus` with decisions labelled `SYNTHETIC SELF-TEST (
 
 Per draft, `bundle validate` runs: draft no-guessing checks → export dry run (`isaac_records.export`)
 → the official schema and exactness check → the **offline upstream portal validator** pinned at
-`a1cb1c8` (isolated interpreter, `scripts/install_portal_validator.sh`). Every report names which
+`a1cb1c8`, shipped in `vendor/isaac-portal-validator/` (isolated interpreter; its packages installed by
+`scripts/setup_isaac_local.sh`). Every report names which
 schema each verdict used: the vendored schema stays the website's authority, the pinned
 upstream schema is what the portal enforces and is the only one that gates (`validate_draft_file`).
 Since 2026-11-16 the vendored schema is the pinned commit's own document (`schema/PROVENANCE.md`),

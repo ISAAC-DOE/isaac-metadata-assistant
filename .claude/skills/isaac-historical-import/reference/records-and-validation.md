@@ -33,7 +33,7 @@ Open `validation/<group id>.json` only for a group those leave unexplained.
 |---|---|---|
 | `incomplete` | "These required facts are still missing: …" | answer the blocking questions (Step 7). `measurement.series`, `measurement.qc.status` and `descriptors.outputs` are missing until the group's curve is approved: the file's `processing_fix` says so, and the fix is Step 6. `processing_fix` is a template: never run it as it is |
 | `invalid_official` | "A value is in the wrong form: …" (quote `first_official_error`) | correct that value |
-| `portal_check_unavailable` | "The offline portal check is not installed, so this cannot count as ready." | `scripts/install_portal_validator.sh`, then `validate` again |
+| `portal_check_unavailable` | "The offline portal check is not installed, so this cannot count as ready." | `scripts/setup_isaac_local.sh` (it sets up the portal check shipped in `vendor/isaac-portal-validator/`), then `validate` again |
 | `portal_check_degraded` | "The portal check ran only partly, so this cannot count as ready." | re-install the validator; if it persists, report it |
 | `portal_hold` | "The portal would hold this record for a warning: …" | explain the warning; ask whether to fix or leave unexported |
 | `portal_reject` | "The portal would reject this: …" | fix the stated value or leave it unexported |
@@ -135,7 +135,8 @@ Then ask: "Does all of this look right, or what should change?"
 ## Record shape
 
 When the scientist asks "what should this record hold?", answer from the upstream record contract, not from memory:
-`~/.cache/isaac/portal-validator/<sha>/src/data/record_contract.json` and the wiki page "What an ISAAC record is".
+`vendor/isaac-portal-validator/a1cb1c8/data/record_contract.json` in the ISAAC folder (shipped with the repository)
+and the wiki page "What an ISAAC record is".
 One record is one result: one sample, one measurement, one set of conditions, the values it produced, the work they come from.
 
 A record of an approved curve carries:
