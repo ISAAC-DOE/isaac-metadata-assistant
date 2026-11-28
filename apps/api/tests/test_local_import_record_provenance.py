@@ -125,7 +125,8 @@ def test_the_v1_record_validates_and_carries_its_processing_story(bdir, tmp_path
     for said in ("Energy: no absolute energy calibration was applied", "not across beamtimes",
                  "not traced to a tabulated energy", "scan-to-scan spread of the raw IF/I0",
                  "grid point of the maximum first derivative", "no self-absorption (over-absorption) correction",
-                 "aligned to one beamtime energy reference, the I0 glitch", "anchored on the earliest group", "shifts ",
+                 "aligned to one beamtime energy reference, the I0 glitch",
+                 "onto the beamtime zero", "earliest fine-grid anchors", "shifts ",   # 1.1.0: the zero rule (N3)
                  " meV", "Scans: 4 of 6 kept (4 merged), 2 dropped (the scientist's decision: ",
                  "Normalisation: Victoreen background + McMaster step", "pre-edge ",
                  "post-edge ", "Points excluded: none", "edge step", "no edge-step name", res["result_id"]):

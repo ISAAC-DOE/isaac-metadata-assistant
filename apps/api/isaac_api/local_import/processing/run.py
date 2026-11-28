@@ -2205,7 +2205,7 @@ def run_series_pass(groups: Sequence[Mapping], ctx: _Ctx, out_dir: Path, *, reus
                 return {**got, "fingerprint": fp, "reused": True}
         return {**scan_selection_series(groups, ctx), "fingerprint": fp, "reused": False, "computed_utc": now}
     except Exception as exc:  # noqa: BLE001 - never a processing failure
-        return {"series": {}, "of": {}, "error": f"{type(exc).__name__}: {exc}"[:300]}
+        return {"series": {}, "of": {}, "error": C.plain_error(exc, "the series pass")[:300]}
 
 
 def _series_payload(ser: Mapping) -> dict:
@@ -2312,7 +2312,7 @@ def _propose_scan_selection(group: Mapping, ctx: _Ctx, scans: Sequence[Mapping],
         return _propose_scan_selection_unguarded(group, ctx, scans, used_entries, scans_data, header_of, inputs, cal,
                                                  mode=mode, energy_column=energy_column)
     except Exception as exc:  # noqa: BLE001 - review M4: a proposal that cannot be made is said, never a failure
-        return _not_evaluated_selection(f"{type(exc).__name__}: {exc}"[:300])
+        return _not_evaluated_selection(C.plain_error(exc, "the scan-selection analysis")[:300])
 
 
 def _not_evaluated_selection(detail: str) -> dict:
@@ -2370,7 +2370,7 @@ def _propose_scan_selection_unguarded(group: Mapping, ctx: _Ctx, scans: Sequence
             return None
         core = C.scan_selection(evaluated, e0s, np)
     except Exception as exc:  # noqa: BLE001 - a proposal that cannot be made is said, never a processing failure
-        return _not_evaluated_selection(f"{type(exc).__name__}: {exc}"[:300])
+        return _not_evaluated_selection(C.plain_error(exc, "the scan-selection analysis")[:300])
     got = {x["key"]: x for x in core.pop("scans")}
     file_of_number = {}
     per_scan = []
@@ -2469,7 +2469,7 @@ def _attach_scan_selection(res: dict, sel: Mapping, group_id: str) -> None:
     try:
         said = _scan_selection_statement(sel, group_id) if sel.get("status") == "evaluated" else None
     except Exception as exc:  # noqa: BLE001 - review M4: the proposal is kept as not evaluated, never a failure
-        res[SCAN_SELECTION_KEY] = _not_evaluated_selection(f"the sentence failed: {type(exc).__name__}: {exc}"[:300])
+        res[SCAN_SELECTION_KEY] = _not_evaluated_selection(C.plain_error(exc, "the scan-selection sentence")[:300])
         return
     res[SCAN_SELECTION_KEY] = sel
     if said:
@@ -3733,7 +3733,16 @@ def athena_never_statement(projects: int, sections: Sequence[str] = ()) -> str:
     return said
 
 
-def process_bundle(
+def process_bundle(*args, **kwargs) -> dict:
+    """:func:`_process_bundle` (its docstring says what it does), with the bundle's processing diagnostics file
+    (core.DIAGNOSTICS_FILE, N7) closed again whatever happens, so no later call writes into this bundle's."""
+    try:
+        return _process_bundle(*args, **kwargs)
+    finally:
+        C.set_diagnostics(None)
+
+
+def _process_bundle(
     bundle_dir: Path,
     *,
     source_root: Path | None = None,
@@ -3806,6 +3815,9 @@ def process_bundle(
     runs_by_key = {r["run_key"]: r for r in bundle.get("runs") or ()}
     sources = {s["source_id"]: s for s in bundle.get("sources") or () if s.get("source_id")}
     ctx = _Ctx(bundle=bundle, bundle_dir=bundle_dir, root=root, params=resolved, np=np, xafs=xafs, out_dir=out_dir, sources=sources, runs_by_key=runs_by_key)
+    # N7: the technical text of any step that stops on an exception goes here, never into a record
+    out_dir.mkdir(parents=True, exist_ok=True)
+    C.set_diagnostics(out_dir / C.DIAGNOSTICS_FILE)
     ctx.scan_reader = scan_reader or read_scan_file
     ctx.calibration_approvals = dict(calibration_approvals or {})
     ctx.exclusions = P.scan_exclusions(params)  # r4-a M6: scans a params file leaves out of a named group's merge
@@ -3876,7 +3888,7 @@ def process_bundle(
                             r[EX.ENGINE_KEY] = {"protocol_id": P.PROTOCOL_ID, "reason": why,
                                                 "statement": f"Processed by {P.PROTOCOL_ID}, not {EX.PROTOCOL_ID}: {why}."}
         except Exception as exc:  # noqa: BLE001 - one group's crash is that group's failure, never a pass
-            out = [_fail(_base(g, "isaac_protocol"), "processing_error", f"{type(exc).__name__}: {exc}"[:500])]
+            out = [_fail(_base(g, "isaac_protocol"), "processing_error", C.plain_error(exc, "processing this group")[:500])]
         for r in out:
             _null_non_finite(r)
         (unread_results if g.get("group_kind") in ("unread_acquisition", "generic_run") else results).extend(out)

@@ -76,7 +76,7 @@ def _read(root: Path | None, f: Mapping, np) -> tuple[Any, Any, str | None]:
     try:
         rows = two_column.read(path).rows
     except (ValueError, OSError) as exc:
-        return None, None, f"it could not be read as two numeric columns ({type(exc).__name__})"
+        return None, None, "it could not be read as two numeric columns (" + C.plain_error(exc, "reading it").split(": ", 1)[-1] + ")"
     pairs = [(r[0], r[1]) for r in rows if len(r) >= 2 and r[0] is not None and r[1] is not None
              and math.isfinite(r[0]) and math.isfinite(r[1])]
     if len(pairs) < 2:
@@ -230,7 +230,7 @@ def compare_one(po: Mapping, link: Mapping, *, group: Mapping, root: Path | None
             try:
                 sci_norm, step_ = normalizer(e, y)
             except Exception as exc:  # noqa: BLE001
-                out["reason"] = f"Not compared: normalising it as ISAAC's result is normalised failed ({type(exc).__name__})."
+                out["reason"] = "Not compared: " + C.plain_error(exc, "normalising it as ISAAC's result is normalised") + "."
                 return out
             out["assumptions"].append(
                 "not normalised: normalised here exactly as ISAAC's result is (the engine's Victoreen + McMaster, the "
@@ -278,5 +278,5 @@ def compare_group(group: Mapping, ctx: Any, *, grid_ok, mean, nm: Mapping, M, gr
         except Exception as exc:  # noqa: BLE001 - a reference that cannot be compared never fails ISAAC's result
             out.append({"rule_id": RULE_ID, "processed_output_id": po.get("processed_output_id"), "role": ROLE,
                         "preferred_for_record": False, "treated_as_truth": False, "verdict": "not_comparable",
-                        "reason": f"Not compared: {type(exc).__name__}.", "statement": _LABEL})
+                        "reason": "Not compared: " + C.plain_error(exc, "the comparison") + ".", "statement": _LABEL})
     return out

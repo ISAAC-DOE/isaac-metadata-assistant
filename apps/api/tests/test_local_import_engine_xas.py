@@ -855,13 +855,18 @@ def test_a_failed_engine_pass_keeps_every_group_on_v0_and_says_why(tmp_path, mon
     bdir, _ = imported(tmp_path, _two_groups())
     res = [r for r in M.load(bdir)["processing_results"] if r["source"] == "isaac_protocol"]
     assert res and {r["protocol_id"] for r in res} == {"isaac.xas.v0"}
+    # N7 (28 Nov 2026): the reason is a plain sentence; the raw exception text never reaches a record (it goes to the
+    # processing log, stderr). This test pinned the raw text before; it now pins its absence.
     for r in res:
-        assert "the engine's beamtime pass failed (RuntimeError: SYN engine failure)" in r[EX.ENGINE_KEY]["reason"]
+        reason = r[EX.ENGINE_KEY]["reason"]
+        assert reason.startswith("the engine's beamtime pass failed (the beamtime pass could not be completed")
+        assert "RuntimeError" not in reason and "SYN engine failure" not in reason
     payload = json.loads((bdir / "processing" / "processing_results.json").read_text())
-    assert payload[EX.BEAMTIME_KEY]["error"].startswith("RuntimeError")
-    capsys.readouterr()
+    assert "RuntimeError" not in payload[EX.BEAMTIME_KEY]["error"]
+    assert payload[EX.BEAMTIME_KEY]["error"].startswith("the beamtime pass could not be completed")
+    assert "SYN engine failure" in capsys.readouterr().err      # the technical detail: in the log only
     assert cli.main(["bundle", "show", str(bdir), "processing-result", res[0]["result_id"]]) == 0
-    assert "SYN engine failure" in json.loads(capsys.readouterr().out)["engine"]["reason"]
+    assert "SYN engine failure" not in json.loads(capsys.readouterr().out)["engine"]["reason"]
 
 
 def test_without_the_processing_extra_the_default_path_says_unavailable(tmp_path, monkeypatch):
@@ -1347,7 +1352,9 @@ def test_dose_rules_never_fire_on_one_spot_on_intensity_or_on_a_global_trend(tmp
         runs = _dose_run(lambda j, k: 3.0 - 0.1 * k)
     bdir, _ = imported(tmp_path, runs)
     r = by_run(v1_results(bdir), "02_SYN_ZZ2")
-    assert _dose(r).get("outcome") in (None,), _dose(r)
+    # N6 (28 Nov 2026): a judged check that found nothing (or found the sample's own trend) SAYS so, deciding nothing
+    assert _dose(r).get("outcome") in (EX.DOSE_NO_CHANGE, EX.DOSE_EVOLUTION), _dose(r)
+    assert EX.DOSE_QUESTION_FLAG not in r["review_flags"]
     codes = {y["code"] for x in r[EX.DECISIONS_KEY]["rows"] for y in x["reasons"]}
     assert not codes & {EX.DOSE_CODE, EX.SETTLING_CODE}
     if case != "global_trend":
@@ -1381,7 +1388,8 @@ def test_identical_scans_with_counting_noise_show_no_dose_trend(tmp_path, counts
         assert "not judged at this count level" in d["statement"] and "cannot be told" in d["statement"]
         assert "dose_damage" in r["qc"]["statements"]
     else:
-        assert d.get("outcome") is None, d
+        assert d.get("outcome") == EX.DOSE_NO_CHANGE, d          # N6: judged, nothing found, said in one line
+        assert d["statement"].startswith("Beam damage judged at 4 spots") and "no consistent" in d["statement"]
     assert EX.DOSE_QUESTION_FLAG not in r["review_flags"]
     codes = {y["code"] for x in r[EX.DECISIONS_KEY]["rows"] for y in x["reasons"]}
     assert not codes & {EX.DOSE_CODE, EX.SETTLING_CODE}

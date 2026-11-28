@@ -94,8 +94,8 @@ fails with that reason, on v0 as on v1, and never comes out as a spectrum. `ISAA
 channel choice and BL15-2 absev rule (hash-checked); the engine's survey (`survey_files`, one entry per record group,
 spots and repeats pooled) picks the energy reference, its anchor method and window, and reads the `mono reset` lines;
 the I0 glitch is then located by a robust consensus of every scan's own dips (`isaac.xas.glitch_consensus.v1`, below);
-the reference is the EARLIEST group with good anchors, the robust MEDIAN of its validated scans' anchors; the
-normalisation window is the engine's
+the beamtime zero is the median of the validated anchors of the EARLIEST scans on a fine grid at the anchor
+(`isaac.xas.beamtime_zero_earliest_fine.v1`, 1.1.0 below); the normalisation window is the engine's
 default rule (`recipe_init.norm_range`) on the beamtime's modal grid, one per edge. With `--group`, the stored block is
 reused when its fingerprint (sources, groups, channel parameters, engine version) still holds.
 
@@ -173,7 +173,8 @@ scientist still approves each curve before it goes into a record.
   guard's noise threshold (the stability rule's floor, 3 x the scans' own sd), else it is kept and said
   (`change_within_noise`). Coverage is edge-relative: a scan under 90 % of the group's grid that covers 10 eV before the
   end of the pre-edge window to 50 eV into the post-edge window is complete (`shorter_but_complete`). The engine's
-  `ratio_shape` (E_edge + 6 eV to the grid end, 5 %) and `post_drift` (E_edge + 60..95 eV vs the last 40 eV, 15 %)
+  `ratio_shape` (from the tabulated edge to the grid end, 5 %; from E_edge + 6 eV at Pt L3, the package author's
+  recipe; 1.1.0) and `post_drift` (E_edge + 60..95 eV vs the last 40 eV, 15 %)
   screens run, glitch windows excluded; a flag drops only when, after a free scale and offset fitted over the pre-edge
   and post-edge, the smoothed residual still departs 5 % of the edge step and 5 x its noise (a within-scan step collapse
   is shape; a uniformly weaker scan, or one on a background, is not: `intensity_not_shape`). A WITHIN-SPOT
@@ -221,10 +222,69 @@ template is a scan with the glitch (the one nearest its group's median dip). Eve
 own dip within the shift limit of the consensus (else "no energy reference found in this scan"), an ok fit inside the
 fit window, and the fitted anchor at the beamtime's usual offset from its own dip within max(0.25 eV, 1.5 grid steps)
 (else "reference feature fit failed": the fit took another feature). A scan that fails is not aligned and not merged,
-says why, and changes no other scan's shift. The reference anchor is the median over the validated scans of the
-earliest group that has any (else the next earliest, said). With no reference at all (no foil, no glitch in most
+says why, and changes no other scan's shift. The reference anchor (the beamtime zero) is the median over the
+validated scans of the earliest group that has any on a fine grid (1.1.0, below; else the next earliest, said). With no reference at all (no foil, no glitch in most
 scans, no foil scans) every result says NO ENERGY REFERENCE, carries the review flag `no_energy_reference`, and a bulk
 approval refuses it.
+
+**What version 1.1.0 changed (28 Nov 2026; measured on six real beamtimes against the package author's reductions and
+the beamline scientist's merges; the beamtimes are described, not named: A and B are BL15-2 Ir L3 HERFD beamtimes of
+2021 and 2025, P a BL15-2 Pt L3 beamtime, C a BL6-2c Pt L3 beamtime, T a BL4-3 Ti K beamtime, S a BL4-3 S K beamtime; each item has a synthetic test in `test_local_import_engine_xas_beyond.py`).**
+- *A standard's mode is measured* (`isaac.xas.standard_mode_by_test.v1`, N1): a standard whose channel choice is
+  ln(I0/I1) is tested with the engine's own `measurement_mode` on its scans read in fluorescence, at the absorber's
+  tabulated edge; a standard whose ln(I0/I1) steps across the edge by at least `MODE_TRANS_STEP_ALONE` (0.05) stays on
+  transmission whatever its fluorescence channel shows or its name says; only one whose ln(I0/I1) has no edge and whose
+  fluorescence does is reduced in fluorescence (7 Ti K and 3 S K standards were reduced as a flat ln(I0/I1): edge steps
+  0.00-0.20 of the author's, now 1.008-1.028, rms <= 0.0002). A foil is never re-read.
+- *No raw exception text in a record* (`isaac.xas.plain_failure_reason.v1`, N7): a step that stops on an exception
+  says why in plain words, keeping what a person can act on ("the data have no 'Offsets block', which this step
+  needs"); the technical text goes to `processing/processing_diagnostics.log` in the bundle (and stderr) only.
+- *A glitch is checked against the sample* (`isaac.xas.glitch_tracks_sample.v1`, N2 / I2): in every hold of four or
+  more aligned scans, each scan's own half-height and white-line peak (raw axis, its own pre/post normalisation) are
+  compared with its glitch shift. The glitch is not used only on positive evidence: shifts large enough to matter, the
+  data ruling out even half-tracking for both features (slope + 2 standard errors under 0.5), and aligning making both
+  scatter more. Then no scan is aligned, every result says NO RELIABLE PER-SCAN ENERGY REFERENCE, carries
+  `no_energy_reference`, and no shift table or calibration step claims an alignment. A foil "timeline" of fewer than two
+  USABLE foil scans (the ones the timeline anchors) cannot measure drift and never beats a glitch most scans carry; with
+  no glitch either, no scan is aligned and every result says why. Only groups at the beamtime's edge are judged, and a
+  beamtime with groups at another edge never loses its routes to this check (`not_applied_mixed_edges`). Measured: beamtime
+  S (slopes 0.09 and 0.00, scatter 15 -> 20 and 10 -> 14 meV): not aligned; the four BL15-2 / BL6-2c beamtimes keep the
+  glitch (P: slope 0.28, upper bound 0.60).
+- *The beamtime zero* (`isaac.xas.beamtime_zero_earliest_fine.v1`, N3 / I3): the median of the validated anchors of the
+  earliest scans on a fine grid at the anchor (step at most 1.5 x the beamtime's modal step there; whole groups in time
+  order until at least three, only from groups starting within 6 h of the first scan; fewer within that window are used
+  and said), the scans nearest the staff's calibration of the mono. In beamtime B the first group (coarse at the anchor
+  against 0.10 eV steps elsewhere) had set it +49 meV high: records sat 52-80 meV above the beamline's absev scale,
+  now 2.5-30 meV (median 20: the mono's drift over the beamtime, which the alignment removes and the scientist's
+  unaligned merges keep). A coarse-grid group's own record says its anchors sit on a coarse grid
+  (`energy_reference.coarse_grid`; that first group of B, mean shift -47 meV). The median over the WHOLE beamtime was
+  measured and rejected: it puts B at -1 meV but moves P by +310 meV and C by +106 meV away from the calibrated scale and the author's reductions.
+- *A joint dose test* (N4 / I4): when the spots' scan-1 -> scan-2 differences share one sign, their mean is beyond 1 %
+  of the edge step and their joint z (sum d / sqrt(sum sigma^2)) is at least 5 (and 2 without the strongest spot), every
+  such spot counts as changed (the ones that did not pass alone with their own kind, `joint_only`, so a question
+  shows them) and the result is a QUESTION, never a drop. The test runs on the differences after the global trend is
+  taken out; a change beyond the noise only BEFORE that is the sample's evolution, said
+  (`change_carries_on_across_spots`), never promoted. The noise sigma was calibrated first by the audit's Poisson null
+  simulation (545 spots of beamtimes A and B: null spread 0.83-0.89 sigma, bias 0.00 sigma; sigma used as it is). It
+  asks about three groups of A that the per-spot rule missed; a fourth (joint z -9.5 before the trend is taken out, mostly one spot;
+  -3.3 and mixed signs after) gets the no-change line naming its two spots that change on their own after the trend
+  (spot 1 falls, spot 3 rises): the evolution sentence is used only when no spot passes alone after the trend, and a
+  joint result never meets the no-change line; it stays silent on B (largest sign-consistent |z|
+  3.28 after the trend, 3.73 before). A judged check that found nothing says so in one line
+  (`no_change_at_judged_spots`, N6).
+- *The ratio-shape window and spots* (N5 / I5): the window starts at the tabulated edge, before any white line (Pt L3
+  keeps +6 eV). A spot split by the shape screen is judged as a whole (`isaac.xas.spot_judged_as_a_whole.v1`): when its
+  kept scans also differ from at least two other spots in a normalised-shape metric beyond the noise, the same way as
+  the off-shape scan and nearer to it than to the other spots, the whole spot is dropped, but only with at least two
+  kept scans there and when they are not the first scans of the run; otherwise it is ASKED (a note
+  `spot_may_differ_as_a_whole`, flag `spots_disagree`, a bulk approval refused). One group of B (one kept scan, the
+  first of the run; the beamline scientist dropped both) and one of A are asked; no kept set of the author's or
+  the scientist's changes.
+- *Not built: a time-smoothed drift* (I1, `isaac.xas.time_smoothed_drift.v1`, OFF): it improves P (sample
+  half-height scatter 35.9 -> 27.6 meV) and A, but makes C (21.5 -> 23.1) and B (136.0 -> 136.2)
+  worse, so it stays off.
+- *The scoped verification statement* (`engine.verification`, `params.json` `verification`): what was checked against
+  what, and what was not; `protocol_status` stays `draft_unreviewed`.
 
 **Energy-reference lessons** (general, from the engine author's per-beamtime notes, which are not vendored): read the
 encoder energy (`absev`), not the SPEC `energy` column, which can wander from it by a few eV; a sharp, symmetric I0

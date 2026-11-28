@@ -22,6 +22,77 @@ class StepError(RuntimeError):
         self.detail = detail
 
 
+#: NO RAW EXCEPTION TEXT IN A RECORD (28 Nov 2026, N7): a step that stops on an exception says WHY in plain words. The
+#: known causes have their own sentence, keeping what a person can act on (which part of the data is missing); any
+#: other one says the step could not be completed. The technical text is written to the bundle's processing
+#: diagnostics file (:data:`DIAGNOSTICS_FILE`, set by ``isaac process``) and to stderr, never into a record.
+PLAIN_ERROR_RULE_ID = "isaac.xas.plain_failure_reason.v1"
+DIAGNOSTICS_FILE = "processing_diagnostics.log"
+_DIAG = {"path": None}
+_PLAIN_ERRORS = (
+    (r"need >= ?3 pre-edge and post-edge points",
+     lambda m: "the merged curve has too few points in the pre-edge or the post-edge normalisation window (under 3 in "
+               "one of them), so its edge step cannot be fitted"),
+    (r"find_e0", lambda m: "the edge position (E0) could not be found on this curve"),
+    (r"singular matrix|SVD did not converge|LinAlgError", lambda m: "the fit had no unique solution on these points"),
+    (r"\b(?:not enough|too few|fewer than)\b[^.;]{0,40}\bpoints\b|zero-size array|size 0\b",
+     lambda m: "there are too few points to work on"),
+    (r"could not convert string to float|invalid literal for (?:int|float)",
+     lambda m: "a value in the file could not be read as a number"),
+    (r"FileNotFoundError|No such file or directory", lambda m: "a file the step needs could not be found"),
+    (r"PermissionError|Permission denied", lambda m: "a file the step needs could not be opened (permission)"),
+    # "<name> not found" from our own readers names WHAT is missing (an Offsets block, a reference sample): said so
+    (r"\b([A-Za-z][\w .-]{0,40}?) (?:is )?not found\b",
+     lambda m: f"the data have no {m.group(1).strip()!r}, which this step needs"),
+    # a KeyError naming a CHANNEL is missing data; any other KeyError is the software's own (below: generic)
+    (r"^KeyError: '(" + "|".join(("I0", "I1", "I2", "IF", "IT", "IR", "Iref", "absev", "energy", "sec", "Seconds",
+                                   "vortDT", "SCA1", "SCA2", "SCA3", "SCA4", "FF", "PIPS")) + r")'$",
+     lambda m: f"the scan has no {m.group(1)!r} column, which this step needs"),
+)
+
+
+def set_diagnostics(path) -> None:
+    """Where :func:`plain_error` writes the technical text (``None``: stderr only). The file is PER RUN: it is
+    started afresh (removed) when a path is set, so it only ever holds this run's details."""
+    _DIAG["path"] = path
+    if path is not None:
+        try:
+            import os
+
+            os.remove(path)
+        except OSError:
+            pass
+
+
+def plain_error(exc: BaseException | str, what: str = "this step") -> str:
+    """A plain sentence for an exception (:data:`PLAIN_ERROR_RULE_ID`); the raw text goes to the diagnostics file and
+    stderr only."""
+    import json
+    import re
+    import sys
+    from datetime import datetime, timezone
+
+    raw = exc if isinstance(exc, str) else f"{type(exc).__name__}: {exc}"
+    try:
+        print(f"[isaac processing] {what}: {raw}"[:2000], file=sys.stderr)
+    except Exception:  # noqa: BLE001 - the log is a convenience, never a failure
+        pass
+    if _DIAG["path"] is not None:
+        try:
+            with open(_DIAG["path"], "a", encoding="utf-8") as fh:
+                fh.write(json.dumps({"utc": datetime.now(timezone.utc).isoformat(timespec="seconds"), "where": what,
+                                     "detail": raw[:4000]}) + "\n")
+        except Exception:  # noqa: BLE001
+            pass
+    for pat, said in _PLAIN_ERRORS:
+        m = re.search(pat, raw)
+        if m:
+            return f"{what} could not be completed: {said(m)}"
+    where = f"processing/{DIAGNOSTICS_FILE}" if _DIAG["path"] is not None else "the processing log"
+    return (f"{what} could not be completed on these data: a software error, not a problem the data show (the "
+            f"technical detail is in {where}, not in this record)")
+
+
 def _f(x: Any) -> float | None:
     try:
         v = float(x)
@@ -562,7 +633,7 @@ def normalize(energy, mu, params: Mapping, np, larch_xafs, *, e0: float | None =
         try:
             e0_for_rule = use_e0 if use_e0 is not None else float(larch_xafs.find_e0(energy, mu))
         except Exception as exc:  # noqa: BLE001
-            raise StepError("normalization_failed", f"find_e0: {type(exc).__name__}: {exc}") from exc
+            raise StepError("normalization_failed", plain_error(f"find_e0: {type(exc).__name__}: {exc}", "normalisation")) from exc
         span = float(energy[-1]) - e0_for_rule
         if span > 0:
             kwargs["norm1"] = min(float(p["norm1_rule_cap_eV"]), float(p["norm1_rule_fraction"]) * span)
@@ -574,7 +645,7 @@ def normalize(energy, mu, params: Mapping, np, larch_xafs, *, e0: float | None =
         try:
             e0_w = use_e0 if use_e0 is not None else float(larch_xafs.find_e0(energy, mu))
         except Exception as exc:  # noqa: BLE001
-            raise StepError("normalization_failed", f"find_e0: {type(exc).__name__}: {exc}") from exc
+            raise StepError("normalization_failed", plain_error(f"find_e0: {type(exc).__name__}: {exc}", "normalisation")) from exc
         n1 = kwargs.get("norm1")
         n2 = kwargs.get("norm2") if kwargs.get("norm2") is not None else float(energy[-1]) - e0_w
         if n1 is not None:
@@ -583,7 +654,7 @@ def normalize(energy, mu, params: Mapping, np, larch_xafs, *, e0: float | None =
     try:
         larch_xafs.pre_edge(energy, mu, group=g, e0=use_e0, make_flat=bool(p.get("make_flat", True)), **kwargs)
     except Exception as exc:  # noqa: BLE001
-        raise StepError("normalization_failed", f"{type(exc).__name__}: {exc}") from exc
+        raise StepError("normalization_failed", plain_error(exc, "normalisation")) from exc
     if len(g.norm) != len(energy):
         raise StepError("normalization_length_mismatch", f"{len(g.norm)} != {len(energy)}")
     d = g.pre_edge_details
