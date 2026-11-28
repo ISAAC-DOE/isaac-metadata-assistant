@@ -41,6 +41,18 @@ SCALE = "context.electrochemistry.potential_scale"
 COLUMN = "Current Set-point (mA/cm2)"
 
 
+@pytest.fixture(scope="module", autouse=True)
+def _name_deductions_off():
+    """1.22.0 (DEC-100 fix round): DEC-92's "no mode from a current set-point" and the answers here are measured with the
+    file-name deductions off (``tests_support_records.without_name_deductions``); they are tested in
+    ``test_local_import_control_mode`` and ``test_local_import_guesses``."""
+    from tests_support_records import without_name_deductions
+
+    with without_name_deductions():
+        yield
+
+
+
 def _json(b: Path) -> dict:
     return json.loads((b / "bundle.json").read_text())
 
@@ -70,7 +82,7 @@ def test_the_current_setpoint_is_a_run_scope_local_answer_field_new_in_1_7_0():
     assert CURRENT == "context.electrochemistry.current_setpoint_mA_cm2"
     assert B.LOCAL_ANSWER_FIELDS[CURRENT] == B.LOCAL_ANSWER_FIELDS[POT] == "run"
     assert CURRENT in B._writable_paths() and B.WRITABLE_ADDED_IN["1.7.0"] == frozenset({CURRENT})
-    assert B._VERSION_ORDER.index("1.7.0") == B._VERSION_ORDER.index(B.FORMAT_VERSION) - 14  # 1.21.0 the end review (DEC-99), 1.20.0 the folder, people and held-potential fills (DEC-98), 1.19.0 the checked readings (DEC-97), 1.18.0 the filled state (DEC-96), 1.8.0 bounds, 1.9.0 `last`, 1.10.0 vocabulary requests, 1.11.0 quick merges, 1.12.0 scan notes, 1.13.0 MERGE-folder outputs: none writable, 1.14.0 audit import rules, 1.15.0 export-anyway decision, 1.16.0 second audit import rules, 1.17.0 consents and reads that write nothing
+    assert B._VERSION_ORDER.index("1.7.0") == B._VERSION_ORDER.index(B.FORMAT_VERSION) - 15  # 1.22.0 guesses (DEC-100), 1.21.0 the end review (DEC-99), 1.20.0 the folder, people and held-potential fills (DEC-98), 1.19.0 the checked readings (DEC-97), 1.18.0 the filled state (DEC-96), 1.8.0 bounds, 1.9.0 `last`, 1.10.0 vocabulary requests, 1.11.0 quick merges, 1.12.0 scan notes, 1.13.0 MERGE-folder outputs: none writable, 1.14.0 audit import rules, 1.15.0 export-anyway decision, 1.16.0 second audit import rules, 1.17.0 consents and reads that write nothing
     assert B._added_since("1.6.0") == frozenset({CURRENT}) and B._added_since("1.7.0") == frozenset()
     assert not Q._is_shared(CURRENT)  # never asked once for the whole beamtime
     # DEC-92: no companion gate — the schema declares no reference for a current density

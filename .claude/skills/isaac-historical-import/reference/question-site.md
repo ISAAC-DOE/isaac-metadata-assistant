@@ -26,7 +26,7 @@ decision is recorded under the name the scientist signed in with.
 - The export checks every card by a dry run, so it takes about a minute for a large beamtime. It writes to the
   bundle only the list of values it showed (the exposure log), never a decision.
 
-**Only what remains.** A value a rule filled from the evidence gets no card: it waits for the end review (Step 10).
+**Only what remains.** A value a rule filled or guessed from the evidence gets no card: it waits for the end review (Step 10).
 The environment convention is one beamtime card (operando, in situ, or it differs), and the per-run environment
 questions it covers get no card of their own.
 

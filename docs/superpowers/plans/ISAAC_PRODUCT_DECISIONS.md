@@ -693,6 +693,68 @@ every supersession they list stands. Contract: §9 "What 1.21.0 added".
 - **Not decided here:** moving record groups into the end review (design finding 7, still one bulk question), and a
   per-value accept.
 
+### DEC-100
+*(2026-11-28; slice 5a of `docs/guesses-and-review-page-design-2026-11-28.md`, goals 1, 2, 5 and the potential-scale
+half of 6. The project owner's direction of 2026-11-28: inferred values "should be inputted and pretty much ready to
+send, but obviously editable and discernible to the user"; green means done and certain, and a guess is never green.)*
+
+**Guesses fill, as yellow; one colour per value; a final check before an upload; local bundle format 1.22.0, fill rule
+set 4.** Extends `DEC-96`–`DEC-99`; every supersession they list stands. Contract: §9 "What 1.22.0 added".
+
+- **An inferred reading fills as a GUESS.** A Claude reading of strength `inferred` whose quote check passed (the same
+  check as `reading_stated`) and whose scope reaches the target (the same scope tie) fills the value under the new rule
+  `isaac.fill.reading_inferred.v1`, in the new value state `guessed`: eligible, composed into the draft as `inferred` with
+  a derivation entry marked `guess` that carries the reading's quote, file and line, left out of the questions, listed
+  apart in the end review. **Never:** a sample's own label or code as its material, the environment (the convention
+  question settles it), a time, the scale or the control mode, a value off its field's list, where any two readings of
+  the target disagree, beside a rule that fills it, over a conflict, or over any decision (a defer included). These are
+  the two classes behind the 62 wrong fills of `DEC-97`'s replay (sample labels taken as material names; "in situ"
+  inferred from indirect lines), now refused by rule rather than by refusing every inference.
+- **One colour per value** (`bundle.value_colour`, its per-rule table beside `FILL_RULES`, pinned by a test): green =
+  confirmed by the scientist, or read (`parser_exact`, `reading_stated`, `facility_from_folder`,
+  `domain_from_acquisition`, and `stored_convention`, kept green because `DEC-70`'s convention was reviewed by the domain
+  owner); yellow = a guess, or a deduction (`group_from_folder_pi`, `organization_from_facility`,
+  `environment_from_held_potential`: the convention is the scientist's answer, but which runs it reaches is the rule's
+  deduction); red = needed and missing, conflicting or deferred. `bundle review`, `bundle status` and the final check all
+  use it.
+- **The final check before an upload.** `bundle upload --dry-run` lists every yellow value the records to be sent carry
+  (field, value, how many records, the quote or rule) and sends nothing until `--guesses-ok <digest>` matches exactly
+  that list; the scientist's yes is ONE experiment decision `submit_with_guesses` (who, when, the digest, every listed
+  item), the bundle's audit of what was sent unconfirmed. It confirms nothing. A record with a red value it needs still
+  never uploads.
+- **The official record carries no mark of a guess**: the vendored schema has no record-level free-text note, so no
+  guess is written into an official field; the final check says the portal copy will not show which values were
+  guesses, and the bundle and the evidence sidecar keep it.
+- **The potential scale is a must-answer** when a record holds applied potentials and nothing states their scale (the
+  same question id): a wrong scale is a scientific error, and the potentials are a goal of the records.
+- **The skill** (SKILL.md): the reading pass still marks strength honestly — `stated` only word for word — because an
+  inferred reading now fills yellow, and calling it stated would make a guess look certain; the end review shows guesses
+  first, apart; the final check asks the scientist one plain question ("These N values are my guesses from your files.
+  Send them as they are, or check them first?") and only on their yes runs the upload with `--guesses-ok`.
+- **Supersedes, explicitly:**
+  - **`DEC-97`'s refusal of inferred readings** ("an inferred reading never fills", and its removal of
+    `isaac.fill.reading_inferred.v1`): an inferred reading now fills, as a yellow guess only. Its quote check, its
+    lexical tie for a stated reading, its label rule and its scope rules stand.
+  - **`DEC-99`'s skill rule 5** ("an inferred one never does"): replaced as above.
+- **The truth plane is unchanged.** `schema/` and `src/isaac_records/*` are not edited; a guess composes as `inferred`
+  with a derivation entry, the shape `draft_validator` already accepts, and `isaac export` passes it.
+- **Not decided here (later slices of the design):** the review page, answers carried over to siblings and later
+  beamtimes, and taking proposed record groups as the grouping without a confirmation.
+- **Fix round (2026-11-28, the orchestrator's direction after an independent review and a replay of a real
+  beamtime):** every answer names the value it confirms, so an answer never green-washes a guess pooled beside it; a
+  derivation no rule registers is yellow (the DEC-76 temperature placeholder, an absence, is green by its mark); status
+  and the final check count with one function; the final check also lists records with no evidence file, refuses a yes
+  against a bundle the export index does not name or against records older than the answers, records a yes once per
+  list, and says plainly that it only records the yes and that the scientist uploads through the portal, which never
+  runs the check; the export index flags records holding yellow values. Two yellow DEDUCTION rules join:
+  `isaac.fill.setpoint_from_file_name.v1` (a run's one signed potential token in its own name) and
+  `isaac.fill.control_mode_from_setpoint.v1` (potentiostatic from the run's own set-point with no current set-point;
+  open_circuit from an OCV / OCP token). **This narrows `DEC-90`** ("no control mode is derived from a set-point") for a
+  yellow, reviewable deduction only: a mode a reading, file value or answer states always wins, and the mode is never
+  green until the scientist confirms it — **flagged for the owner's confirmation**. A group question that blocks only
+  for the scale is covered by the beamtime scale question; a shared field asked per group with the same suggestion is
+  asked once for the beamtime; a reading about a sample reaches every run of it.
+
 ### What `DEC-76`…`DEC-84` do NOT change
 - **The website's truth plane.** `schema/` and the `src/isaac_records` validators and export are unedited. *(True for `DEC-76`…`DEC-84`; `DEC-95` later re-vendored `schema/` and edited the truth plane, disclosed there.)* The only change in `src/isaac_records/cli.py` is the additive `import` / `bundle` dispatch.
 - **One hosted read changes, and it is a bug fix.** When an archive has acquisition files with the

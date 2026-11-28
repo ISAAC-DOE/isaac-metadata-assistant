@@ -98,8 +98,11 @@ Write every finding to ONE JSON file (`isaac.reading_findings`) in a working fol
 - `stated`: the quote states the value word for word (the number with its unit, the list member, every word of
   the name). `inferred`: ONE written step from what it says ("100 mV" for `0.1` V is one step). Nothing from what a
   lab "usually" does. A name in a file or folder name is evidence; say it is a name.
-- A checked `stated` finding can FILL its field (the code decides, by its rule); an `inferred` one never does: it is
-  shown beside the question. So never mark a finding `stated` to get it filled.
+- A checked `stated` finding can FILL its field green (the code decides, by its rule). A checked `inferred` one fills
+  it as a GUESS, yellow: listed apart in the end review and named in the final check before upload, so the scientist
+  sees it was your reading, not the file's words. So never mark a finding `stated` to make it green: an honest
+  `inferred` is what keeps green meaning certain. A guess is never made of a sample's own code as its material, of the
+  environment (the convention question settles it), or where two readings disagree.
 - The environment: write what the logbook STATES (a line that says "operando" or "in situ"). Never infer one from a
   potential or a cell: the beamtime's convention question settles those runs.
 - **The quote is checked when the file is loaded.** Copy at least 3 words (or 12 characters), or a
@@ -121,8 +124,9 @@ Write every finding to ONE JSON file (`isaac.reading_findings`) in a working fol
   two folders) the row also prints `path`, and that path or the `run_id` names one of them. Never use
   `label`: it reorders the name's tokens and drops some, so two runs (`_12_1200mV`, `_1_1200mV`) can
   share one. A reference that names more than one run is skipped, never spread over both.
-- `"scope": "runs"` whenever the statement is about particular samples or conditions;
-  `"experiment"` only when the source says it of the whole beamtime. Two files that disagree:
+- `"scope": "runs"` whenever the statement is about particular conditions or runs; `{"scope": "samples", "samples":
+  ["<the sample's name as the files write it>"]}` when it is about a SAMPLE (its material, its form): it reaches every
+  run of that sample; `"experiment"` only when the source says it of the whole beamtime. Two files that disagree:
   write both findings and tell the scientist. Never pick one.
 - `field_path` is the FULL path, as `bundle questions` prints it. Where and by whom: the facility is
   `system.facility.facility_name`, the beamline `system.facility.beamline`, the endstation
@@ -193,9 +197,10 @@ is not on its field's list (`refused_by_reason`); there is no way to skip the ch
 load it again until nothing is refused. The preview also lists, per finding, how many targets it
 reaches and every finding it could NOT place (no such field in this bundle): fix those or tell the
 scientist.
-A checked, stated reading whose quote states the value fills its field (rule `isaac.fill.reading_stated.v1`) and
-goes to the end review; every other reading is a suggestion with its citation, shown beside its question, and the
-scientist's answer is what counts. Loading the same file again adds nothing. Never present a reading as confirmed.
+A checked, stated reading whose quote states the value fills its field (rule `isaac.fill.reading_stated.v1`, green);
+a checked inferred one fills it as a guess (rule `isaac.fill.reading_inferred.v1`, yellow); both go to the end review.
+Every other reading is a suggestion with its citation, shown beside its question, and the scientist's answer is what
+counts. Loading the same file again adds nothing. Never present a reading as confirmed.
 
 ## Before you leave this step
 

@@ -635,7 +635,35 @@ def readings_to_interpretations(bundle: Mapping, findings: Mapping, *, model_id:
                     + ". Write one allowed value, or no finding, and tell the scientist what the file says")})
                 continue
         scope = (f.get("applies_to") or {}).get("scope") if isinstance(f.get("applies_to"), Mapping) else None
-        if scope == "experiment":
+        sample_note = ""
+        if scope == "samples":
+            # 1.22.0 (fix round of DEC-100, the real-beamtime replay R3): a finding about named SAMPLES reaches EVERY run of
+            # each (the bundle's sample groupings, by the sample's name as the files write it or its sample id); it is
+            # kept as a reading of those runs (scope `runs`), so every rule that reads a runs-scoped reading reads it
+            applies = f.get("applies_to") or {}
+            names = applies.get("samples")
+            if not isinstance(names, list) or not names or not all(isinstance(n, str) and n.strip() for n in names):
+                skipped.append({"finding": fid, "field_path": path, "reason": (
+                    "applies_to.samples must be a non-empty list of sample names, as the files write them (or sample "
+                    "ids, as `bundle list <dir> samples` prints them)")})
+                continue
+            of_sample = runs_of_samples(bundle, names)
+            unknown = [n for n in names if not of_sample.get(n)]
+            if unknown:
+                skipped.append({"finding": fid, "field_path": path, "refused": "unknown_sample", "reason": (
+                    f"sample names not in this bundle: {unknown[:5]} (name a sample as its files write it, e.g. its "
+                    "code in the file names, or by its sample id)")})
+                continue
+            named = {rid for n in names for rid in of_sample[n]}
+            run_ids = sorted(named & live)
+            named_keys = {key_of[rid] for rid in named}
+            groups = [g for g in live_groups if named_keys & set(g.get("member_run_keys") or ())]
+            if not (groups if absorber else run_ids):
+                skipped.append({"finding": fid, "field_path": path, "reason": "the samples it names are in no live record group"})
+                continue
+            sample_note = f"About sample {', '.join(names)}: every one of its {len(named)} run(s). "
+            scope = "runs"
+        elif scope == "experiment":
             run_ids = sorted(live) + [None]
             groups = live_groups
         elif scope == "runs":
@@ -668,7 +696,8 @@ def readings_to_interpretations(bundle: Mapping, findings: Mapping, *, model_id:
                 skipped.append({"finding": fid, "field_path": path, "reason": "the runs it names are in no live record group"})
                 continue
         else:
-            skipped.append({"finding": fid, "field_path": path, "reason": "applies_to.scope must be `experiment` or `runs`"})
+            skipped.append({"finding": fid, "field_path": path,
+                            "reason": "applies_to.scope must be `experiment`, `runs` or `samples`"})
             continue
         targets = []
         group_runs: dict[str, list[str]] = {}
@@ -704,7 +733,7 @@ def readings_to_interpretations(bundle: Mapping, findings: Mapping, *, model_id:
             path_note = f"The line cited is possibly stale: {stale} Loaded as an inference, never as stated. " + path_note
         fields = {
             "proposed_value": f["value"],
-            "rationale": (path_note + str(f.get("reasoning") or ""))[:1000],
+            "rationale": (sample_note + path_note + str(f.get("reasoning") or ""))[:1000],
             "source_refs": [{"source_id": source_id, "locator": str(source["locator"])[:300]}],
             "excerpt_locator": str(source["locator"])[:300],
             "source_path": rel[:500],
@@ -724,6 +753,27 @@ def readings_to_interpretations(bundle: Mapping, findings: Mapping, *, model_id:
         for t in targets:
             planned.append((t, {**fields, "run_ids": group_runs.get(t["id"]) if absorber else None}))
     return {"planned": planned, "scan_notes": scan_notes, "skipped": skipped}
+
+
+def runs_of_samples(bundle: Mapping, names: Sequence[str]) -> dict[str, list[str]]:
+    """1.22.0 (R3): ``{name: [run ids]}``: the runs of every sample of the bundle a name names, by its sample id or a
+    sample-name reading its files give (compared without case or punctuation, ``reading_tie.label_key``); a bare
+    number (a group token, an electrode number) names no sample. An unknown name maps to ``[]``."""
+    from .reading_tie import label_key
+
+    out: dict[str, list[str]] = {}
+    for name in names:
+        key = label_key(name)
+        runs: set[str] = set()
+        if key and not key.isdigit():
+            for smp in bundle.get("samples") or ():
+                if not isinstance(smp, Mapping):
+                    continue
+                keys = {label_key(smp.get("sample_id"))} | {label_key(x) for x in smp.get("sample_name_readings") or ()}
+                if key in keys - {""}:
+                    runs.update(str(r) for r in smp.get("run_ids") or ())
+        out[name] = sorted(runs)
+    return out
 
 
 def ai_hints(bundle: Mapping, target_ids: Iterable[str], *, limit: int = 5) -> list[dict]:

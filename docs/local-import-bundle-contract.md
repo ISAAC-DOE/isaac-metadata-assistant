@@ -1,6 +1,6 @@
 # ISAAC Local Import Bundle — contract v1
 
-Status: **v1.21.0** (the end review: after `build-records`, `isaac bundle review` lists every value a rule filled that the built records carry, by field, with its record count, its rule in plain words and its shortest witness, and the processing rule's scan keep / drop decisions; the scientist's yes is ONE experiment decision `review` (`bundle review --accept --by --apply`, never `decide`) binding each listed fill by target, value, rule and an evidence hash, so each bound fill derives `scientist_confirmed` (basis `reviewed_final_records`) until any part of it changes, when it is `filled` again; a decision beats the review; no rule changed, so the fill rule set stays 3, 2026-11-26, DEC-99, §9 "What 1.21.0 added"; v1.20.0 the folder, the people and the held potential: the sample measurements held at a potential their own files give, with corroboration that they were electrochemical, take the environment convention the scientist gives ONCE for the beamtime (`set_environment_convention`: operando, in situ, or per run), asked by one question that covers each run's own environment question meanwhile; the facility and beamline the folder name and the SPEC fingerprint agree on, for each run whose own headers carry the fingerprint; the producing organization as that facility; the producing group from the PI the folder names, beside a second source that agrees; the import keeps the readme's header lines; fill rule set 3, so a 1.19.0 bundle is STALE where a value moves, 2026-11-25, DEC-98, §9 "What 1.20.0 added"; v1.19.0 fills from CHECKED, STATED Claude readings: `annotate --from-readings --apply` keeps each reading's quote check — result, checker, a reading-pass id, the checked file's `content_sha256` and a `reading_sha256` over the reading itself, all recomputed by the validator — and its scope; `isaac.fill.reading_stated.v1` fills what a checked stated reading's quote itself states (the number, the list member, every significant word), never an inferred reading, a sample's own label as its material, or a beamtime reading on a run-level or sample field; fill rule set 2, so a 1.18.0 bundle is STALE where a value moves, 2026-11-25, DEC-97, §9 "What 1.19.0 added"; v1.18.0 fill first, review at the end: the value state `filled` — a value a registered fill rule supports, `isaac.fill.parser_exact.v1`, `isaac.fill.stored_convention.v1` or `isaac.fill.domain_from_acquisition.v1`, and no scientist decided — is eligible, goes into a draft as `inferred` naming its rule, and is not asked; a decision always wins; a 1.2.0–1.17.0 bundle is STALE until its next write, which logs each filled value, 2026-11-25, DEC-96, §9 "What 1.18.0 added"; v1.17.0 the scientist's consent to Claude reading the files, and their name, kept in `consents` so a second session reads it with `isaac bundle status` instead of asking again; a command that only reads never writes `bundle.json`, and the values it prints are recorded beside it in `exposures.pending.jsonl`, 2026-11-23, §9 "What 1.17.0 added"; v1.16.0 the second round of the 18 Nov 2026 audit's import rules: the potential an SSRL XDC run's name writes, as a suggestion that needs review; a scan title naming other scans makes a processed output, never a run; an overwritten macro, two comment-line events and a position within motor resolution are no conflicts; the clock zone an #E / #D pair gives is suggested; a BL4-3 standard named as one proposes the role reference and the scanned range a witness for the absorber, 2026-11-22, §9 "What 1.16.0 added"; v1.15.0 the `export_despite_completeness` record-group decision: a record the local record-completeness gate holds is exported anyway, for that record body, and later exports keep it, 2026-11-22, §9 "What 1.15.0 added"; v1.14.0 four import rules of the 18 Nov 2026 audit: a signed potential token in a file name, the technique from the instrument configuration, pellet-standard fields asked only where mentioned, and a comment line left over from an earlier run flagged; every id an earlier build gave stands on a re-import, 2026-11-19, §9 "What 1.14.0 added"; v1.13.0 a file whose own scan title states an average beside SPEC acquisitions — the scientists' averages, such as a PyMca `.mca` — is a processed output linked by legacy number, never a run; a `MERGE` folder alone only flags a run; and a processed product's file name is no longer read as a condition or sample reading of its run, 2026-11-18, §9 "What 1.13.0 added"; v1.12.0 a reading pass's quotes are checked against the cited file when it is loaded, and its notes about a run's scans are kept as `scan_notes`, AI readings never decisions, 2026-11-17, §9 "What 1.12.0 added"; v1.11.0 a file the engine classifies `processed_spectrum` — the scientists' quick merges — is a processed output linked by legacy number, never a run, 2026-11-09, §9 "What 1.11.0 added"; v1.10.0 an answer refused only because it is not on its field's list is kept as a vocabulary request, `vocabulary_requests`, and `bundle propose-terms` drafts it, 2026-10-30, §9 "What 1.10.0 added", §29; v1.9.0 (`set_counter_positions` may name the LAST file-name token, `--positions last`, and a scientist's merge has a working path, 2026-10-30, §9 "What 1.9.0 added", §27; v1.8.0 the bounds on `scientist_decisions` and `ai_interpretations` raised to 200,000, so an append-only log can no longer lock a bundle; decide refuses a value its field refuses, 2026-10-29, §9 "What 1.8.0 added", §25; v1.7.0 `context.electrochemistry.current_setpoint_mA_cm2` answerable, so a confirmed galvanostatic record can complete, 2026-10-29, §9 "What 1.7.0 added", DEC-92; v1.6.0 capture decisions — keep apart, the Athena result of record, "no counter" — a merge decision applied as one combined group, and question ids that survive answers, 2026-10-29, §9 "What 1.6.0 added"; v1.5.0 control mode answerable the same day; v1.4.0 the SSRL XDC scan start time, the instrument clock's time zone and its binding, 2026-10-29, §9 "What 1.4.0 added"; v1.3.0 absorber readings on record groups, a larger writable set and STALE bundles, the same day; v1.2.0 processed outputs 2026-10-28; v1.1.0 LOCAL-2 and v1.0.0 LOCAL-1 the same day). Machine contract:
+Status: **v1.22.0** (guesses fill, as yellow: an inferred Claude reading whose quote is checked against the file fills its target as a GUESS, value state `guessed` (`isaac.fill.reading_inferred.v1`; never a sample's own label as its material, never the environment, never where readings disagree, never over a decision or a conflict), composed as `inferred` and marked a guess in the draft and the evidence sidecar; every value has one colour, green / yellow / red (`bundle.value_colour`); `bundle review` lists guesses apart; the final check before an upload lists every yellow value and needs `--guesses-ok <digest>`, kept as one `submit_with_guesses` decision; a record holding potentials with no stated scale is blocked by the scale question; fill rule set 4, 2026-11-28, DEC-100, §9 "What 1.22.0 added"; v1.21.0 the end review: after `build-records`, `isaac bundle review` lists every value a rule filled that the built records carry, by field, with its record count, its rule in plain words and its shortest witness, and the processing rule's scan keep / drop decisions; the scientist's yes is ONE experiment decision `review` (`bundle review --accept --by --apply`, never `decide`) binding each listed fill by target, value, rule and an evidence hash, so each bound fill derives `scientist_confirmed` (basis `reviewed_final_records`) until any part of it changes, when it is `filled` again; a decision beats the review; no rule changed, so the fill rule set stays 3, 2026-11-26, DEC-99, §9 "What 1.21.0 added"; v1.20.0 the folder, the people and the held potential: the sample measurements held at a potential their own files give, with corroboration that they were electrochemical, take the environment convention the scientist gives ONCE for the beamtime (`set_environment_convention`: operando, in situ, or per run), asked by one question that covers each run's own environment question meanwhile; the facility and beamline the folder name and the SPEC fingerprint agree on, for each run whose own headers carry the fingerprint; the producing organization as that facility; the producing group from the PI the folder names, beside a second source that agrees; the import keeps the readme's header lines; fill rule set 3, so a 1.19.0 bundle is STALE where a value moves, 2026-11-25, DEC-98, §9 "What 1.20.0 added"; v1.19.0 fills from CHECKED, STATED Claude readings: `annotate --from-readings --apply` keeps each reading's quote check — result, checker, a reading-pass id, the checked file's `content_sha256` and a `reading_sha256` over the reading itself, all recomputed by the validator — and its scope; `isaac.fill.reading_stated.v1` fills what a checked stated reading's quote itself states (the number, the list member, every significant word), never an inferred reading, a sample's own label as its material, or a beamtime reading on a run-level or sample field; fill rule set 2, so a 1.18.0 bundle is STALE where a value moves, 2026-11-25, DEC-97, §9 "What 1.19.0 added"; v1.18.0 fill first, review at the end: the value state `filled` — a value a registered fill rule supports, `isaac.fill.parser_exact.v1`, `isaac.fill.stored_convention.v1` or `isaac.fill.domain_from_acquisition.v1`, and no scientist decided — is eligible, goes into a draft as `inferred` naming its rule, and is not asked; a decision always wins; a 1.2.0–1.17.0 bundle is STALE until its next write, which logs each filled value, 2026-11-25, DEC-96, §9 "What 1.18.0 added"; v1.17.0 the scientist's consent to Claude reading the files, and their name, kept in `consents` so a second session reads it with `isaac bundle status` instead of asking again; a command that only reads never writes `bundle.json`, and the values it prints are recorded beside it in `exposures.pending.jsonl`, 2026-11-23, §9 "What 1.17.0 added"; v1.16.0 the second round of the 18 Nov 2026 audit's import rules: the potential an SSRL XDC run's name writes, as a suggestion that needs review; a scan title naming other scans makes a processed output, never a run; an overwritten macro, two comment-line events and a position within motor resolution are no conflicts; the clock zone an #E / #D pair gives is suggested; a BL4-3 standard named as one proposes the role reference and the scanned range a witness for the absorber, 2026-11-22, §9 "What 1.16.0 added"; v1.15.0 the `export_despite_completeness` record-group decision: a record the local record-completeness gate holds is exported anyway, for that record body, and later exports keep it, 2026-11-22, §9 "What 1.15.0 added"; v1.14.0 four import rules of the 18 Nov 2026 audit: a signed potential token in a file name, the technique from the instrument configuration, pellet-standard fields asked only where mentioned, and a comment line left over from an earlier run flagged; every id an earlier build gave stands on a re-import, 2026-11-19, §9 "What 1.14.0 added"; v1.13.0 a file whose own scan title states an average beside SPEC acquisitions — the scientists' averages, such as a PyMca `.mca` — is a processed output linked by legacy number, never a run; a `MERGE` folder alone only flags a run; and a processed product's file name is no longer read as a condition or sample reading of its run, 2026-11-18, §9 "What 1.13.0 added"; v1.12.0 a reading pass's quotes are checked against the cited file when it is loaded, and its notes about a run's scans are kept as `scan_notes`, AI readings never decisions, 2026-11-17, §9 "What 1.12.0 added"; v1.11.0 a file the engine classifies `processed_spectrum` — the scientists' quick merges — is a processed output linked by legacy number, never a run, 2026-11-09, §9 "What 1.11.0 added"; v1.10.0 an answer refused only because it is not on its field's list is kept as a vocabulary request, `vocabulary_requests`, and `bundle propose-terms` drafts it, 2026-10-30, §9 "What 1.10.0 added", §29; v1.9.0 (`set_counter_positions` may name the LAST file-name token, `--positions last`, and a scientist's merge has a working path, 2026-10-30, §9 "What 1.9.0 added", §27; v1.8.0 the bounds on `scientist_decisions` and `ai_interpretations` raised to 200,000, so an append-only log can no longer lock a bundle; decide refuses a value its field refuses, 2026-10-29, §9 "What 1.8.0 added", §25; v1.7.0 `context.electrochemistry.current_setpoint_mA_cm2` answerable, so a confirmed galvanostatic record can complete, 2026-10-29, §9 "What 1.7.0 added", DEC-92; v1.6.0 capture decisions — keep apart, the Athena result of record, "no counter" — a merge decision applied as one combined group, and question ids that survive answers, 2026-10-29, §9 "What 1.6.0 added"; v1.5.0 control mode answerable the same day; v1.4.0 the SSRL XDC scan start time, the instrument clock's time zone and its binding, 2026-10-29, §9 "What 1.4.0 added"; v1.3.0 absorber readings on record groups, a larger writable set and STALE bundles, the same day; v1.2.0 processed outputs 2026-10-28; v1.1.0 LOCAL-2 and v1.0.0 LOCAL-1 the same day). Machine contract:
 [`apps/api/isaac_api/local_import/bundle-v1.schema.json`](../apps/api/isaac_api/local_import/bundle-v1.schema.json)
 (JSON Schema draft 2020-12) plus the checks in
 [`bundle.py`](../apps/api/isaac_api/local_import/bundle.py) `validate_bundle` that JSON
@@ -137,6 +137,7 @@ The single key is `SemanticCandidate.review_status` (itself derived from `kind`,
 | no decision at all (not even a `defer`), and a registered fill rule supports the value (1.18.0, DEC-96; the `fill` block names the rule and the value) | `filled` | — (no person accepted it: the end review is where the scientist sees it) |
 | no decision, and a CHECKED, STATED Claude reading whose quote states the value supports it (1.19.0, DEC-97: `isaac.fill.reading_stated.v1`; the `fill` block names the rule, the value and the readings) | `filled` | — (the end review is where the scientist sees it) |
 | a fill the scientist's END REVIEW still binds: a `review` decision names this target with the same rule, value and evidence hash the fill has now (1.21.0, DEC-99; the `fill` block stays, and the `review` block names the decision and the basis `reviewed_final_records`) | `scientist_confirmed` | `proposals.STATE_ACCEPTED`, accepted by reviewing the final records |
+| no decision, no other rule fills it, and a CHECKED INFERRED Claude reading whose scope reaches the target supports it (1.22.0, DEC-100: `isaac.fill.reading_inferred.v1`; never a sample's own label as its material, never the environment, never where readings disagree) | `guessed` (yellow; a review that still binds it: `scientist_confirmed`) | — (the end review lists it apart, and the final check names it before an upload) |
 | `ai_interpretations` on a `missing` / `unmapped` / `candidate_extracted` value no rule fills | `needs_review` | — (an interpretation is never a proposal acceptance) |
 
 The derivation is `bundle.derive_value_state(extracted_state, decision, interpreted, fill_rule)`,
@@ -1659,6 +1660,129 @@ refuses all three. No fill rule changed: `FILL_RULE_SET` stays 3.
   its `format_upgrades` entry).
 - **Not built:** review of record groups (design finding 7: still one bulk question in Step 5) and a per-value accept
   (`--field` narrows it to one field).
+
+### What 1.22.0 added (guesses fill, as yellow; one colour per value; the final check — DEC-100)
+
+Slice 5a of `docs/guesses-and-review-page-design-2026-11-28.md` (goals 1, 2, 5 and the potential-scale half of 6). The
+owner's direction (2026-11-28): inferred values "should be inputted and pretty much ready to send, but obviously editable
+and discernible to the user". The format moves because a value state (`guessed`), a fill rule
+(`isaac.fill.reading_inferred.v1`), an experiment decision (`submit_with_guesses`) and its three fields join the schema;
+a 1.21.0 validator refuses each. `FILL_RULE_SET` 4: a rule set 3 bundle is STALE where a value moves, and its next write
+re-derives it and logs each moved value in `eligibility_rederived`.
+
+- **The value state `guessed`** (`bundle.STATE_GUESSED`; `bundle.FILL_STATES` is `filled` and `guessed`). Only
+  `derive_value_state` gives it, from a fill by a GUESS rule (`bundle.GUESS_RULES`); never a parser state; the validator
+  re-derives it and refuses a stored `guessed` (or a guess stored as `filled`) it cannot re-derive. Any decision on the
+  target, a defer included, beats it; it never lifts a conflict. Otherwise it behaves as `filled` does: eligible
+  ("Guessed from the evidence …"), composed as `inferred`, left out of the questions (`questions.consolidate`, and still
+  addressable with `include_answered`), held by `group_unusable_fills` like a fill, reviewable. `counts.guessed` (stored
+  from 1.22.0) counts candidates and missing values in it.
+- **The rule `isaac.fill.reading_inferred.v1`** (`bundle.reading_inferred_fill_for`, `bundle.guess_refusal`): an AI
+  reading of strength `inferred` fills its target as a guess when ALL hold — its stored quote check passes
+  (`bundle.reading_quote_problem`, the same check as `reading_stated`: the quote is in the cited file the import read,
+  the reading is the one checked); its scope reaches this target (`bundle.reading_scope_problem`, the same tie as
+  `reading_stated`: DEC-69's beamtime-reading guard and the naming gate; the lexical tie, which would make it a stated
+  reading, is NOT asked); the value is on the field's list when the field has one and fits its type; no other reading of
+  this target states another value (two inferred readings that disagree: no guess, it stays asked); no rule fills it
+  already (a file rule or a stated reading comes first); and every dissent rule a reading fill shares
+  (`bundle._reading_target_open`). Never: a sample's own label or code as its material (`bundle.fill_value_problem`,
+  reading "ZZ1" for sample ZZ1), `context.environment` (`bundle.GUESS_NEVER_FILLS`: the convention question settles it),
+  a time, the potential scale or the control mode (`bundle.reading_never_fills`). These are the two classes behind
+  DEC-97's 62 wrong fills, now refused by rule.
+- **Composition** (`records.fill_derivation`): a guess composes as `inferred` with the derivation entry
+  `{"source_type": "derivation", "rule": "isaac.fill.reading_inferred.v1", "guess": true, "basis": records.GUESS_BASIS,
+  "quote", "source_file", "locator", "lines", ...}` (the reading's quote, file and line) beside the reading's quoted
+  witness, so the official export works (export refuses `needs_confirmation`, never `inferred`) while the draft and the
+  evidence sidecar keep it distinguishable. **The official record carries no mark:** `schema/isaac_record_v1.json` has
+  no record-level free-text note (its `notes` are per object — `sample.material`, `system.facility`, `system.instrument`,
+  `system.session`, `context.reaction` — and `timestamps.revision_note` says why a record was revised), so no guess is
+  written into an official field and the final check says plainly that the portal copy will not show which values were
+  guesses.
+- **One colour per value** (`bundle.value_colour`, the table `bundle.FILL_RULE_COLOURS` next to `FILL_RULES`, pinned by
+  a test): **green** = `scientist_confirmed` (an answer or the end review), or filled by `parser_exact` (the build's own
+  instrument-configuration technique rule counted as a read), `reading_stated`, `facility_from_folder`,
+  `domain_from_acquisition` or `stored_convention` (DEC-70's dry → ex situ, kept green: reviewed by the domain owner and
+  confirmed by a scientist on a real beamtime); **yellow** = `guessed`, and filled by a DEDUCTION rule
+  (`bundle.DEDUCTION_RULES`: `group_from_folder_pi`, `organization_from_facility`, `environment_from_held_potential` — the
+  convention is the scientist's answer, but which runs it reaches is a deduction); **red** = a value the record needs
+  that is missing, conflicting or deferred. An unknown rule is yellow, never green. `bundle.evidence_colour` reads the
+  same colour from a draft's or a sidecar's evidence (a merged field stays yellow while any yellow fill in it is
+  unconfirmed: the review's confirmation now names its `target_id`); `records.field_colours` / `records.colour_counts`
+  colour a composition's fields.
+- **`bundle review`** lists every value with its `colour` and `kind` (`guess`, `deduction` or `read`) and counts them
+  (`values_by_kind`); the plain listing has three headings in this order — "Guesses — the skill's best reading, please
+  check" (each with the inferred reading's quote, file and line), "Worked out by a rule from other values — please
+  check", "Read from your files". `--accept` covers all of them, guesses included, bound by digest as before; a bound
+  guess is `scientist_confirmed` (basis `reviewed_final_records`, green) until any of it changes. `REVIEW_RULES_BY_KIND`
+  lets a review bind the inferred rule (a quote-checked inferred reading of that very target must exist).
+- **The final check** (`isaac bundle upload <records> --dry-run`, `review.final_check`): before the dry run, every record
+  to be sent is read with its evidence file; every YELLOW field is listed (field, value, rule, guess or deduction, how
+  many values and records, the quote, file and line or the rule in words), with "N value(s) are guesses or deductions,
+  not confirmed by you" and the portal-copy note. With any, it prints the list, a 16-hex digest over exactly it, and the
+  one question ("These N values are my guesses from your files. Send them as they are, or check them first?"), sends
+  nothing and exits 1 (`sent: false`). `--guesses-ok <digest> --by "<name>" --bundle <bundle_dir> [--orcid]` is the yes:
+  refused (exit 1) when the digest is not the list's now, exit 2 without `--bundle`, refused when the records with
+  guesses come from another bundle (the export index's `bundle_id`); on a match it records ONE experiment decision
+  `submit_with_guesses` (`decided_by`, `decided_utc`, `guesses_digest`, `guesses_sent` — each listed item —, and
+  `guesses_records`), then prints the dry run with `final_check.recorded`. The yes confirms nothing: every value stays
+  yellow in the bundle; it is the bundle's audit of what was sent unconfirmed. `decide` cannot record it; the validator
+  refuses one off the experiment, with a value, without a digest, items or records, and the keys on any other decision
+  (`bundle.submit_decision_errors`). A record with a red value it needs still never reaches the records folder
+  (unchanged: export refuses it).
+- **The potential scale blocks** (`records.compose_group`, `questions._potential_scale_question`): a record whose
+  potential set-point the scale gate holds back (nothing states the scale) now lists the scale as missing
+  (`missing_required`, `required_because` `records.POTENTIALS_NEED_SCALE`), so its scale question blocks it — the per-group
+  question by the composer's rule, and the beamtime-wide one (same id) when it reaches such a group. Before, the record was
+  complete with the potential silently held out and the question optional. A record with no potential is never asked.
+- **`bundle status`** says ONE line with a count per colour over the fields of the live groups' records as they compose
+  now (`colours`: green, yellow, red, records), counts the guesses among the unreviewed fills (`values_guessed`), and
+  its last "Next:" step names the final check.
+- **`scripts/replay_fill_accuracy.py`** counts `guessed_correct` / `guessed_wrong` apart from `filled_correct` /
+  `filled_wrong`, reports each wrong value's colour (`wrong_by_colour`: green-wrong must stay 0) and `guessed_unchecked`;
+  `--rederive` measures an older bundle under this build's rules in memory.
+- **Answer memory never learns a guess** (it reads `confirm` / `correct` decisions only), nor the final check's yes.
+- **Older bundles:** a 1.18.0–1.21.0 bundle derived under rule set 3 is STALE where an inferred reading now guesses; its
+  next write raises it to 1.22.0 with `bundle.CHANGES_ADDED_IN["1.22.0"]` in its `format_upgrades` entry.
+- **Not built (later slices):** the review page (`bundle review --html`), answers carried over to siblings and later
+  beamtimes, and the record-group auto-accept (design goals 3, 4 and the groups half of 6).
+- **Fix round (independent review and a replay of a real beamtime), still 1.22.0, rule set 4:**
+  - **One colour, read the same everywhere (C1).** `bundle.evidence_colour` colours EACH derivation on its own: a fill
+    is green only when a `user_confirmation` names its own value (`target_id` equal to its `candidate_id` / `value_id`);
+    every answer's confirmation now carries the `target_id` of the value it answers, so an answer pooled with an
+    unconfirmed guess no longer reads green. A derivation naming no registered rule is yellow, except the DEC-76
+    `temperature_basis = not_reported` entry, which records an absence and carries `states_absence: true`
+    (`bundle.ABSENCE_DERIVATION_KEY`, M3). `compose_group` stores each field's colour in the composition
+    (`field_colours`, `bundle.record_field_colours`), and `bundle status` and the final check both count with
+    `bundle.count_colours`.
+  - **The final check (I1–I4, M1, M2, M5).** A record with no readable evidence file is listed (`kind: unknown`) and
+    needs the yes. The yes is refused when the export index does not name the bundle for every record with a yellow
+    value (or names another), and when any record of the bundle composes differently now than when it was exported
+    (`records.content_sha256` against the index: "the records are older than your answers"). The same yes to the same
+    digest is recorded once. The question and statements say the split and the right plural ("These 3 values are my
+    guesses from your files or worked out by a rule (1 guess, 2 worked out by a rule)"), that this records their yes, and
+    that this build sends nothing and the portal does not run the check. Export flags each record holding yellow values
+    in the export index (`unconfirmed_values: {count, paths}`), never in the record.
+  - **`isaac.fill.setpoint_from_file_name.v1`** (yellow deduction): a run's set-point candidate every witness of which is
+    the file-name reader reading ONE token of the run's own name by a potential rule (`<digits>mV`, `<d>p<d>V`,
+    `<digits>V`; a leading lower-case `m` or `-` is a minus sign), the token stating exactly the value read
+    (`bundle.name_token_potential`, read independently: a dropped sign, a capital `M`, a cycling-history token,
+    a range never fill), under every exclusion of `parser_exact`. Tried after a stated reading. The scale gate stands.
+  - **`isaac.fill.control_mode_from_setpoint.v1`** (yellow deduction): a run's missing control mode is `potentiostatic`
+    when the run has a set-point its files give that the record can carry (a file value or a reading, filled, guessed or confirmed; never one only typed in an answer) and no current set-point (answered or read), no
+    candidate of the run states a mode, and nothing disagrees; the build's own open-circuit suggestion (an OCV / OCP token,
+    no potential after it) fills `open_circuit`. `bundle.control_mode_by_run` counts a filled mode, so the questions and
+    the composer agree. A missing value is read from its decision or its reading rules, never from its stored state, so
+    every derivation (the validator's included) gives the same.
+  - **Asked once for the beamtime.** A group's own question that blocks only for the potential scale is covered by the
+    beamtime scale question (`covered_by`, its id and targets unchanged): one blocking question for the scale. A field of
+    `questions.ASK_ONCE_FIELDS` (the reaction, its catalysis and drive, the control mode; never one a beamtime-wide or
+    passing statement holds for review, which DEC-69 asks group by group) asked per group with
+    the same suggestion everywhere is asked once (`questions._beamtime_family_questions`, on the sample-question pattern:
+    `sample_family.basis: beamtime`, its own id from the field and kind, members keep their ids and name it
+    (`asked_for_sample_by`), groups with another suggestion listed under `asked_once_for_beamtime.exceptions`).
+  - **A reading about a sample** (`applies_to: {"scope": "samples", "samples": [...]}`) reaches every run of each sample
+    it names (by the sample's name as the files write it, or its sample id); it is kept as a reading of those runs.
+  - **Questions say a guess as one** (M4): "Left out, because the skill guessed it from "<quote>"".
 
 ## 10. Exit codes (`isaac import` / `isaac bundle`)
 

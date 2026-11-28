@@ -36,6 +36,17 @@ FIXED_UTC = "2099-01-01T00:00:00Z"
 LOCAL = dict(base_url="http://127.0.0.1:8000", client=("127.0.0.1", 50123), headers={LB.LOCAL_HEADER: "1"})
 
 
+@pytest.fixture(scope="module", autouse=True)
+def _name_deductions_off():
+    """1.22.0 (DEC-100 fix round): the questions these pin are the ones asked with the file-name deductions off (a valued
+    confirm question is a run's set-point, which that rule now fills): ``tests_support_records.without_name_deductions``."""
+    from tests_support_records import without_name_deductions
+
+    with without_name_deductions():
+        yield
+
+
+
 @pytest.fixture(scope="module")
 def grouped_bundle(pristine_bundle, tmp_path_factory):
     out = tmp_path_factory.mktemp("grouped-c8") / "bundle"

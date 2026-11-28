@@ -76,7 +76,7 @@ def _accept(bdir: Path, **kw) -> dict:
 
 
 def test_the_format_is_1_21_0_and_the_rule_set_is_unchanged():
-    assert B.FORMAT_VERSION == "1.21.0" == B._VERSION_ORDER[-1] and B.FILL_RULE_SET == 3
+    assert B.FORMAT_VERSION == "1.22.0" == B._VERSION_ORDER[-1] and B.FILL_RULE_SET == 4  # 1.22.0: guesses (DEC-100)
     assert "1.21.0" in B.CHANGES_ADDED_IN and "review" in B.CHANGES_ADDED_IN["1.21.0"]
     assert B.REVIEW_DECISION in B.DECISIONS_BY_KIND["experiment"]
     assert set(RV.RULE_WORDS) == set(B.FILL_RULES)  # every registered rule has its plain words
@@ -472,7 +472,8 @@ def test_the_skill_fills_first_asks_only_what_remains_and_ends_with_the_review()
     assert len(text.splitlines()) <= 250
     for said in ("Fill what a registered rule supports: the code does it, you never write a value",
                  "Ask only what is missing, conflicting, or a judgment call",
-                 "A reading is evidence.", "an inferred one never does",
+                 # inverted at 1.22.0 (DEC-100): an inferred reading fills as a yellow guess, never green
+                 "A reading is evidence", "inferred one fills it as a yellow guess", "mark its strength honestly",
                  "the group may be filled from the folder when a second source agrees",
                  "End with the review.", "## Step 10 · The review of the final records", "## Step 11 · Final summary",
                  "Never infer operando or in situ yourself", "word for word", "environment_convention",
@@ -483,7 +484,7 @@ def test_the_skill_fills_first_asks_only_what_remains_and_ends_with_the_review()
         assert said in text, said
     # the old rules are gone, the kept ones stay
     for gone in ("Your reading is a suggestion.", "A name in the folder name is a hint to offer, never an answer",
-                 "**Values to confirm**"):
+                 "**Values to confirm**", "an inferred one never does"):
         assert gone not in text, gone
     for kept in ("You do not write files.", "Never pick a side in a conflict.", "Never upload.",
                  "answer the scientist gave in THIS conversation"):

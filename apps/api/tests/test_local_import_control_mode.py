@@ -3,8 +3,11 @@ became at 1.3.0 (DEC-88).
 
 * Its allowed values are the official schema's ``enum``, read at runtime — never a list here.
 * RUN scope, like ``potential_scale``: never asked once for the whole beamtime.
-* It is never defaulted and never derived: not from a set-point being present, and no set-point
-  from it.
+* It is never defaulted. ~~Never derived from a set-point being present~~ — inverted at 1.22.0 (DEC-100 fix round): a
+  run whose set-point its own file name gives (read, never only answered) and that has no current set-point is
+  DEDUCED potentiostatic, a yellow fill (``isaac.fill.control_mode_from_setpoint.v1``, tested below with the deductions
+  on); no set-point is ever derived from a mode. The other tests here switch the file-name deductions off and pin the
+  answers as before.
 * The schema's conditional rules key the set-point requirement on it: a draft whose CONFIRMED
   mode is potentiostatic is incomplete without a composed set-point.
 * A 1.4.0 bundle in which a value at this path moves eligibility is STALE, not INVALID.
@@ -35,6 +38,27 @@ CM = B.CONTROL_MODE_PATH
 POT = "context.electrochemistry.potential_setpoint_V"
 SCALE = "context.electrochemistry.potential_scale"
 CURRENT = "context.electrochemistry.current_setpoint_mA_cm2"
+
+
+#: the real deductions, kept before the module switches them off (the inverted tests switch them back on)
+REAL_DEDUCTIONS = {name: getattr(B, name) for name in ("setpoint_from_name_applies", "control_mode_fill_for",
+                                                       "open_circuit_mode_applies")}
+
+
+@pytest.fixture(scope="module", autouse=True)
+def _name_deductions_off():
+    """1.22.0 (DEC-100 fix round): the answers this module pins are measured with the file-name deductions off
+    (``tests_support_records.without_name_deductions``); the deduction itself is tested with them on."""
+    from tests_support_records import without_name_deductions
+
+    with without_name_deductions():
+        yield
+
+
+@pytest.fixture()
+def deductions_on(monkeypatch):
+    for name, fn in REAL_DEDUCTIONS.items():
+        monkeypatch.setattr(B, name, fn)
 
 
 def _json(b: Path) -> dict:
@@ -148,7 +172,8 @@ def test_an_enum_value_is_eligible_and_an_off_enum_value_is_confirmed_but_not_el
 # --- no inference, either way ------------------------------------------------------------------
 
 
-def test_a_confirmed_setpoint_never_gives_a_control_mode(grouped):
+def test_a_confirmed_setpoint_never_gives_a_control_mode_without_the_deduction(grouped):
+    """With the file-name deductions off (the rules no scientist reviewed): a confirmed set-point alone gives no mode."""
     bd = M.load(grouped)
     M.decide(grouped, target_ids=[_cand(bd, POT, "run-001")["candidate_id"]], decision="confirm", value=None, by=BY, orcid=None)
     M.decide(grouped, target_ids=[_miss(bd, SCALE, "run-001")["value_id"]], decision="correct", value="RHE", by=BY, orcid=None)
@@ -166,6 +191,33 @@ def test_a_confirmed_control_mode_never_gives_a_setpoint(grouped):
     assert POT not in draft["fields"]  # the parsed set-point was never confirmed: nothing fills it
     assert _cand(M.load(grouped), POT, "run-001")["value_state"] == B.STATE_NEEDS_REVIEW
     assert not ({POT, CURRENT} & {m["path"] for m in report["missing_required"]})  # open_circuit requires neither
+
+
+def test_a_read_setpoint_with_no_current_setpoint_is_deduced_potentiostatic(grouped, deductions_on):
+    """Inverted at 1.22.0 (DEC-100 fix round, the real-beamtime replay R1a): the run's own file name gives its set-point, no
+    current set-point is read or answered, and nothing states another mode: the mode is DEDUCED potentiostatic, yellow,
+    never green, and the questions read it as the composer composes it."""
+    bd = B.apply_derivations(json.loads(json.dumps(M.load(grouped))))  # derived with the deductions on
+    m = _miss(bd, CM, "run-001")
+    assert m["value_state"] == B.STATE_FILLED and m["fill"] == {"rule_id": B.FILL_CONTROL_MODE_RULE_ID,
+                                                                 "value": "potentiostatic"}
+    assert B.value_colour(m["value_state"], m["fill"]["rule_id"]) == B.COLOUR_YELLOW
+    assert B.control_mode_by_run(bd)["run-001"] == "potentiostatic"
+    # an answer of another mode wins, and a current set-point stops the deduction
+    _set_mode(grouped, "run-001", "galvanostatic")
+    assert _miss(M.load(grouped), CM, "run-001")["value_state"] == B.STATE_SCIENTIST_CONFIRMED
+    M.decide(grouped, target_ids=[_miss(M.load(grouped), CURRENT, "run-002")["value_id"]], decision="correct", value=1.0,
+             by=BY, orcid=None)
+    assert "fill" not in _miss(M.load(grouped), CM, "run-002")
+
+
+def test_with_no_setpoint_the_files_give_no_mode_is_deduced(grouped, deductions_on):
+    """The deduction reads a set-point the files give (never one only typed in an answer): with the run's own file-name
+    set-point rejected, no mode is deduced."""
+    bd = M.load(grouped)
+    M.decide(grouped, target_ids=[_cand(bd, POT, "run-001")["candidate_id"]], decision="reject", value=None, by=BY,
+             orcid=None)
+    assert "fill" not in _miss(M.load(grouped), CM, "run-001")
 
 
 # --- the set-point a confirmed mode requires ------------------------------------------------------

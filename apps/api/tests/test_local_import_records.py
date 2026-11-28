@@ -28,6 +28,17 @@ SEMANTICS = REPO_ROOT / "tests/fixtures/bl15/semantics/multi_operator_corpus"
 BY = dict(by="Synthetic Scientist", orcid="0000-0002-1825-0097")
 
 
+@pytest.fixture(scope="module", autouse=True)
+def _name_deductions_off():
+    """1.22.0 (DEC-100 fix round): this module's subject is not the set-point or control-mode deductions from a run's
+    file name, and its synthetic runs were written for set-points that are asked: the two deductions are switched off
+    here (``tests_support_records.without_name_deductions``; the rules are pinned in ``test_local_import_guesses``)."""
+    from tests_support_records import without_name_deductions
+
+    with without_name_deductions():
+        yield
+
+
 @pytest.fixture(scope="module")
 def pristine(tmp_path_factory):
     out = tmp_path_factory.mktemp("pristine") / "bundle"
@@ -597,7 +608,7 @@ def test_upload_dry_run_touches_no_network_and_never_reads_the_token(tmp_path, c
     records.mkdir()
     body = b'{"record_id": "SYNTHETIC"}\n'
     (records / "01ABC.json").write_bytes(body)
-    (records / "01ABC.evidence.json").write_text("{}")
+    (records / "01ABC.evidence.json").write_text('{"evidence": {}}')  # 1.22.0: one the final check can read
     monkeypatch.setenv("ISAAC_PORTAL_TOKEN", "SENTINEL-TOKEN-NEVER-PRINTED")
 
     def no_network(*_a, **_k):

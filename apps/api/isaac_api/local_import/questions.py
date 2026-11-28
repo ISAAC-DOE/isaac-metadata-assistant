@@ -535,19 +535,51 @@ def _sample_reading_text(groups: Sequence[str], written: Mapping[str, Sequence[t
                      for key, lits in spellings.items())
 
 
-def left_out_filled_text(left: Sequence[tuple[str | None, str]], stem_of_run: Mapping[str, str]) -> str:
+def left_out_filled_text(left: Sequence[tuple[str | None, str]], stem_of_run: Mapping[str, str],
+                         guess_quotes: Mapping[str, str] | None = None) -> str:
     """1.19.0 (re-review M1): the sentence a question ends with when it leaves out targets a registered rule FILLED
     (``questions skip filled values``): how many, for which runs (their file stems; ``the beamtime`` for a beamtime
-    value), and how to correct one (``decide --target``, or the end review). ``""`` when it leaves none out."""
+    value), and how to correct one (``decide --target``, or the end review). ``""`` when it leaves none out. 1.22.0
+    (review M4): the GUESSED ones (``guess_quotes``: target id -> the quote the guess rests on) are said apart: "the
+    skill guessed it from <quote>"."""
     if not left:
         return ""
-    names = sorted({stem_of_run.get(r) or r if r else "the beamtime" for r, _ in left})
-    ids = [tid for _, tid in left]
-    shown = ", ".join(names[:5]) + (f" and {len(names) - 5} more" if len(names) > 5 else "")
-    return (f" Left out, because a rule filled the value from the evidence: {len(ids)} value(s), for {shown}; "
-            f"to change one, `isaac bundle decide <bundle_dir> --target {ids[0]} --decision correct --value <value> "
-            '--by "<your name>"`' + (f" (its id; the others: {', '.join(ids[1:4])}{'…' if len(ids) > 4 else ''})"
-                                      if len(ids) > 1 else "") + ", or change it in the end review.")
+    guess_quotes = guess_quotes or {}
+    filled = [(r, t) for r, t in left if t not in guess_quotes]
+    guessed = [(r, t) for r, t in left if t in guess_quotes]
+
+    def runs_of(pairs: Sequence[tuple[str | None, str]]) -> str:
+        names = sorted({stem_of_run.get(r) or r if r else "the beamtime" for r, _ in pairs})
+        return ", ".join(names[:5]) + (f" and {len(names) - 5} more" if len(names) > 5 else "")
+
+    def change(ids: Sequence[str]) -> str:
+        return (f"to change one, `isaac bundle decide <bundle_dir> --target {ids[0]} --decision correct --value <value> "
+                '--by "<your name>"`' + (f" (its id; the others: {', '.join(ids[1:4])}{'…' if len(ids) > 4 else ''})"
+                                          if len(ids) > 1 else ""))
+
+    out = ""
+    if filled:
+        ids = [tid for _, tid in filled]
+        out += (f" Left out, because a rule filled the value from the evidence: {len(ids)} value(s), for "
+                f"{runs_of(filled)}; " + change(ids) + ", or change it in the end review.")
+    if guessed:
+        ids = [tid for _, tid in guessed]
+        quote = guess_quotes[ids[0]]
+        out += (f" Left out, because the skill guessed it from \"{quote}\": {len(ids)} value(s), for "
+                f"{runs_of(guessed)}; a guess, not yet confirmed; " + change(ids) + ", or check it in the end review.")
+    return out
+
+
+def guess_quotes_of(bundle: Mapping) -> dict[str, str]:
+    """1.22.0 (review M4): ``{target id: the quote its guess rests on}`` for every GUESSED value of ``bundle``."""
+    quote_of = {str(i.get("interpretation_id")): i.get("quote") for i in bundle.get("ai_interpretations") or ()
+                if isinstance(i, Mapping)}
+    out: dict[str, str] = {}
+    for o in [*(bundle.get("candidates") or ()), *(bundle.get("missing_values") or ())]:
+        if o.get("value_state") == B.STATE_GUESSED:
+            q = next((quote_of[r] for r in (o.get("fill") or {}).get("readings") or () if quote_of.get(r)), None)
+            out[str(o.get("candidate_id") or o.get("value_id"))] = str(q or "a Claude reading of the files")[:200]
+    return out
 
 
 def _qid(*parts: str) -> str:
@@ -760,6 +792,7 @@ def consolidate(bundle: Mapping, *, compositions_out: dict | None = None, includ
     # 1.19.0 (re-review M1): the FILLED targets each question leaves out (not asked: a rule filled them), by the
     # question's key, so its text names the runs it leaves out and how to correct one
     filled_left_out: dict[tuple, list[tuple[str | None, str]]] = {}
+    guess_quotes = guess_quotes_of(bundle)  # 1.22.0 (review M4): a guess is said as one, with its quote
 
     def add(key: tuple, *, kind: str, path: str | None, target: dict, run_id: str | None, scope: str,
             blocking: str | None, partition: str | None = None, field: str | None = None, again: dict | None = None):
@@ -828,8 +861,8 @@ def consolidate(bundle: Mapping, *, compositions_out: dict | None = None, includ
             # card can still record a correction, and the correction wins
             if again is None and not (include_answered and m.get("extracted_state", B.STATE_MISSING) in _UNANSWERED
                                       and (("missing_value", m["value_id"]) in decisions
-                                           or m["value_state"] == B.STATE_FILLED or B.is_reviewed_fill(m))):
-                if include_answered or m["value_state"] != B.STATE_FILLED or B.is_answer_slot(m):
+                                           or m["value_state"] in B.FILL_STATES or B.is_reviewed_fill(m))):
+                if include_answered or m["value_state"] not in B.FILL_STATES or B.is_answer_slot(m):
                     continue
                 left_filled = True
             back = back or again is None
@@ -889,7 +922,7 @@ def consolidate(bundle: Mapping, *, compositions_out: dict | None = None, includ
         state = c["value_state"]
         left_filled = False  # 1.19.0: not asked because a rule filled it; its question says so
         held_fill = c["candidate_id"] in unusable_fills
-        if held_fill and (state == B.STATE_FILLED or B.is_reviewed_fill(c)):
+        if held_fill and (state in B.FILL_STATES or B.is_reviewed_fill(c)):
             state = c.get("extracted_state")  # asked as it was read, never as answered
         if state not in (B.STATE_NEEDS_REVIEW, B.STATE_CANDIDATE_EXTRACTED):
             again = not_eligible_answer(c, "candidate")
@@ -898,9 +931,9 @@ def consolidate(bundle: Mapping, *, compositions_out: dict | None = None, includ
                 state = c.get("extracted_state")
                 # 1.18.0: ...and a FILLED candidate likewise (not asked, still addressable, see above)
                 if not (include_answered and state in (B.STATE_NEEDS_REVIEW, B.STATE_CANDIDATE_EXTRACTED)
-                        and (c["value_state"] == B.STATE_FILLED or B.is_reviewed_fill(c)
+                        and (c["value_state"] in B.FILL_STATES or B.is_reviewed_fill(c)
                              or B.candidate_decision(bundle, c, decisions) is not None)):
-                    if include_answered or c["value_state"] != B.STATE_FILLED:
+                    if include_answered or c["value_state"] not in B.FILL_STATES:
                         continue
                     left_filled = True
                 if answered_out is not None:
@@ -939,7 +972,7 @@ def consolidate(bundle: Mapping, *, compositions_out: dict | None = None, includ
             conflict_ids_of = B.conflict_ids_by_candidate(bundle)
             for kind, objs in (("candidate", bundle["candidates"]), ("missing_value", bundle["missing_values"])):
                 for o in objs:
-                    if ((o.get("value_state") == B.STATE_FILLED or B.is_reviewed_fill(o)) and o.get("target_field_path")
+                    if ((o.get("value_state") in B.FILL_STATES or B.is_reviewed_fill(o)) and o.get("target_field_path")
                             and not (o.get("run_id") is None and o["target_field_path"] in RUN_ONLY_PATHS)):
                         # 1.18.0: a FILL is held like an answer (the composer pools it the same way); its "decision"
                         # names the rule, never a person
@@ -1067,7 +1100,7 @@ def consolidate(bundle: Mapping, *, compositions_out: dict | None = None, includ
                 }
             )
             if left:
-                questions[-1]["text"] += left_out_filled_text(left, stem_of_run)
+                questions[-1]["text"] += left_out_filled_text(left, stem_of_run, guess_quotes)
                 questions[-1]["left_out_as_filled"] = [{"run_id": r, "target_id": t} for r, t in left]
             continue
         node = _node(schema, path)
@@ -1215,7 +1248,7 @@ def consolidate(bundle: Mapping, *, compositions_out: dict | None = None, includ
             text += S.technique_hints_left_out_sentence(code_left_out)
         text += _asked_again_text(q["asked_again"], {path: enum})
         left = filled_left_out.get((scope, kind, path, partition)) or []
-        text += left_out_filled_text(left, stem_of_run)
+        text += left_out_filled_text(left, stem_of_run, guess_quotes)
         value_arg = "<value>" + (" --json" if numeric else "")
         qid = _qid(scope, kind, path, partition or "")
         if passing_said:
@@ -1622,6 +1655,10 @@ def consolidate(bundle: Mapping, *, compositions_out: dict | None = None, includ
                                                                  explain_counter=False)["questions"]
                         if q.get("sample_family")}
         questions += _sample_family_questions(questions, bundle, sample_written_of_group, universe=universe)
+        # 1.22.0 (fix round of DEC-100, the real-beamtime replay R1b): a field asked per group with the SAME suggestion
+        # everywhere (the reaction, its catalysis and drive, the control mode where the deduction cannot reach, the
+        # cell) is asked ONCE for the beamtime, on the sample-question pattern: its own id, each group's question kept
+        questions += _beamtime_family_questions(questions, bundle)
         # the condition labels (labels.py): new questions, each with its own id; no other question changes
         questions += label_questions(bundle, decisions=decisions, groups=groups, include_answered=include_answered)
         # r8 MED 5: a disagreement on a reading a label is proposed from points at that label's question (its why only)
@@ -1634,6 +1671,7 @@ def consolidate(bundle: Mapping, *, compositions_out: dict | None = None, includ
         scale_q = _potential_scale_question(questions, bundle, groups, group_of, context)
         if scale_q is not None:
             questions.append(scale_q)
+            _cover_by_scale_question(questions, scale_q)
         # finding 4: the dose-reading question of the processing results, asked ONCE for the beamtime (its own id)
         dose_q = _dose_reading_question(bundle, groups, include_answered=include_answered)
         if dose_q is not None:
@@ -1897,6 +1935,29 @@ def _environment_convention_question(bundle: Mapping, *, include_answered: bool 
     }
 
 
+def _cover_by_scale_question(questions: list[dict], scale_q: Mapping) -> None:
+    """1.22.0 (fix round of DEC-100, the real-beamtime replay R1): while the beamtime's potential-scale question blocks, a
+    group's own question that blocks ONLY for the scale (``required_fields`` is the scale alone), every scale target of
+    which the beamtime question asks, is COVERED by it: no longer blocking (``covered_by`` names it; its id, scope and
+    targets unchanged; still answerable, e.g. for a group quoted against another scale). Without this, one missing
+    fact blocked once per group (65 optional-value questions on a real beamtime)."""
+    if not scale_q.get("blocking"):
+        return
+    qid = scale_q["question_id"]
+    asked = {t["id"] for t in scale_q.get("targets") or ()}
+    for q in questions:
+        if q is scale_q or not q.get("blocking") or q.get("required_fields") != [SCALE_PATH]:
+            continue
+        mine = dict(_value_paths(q)).get(SCALE_PATH) or [t["id"] for t in q.get("targets") or ()
+                                                         if q.get("target_field_path") == SCALE_PATH]
+        if not mine or not set(mine) <= asked:
+            continue
+        q.update(blocking=False, tier=TIER_OPTIONAL, covered_by=qid)
+        q["why"] = (f"Not blocking: the record needs only the potential scale from it, and question {qid} asks the scale "
+                    "once for the beamtime; answer that one (or this one, for a group quoted against another scale).")
+        q["text"] += f" The scale is covered by question {qid}, which asks it once for the beamtime."
+
+
 def _cover_by_environment_convention(questions: list[dict], env_q: Mapping) -> None:
     """While the environment convention is open, a run's own environment question that it reaches is COVERED by it:
     a question all of whose targets it asks is no longer blocking (``covered_by`` names it; its id unchanged); one that
@@ -1982,7 +2043,14 @@ def _potential_scale_question(questions: Sequence[Mapping], bundle: Mapping, gro
                     hints.append({**h, "group_id": scope[len("group:"):]})
     stated = {gid: said for g in groups if (gid := g["group_id"]) in asked
               and (said := _states_a_potential(bundle, g, members.get(gid, ())))}
-    if len(stated) < _SCALE_MIN_GROUPS:
+    # 1.22.0 (fix round): ID STABILITY (DEC-91) now that the scale blocks: the question exists while ANY group it reaches
+    # is still asked, counting the groups already answered for the threshold (one group answered must not make the
+    # beamtime question vanish and its last group be asked under its own id only)
+    scale_runs = {m.get("run_id") for m in bundle.get("missing_values") or () if m.get("target_field_path") == SCALE_PATH}
+    reached = {g["group_id"] for g in groups if g["group_id"] not in asked
+               and scale_runs & set(members.get(g["group_id"], ()))
+               and _states_a_potential(bundle, g, members.get(g["group_id"], ()))}
+    if not stated or len(stated) + len(reached) < _SCALE_MIN_GROUPS:
         return None
     qid = potential_scale_question_id()
     stem_of = {r["run_id"]: str(r.get("stem") or "") for r in bundle.get("runs") or ()}
@@ -1991,13 +2059,23 @@ def _potential_scale_question(questions: Sequence[Mapping], bundle: Mapping, gro
     allowed = _eligible_values(SCALE_PATH)
     not_reached = len([g for g in groups if g["group_id"] not in stated])
     targets = [i for gid in stated for i in asked[gid]]
+    # 1.22.0 (DEC-100): BLOCKING when a group it reaches holds a potential the record cannot carry without its scale (the
+    # composer lists the scale as missing for it, and its own question blocks on it): the same id, now a must-answer
+    blocks = sorted({scope[len("group:"):] for q in questions if q.get("blocking")
+                     and (scope := str(q.get("scope") or "")).startswith("group:") and scope[len("group:"):] in stated
+                     and SCALE_PATH in (q.get("required_fields") or ())})
     return {
         "question_id": qid,
         "partition": POTENTIAL_SCALE_PARTITION,
-        "tier": TIER_OPTIONAL,
-        "blocking": False,
-        "why": ("Optional for the schema, needed to say what was measured: a potential goes into a record only beside "
-                "the reference scale it is quoted against, and no file here states one."),
+        "tier": TIER_BLOCKING if blocks else TIER_OPTIONAL,
+        "blocking": bool(blocks),
+        **({"blocks_groups": len(blocks), "blocks_group_ids": blocks, "required_fields": [SCALE_PATH]} if blocks else {}),
+        "why": (("The records cannot be exported without it: their measurements were held at a potential, and a "
+                 "potential goes into a record only beside the reference scale it is quoted against, which no file "
+                 f"here states (a wrong scale is a scientific error); it blocks {len(blocks)} record group(s).")
+                if blocks else
+                ("Optional for the schema, needed to say what was measured: a potential goes into a record only beside "
+                 "the reference scale it is quoted against, and no file here states one.")),
         "kind": "missing_value",
         "scope": "experiment",
         "target_field_path": SCALE_PATH,
@@ -2028,7 +2106,7 @@ STATED_UTC_START_QUESTION_ID = _qid("experiment", STATED_UTC_START_KIND, B.XDC_S
 #: How many groups the beamtime-wide start-time question names as examples (the rest are counted).
 _STATED_UTC_EXAMPLES = 3
 #: The reading states a value it may still settle a start with (a rejected reading never does).
-_STATED_UTC_USABLE_STATES = (B.STATE_CANDIDATE_EXTRACTED, B.STATE_NEEDS_REVIEW, B.STATE_FILLED,
+_STATED_UTC_USABLE_STATES = (B.STATE_CANDIDATE_EXTRACTED, B.STATE_NEEDS_REVIEW, *B.FILL_STATES,
                              B.STATE_SCIENTIST_CONFIRMED)
 #: r6 review M1: SPEC writes ``#E`` once, in the file header, when the file is CREATED (the header's ``#D`` is the same
 #: instant); each scan writes its own ``#D`` later. A run whose first scan starts more than this long after its file
@@ -2999,6 +3077,144 @@ def asked_for_sample_sentence(qid: str) -> str:
     return f" Or answer the whole sample at once: question {qid}."
 
 
+#: 1.22.0 (fix round, R1b): the fields a beamtime usually shares, asked ONCE for the beamtime when every group's own
+#: question carries the same suggestion (or none): the reaction, its catalysis and drive, the control mode. Not the
+#: cell: a cell named in a beamtime-wide or passing sentence is asked group by group on purpose (r5b, c6a).
+ASK_ONCE_FIELDS = frozenset({"context.electrochemistry.reaction", "context.reaction.name", "context.reaction.catalysis",
+                             "context.reaction.drive", B.CONTROL_MODE_PATH})
+#: The partition key of a beamtime family question (``sample_family=beamtime``): one per field and kind.
+BEAMTIME_FAMILY_KEY = "beamtime"
+
+
+def asked_for_beamtime_sentence(qid: str) -> str:
+    """The sentence a per-group question adds when a beamtime question asks it once (1.22.0)."""
+    return f" Or answer it once for the whole beamtime: question {qid}."
+
+
+def _suggestion_of(q: Mapping, cand_of: Mapping[str, Mapping]) -> tuple[bool, Any]:
+    """``(one, value)``: whether ONE suggestion holds across the question's targets, and it (``None``: none at all). A
+    confirm question's suggestion is its candidates' value; a missing value's is its single suggested value, if any."""
+    if q.get("kind") == "confirm_value":
+        values = {json.dumps((cand_of.get(t["id"]) or {}).get("value"), sort_keys=True) for t in q.get("targets") or ()
+                  if t.get("kind") == "candidate"}
+        if len(values) != 1:
+            return False, None
+        return True, json.loads(next(iter(values)))
+    sug = q.get("suggested")
+    value = sug.get("value") if isinstance(sug, Mapping) else sug
+    return True, value
+
+
+def _beamtime_family_questions(questions: list[dict], bundle: Mapping) -> list[dict]:
+    """1.22.0 (fix round of DEC-100, R1b): ONE question for the beamtime per :data:`ASK_ONCE_FIELDS` field and kind, when
+    two or more record groups are asked it on their own question with the SAME suggestion (the same value their files
+    give, or none). Built on the sample-question pattern (:func:`_sample_family_questions`): its own id (hashed from the
+    field and the kind, never from an answer), ``sample_family`` naming its members, each member keeping its id, scope
+    and targets and staying answerable (``asked_for_sample_by`` names this question, so it is counted once). Its answer
+    records the same decision on every member's targets (``decide --question``), each run keeping it as its own; a group
+    whose question carries ANOTHER suggestion is not a member and is listed under ``exceptions``, asked on its own."""
+    cand_of = {c["candidate_id"]: c for c in bundle.get("candidates") or ()}
+    by_key: dict[tuple[str, str], list[tuple[dict, Any]]] = {}
+    for q in questions:
+        path, kind = q.get("target_field_path"), q.get("kind")
+        if (path not in ASK_ONCE_FIELDS or kind not in ("missing_value", "confirm_value")
+                or not str(q.get("scope") or "").startswith("group:") or not q.get("targets")
+                or q.get("asked_for_sample_by") or q.get("sample_family")):
+            continue
+        if any(q.get(flag) for flag in ("informational", "outside_live_groups", "covered_by_decisions",
+                                        "asked_by_question", "answered_at_once_by", "asked_again")):
+            continue
+        if any((((cand_of.get(t["id"]) or {}).get("state_basis") or {}).get("not_proposable_reason") in B.HELD_REASONS)
+               for t in q["targets"] if t.get("kind") == "candidate"):
+            continue  # a beamtime-wide or passing statement held for review: asked group by group on purpose (DEC-69)
+        one, value = _suggestion_of(q, cand_of)
+        if one:
+            by_key.setdefault((path, kind), []).append((q, value))
+    out: list[dict] = []
+    for (path, kind), rows in sorted(by_key.items()):
+        values = Counter(json.dumps(v, sort_keys=True, default=str) for _, v in rows)
+        common, n = values.most_common(1)[0]
+        members = sorted((q for q, v in rows if json.dumps(v, sort_keys=True, default=str) == common),
+                         key=lambda q: q["question_id"])
+        if n < 2:
+            continue
+        value = json.loads(common)
+        apart = sorted((q for q, v in rows if json.dumps(v, sort_keys=True, default=str) != common),
+                       key=lambda q: q["question_id"])
+        qid = _qid("experiment", SAMPLE_FAMILY_TAG, kind, path, BEAMTIME_FAMILY_KEY)
+        targets: list[dict] = []
+        per_scope: dict[str, list[str]] = {}
+        for m in members:
+            targets += [t for t in m["targets"] if t not in targets]
+            for sc, ids in (m.get("per_scope_targets") or {}).items():
+                per_scope.setdefault(sc, []).extend(i for i in ids if i not in per_scope.get(sc, ()))
+        gids = [sc[len("group:"):] for sc in per_scope if sc.startswith("group:")]
+        runs = sum(int((m.get("applies_to") or {}).get("runs") or 0) for m in members)
+        blocking = [m for m in members if m.get("blocking")]
+        hints: list[dict] = []
+        seen: set = set()
+        for m in members:
+            for h in m.get("hints") or ():
+                hkey = (h.get("kind"), str(h.get("literal")), h.get("source_id"), h.get("locator"))
+                if hkey not in seen and h.get("kind") != "related_reading":
+                    seen.add(hkey)
+                    hints.append(h)
+        own = ", ".join(m["question_id"] for m in members[:5]) + (", …" if len(members) > 5 else "")
+        said = f" The files of every one of them give {_quoted(str(value))}." if value is not None else ""
+        text = (f"What is the {_label(path)} ({path}) of this beamtime's measurements? It is asked for {len(gids)} record "
+                f"group(s) ({runs} run(s)) with the same suggestion.{said} One answer applies to each of them, each run "
+                f"keeping it as its own value. If one differs, answer it on its own question ({own}) or add --only "
+                "group:<group_id>: an answer given that way is kept, and this question never changes it."
+                + (f" Asked on their own, because their files suggest something else: {len(apart)} group question(s) ("
+                   + ", ".join(a["question_id"] for a in apart[:5]) + ("…" if len(apart) > 5 else "") + ")."
+                   if apart else ""))
+        confirm = kind == "confirm_value" and value is not None
+        fam: dict[str, Any] = {
+            "question_id": qid,
+            "tier": min(m["tier"] for m in members),
+            "blocking": bool(blocking),
+            "why": (blocking or members)[0].get("why"),
+            "kind": kind,
+            "scope": "experiment",
+            "partition": f"{SAMPLE_FAMILY_TAG}={BEAMTIME_FAMILY_KEY}",
+            "target_field_path": path,
+            "beamtime_wide": True,
+            "text": text,
+            "applies_to": {"groups": len(gids), "runs": runs, "targets": len(targets), "runs_outside_live_groups": 0},
+            "targets": targets,
+            "per_scope_targets": per_scope,
+            "hints": hints[:_HINTS_PER_QUESTION],
+            "allowed_values": members[0].get("allowed_values"),
+            "allowed_decisions": list(members[0].get("allowed_decisions") or ALLOWED_DECISIONS.get(kind, ())),
+            "answers_differ": False,
+            "answer_command": ((f'isaac bundle decide <bundle_dir> --question {qid} --decision confirm --by "<your name>"'
+                                "   # the value the files give; another: --decision correct --value <value>")
+                               if confirm else
+                               (f'isaac bundle decide <bundle_dir> --question {qid} --decision correct --value <value> '
+                                '--by "<your name>"   # one group differs: add --only group:<group_id>')),
+            "sample_family": {"sample": "the whole beamtime", "basis": BEAMTIME_FAMILY_KEY, "numbers": [],
+                              "numbers_name_electrodes": False, "objects": None,
+                              "named": f"every record group of the beamtime asked it ({len(gids)})",
+                              "member_questions": [m["question_id"] for m in members]},
+            "asked_once_for_beamtime": {"suggested": value, "groups": len(gids),
+                                        "exceptions": [{"question_id": a["question_id"],
+                                                        "scope": a.get("scope")} for a in apart]},
+            "answers_at_once": len(members),
+        }
+        if kind == "confirm_value":
+            fam.update(no_value=value is None, targets_without_a_value=len(targets) if value is None else 0,
+                       targets_with_an_unfit_value=0, confirmable_scopes=[] if value is None else sorted(per_scope))
+        ids = [g for m in blocking for g in m.get("blocks_group_ids") or ()]
+        if blocking:
+            fam["blocks_group_ids"] = list(dict.fromkeys(ids))
+            fam["blocks_groups"] = len(fam["blocks_group_ids"])
+        for m in members:
+            m["asked_for_sample_by"] = qid
+            m["text"] += asked_for_beamtime_sentence(qid)
+        out.append(fam)
+    return out
+
+
 def _group_sample_identity(group: Mapping) -> str | None:
     """A record group's sample as the grouping recorded it, WITHOUT its electrode or specimen number: the canonical
     sample reading (``sample_name`` plus any other sample part, e.g. a loading), or ``None`` when the group states no
@@ -3055,7 +3271,7 @@ def _sample_family_field_answered(bundle: Mapping, group_of: Mapping[str, str]) 
     is never a member's, so it needs no second look."""
     answered = [o for o in (*(bundle.get("candidates") or ()), *(bundle.get("missing_values") or ()))
                 if o.get("target_field_path") in SAMPLE_FAMILY_FIELDS and o.get("run_id") in group_of
-                and o.get("value_state") in (B.STATE_SCIENTIST_CONFIRMED, B.STATE_REJECTED, B.STATE_FILLED)]
+                and o.get("value_state") in (B.STATE_SCIENTIST_CONFIRMED, B.STATE_REJECTED, *B.FILL_STATES)]
     if not answered:
         return False
     identity = {g["group_id"]: _group_sample_identity(g) for g in live_groups(bundle)}
@@ -4649,14 +4865,14 @@ def group_unusable_fills(bundle: Mapping, group_of: Mapping[str, str], context: 
     for kind, objs in (("candidate", bundle["candidates"]), ("missing_value", bundle["missing_values"])):
         for o in objs:
             state, path = o.get("value_state"), o.get("target_field_path")
-            if not path or state not in (B.STATE_FILLED, B.STATE_SCIENTIST_CONFIRMED):
+            if not path or state not in (*B.FILL_STATES, B.STATE_SCIENTIST_CONFIRMED):
                 continue
             if not (o.get("eligibility_for_official_record") or {}).get("eligible"):
                 continue
             if o.get("run_id") is None and path in RUN_ONLY_PATHS:
                 continue
             tid = o.get("candidate_id") or o.get("value_id")
-            by_fill = state == B.STATE_FILLED or B.is_reviewed_fill(o)  # 1.21.0: a reviewed fill composes as a fill
+            by_fill = state in B.FILL_STATES or B.is_reviewed_fill(o)  # 1.21.0: a reviewed fill composes as a fill
             if by_fill:
                 value = B.fill_value(o)
             else:
@@ -4721,7 +4937,7 @@ def fills_asked(bundle: Mapping) -> set[str]:
                 group_of[rid] = g["group_id"]
     asked = group_unusable_fills(bundle, group_of, B.context_run_ids(bundle))
     return {o.get("candidate_id") or o.get("value_id") for o in [*bundle["candidates"], *bundle["missing_values"]]
-            if o.get("value_state") == B.STATE_FILLED and (o.get("candidate_id") or o.get("value_id")) in asked}
+            if o.get("value_state") in B.FILL_STATES and (o.get("candidate_id") or o.get("value_id")) in asked}
 
 
 def filled_targets(bundle: Mapping, ids: Iterable[str]) -> list[str]:
@@ -4733,7 +4949,7 @@ def filled_targets(bundle: Mapping, ids: Iterable[str]) -> list[str]:
     wanted = set(ids)
     return [o.get("candidate_id") or o.get("value_id")
             for o in [*(bundle.get("candidates") or ()), *(bundle.get("missing_values") or ())]
-            if (o.get("candidate_id") or o.get("value_id")) in wanted and o.get("value_state") == B.STATE_FILLED]
+            if (o.get("candidate_id") or o.get("value_id")) in wanted and o.get("value_state") in B.FILL_STATES]
 
 
 def processing_blocked_groups(bundle: Mapping) -> dict[str, str]:
@@ -4937,7 +5153,7 @@ def _unasked(bundle: Mapping, group: Mapping, path: str, report: Mapping) -> dic
     reject = f'isaac bundle decide <bundle_dir> --target {gid} --decision reject --by "<your name>"'
     beamtime = [o for o in objs if o.get("run_id") is None]
     own = [o for o in objs if o.get("run_id") is not None
-           and (B.is_answer_slot(o) or o.get("value_state") in (B.STATE_SCIENTIST_CONFIRMED, B.STATE_FILLED))]
+           and (B.is_answer_slot(o) or o.get("value_state") in (B.STATE_SCIENTIST_CONFIRMED, *B.FILL_STATES))]
     if beamtime and own:
         # c7-r MED-2: A BEAMTIME TARGET AND A RUN'S OWN ANSWER (an answer slot, or the run's own target). `--target` on
         # the beamtime one would rewrite every group of the beamtime; the group's own answer is changed through the

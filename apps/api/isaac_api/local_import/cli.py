@@ -1995,6 +1995,9 @@ def cmd_bundle_check(args) -> int:
     if (bundle.get("counts") or {}).get("filled"):
         # 1.18.0: candidates AND missing values a registered rule filled (counts.filled), not asked
         print(f"  filled by a rule (candidates and missing values, not asked): {bundle['counts']['filled']}")
+    if (bundle.get("counts") or {}).get("guessed"):
+        # 1.22.0 (DEC-100): guessed from a checked inferred reading (yellow), not asked
+        print(f"  guessed from a Claude reading (yellow, not asked; listed apart in the review): {bundle['counts']['guessed']}")
     print(
         f"  bounds: {len(bundle['runs'])}/{b['max_runs']} runs, "
         f"{len(bundle['candidates'])}/{b['max_candidates']} candidates, "
@@ -2780,7 +2783,12 @@ def cmd_bundle_export(args) -> int:
 
 
 def cmd_bundle_upload(args) -> int:
+    """1.22.0 (DEC-100): THE FINAL CHECK comes first. When any record to be sent carries a yellow value (a guess, or a
+    deduction no scientist confirmed: ``bundle.evidence_colour``), it lists them and sends nothing until the scientist's
+    yes is given as ``--guesses-ok <digest> --by <name> --bundle <bundle_dir>`` over exactly that list; the yes is
+    recorded in the bundle as one ``submit_with_guesses`` decision. Then the dry run, as before."""
     from . import records as R
+    from . import review as RV
 
     if not args.dry_run:
         _err("uploads are disabled in this build. Use --dry-run to see what would be sent.")
@@ -2788,6 +2796,37 @@ def cmd_bundle_upload(args) -> int:
     if not Path(args.records_dir).is_dir():
         _err(f"No records directory at {args.records_dir}.")
         return EXIT_NOT_FOUND
+    if (args.by or args.orcid) and not args.guesses_ok:
+        _err("--by and --orcid go with --guesses-ok (the scientist's yes to sending the guesses). Nothing was sent.")
+        return EXIT_USAGE
+    try:
+        check = RV.final_check(Path(args.records_dir), Path(args.bundle).expanduser() if args.bundle else None)
+    except RV.ReviewRefused as exc:
+        _err(str(exc))
+        return exc.code
+    accepted = None
+    if check["values"] and not args.guesses_ok:
+        stale = (f" The records are older than your answers ({len(check['stale_records'])} record(s)): run "
+                 "`isaac bundle build-records` and `isaac bundle export` again first." if check["stale_records"] else "")
+        _print({"dry_run": True, "network_calls": 0, "sent": False,
+                "statement": (check["statement"] + stale + " Nothing would be sent until the scientist says to send "
+                              "them as they are (--guesses-ok with the digest below) or checks them first (`isaac "
+                              "bundle review`). " + RV.UPLOAD_NOTE),
+                "question": RV.final_check_question(check),
+                "final_check": check,
+                "final_check_words": RV.render_final_check(check, records_dir=args.records_dir, bundle=args.bundle)})
+        return EXIT_INVALID
+    if check["values"] and args.guesses_ok:
+        if not args.bundle:
+            _err("--guesses-ok needs --bundle <bundle_dir>: the bundle the records were exported from, where the yes is "
+                 "recorded. Nothing was recorded.")
+            return EXIT_USAGE
+        try:
+            accepted = RV.accept_guesses(Path(args.records_dir), Path(args.bundle).expanduser(), digest=args.guesses_ok,
+                                         by=args.by, orcid=args.orcid)
+        except RV.ReviewRefused as exc:
+            _err(str(exc))
+            return exc.code
     plan = R.upload_plan(Path(args.records_dir), args.portal_url)
     # r5f L3: the statement leads ("N records, 2 requests each, to <portal>") and says each distinct note and each
     # portal warning once (a note differing only in its question id is one note); a record's own notes stay in `records`
@@ -2796,6 +2835,12 @@ def cmd_bundle_upload(args) -> int:
     # of its own, is listed); --full prints every row
     _print({"dry_run": True, "network_calls": 0, "statement": summary["statement"],
             **{k: v for k, v in summary.items() if k != "statement"},
+            # 1.22.0 (DEC-100): what the final check found, and the yes when it was given
+            "final_check": ({"values": check["values"], "digest": check["digest"], "statement": check["statement"],
+                             **({"recorded": accepted["recorded"], "decision_id": accepted.get("decision_id"),
+                                 **({"already_recorded": True} if accepted.get("already_recorded") else {}),
+                                 "accepted_statement": accepted["statement"]} if accepted else {})}),
+            "upload_note": RV.UPLOAD_NOTE,
             **({"records_total": len(plan), "records": plan} if args.full else compact_upload(plan))})
     return EXIT_OK
 
@@ -3364,6 +3409,12 @@ def build_parser(prog: str = "isaac") -> argparse.ArgumentParser:
     q.add_argument("--portal-url")
     q.add_argument("--full", action="store_true", help="print every record's requests (default: every replacing record and "
                    "every one with a note of its own; of the repeated ones the first few)")
+    q.add_argument("--bundle", help="the bundle the records were exported from (where the final check's yes is recorded)")
+    q.add_argument("--guesses-ok", dest="guesses_ok", metavar="DIGEST",
+                   help="the scientist's yes to sending the guesses the final check listed, as the digest it printed; "
+                        "refused if the list changed since")
+    q.add_argument("--by", help="with --guesses-ok: the name of the person who said to send the guesses")
+    q.add_argument("--orcid", help="optional ORCID iD claimed with --by")
     q.set_defaults(func=cmd_bundle_upload)
 
     q = bsub.add_parser("template", help="the ISAAC metadata template: export it, fill it once, import the answers")

@@ -43,6 +43,18 @@ OLD_COMMIT = "ed731bcc"  # the last commit whose build could not write the set-p
 REPO = Path(__file__).resolve().parents[3]
 
 
+@pytest.fixture(scope="module", autouse=True)
+def _name_deductions_off():
+    """1.22.0 (DEC-100 fix round): the rules this module pins are measured on set-points no rule fills: the file-name
+    deductions (the set-point from a run's one name token, and the control mode it implies) are switched off here
+    (``tests_support_records.without_name_deductions``); they are tested in ``test_local_import_guesses``."""
+    from tests_support_records import without_name_deductions
+
+    with without_name_deductions():
+        yield
+
+
+
 def _json(b: Path) -> dict:
     return json.loads((b / "bundle.json").read_text())
 

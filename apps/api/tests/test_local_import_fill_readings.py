@@ -8,7 +8,8 @@ fake folder name, and in-memory edits of those bundles.
 * ``isaac.fill.reading_stated.v1`` fills a field a checked ``stated`` reading names when its quote itself states the
   value (the lexical tie); an unchecked reading (no block, a failed check, a block that is not the bundle's own source
   or not the reading it was made for) never fills, and the validator refuses an edited or copied block;
-* an INFERRED reading never fills, however many quotes agree (DEC-97, after a real-beamtime replay);
+* an INFERRED reading never fills green, however many quotes agree (DEC-97, after a real-beamtime replay); since 1.22.0
+  (DEC-100) it fills as a yellow GUESS instead (``test_local_import_guesses.py``);
 * a sample's own label is never filled as its material; an electrolyte name carrying a concentration never fills;
 * any disagreement (another reading, a file value) means no fill, and one dissenting target stops a whole beamtime
   finding; a beamtime-scoped reading never fills a run-level or sample field (DEC-69), a runs-scoped one fills only its
@@ -83,6 +84,18 @@ MEMO_LINES = {
     38: "Sample 1 ZZ1 film in acid, as before (SYNTHETIC)",
 }
 MEMO2_LINES = {1: "# SYNTHETIC FIXTURE -- NOT INSTRUMENT OUTPUT.", 2: "a second memo: ZZ1 is a SYN-oxide on SYN-support (SYNTHETIC)"}
+
+
+@pytest.fixture(scope="module", autouse=True)
+def _name_deductions_off():
+    """1.22.0 (DEC-100 fix round): the rules this module pins are measured on set-points no rule fills: the file-name
+    deductions (the set-point from a run's one name token, and the control mode it implies) are switched off here
+    (``tests_support_records.without_name_deductions``); they are tested in ``test_local_import_guesses``."""
+    from tests_support_records import without_name_deductions
+
+    with without_name_deductions():
+        yield
+
 
 
 def _write(path: Path, lines: dict[int, str], total: int) -> None:
@@ -194,7 +207,7 @@ def test_annotate_apply_stores_the_quote_check_and_a_deterministic_reading_pass_
     assert done["applied"] and done["interpretations"] == 1 and done["quote_check"]["failed"] == 0
     assert all("content_sha256" not in r and "lines" not in r for r in done["quote_check"]["results"])  # stored only
     b = M.load(bdir)
-    assert b["format_version"] == B.FORMAT_VERSION == "1.21.0" and b["fill_rule_set"] == B.FILL_RULE_SET == 3
+    assert b["format_version"] == B.FORMAT_VERSION == "1.22.0" and b["fill_rule_set"] == B.FILL_RULE_SET == 4
     assert B.validate_bundle(b) == []
     [i] = _readings_of(b, _value(b, ENV))
     qc = i["quote_check"]
@@ -607,24 +620,31 @@ def test_a_label_valued_parser_candidate_is_not_filled_by_parser_exact(bdir):
     assert got["value_state"] == B.STATE_CANDIDATE_EXTRACTED and "fill" not in got
 
 
-# --- inferred readings never fill (D1) ----------------------------------------------------------------------------------
+# --- inferred readings never fill GREEN (D1; 1.22.0, DEC-100: they fill as a yellow GUESS) -------------------------------
 
 
-def test_an_inferred_reading_never_fills_however_many_quotes_agree(bdir, src):
+def test_an_inferred_reading_never_fills_green_however_many_quotes_agree_it_is_a_guess(bdir, src):
+    """Inverted at 1.22.0 (DEC-100): DEC-97 kept an inferred reading out entirely; now it fills as a GUESS (state
+    guessed, yellow), never as a green fill, however many quotes agree."""
     value = "SYN-oxide on SYN-support"
     _apply(bdir, src, _finding(NAME, value, 12, strength="inferred"), _finding(NAME, value, 25, strength="inferred"),
            _finding(NAME, value, 2, file=MEMO2, strength="inferred"))
     c = _value(M.load(bdir), NAME)
-    assert c["value_state"] == B.STATE_NEEDS_REVIEW and "fill" not in c
-    assert B.FILL_READING_STATED_RULE_ID in B.FILL_RULES and "isaac.fill.reading_inferred.v1" not in B.FILL_RULES
+    assert c["value_state"] == B.STATE_GUESSED != B.STATE_FILLED
+    assert c["fill"]["rule_id"] == B.FILL_READING_INFERRED_RULE_ID and c["fill"]["value"] == value
+    assert B.value_colour(c["value_state"], c["fill"]["rule_id"]) == B.COLOUR_YELLOW
+    assert B.FILL_READING_STATED_RULE_ID in B.FILL_RULES and "isaac.fill.reading_inferred.v1" in B.FILL_RULES
 
 
-def test_an_inferred_reading_beside_the_file_value_never_fills(bdir, src):
+def test_an_inferred_reading_beside_the_file_value_is_a_guess_never_a_fill(bdir, src):
+    """Inverted at 1.22.0: an inferred reading that agrees with the file value guesses it (yellow); it never fills it
+    green (only a stated reading whose quote states it, or a file rule, does)."""
     sp = _value(M.load(bdir), SETPOINT)
     assert "candidate_id" in sp and sp["value"] == 0.1 and sp["value_state"] == B.STATE_NEEDS_REVIEW
     _apply(bdir, src, _finding(SETPOINT, 0.1, 21, file=MEMO, strength="inferred"))
     sp = _value(M.load(bdir), SETPOINT)
-    assert sp["value_state"] == B.STATE_NEEDS_REVIEW and "fill" not in sp
+    assert sp["value_state"] != B.STATE_FILLED
+    assert sp["value_state"] == B.STATE_GUESSED and sp["fill"]["rule_id"] == B.FILL_READING_INFERRED_RULE_ID
 
 
 def test_a_stated_reading_beside_the_file_value_fills_and_one_that_differs_does_not(bdir, src):
@@ -1034,13 +1054,15 @@ def test_a_reading_fill_composes_as_inferred_passes_the_draft_validator_and_isaa
 
 
 def test_the_rules_and_their_texts():
-    assert B.READING_FILL_RULES == {B.FILL_READING_STATED_RULE_ID} and B.FILL_READING_STATED_RULE_ID in B.FILL_RULES
-    assert not hasattr(B, "FILL_READING_INFERRED_RULE_ID")  # D1: no dead rule
+    # inverted at 1.22.0 (DEC-100): the inferred rule exists now, and it is a GUESS rule (yellow), never a green fill
+    assert B.READING_FILL_RULES == {B.FILL_READING_STATED_RULE_ID, B.FILL_READING_INFERRED_RULE_ID}
+    assert B.FILL_READING_STATED_RULE_ID in B.FILL_RULES and B.FILL_READING_INFERRED_RULE_ID in B.FILL_RULES
+    assert B.GUESS_RULES == {B.FILL_READING_INFERRED_RULE_ID} and B.FILL_READING_STATED_RULE_ID not in B.GUESS_RULES
     schema = B.bundle_schema()
     assert set(schema["$defs"]["fill"]["properties"]["rule_id"]["enum"]) == set(B.FILL_RULES)
     qc = schema["$defs"]["ai_interpretation"]["properties"]["quote_check"]
     assert qc["properties"]["checker"]["enum"] == [B.QUOTE_CHECKER_ID] and "reading_sha256" in qc["required"]
-    assert B.FILL_RULE_SET == 3 and B.FORMAT_VERSION == "1.21.0" and "1.19.0" in B.CHANGES_ADDED_IN
+    assert B.FILL_RULE_SET == 4 and B.FORMAT_VERSION == "1.22.0" and "1.19.0" in B.CHANGES_ADDED_IN
     assert "inferred" in B.FILL_READING_STATED_RULE and ". " not in B.FILL_READING_STATED_RULE
 
 

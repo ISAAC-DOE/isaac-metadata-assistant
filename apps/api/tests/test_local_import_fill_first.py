@@ -43,6 +43,18 @@ DOMAIN = "system.domain"
 
 
 @pytest.fixture(scope="module", autouse=True)
+def _name_deductions_off():
+    """1.22.0 (DEC-100 fix round): the rules this module pins are measured on set-points no rule fills: the file-name
+    deductions (the set-point from a run's one name token, and the control mode it implies) are switched off here
+    (``tests_support_records.without_name_deductions``); they are tested in ``test_local_import_guesses``."""
+    from tests_support_records import without_name_deductions
+
+    with without_name_deductions():
+        yield
+
+
+
+@pytest.fixture(scope="module", autouse=True)
 def _vendored_schema_basis(tmp_path_factory):
     """No portal validator installed (as in CI), so the question set does not depend on the machine."""
     d = tmp_path_factory.mktemp("no-validator")
@@ -120,10 +132,11 @@ def test_filled_is_a_value_state_and_never_a_parser_state():
     assert "filled" not in schema["$defs"]["extracted_state"]["enum"]
     assert set(schema["$defs"]["fill"]["properties"]["rule_id"]["enum"]) == set(B.FILL_RULES)
     # 1.19.0 (slice 2, DEC-97) adds the one reading rule (an inferred reading never fills); 1.20.0 (slice 3, DEC-98)
-    # the folder, people and held-potential rules
+    # the folder, people and held-potential rules; inverted at 1.22.0 (DEC-100): the inferred rule fills, as a GUESS
     assert set(B.FILL_RULES) == {B.FILL_PARSER_EXACT_RULE_ID, B.FILL_STORED_CONVENTION_RULE_ID, B.FILL_DOMAIN_RULE_ID,
-                                 B.FILL_READING_STATED_RULE_ID} | B.FOLDER_FILL_RULES
-    assert B.FORMAT_VERSION == "1.21.0" == B._VERSION_ORDER[-1]  # 1.21.0: the end review (DEC-99), no new rule
+                                 B.FILL_READING_STATED_RULE_ID, B.FILL_READING_INFERRED_RULE_ID,
+                                 B.FILL_SETPOINT_NAME_RULE_ID, B.FILL_CONTROL_MODE_RULE_ID} | B.FOLDER_FILL_RULES
+    assert B.FORMAT_VERSION == "1.22.0" == B._VERSION_ORDER[-1]  # 1.22.0: guesses (DEC-100); 1.21.0: the end review (DEC-99), no new rule
     for rule_id, text in B.FILL_RULES.items():
         assert text.startswith(rule_id + ": ") and text.count(". ") == 0, rule_id  # one sentence, named by its id
     with pytest.raises(ValueError):

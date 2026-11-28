@@ -1125,7 +1125,7 @@ def progress(bundle_dir: Path, bundle: Mapping, check: Mapping) -> dict:
         "scientist_decisions": len(bundle.get("scientist_decisions") or ()),
         # 1.18.0: `filled` (values a registered rule filled, not asked; None for an older bundle, which stores none)
         "values": {k: counts.get(k) for k in ("candidates", "conflicts", "missing_values", "needs_review",
-                                              "candidate_extracted", "filled", "scientist_confirmed", "rejected",
+                                              "candidate_extracted", "filled", "guessed", "scientist_confirmed", "rejected",
                                               "unmapped")},
         "readiness": {"stage": readiness.get("stage"), "eligible_value_count": readiness.get("eligible_value_count"),
                       "blocking": readiness.get("blocking"), "official_record_ready": False},
@@ -1533,7 +1533,7 @@ def list_local_bundles():
             **bundle_header(entry.name, bdir, bundle, version),
             "check": check,
             "counts": {k: counts.get(k) for k in ("runs", "run_candidates", "candidates", "conflicts", "missing_values",
-                                                  "needs_review", "scientist_confirmed", "filled")},
+                                                  "needs_review", "scientist_confirmed", "filled", "guessed")},
             "record_groups": len(bundle.get("record_groups") or ()),
             "scientist_decisions": len(bundle.get("scientist_decisions") or ()),
             "readiness": {"stage": (bundle.get("readiness") or {}).get("stage"),

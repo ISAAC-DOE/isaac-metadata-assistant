@@ -28,24 +28,24 @@ ISAAC's own code reads the files on this computer. You read only what code canno
    You write only the notes commands take as input (the findings file, a `--targets-file` list, a `--params-file` they
    asked for), in `<bundle>-notes/`, beside the working folder.
 2. **Fill what a registered rule supports: the code does it, you never write a value.** Run `decide` and `review --accept`
-   only with an answer the scientist gave in THIS conversation, never one inferred from a file, a hint or an earlier session. No
-   answer: record nothing. `defer` only when they say they don't know. A beamtime fact never goes onto a run.
+   (and `upload --guesses-ok`) only with an answer the scientist gave in THIS conversation, never one inferred from a file,
+   a hint or an earlier session. No answer: record nothing. `defer` only when they say they don't know. A beamtime fact never goes onto a run.
 3. **A printed command with `<placeholders>` is a template.** Fill it from their answer; never run it as it is.
 4. **Ask only what is missing, conflicting, or a judgment call:** the potential scale when nothing states it, the
    environment convention, the dose question, an absorber with two possible edges, anything deferred. What a rule
-   filled is not asked: it goes to the review. Never default a temperature, a reaction, an electrolyte or a name.
-5. **A reading is evidence.** A stated reading whose quote checks can fill its field; an inferred one never does: it
-   stays a suggestion ("my reading of the files suggests", never "the files say"). No reading settles a conflict.
+   filled or guessed is not asked: it goes to the review. Never default a temperature, a reaction, an electrolyte or a name.
+5. **A reading is evidence; mark its strength honestly.** A stated reading whose quote checks fills its field green; an
+   inferred one fills it as a yellow guess ("my reading of the files suggests", never "the files say"), shown apart in
+   the review and before upload. Calling an inference `stated` makes a guess look certain. No reading settles a conflict.
 6. **Never pick a side in a conflict.** Show each reading with its source and ask.
 7. **A record is one result:** one sample, one measurement type, one set of conditions. Repeats and spots at one
    condition are scans of ONE record. A different condition is a different record. When unsure, split and ask.
    What belongs in a record: the pinned clone's `data/record_contract.json` under
    `~/.cache/isaac/portal-validator/<sha>/src/` and the wiki page "What an ISAAC record is". Quote it.
-8. **Who produced the data:** the group may be filled from the folder when a second source agrees (the code checks).
-   Otherwise ask once, with the folder's name as the suggestion.
-9. **End with the review.** Before the final summary the scientist reviews the values filled in the built records (Step 10).
+8. **Who produced the data:** the group may be filled from the folder when a second source agrees (the code checks). Otherwise ask once, with the folder's name as the suggestion.
+9. **End with the review.** Before the final summary the scientist reviews the values filled in the built records, guesses first, and answers the final check (Step 10).
 10. **Never open by hand:** `bundle.json`, `runs.json`, `reading.full.json`, the groups file, `processing_results.json`. Use `isaac bundle list/show` pages and `summary.md`. Never paste a large file.
-11. **Never upload. Never ask for or print a portal key.** `upload` is `--dry-run` only.
+11. **Never upload. Never ask for or print a portal key.** `upload` is `--dry-run` only; `--guesses-ok` only on their yes.
 12. **Never use `build-records --test-marker` with a real scientist.** It is for the self-test.
 13. **Never use Athena.** Athena files are listed and never read.
 14. **Say what you checked and what you did not.** Never claim "fully verified".
@@ -125,11 +125,10 @@ Read `reference/reading-unread-files.md`. `<isaac> bundle list <bundle> unread -
   - the environment: only what the logbook STATES. Never infer operando or in situ yourself: the convention question settles it;
   - who produced the data (the PI's full name, the group).
 - Write every finding to ONE findings file. Strength `stated` only when the quote states the value word for word;
-  otherwise `inferred`. Load it with `annotate --from-readings --root <folder>`: the preview first, then `--apply`.
-  A quote not found in its file is refused: fix it.
+  otherwise `inferred`: an inferred finding fills as a yellow guess, so this mark is what keeps green meaning certain.
+  Load it with `annotate --from-readings --root <folder>`: the preview first, then `--apply`. A quote not in its file is refused: fix it.
 - Tell the scientist, field by field, what you found and where, what fit no field (with line numbers), and which files nobody could read.
-- **Step 6 does not start until this step is done.** End this step's message with how many scan notes you loaded, or
-  that you read the whole logbook and it has none.
+- **Step 6 does not start until this step is done.** End its message with how many scan notes you loaded, or that there are none.
 
 ## Step 5 · Groups
 
@@ -143,8 +142,7 @@ Read `reference/grouping-and-processing.md` (every command of Steps 5 and 6 is t
 3. **Load the findings file again** (`annotate --from-readings`, preview then `--apply`), now and after every later regroup.
 4. **Triage; do not walk every group.** Page the groups and the merge candidates.
    - Needs a look: a row with `needs_care`, `role_proposed`, `exported_file` or `cannot_export_reason`; a group of several runs with a care flag;
-     a group with an open disagreement about a condition that defines it (filter, potential, history); every merge candidate.
-   - All others are "as proposed".
+     a group with an open disagreement about a condition that defines it (filter, potential, history); every merge candidate. All others are "as proposed".
 5. **One message:** "N groups. M are as proposed (short table: sample, what tells them apart, how many). K need a look. Confirm the M together?"
    - On yes: one `--targets-file` confirm. Never include a group that needs a look. Offer to list any group in full.
 6. **Then the K**, a few per message, each with why it needs a look. Confirm, split, merge, or leave out (`reject`: never exported).
@@ -182,32 +180,30 @@ If processing is not installed, say what that costs (no curves, records stay inc
 ## Step 7 · Questions: only what remains
 
 Read `reference/questions-and-decisions.md`. Use `<isaac> bundle questions <bundle> --blocking-only --limit 10`, never the raw list.
-What a rule filled is not in it: it waits for the review (Step 10). Each question has `ask`, `answer` (its options),
+What a rule filled or guessed is not in it: it waits for the review (Step 10). Each question has `ask`, `answer` (its options),
 `suggested` (in plain words), the full `text`, `hints`, a `context` (the lines, values and plots to show with it; never
 the answer) and an `answer_command` template; the page has `minimum_for_one_group` and the counts. Work from the JSON, not `--plain`.
 
 1. **What the records cannot go out without.** The blocking questions, numbered, one line each, as a yes/no or a pick.
    - Start from `minimum_for_one_group`: its `questions`, then its `unasked_required`, then its `plus_decisions`.
+   - The potential scale blocks every record that holds a potential when no file states it: a wrong scale is a scientific error.
    - A beamtime question: "this applies to N groups; one answer for all, or do some differ?" (`--only group:<id>` for one that differs).
    - Offer a suggestion only with its evidence. Record it only on their yes.
 2. **Then the environment convention, as ONE beamtime question** (kind `environment_convention`, kept out of the
    numbered list): "these N measurements were held at a potential in electrolyte: operando or in situ?" Show two or
    three set-points as the files write them and the checked quote that shows they were electrochemical. Record their
    word (operando, in_situ, or per_run when it differs): `--question <Q> --decision set_environment_convention --value <it>`.
-3. **Values still proposed, not filled** (an absorber, a set-point's scale, condition labels, start times), in ONE
-   message: ask "yes to all", or what to change. Read `reference/condition-labels.md` first; start times: `reference/start-times-and-clock.md`.
+3. **Values still proposed, not filled** (an absorber, condition labels, start times), in ONE message: ask "yes to all", or what to change. Read `reference/condition-labels.md` first; start times: `reference/start-times-and-clock.md`.
 4. **The rest, only if they want it:** optional questions; the template for facts that differ from run to run.
 
 - **Closed lists.** Map their words to one allowed value, say it back ("in situ → `in_situ`, right?"), record on their yes.
   **"I don't know" on a required field:** first say what it costs ("without it, these N records cannot be exported")
   and offer the template or a colleague who knows. If they still don't know: `defer`. Do not re-ask a deferred question.
 - **Absorber:** say the element and edge back; record only on a clear yes. **Clock zone:** never suggest one.
-- **A word that is not on the list**, and they keep it: `reference/vocabulary-requests.md`. **An earlier beamtime's
-  answer** shown on a question: `reference/earlier-answers.md`. **A filled sheet or workbook:**
-  `reference/template-and-own-sheet.md`, `reference/workbook-answers.md`.
+- **A word that is not on the list**, and they keep it: `reference/vocabulary-requests.md`. **An earlier beamtime's answer** shown on a question: `reference/earlier-answers.md`.
+  **A filled sheet or workbook:** `reference/template-and-own-sheet.md`, `reference/workbook-answers.md`.
 - **A few at a time, on a phone:** `reference/question-site.md` (`isaac bundle site export`, then `isaac bundle site import`, preview first).
-- Not asked: `informational` and `covered_by` questions, and conflicts with `affects_record: false`. Give their count once.
-  The same list holds the record-completeness tier (`--distinguishing-only`) and the beam-damage question (`dose_reading`, Step 6).
+- Not asked: `informational` and `covered_by` questions, and conflicts with `affects_record: false`. Give their count once. The same list holds the record-completeness tier (`--distinguishing-only`) and the beam-damage question (`dose_reading`, Step 6).
 - They may also answer on the local *Local Imports* page. Run `bundle questions` again after.
 
 ## Step 8 · Build and validate
@@ -220,16 +216,14 @@ the answer) and an `answer_command` template; the page has `minimum_for_one_grou
   A warning means the record goes out WITHOUT something. Ask the question it names (and the set-point when `also_needs` is set, with `also_command`).
   Run a command only with their answer. Never edit a draft or relax a check.
 
-## Step 9 · Export and dry run
+## Step 9 · Export
 
 `<isaac> bundle export <bundle> --out <records>` writes only `exportable` records.
 
 - Read its `outcome`, not its exit code: "N record(s) ready (U unchanged, W written), refused M group(s)".
   `records_ready` is N. `refused_by_reason` says why groups were refused.
   Say how many are ready, how many were refused and why, and each kind of warning once with its count.
-- Nothing exportable: skip the dry run, say "no record is ready yet", name what blocks the nearest group, go to Step 10.
-  A record with values not yet reviewed exports with them as inferred; Step 10 re-exports after the review.
-- `<isaac> bundle upload <records> --dry-run` shows what WOULD be sent. Say **nothing was sent and this build cannot send**. The scientist uploads through the ISAAC portal themselves.
+- Nothing exportable: say "no record is ready yet", name what blocks the nearest group, go to Step 10. A record with values not yet reviewed exports with them as inferred; Step 10 re-exports after the review.
 
 ## Step 10 · The review of the final records
 
@@ -237,14 +231,20 @@ Read `reference/records-and-validation.md` ("The end review"). After `build-reco
 
 1. `<isaac> bundle review <bundle> --json`: every value a rule filled in the built records, by field, with how many
    values and records, why (the rule in plain words) and a witness; the convention answer and how many measurements
-   it reached; and the scans kept and dropped, with why. Show ALL of it in ONE message, by field, no ids.
+   it reached; and the scans kept and dropped, with why. Show ALL of it in ONE message, by field, no ids. **Guesses
+   first** (`kind: guess`), each with its quote: your best reading, not what the files state.
 2. Ask: "Does all of this look right, or what should change?" On their yes: run its `next` command (`--accept --by
    "<name>" --listing <digest>`, a preview), then the same with `--apply`; it is refused if the values changed since you
    showed them. Yes to some fields only: `bundle review --field <each>` (repeatable) and accept that listing. A value to change: `decide` it. A scan to
    keep or drop instead: Step 6.3 (`set_scan_decision`, re-process, approve the new curve on their yes).
 3. Then `build-records` (and `bundle review` again for what is left), `validate` and `export`, so the records carry it.
+4. **The final check.** `<isaac> bundle upload <records> --dry-run --bundle <bundle>`. It lists the guesses and deductions
+   (exit 1, nothing sent). Ask its `question`, in one line ("These N values are my guesses from your files or worked out by
+   a rule (G guesses, D worked out by a rule). Send them as they are, or check them first?"). Send: the same with
+   `--guesses-ok <digest> --by "<name>"`; check: item 1. "Older than your answers": build-records and export again first.
+   Say it only records their yes: **this build sends nothing**; they upload the records folder through the ISAAC portal, which never runs this check.
 
 ## Step 11 · Final summary
 
-Close with a short plain summary: records exported (count, names), records blocked and why; what was filled by rule (how many, by field), what the scientist answered, and what they reviewed in the review;
+Close with a short plain summary: records exported (count, names), records blocked and why; what was filled by rule (how many, by field), what the scientist answered, what they reviewed, and the guesses they chose to send unconfirmed;
 - what was not checked (high-value items not cross-checked, files nobody could read, processing still a draft); where the files are, and the one next action.

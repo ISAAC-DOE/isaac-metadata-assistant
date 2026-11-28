@@ -14,10 +14,11 @@ Read this at Step 7. Open another file only on its trigger:
 
 ## What the list gives you
 
-**What a rule filled is not asked.** A value a registered rule fills from the evidence (a reader's value with nothing
-disagreeing, a checked stated reading, the facility and group the folder and a second source agree on, the beamtime's
-environment convention) is not in the list: it goes into the records as inferred, naming its rule, and the scientist
-sees it in the end review (`bundle review`, Step 10). A question that left out filled values says so ("Left out, because a
+**What a rule filled or guessed is not asked.** A value a registered rule fills from the evidence (a reader's value
+with nothing disagreeing, a checked stated reading, the facility and group the folder and a second source agree on, the
+beamtime's environment convention), and a value guessed from a checked inferred reading (yellow), is not in the list: it
+goes into the records as inferred, naming its rule, and the scientist sees it in the end review (`bundle review`, Step
+10), guesses first. A question that left out filled values says so ("Left out, because a
 rule filled the value from the evidence"). To correct one now: `decide --target <its id> --decision correct`.
 
 `<isaac> bundle questions <bundle> --blocking-only --limit 10` (add `--no-context` for a large page). Read the JSON page. `--plain` (`--plain --detail`) prints the asks as text for a person reading the terminal; it leaves out `minimum_for_one_group`, the counts, the answer commands, the context and the evidence, so do not work from it.

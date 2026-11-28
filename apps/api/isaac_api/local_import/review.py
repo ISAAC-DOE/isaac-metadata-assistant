@@ -17,6 +17,11 @@ from the stored processing results (never re-derived).
   ``scientist_confirmed`` (``review.basis`` ``reviewed_final_records``) until any part of it changes. A change is not
   made here: the scientist corrects a value with ``decide`` and runs ``build-records`` again. Answer memory never
   learns a review.
+
+1.22.0 (DEC-100): every listed value carries its COLOUR (``bundle.value_colour``): the GUESSES (an inferred reading,
+``guessed``) are listed under their own heading with the quote they rest on, then the values a rule DEDUCED (yellow
+too), then the values read from the files (green). ``--accept`` covers all of them, guesses included, and binds each as
+before; a bound guess is ``scientist_confirmed`` (green) until any part of it changes.
 """
 
 from __future__ import annotations
@@ -48,7 +53,34 @@ RULE_WORDS: Mapping[str, str] = {
     B.FILL_ORGANIZATION_RULE_ID: ("the organization that produced the data is the facility the folder name and the "
                                   "scan headers agree on"),
     B.FILL_GROUP_RULE_ID: "the folder name gives the PI, and another file agrees",
+    B.FILL_READING_INFERRED_RULE_ID: ("my best reading of a line in your files, which suggests it but does not say it "
+                                      "word for word; the quote was checked against the file"),
+    B.FILL_SETPOINT_NAME_RULE_ID: ("worked out from the run's own file name, which writes this one potential (e.g. "
+                                   "100mV, m800mV for -0.8 V), read as it is written"),
+    B.FILL_CONTROL_MODE_RULE_ID: ("worked out from the run's own set-point: a run held at a potential with no current "
+                                  "set is potentiostatic (an OCV in its name: open circuit)"),
 }
+#: 1.22.0 (DEC-100): the three parts of the listing, in order: (key, heading, which values)
+SECTIONS = (
+    ("guesses", "Guesses — the skill's best reading, please check", "guess"),
+    ("deductions", "Worked out by a rule from other values — please check", "deduction"),
+    ("read", "Read from your files", "read"),
+)
+
+
+def _kind_of(rule: str | None) -> str:
+    """``guess`` (a guess rule), ``deduction`` (another yellow rule) or ``read`` (a green rule), by the colour table."""
+    if rule in B.GUESS_RULES:
+        return "guess"
+    return "deduction" if B.value_colour(B.STATE_FILLED, rule) == B.COLOUR_YELLOW else "read"
+
+
+def _guess_witness(evidence: Sequence[Mapping]) -> dict | None:
+    """A guess's witness: the shortest quote of the INFERRED reading(s) it rests on, with the file and the line."""
+    quoted = [e for e in evidence if isinstance(e, Mapping) and e.get("method") == "ai_interpretation"
+              and e.get("strength") == "inferred" and e.get("quote")]
+    best = _shortest(quoted)
+    return _quoted(best) if best is not None else None
 #: the words a field is listed under, where the record's own word differs from the questions' (review 17: the record
 #: field is ``attribution.produced_by.organization``, so the review says "organization")
 FIELD_WORDS: Mapping[str, str] = {B.ORGANIZATION_FILL_PATH: "organization"}
@@ -391,7 +423,7 @@ def _listing(bundle_dir: Path, bundle: Mapping, *, fields: Sequence[str] | None)
             env = dfields.get(path) or {}
             for tid in entry["from"]:
                 kind, obj = obj_of.get(tid, (None, None))
-                if obj is None or obj.get("value_state") != B.STATE_FILLED:
+                if obj is None or obj.get("value_state") not in B.FILL_STATES:  # 1.22.0: a guess too
                     continue
                 rule = (obj.get("fill") or {}).get("rule_id")
                 value = B.fill_value(obj)
@@ -410,7 +442,7 @@ def _listing(bundle_dir: Path, bundle: Mapping, *, fields: Sequence[str] | None)
                     row["targets"].append(tid)
     conv = B.environment_convention_decision(bundle)
     reached = sum(1 for m in bundle["missing_values"] if (m.get("fill") or {}).get("rule_id") == B.FILL_ENVIRONMENT_RULE_ID
-                  and m.get("value_state") in (B.STATE_FILLED, B.STATE_SCIENTIST_CONFIRMED))
+                  and m.get("value_state") in (*B.FILL_STATES, B.STATE_SCIENTIST_CONFIRMED))
     out_fields: list[dict] = []
     headers: dict | None = None
     for path in sorted({r["path"] for r in rows.values()}, key=lambda p: (field_words(p), p)):
@@ -423,11 +455,16 @@ def _listing(bundle_dir: Path, bundle: Mapping, *, fields: Sequence[str] | None)
                 if headers is None:
                     headers = _header_index(bundle)
                 header = _naming_header(bundle, headers, row["runs"], names)
+            kind = _kind_of(row["rule_id"])
             item = {"value": row["value"], "value_words": value_words(path, row["value"], row["scale"]),
                     "records": len(row["groups"]), "values": len(row["targets"]), "rule_id": row["rule_id"],
                     "rule": RULE_WORDS.get(row["rule_id"], row["rule_id"]),
-                    "witness": witness(row["rule_id"], path, row["value"], row["evidence"],
-                                       files=_acquisition_files(bundle, row["runs"]), names=names, header=header),
+                    # 1.22.0 (DEC-100): the value's colour, and whether it is a guess or a deduction (both yellow)
+                    "colour": B.value_colour(B.STATE_GUESSED if kind == "guess" else B.STATE_FILLED, row["rule_id"]),
+                    "kind": kind,
+                    "witness": (_guess_witness(row["evidence"]) if kind == "guess" else None) or witness(
+                        row["rule_id"], path, row["value"], row["evidence"],
+                        files=_acquisition_files(bundle, row["runs"]), names=names, header=header),
                     "target_ids": sorted(row["targets"]), "group_ids": sorted(row["groups"])}
             if path == POTENTIAL_PATH:
                 item["scale"] = row["scale"]
@@ -477,7 +514,7 @@ def _canonical_fields(fields: Sequence[str] | str | None) -> list[str] | None:
 def _changed_words(changed: Sequence[Mapping]) -> dict:
     """What became of the reviewed values that changed since (review 3): filled again and listed now, filled again but
     in no built record, or now asked (no rule fills it any more, e.g. the convention answered per measurement)."""
-    filled = [c for c in changed if c.get("now") == B.STATE_FILLED]
+    filled = [c for c in changed if c.get("now") in B.FILL_STATES]
     return {"total": len(changed), "listed_again": sum(1 for c in filled if c.get("listed")),
             "filled_outside_records": sum(1 for c in filled if not c.get("listed")),
             "now_asked": len(changed) - len(filled)}
@@ -503,11 +540,14 @@ def review(bundle_dir: Path, *, fields: Sequence[str] | str | None = None, limit
     exposed = [(t["target"]["kind"], t["target"]["id"]) for t in out["items"] if t["target"]["id"] in shown_ids]
     if exposed:
         M.record_exposures(bundle_dir, [(exposed, EXPOSURE_COMMAND)])  # beside bundle.json, which a read never writes
+    kinds = {k: sum(v["values"] for f in out["fields"] for v in f["values"] if v["kind"] == k) for _, _, k in SECTIONS}
     return {
         "records": out["records"],
         "records_built_since_last_change": not out["records_stale"],
         "fields_filter": wanted,
         "values_to_review": len(out["items"]),
+        # 1.22.0 (DEC-100): how many of them are guesses, deductions and reads (yellow, yellow, green)
+        "values_by_kind": kinds,
         "fields_total": len(out["fields"]),
         "fields": shown,
         **({"fields_not_shown": len(out["fields"]) - len(shown)} if len(shown) < len(out["fields"]) else {}),
@@ -600,12 +640,17 @@ def accept(bundle_dir: Path, *, by: str, orcid: str | None = None, note: str | N
                                 "them a few fields at a time (--field). Nothing was recorded.", code=5)
         by_field = {f["path"]: {"field": f["field"], "values": f["values_total"], "records": f["records_total"]}
                     for f in out["fields"]}
+        # 1.22.0 (DEC-100): the accept covers the guesses too, and says how many
+        guesses = sum(v["values"] for f in out["fields"] for v in f["values"] if v["kind"] == "guess")
+        guessed_words = f" ({guesses} of them guesses)" if guesses else ""
         said = "; ".join(f"{x['field']}: {x['values']} value(s) in {x['records']} record(s)" for x in by_field.values())
         if not apply:
             return {"recorded": False, "preview": True, "values": len(items), "records": out["records"],
                     "by_field": by_field, "bundle_version": version,
                     **({"listing_matches": True} if listing else {}),
-                    "statement": (f"Would record {by} reviewing {len(items)} filled value(s) in {out['records']} "
+                    "guesses": guesses,
+                    "statement": (f"Would record {by} reviewing {len(items)} filled value(s)" + guessed_words
+                                  + f" in {out['records']} "
                                   f"record(s) as right ({said}). Nothing was recorded: add --apply"
                                   + ("." if listing else " with --listing <the digest `bundle review` printed>; it "
                                      "will be refused if the values changed since they were shown."))}
@@ -639,8 +684,9 @@ def accept(bundle_dir: Path, *, by: str, orcid: str | None = None, note: str | N
     nxt = (f"Run `isaac bundle build-records {q}` again so the records carry the confirmation, then `isaac bundle "
            f"review {q}` for what is left" + (" in the other fields" if wanted else "") + ".")
     return {"recorded": True, "decision_id": entry["decision_id"], "values": len(items), "records": out["records"],
-            "confirmed_now": confirmed, "by_field": by_field, "next": nxt,
-            "statement": (f"Recorded: {by} reviewed {len(items)} filled value(s) in {out['records']} record(s) and said "
+            "confirmed_now": confirmed, "by_field": by_field, "next": nxt, "guesses": guesses,
+            "statement": (f"Recorded: {by} reviewed {len(items)} filled value(s){guessed_words} in {out['records']} "
+                          f"record(s) and said "
                           f"they are right ({said}); {confirmed} are now confirmed. {nxt}")}
 
 
@@ -665,8 +711,12 @@ def render(result: Mapping) -> str:
             lines.append("The records changed since they were last built; build them again before reviewing.")
         only = f" in {', '.join(field_words(f) for f in result['fields_filter'])}" if result.get("fields_filter") else ""
         if n:
+            k = result.get("values_by_kind") or {}
+            split = "; ".join(x for x in (f"{k['guess']} guess(es)" if k.get("guess") else "",
+                                          f"{k['deduction']} worked out by a rule" if k.get("deduction") else "",
+                                          f"{k['read']} read from your files" if k.get("read") else "") if x)
             lines.append(f"Filled from the evidence, not yet reviewed{only}: {n} value(s) in {result['fields_total']} "
-                         f"field(s), across {recs} built record(s).")
+                         f"field(s), across {recs} built record(s)" + (f" ({split})" if split else "") + ".")
         else:
             lines.append(f"Nothing filled is waiting for review{only} in the {recs} built record(s).")
     if result.get("reviewed_earlier"):
@@ -679,22 +729,30 @@ def render(result: Mapping) -> str:
                  f"{ch['now_asked']} now asked (no rule fills them any more)" if ch.get("now_asked") else ""]
         lines.append(f"Reviewed earlier but changed since (their value, rule or evidence): {ch['total']} value(s): "
                      + "; ".join(p for p in parts if p) + ".")
-    for f in result["fields"]:
+    for _key, heading, kind in SECTIONS:
+        # 1.22.0 (DEC-100): the guesses first, under their own heading, then the deductions, then the values read
+        part = [(f, [v for v in f["values"] if v.get("kind", "read") == kind]) for f in result["fields"]]
+        part = [(f, vs) for f, vs in part if vs]
+        if not part:
+            continue
         lines.append("")
-        lines.append(f"{f['field'][:1].upper()}{f['field'][1:]}")
-        for v in f["values"]:
-            lines.append(f"  {v['value_words']}: {v['values']} value(s), in {v['records']} record(s). Why: {v['rule']}.")
-            c = v.get("convention")
-            if c:
-                given = f", given for {c['given_for']} measurement(s)" if c.get("given_for") is not None else ""
-                lines.append(f"    Your answer to the environment question: {c['answer_words']}{given}; it reached "
-                             f"{c['reached']} measurement(s).")
-            w = v.get("witness")
-            if w:
-                also = w.get("also")
-            lines.append(f"    Shown by {w['by']}: {_witness_line(w)}"
-                         + (f"; and {'by ' + also['by'] + ': ' if also.get('by') != w.get('by') else ''}"
-                            f"{_witness_line(also)}" if also else ""))
+        lines.append(f"{heading}:")
+        for f, values in part:
+            lines.append(f"{f['field'][:1].upper()}{f['field'][1:]}")
+            for v in values:
+                lines.append(f"  {v['value_words']}: {v['values']} value(s), in {v['records']} record(s). "
+                             f"Why: {v['rule']}.")
+                c = v.get("convention")
+                if c:
+                    given = f", given for {c['given_for']} measurement(s)" if c.get("given_for") is not None else ""
+                    lines.append(f"    Your answer to the environment question: {c['answer_words']}{given}; it reached "
+                                 f"{c['reached']} measurement(s).")
+                w = v.get("witness")
+                if w:
+                    also = w.get("also")
+                    lines.append(f"    Shown by {w['by']}: {_witness_line(w)}"
+                                 + (f"; and {'by ' + also['by'] + ': ' if also.get('by') != w.get('by') else ''}"
+                                    f"{_witness_line(also)}" if also else ""))
     if result.get("fields_not_shown"):
         lines.append(f"\n...and {result['fields_not_shown']} more field(s) (drop --limit to see them all).")
     scans = result.get("scan_decisions") or []
@@ -709,3 +767,321 @@ def render(result: Mapping) -> str:
     lines.append("")
     lines.append(f"Next: {result['next']}")
     return "\n".join(lines)
+
+
+# --- the final check before an upload (1.22.0, DEC-100) ----------------------------------------------------------------
+#
+# The owner's direction (2026-11-28): "before submitting, a final check: these N values are guesses, submit anyway?".
+# `bundle upload <records_dir>` reads the records it would send and their evidence files, and lists every YELLOW value
+# (``bundle.evidence_colour``: a guess, or a deduction no scientist confirmed), grouped by field and value, with how many
+# records carry it and the quote or the rule it rests on. It sends nothing until the scientist's yes comes back as
+# ``--guesses-ok <digest>`` over exactly that list; the yes is kept as ONE ``submit_with_guesses`` decision in the
+# bundle. The official record has no free-text note to carry the marks (``schema/isaac_record_v1.json`` has no
+# record-level note), so the portal copy will not show which values were guesses: the final check says so.
+
+#: What the final check says the portal copy cannot carry (the official schema has no record-level note).
+PORTAL_COPY_NOTE = ("The records sent to the portal will not show which values were guesses: the ISAAC record has no "
+                    "place for that note. This bundle and the evidence files keep it.")
+#: Review I4: this build sends nothing, and the portal never runs this check: said wherever the yes is asked or kept.
+UPLOAD_NOTE = ("This build sends nothing: you upload the records folder through the ISAAC portal yourself, and the portal "
+               "does not run this check. Your yes is kept in this bundle as the record that the values were sent as "
+               "they are.")
+#: The most items one final check lists in its decision (the schema's bound on ``guesses_sent``).
+MAX_SUBMIT_ITEMS = 5000
+#: Review I1: a record whose evidence file is missing or unreadable: what it holds cannot be told, so never green.
+UNKNOWN_PATH = "(the whole record)"
+UNKNOWN_NO_EVIDENCE = "isaac.final_check.no_evidence_file"
+UNKNOWN_DERIVATION = "isaac.final_check.unregistered_derivation"
+
+
+def _at(record: Mapping, path: str) -> Any:
+    """The record's value at a dotted ``path`` (``None`` when absent)."""
+    node: Any = record
+    for part in path.split("."):
+        if not isinstance(node, Mapping):
+            return None
+        node = node.get(part)
+    return node
+
+
+def _record_files(records_dir: Path) -> list[Path]:
+    return [p for p in sorted(Path(records_dir).glob("*.json")) if not p.name.endswith(".evidence.json")]
+
+
+def _read_json(path: Path) -> Any:
+    try:
+        return json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return None
+
+
+def _deduction_witness(entries: Sequence[Mapping]) -> Mapping | None:
+    """A deduction's shortest observed quote (a file line), never its derivation or an answer."""
+    quoted = [e for e in entries if isinstance(e, Mapping) and e.get("source_type") in _WITNESS_TYPES and e.get("quote")]
+    return _shortest(quoted)
+
+
+def _yellow_derivations(entries: Sequence[Mapping]) -> list[tuple[Mapping, str]]:
+    """``[(derivation, kind)]`` of a field's evidence that keep it yellow (``bundle.evidence_colour``, entry by entry):
+    a fill no confirmation names (``guess`` or ``deduction``), or a derivation naming no registered rule (``unknown``)."""
+    confirmed = {str(e.get("target_id")) for e in entries if isinstance(e, Mapping)
+                 and e.get("source_type") == "user_confirmation" and e.get("target_id") is not None}
+    out = []
+    for d in entries:
+        if not (isinstance(d, Mapping) and d.get("source_type") == "derivation"):
+            continue
+        rule = d.get("rule")
+        if rule in B.FILL_RULES:
+            if str(d.get("candidate_id") or d.get("value_id")) in confirmed:
+                continue
+            guess = d.get("guess") is True or rule in B.GUESS_RULES
+            if B.value_colour(B.STATE_GUESSED if guess else B.STATE_FILLED, rule) == B.COLOUR_YELLOW:
+                out.append((d, "guess" if guess else "deduction"))
+        elif d.get(B.ABSENCE_DERIVATION_KEY) is not True:
+            out.append((d, "unknown"))
+    return out
+
+
+def _index_rows(records_dir: Path) -> dict[str, Mapping]:
+    from . import records as R
+
+    index = _read_json(Path(records_dir) / R.EXPORT_INDEX)
+    rows = index.get("records") if isinstance(index, Mapping) else None
+    return {str(r.get("record_id")): r for r in rows or () if isinstance(r, Mapping) and r.get("record_id")}
+
+
+def _stale_records(bundle_dir: Path, rows: Mapping[str, Mapping], record_ids: Sequence[str]) -> list[str]:
+    """Review I3: the records (of ``record_ids``) exported from ``bundle_dir`` whose group composes DIFFERENTLY now (a
+    decision since, e.g. a guess corrected), or not at all: ``records.content_sha256`` of the draft now against the one
+    the export index keeps. Reads only."""
+    from . import records as R
+
+    bundle = _load(bundle_dir)
+    marker = bool((bundle.get("self_test") or {}).get("test_marker"))
+    now = {gid: R.content_sha256(draft, comp) for gid, draft, comp in R.fresh_compositions(bundle_dir, bundle,
+                                                                                         test_marker=marker)}
+    bid = str(bundle.get("bundle_id"))
+    out = []
+    for rid in record_ids:
+        row = rows.get(rid) or {}
+        if str(row.get("bundle_id")) != bid:
+            continue
+        if now.get(str(row.get("group_id"))) != row.get("content_sha256"):
+            out.append(rid)
+    return out
+
+
+def final_check(records_dir: Path, bundle_dir: Path | None = None) -> dict:
+    """The final check over the records in ``records_dir`` (module comment above). READS ONLY. ``{items, values, guesses,
+    deductions, unknown, records, records_checked, digest, bundle_ids, records_without_bundle, stale_records,
+    statement}``: ``items`` one per field, value and rule, with its kind (``guess``, ``deduction``, or ``unknown``: a
+    record with no readable evidence file, review I1, or a derivation no rule registers), how many values and records
+    carry it, and the quote, file and line or the rule; ``values`` the yellow fields over every record, counted by
+    ``bundle.count_colours`` (the aggregation ``bundle status`` uses, review C1); ``digest`` over exactly the items and
+    the records; ``stale_records`` (``bundle_dir`` given, review I3) the records older than the bundle's answers."""
+    records_dir = Path(records_dir)
+    rows: dict[tuple, dict] = {}
+    colour_maps: list[dict[str, str]] = []
+    yellow: dict[str, set[str]] = {}  # record id -> its yellow fields
+    kinds_of: dict[tuple[str, str], set[str]] = {}
+    files = _record_files(records_dir)
+
+    def add(fpath: str, value: Any, rule: Any, kind: str, stem: str, quote: Any = None, file: Any = None,
+            locator: Any = None) -> None:
+        key = (fpath, json.dumps(value, sort_keys=True, default=str), str(rule))
+        row = rows.get(key)
+        if row is None:
+            row = rows[key] = {"path": fpath, "value": value, "rule_id": str(rule), "kind": kind,
+                               "guess": kind == "guess", "values": 0, "records": set(), "quote": quote, "file": file,
+                               "locator": locator}
+        row["values"] += 1
+        row["records"].add(stem)
+        kinds_of.setdefault((stem, fpath), set()).add(kind)
+
+    for path in files:
+        stem = path.name[: -len(".json")]
+        record = _read_json(path)
+        sidecar = _read_json(path.with_name(stem + ".evidence.json"))
+        ev = sidecar.get("evidence") if isinstance(sidecar, Mapping) else None
+        if not isinstance(ev, Mapping) or not isinstance(record, Mapping):
+            # review I1: what this record holds cannot be told, and the upload would still send it: never green
+            add(UNKNOWN_PATH, None, UNKNOWN_NO_EVIDENCE, "unknown", stem,
+                quote="its evidence file is missing or cannot be read, so nothing says which values are certain")
+            colour_maps.append({UNKNOWN_PATH: B.COLOUR_YELLOW})
+            yellow.setdefault(stem, set()).add(UNKNOWN_PATH)
+            continue
+        colours: dict[str, str] = {}
+        for fpath, entries in sorted(ev.items()):
+            if ":" in fpath or not isinstance(entries, list):
+                continue
+            colour = B.evidence_colour(entries)
+            if colour is None:
+                continue
+            colours[fpath] = colour
+            if colour != B.COLOUR_YELLOW:
+                continue
+            yellow.setdefault(stem, set()).add(fpath)
+            value = _at(record, fpath)
+            for d, kind in _yellow_derivations(entries):
+                if kind == "guess":
+                    add(fpath, value, d.get("rule"), kind, stem, d.get("quote"), d.get("source_file"), d.get("locator"))
+                elif kind == "deduction":
+                    w = _deduction_witness(entries) or {}
+                    add(fpath, value, d.get("rule"), kind, stem, w.get("quote"), w.get("source_file"), w.get("locator"))
+                else:
+                    add(fpath, value, UNKNOWN_DERIVATION, kind, stem, quote=str(d.get("rule") or "")[:200])
+        colour_maps.append(colours)
+    items = [{**row, "records": len(row["records"]), "record_ids": sorted(row["records"])}
+             for row in sorted(rows.values(), key=lambda r: (r["kind"] != "guess", field_words(r["path"]), r["path"],
+                                                             json.dumps(r["value"], sort_keys=True, default=str)))]
+    record_ids = sorted(yellow)
+    counted = B.count_colours(colour_maps)
+    n = counted[B.COLOUR_YELLOW]
+    # each yellow field counted once: a guess if any guess keeps it yellow, else a deduction, else unknown
+    first = ["guess" if "guess" in ks else "deduction" if "deduction" in ks else "unknown" for ks in kinds_of.values()]
+    kinds = {k: first.count(k) for k in ("guess", "deduction", "unknown")}
+    index_rows = _index_rows(records_dir)
+    bundle_of = {rid: str(r.get("bundle_id")) for rid, r in index_rows.items() if r.get("bundle_id")}
+    payload = {"items": [{k: i[k] for k in ("path", "value", "rule_id", "kind", "values", "record_ids")} for i in items],
+               "records": record_ids}
+    digest = hashlib.sha256(json.dumps(payload, sort_keys=True, ensure_ascii=False, default=str).encode("utf-8")
+                            ).hexdigest()[:16]
+    stale = _stale_records(Path(bundle_dir), index_rows, sorted(index_rows)) if bundle_dir is not None else []
+    return {"items": items, "values": n, "guesses": kinds["guess"], "deductions": kinds["deduction"],
+            "unknown": kinds["unknown"], "records": record_ids, "records_checked": len(files), "digest": digest,
+            "bundle_ids": sorted({bundle_of[r] for r in record_ids if r in bundle_of}),
+            "records_without_bundle": [r for r in record_ids if r not in bundle_of],
+            "stale_records": stale,
+            "statement": (values_sentence(n, kinds) + f", in {len(record_ids)} of the {len(files)} record(s). "
+                          + PORTAL_COPY_NOTE) if n else
+                         f"None of the {len(files)} record(s) carries a guess or a deduction you have not confirmed."}
+
+
+def values_sentence(n: int, kinds: Mapping[str, int]) -> str:
+    """Review M1: "N values are my guesses or worked out by a rule, not confirmed by you (G guesses, D worked out by a
+    rule[, U I cannot tell])", the plural right for one."""
+    split = [f"{kinds.get('guess', 0)} {'guess' if kinds.get('guess', 0) == 1 else 'guesses'}",
+             f"{kinds.get('deduction', 0)} worked out by a rule"]
+    if kinds.get("unknown"):
+        split.append(f"{kinds['unknown']} I cannot tell, since what they rest on is not in the evidence file")
+    one = n == 1
+    return (f"{n} value{'' if one else 's'} {'is' if one else 'are'} my guess{'' if one else 'es'} or worked out by a "
+            f"rule, not confirmed by you ({', '.join(split)})")
+
+
+def final_check_question(check: Mapping) -> str:
+    """The ONE plain question the skill asks (review M1: the split said, the plural right)."""
+    n = check["values"]
+    one = n == 1
+    return (f"{'This value is' if one else f'These {n} values are'} my guess{'' if one else 'es'} from your files or "
+            f"worked out by a rule ({check['guesses']} {'guess' if check['guesses'] == 1 else 'guesses'}, "
+            f"{check['deductions']} worked out by a rule"
+            + (f", {check['unknown']} I cannot tell" if check.get("unknown") else "")
+            + f"). Send {'it' if one else 'them'} as {'it is' if one else 'they are'}, or check "
+            f"{'it' if one else 'them'} first?")
+
+
+def render_final_check(check: Mapping, *, records_dir: str, bundle: str | None = None) -> str:
+    """The final check in plain words: the question, then each yellow value by field, then the command for a yes (the
+    real bundle folder when it was given, review M5)."""
+    if not check["values"]:
+        return check["statement"]
+    lines = [f"Before sending: {check['statement']}", ""]
+    for i in check["items"]:
+        kind = {"guess": "my guess", "deduction": "worked out by a rule"}.get(i["kind"], "cannot tell")
+        where = ", ".join(str(x) for x in (i.get("file"), i.get("locator")) if x)
+        said = (f"\"{i['quote']}\"" + (f" ({where})" if where else "")) if i.get("quote") else RULE_WORDS.get(
+            i["rule_id"], i["rule_id"])
+        field = field_words(i["path"]) if i["path"] != UNKNOWN_PATH else UNKNOWN_PATH
+        lines.append(f"  {field}: {value_words(i['path'], i['value']) if i['path'] != UNKNOWN_PATH else '?'} — {kind}, "
+                     f"in {i['records']} record(s). From: {said}")
+    q = shlex.quote(records_dir)
+    b = shlex.quote(bundle) if bundle else "<bundle_dir>"
+    lines += ["", final_check_question(check),
+              (f"To send them as they are: `isaac bundle upload {q} --dry-run --bundle {b} --guesses-ok "
+               f"{check['digest']} --by \"<your name>\"`. To check them first: `isaac bundle review {b}`; an answer "
+               f"changes this list only after `isaac bundle build-records {b}` and `isaac bundle export {b} --out {q}` "
+               "again."), UPLOAD_NOTE]
+    return "\n".join(lines)
+
+
+def accept_guesses(records_dir: Path, bundle_dir: Path, *, digest: str, by: str, orcid: str | None = None,
+                   note: str | None = None) -> dict:
+    """The scientist's yes to sending the records with the yellow values the final check lists. Refused unless the name
+    is given, ``digest`` is the check's digest NOW (the values changed since they were shown otherwise), every record
+    with a yellow value names ``bundle_dir``'s bundle in the export index (review I2: an index that names no bundle, or
+    another, refuses), and no record of this bundle is older than its answers (review I3). Records ONE
+    ``submit_with_guesses`` decision (who, when, the digest, every listed item and record), only once per digest
+    (review M2). It confirms nothing: each value stays yellow."""
+    from . import mutations as M
+
+    problem = B.decider_name_problem(by)
+    if problem:
+        raise ReviewRefused(f"--by is required with --guesses-ok: the name of the person who said to send the guesses "
+                            f"(this one {problem}). Nothing was recorded.")
+    if orcid is not None and not M.ORCID_RE.fullmatch(orcid):
+        raise ReviewRefused("--orcid must look like 0000-0000-0000-0000 (last character may be X).")
+    bundle_dir = Path(bundle_dir)
+    check = final_check(records_dir, bundle_dir)
+    if not check["values"]:
+        return {"recorded": False, "check": check, "statement": check["statement"]}
+    q = shlex.quote(str(bundle_dir))
+    if check["stale_records"]:
+        raise ReviewRefused(f"The records are older than your answers ({len(check['stale_records'])} record(s) compose "
+                            f"differently now): run `isaac bundle build-records {q}` and `isaac bundle export {q} --out "
+                            "<records>` again, then the final check. Nothing was recorded.", code=1)
+    if digest != check["digest"]:
+        raise ReviewRefused("The guesses changed since you were shown them (the --guesses-ok digest is not the one the "
+                            "final check gives now); run the upload again without --guesses-ok and show the scientist "
+                            "what it lists now. Nothing was recorded.", code=1)
+    if len(check["items"]) > MAX_SUBMIT_ITEMS:
+        raise ReviewRefused(f"{len(check['items'])} listed values are more than one yes records ({MAX_SUBMIT_ITEMS}); "
+                            "send the records a few at a time. Nothing was recorded.", code=5)
+    with M.locked(bundle_dir):
+        bundle = _load(bundle_dir)
+        bid = str(bundle.get("bundle_id"))
+        if check["records_without_bundle"] or check["bundle_ids"] != [bid]:
+            raise ReviewRefused(
+                "The records folder does not say these records come from this bundle "
+                + (f"({len(check['records_without_bundle'])} record(s) with guesses are in no export index entry, e.g. "
+                   "an index that was removed)" if check["records_without_bundle"] else
+                   f"(they name {', '.join(check['bundle_ids'])}, this bundle is {bid})")
+                + ": export them from the bundle with `isaac bundle export`, give that bundle with --bundle, or send each "
+                "bundle's records on their own. Nothing was recorded.", code=2)
+        earlier = next((d for d in B.submit_decisions(bundle) if d.get(B.SUBMIT_DIGEST_KEY) == check["digest"]), None)
+        if earlier is not None:
+            # review M2: the same yes to the same list is recorded once
+            return {"recorded": False, "already_recorded": True, "decision_id": earlier.get("decision_id"),
+                    "check": check, "statement": (f"Already recorded ({earlier.get('decision_id')}): "
+                                                  f"{(earlier.get('decided_by') or {}).get('name')} said to send exactly "
+                                                  "these values as they are. " + UPLOAD_NOTE)}
+        decisions = bundle.setdefault("scientist_decisions", [])
+        if len(decisions) + 1 > B.MAX_SCIENTIST_DECISIONS:
+            raise ReviewRefused(M.log_full_message("scientist_decisions", len(decisions), 1, B.MAX_SCIENTIST_DECISIONS),
+                                code=5)
+        entry = {
+            "decision_id": f"d-{len(decisions) + 1:05d}",
+            "target": {"kind": "experiment", "id": "experiment"},
+            "decision": B.SUBMIT_WITH_GUESSES_DECISION,
+            "value": None,
+            "chosen_reading_index": None,
+            "decided_by": M._decider(by, orcid),
+            "decided_utc": M.now_utc(),
+            "method": "scientist_answer",
+            "note": note,
+            "batch_id": None,
+            B.SUBMIT_DIGEST_KEY: check["digest"],
+            B.SUBMIT_ITEMS_KEY: [{k: i[k] for k in ("path", "value", "rule_id", "kind", "guess", "values", "records",
+                                                    "quote", "file", "locator")} for i in check["items"]],
+            B.SUBMIT_RECORDS_KEY: check["records"],
+        }
+        decisions.append(entry)
+        try:
+            M.save_bundle(bundle_dir, bundle)
+        except M.MutationRefused as exc:
+            raise ReviewRefused(str(exc), code=exc.code) from None
+    return {"recorded": True, "decision_id": entry["decision_id"], "check": check,
+            "statement": (f"Recorded ({entry['decision_id']}): {by} said to send the records as they are, though "
+                          + values_sentence(check["values"], {"guess": check["guesses"], "deduction": check["deductions"],
+                                                              "unknown": check["unknown"]})
+                          + ". They stay marked as guesses in this bundle and in the evidence files. " + UPLOAD_NOTE)}
